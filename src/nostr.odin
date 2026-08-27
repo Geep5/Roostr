@@ -55,7 +55,8 @@ nostr_write :: proc(s: Nostr_Settings) {
 	relays := make([dynamic]json.Value, context.temp_allocator)
 	for r in s.relays do append(&relays, json.String(r))
 	root["relays"] = json.Array(relays)
-	_ = os.write_entire_file(nostr_settings_path(), marshal(json.Object(root)))
+	// Private key inside — owner-only, like wallet.json.
+	_ = os.write_entire_file(nostr_settings_path(), marshal(json.Object(root)), perm = {.Read_User, .Write_User})
 }
 
 /** Settings with a key, generating one on first access. */
