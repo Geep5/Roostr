@@ -34,7 +34,8 @@
 	function selectChannel(id: string) {
 		activeChannel.id = id;
 		localStorage.setItem("glon.channel", id);
-		void goto("/");
+		// Graph view is per-channel: switching channels swaps the graph in place.
+		if (page.url.pathname !== "/graph") void goto("/");
 	}
 
 	async function newChannel() {

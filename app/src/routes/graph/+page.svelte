@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { onMount } from "svelte";
 	import { goto } from "$app/navigation";
 	import { buildGraph, simStep, type ObjectGraph } from "$lib/graph";
+	import { activeChannel } from "$lib/channel.svelte";
+	import { store, refreshAll } from "$lib/data.svelte";
 	import { createRenderer, createProgram } from "brometal";
 	import nodeShader from "$lib/shaders/graph-node.shader.gen";
 	import edgeShader from "$lib/shaders/graph-edge.shader.gen";
@@ -12,16 +13,35 @@
 
 	const MAX_LABELS = 100; // Anytype's visible-label cull
 
-	onMount(() => {
+	// Each channel gets its own graph (Anytype: one graph per space).
+	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
+	const channelId = $derived(activeChannel.id || defaultChannelId);
+	const channelName = $derived(store.channels.find((c) => c.id === channelId)?.name ?? "");
+
+	$effect(() => {
+		const id = channelId;
+		const el = canvasEl; // dep: re-run when the keyed canvas remounts
+		const isDefault = id === defaultChannelId && id !== "";
+		if (!id) {
+			void refreshAll(); // channels not loaded yet; effect re-runs when they land
+			return;
+		}
+		if (!el || !labelHost) return;
 		let cleanup: (() => void) | null = null;
 		let cancelled = false;
+		status = "Loading graph…";
 
 		void (async () => {
-			const graph: ObjectGraph = await buildGraph();
-			status = graph.nodes.length === 0 ? "Nothing to show yet." : "";
+			const graph: ObjectGraph = await buildGraph(id, isDefault);
+			status = graph.nodes.length === 0 ? "Nothing in this channel yet." : "";
 			if (!canvasEl || cancelled || graph.nodes.length === 0) return;
 
 			const renderer = await createRenderer(canvasEl, { clearColor: [0.047, 0.055, 0.066, 1] });
+			if (cancelled) {
+				renderer.destroy();
+				return;
+			}
+
 			const nodes = createProgram(renderer, nodeShader, { blend: "alpha" });
 			const edges = createProgram(renderer, edgeShader, { blend: "alpha" });
 
@@ -174,14 +194,16 @@
 					ends[i * 2 + 1] = graph.nodes[e.b].y;
 				}
 
-				edges.instanceAttributes.iStart.set(starts);
-				edges.instanceAttributes.iEnd.set(ends);
-				edges.instanceAttributes.iColor.set(ecolors);
-				edges.uniforms.uScale.set(scale);
-				edges.uniforms.uOffset.set([offsetX, offsetY]);
-				edges.uniforms.uViewport.set([w, h]);
-				edges.uniforms.uWidth.set(1.5);
-				edges.draw();
+				if (m > 0) {
+					edges.instanceAttributes.iStart.set(starts);
+					edges.instanceAttributes.iEnd.set(ends);
+					edges.instanceAttributes.iColor.set(ecolors);
+					edges.uniforms.uScale.set(scale);
+					edges.uniforms.uOffset.set([offsetX, offsetY]);
+					edges.uniforms.uViewport.set([w, h]);
+					edges.uniforms.uWidth.set(1.5);
+					edges.draw();
+				}
 
 				nodes.instanceAttributes.iCenter.set(centers);
 				nodes.instanceAttributes.iRadius.set(radii);
@@ -234,8 +256,10 @@
 <svelte:head><title>Graph — glon</title></svelte:head>
 
 <div class="stage">
-	<canvas bind:this={canvasEl}></canvas>
-	<div class="labels" bind:this={labelHost}></div>
+	{#key channelId}
+		<canvas bind:this={canvasEl}></canvas>
+		<div class="labels" bind:this={labelHost}></div>
+	{/key}
 	{#if status}<p class="status">{status}</p>{/if}
 </div>
 

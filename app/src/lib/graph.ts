@@ -68,9 +68,18 @@ function strItems(v: ValueJSON | undefined): string[] {
 	return (v?.valuesValue?.items ?? []).map((i) => i.stringValue).filter((s): s is string => typeof s === "string");
 }
 
-export async function buildGraph(): Promise<ObjectGraph> {
+/**
+ * Build the graph for ONE channel (Anytype: each space has its own graph).
+ * Unassigned objects belong to the default channel. The channel itself
+ * is not a node — the graph shows its contents.
+ */
+export async function buildGraph(channelId: string, isDefaultChannel: boolean): Promise<ObjectGraph> {
 	const res = await fetchQuery({ limit: 2000 });
-	const rows = res.records.filter((r) => !HIDDEN_KINDS[r.typeKey]);
+	const rows = res.records.filter((r) => {
+		if (HIDDEN_KINDS[r.typeKey] || r.typeKey === "channel") return false;
+		const ch = r.fields["channel"]?.stringValue ?? "";
+		return ch === channelId || (ch === "" && isDefaultChannel);
+	});
 
 	const nodes: GraphNode[] = [];
 	const index = new Map<string, number>();
@@ -103,14 +112,7 @@ export async function buildGraph(): Promise<ObjectGraph> {
 	for (const r of rows) {
 		const ni = index.get(r.id)!;
 		for (const [key, v] of Object.entries(r.fields)) {
-			if (key === "channel" && typeof v.stringValue === "string") {
-				const ci = index.get(v.stringValue);
-				if (ci !== undefined) {
-					nodes[ni].cluster = ci;
-					push(ni, ci, CLUSTER_COLOR);
-				}
-				continue;
-			}
+			if (key === "channel") continue; // scoping field, not a link
 			if (key === "collectionIds") {
 				for (const id of strItems(v)) {
 					const mi = index.get(id);
