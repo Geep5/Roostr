@@ -31,8 +31,11 @@
 		if (!root) return [];
 		const out: Message[] = [];
 		for (const cid of root.childrenIds) {
-			const meta = byId.get(cid)?.content.custom?.meta;
-			if (!meta) continue;
+			const custom = byId.get(cid)?.content.custom;
+			// The harness also stores tool_use/tool_result/compaction blocks
+			// under __discussion__ - only chat messages render here.
+			if (custom?.contentType !== "chat") continue;
+			const meta = custom.meta ?? {};
 			const reactions: Message["reactions"] = [];
 			for (const chunk of (meta["reactions"] ?? "").split(";")) {
 				const bar = chunk.indexOf("|");
@@ -65,7 +68,10 @@
 	});
 
 	function who(author: string): string {
-		return author === me ? "You" : author.slice(0, 6);
+		if (author === me) return "You";
+		// The agent posts as its own object id.
+		if (author === object.id) return object.fields["name"]?.stringValue || "Agent";
+		return author.slice(0, 6);
 	}
 
 	/** Stable avatar hue from the author id. */

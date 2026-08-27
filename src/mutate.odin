@@ -332,7 +332,11 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 			position  = 0,
 		})
 		meta := make([dynamic]Str_Pair, context.temp_allocator)
-		append(&meta, Str_Pair{key = "author", value = author_id()})
+		// `as_author` lets the local agent harness post as the agent
+		// identity; default is this device's key-derived author id.
+		author := json_str(parsed, "as_author")
+		if author == "" do author = author_id()
+		append(&meta, Str_Pair{key = "author", value = author})
 		append(&meta, Str_Pair{key = "ts", value = fmt.tprintf("%d", unix_ms())})
 		append(&meta, Str_Pair{key = "text", value = text})
 		if reply := json_str(parsed, "reply_to"); reply != "" {

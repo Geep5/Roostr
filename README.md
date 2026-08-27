@@ -71,3 +71,30 @@ GET  /api/events             SSE: {"objectId"} per committed change
 - Date quickOption windows use UTC day boundaries (TS used local time).
 - SSE only observes changes written through this server (no fs watch);
   external writers need a manual refresh.
+
+## Harness (`harness/`)
+
+The holdfast agent harness, ported as a Bun sidecar that is a pure HTTP
+client of the Odin server. Agents are `agent` objects; their conversation
+is the object's discussion (chat blocks + tool_use/tool_result/compaction
+blocks under `__discussion__`), so the Roostr UI is the chat surface.
+
+```bash
+cd harness && bun install
+bun run src/index.ts setup --name Gracie          # create the agent object
+bun run src/index.ts serve                        # SSE daemon: replies to chats
+bun run src/index.ts ask <agentId> "message"      # one-shot turn
+```
+
+Credentials: `ANTHROPIC_API_KEY`, or the Claude Code OAuth token from the
+macOS keychain (impersonation headers ported from glon agent-llm.ts).
+Model `mock` runs the full loop offline for smoke tests.
+
+Ported from glon's holdfast with the OMP lifts: view-only tool-output
+pruning before compaction, usage-calibrated token estimator, touched-object
+carryover across stacked summaries, and progressive-disclosure skills
+(`skill` objects listed by description, bodies read on demand) plus
+per-channel `instructions` objects. Memory is `pinned_fact`/`milestone`
+objects with owner scoping, keyed upserts, supersession, and an opt-in
+compaction-time extraction loop (`memory_extraction_enabled`); digest
+injection via `memory_digest_enabled`.
