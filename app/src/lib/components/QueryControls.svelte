@@ -1,0 +1,375 @@
+<script lang="ts">
+	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
+	import { note } from "$lib/api";
+
+	/**
+	 * View configuration for a query object — source types, filter rules,
+	 * sorts. Persisted on the object as `setOf` / `viewFilters` /
+	 * `viewSorts` fields (the one-view simplification of Anytype's
+	 * Dataview.View.filters/sorts).
+	 */
+	let {
+		object,
+		relations,
+		onchanged,
+	}: { object: ObjectJSON; relations: RelationDefJSON[]; onchanged: () => Promise<void> } = $props();
+
+	export interface FilterRule {
+		key: string;
+		condition: string;
+		value: string[];
+	}
+
+	export interface SortRule {
+		key: string;
+		type: "asc" | "desc";
+	}
+
+	// ── Parse stored view config ──────────────────────────────────
+	function strItems(v: ValueJSON | undefined): string[] {
+		return (v?.valuesValue?.items ?? []).map((i) => i.stringValue).filter((s): s is string => typeof s === "string");
+	}
+
+	export function parseFilters(fields: Record<string, ValueJSON>): FilterRule[] {
+		const items = fields["viewFilters"]?.valuesValue?.items ?? [];
+		const out: FilterRule[] = [];
+		for (const item of items) {
+			const e = item.mapValue?.entries;
+			if (!e) continue;
+			out.push({
+				key: e["key"]?.stringValue ?? "",
+				condition: e["condition"]?.stringValue ?? "equal",
+				value: strItems(e["value"]),
+			});
+		}
+		return out;
+	}
+
+	export function parseSorts(fields: Record<string, ValueJSON>): SortRule[] {
+		const items = fields["viewSorts"]?.valuesValue?.items ?? [];
+		const out: SortRule[] = [];
+		for (const item of items) {
+			const e = item.mapValue?.entries;
+			if (!e) continue;
+			out.push({ key: e["key"]?.stringValue ?? "", type: e["type"]?.stringValue === "desc" ? "desc" : "asc" });
+		}
+		return out;
+	}
+
+	const sources = $derived(strItems(object.fields["setOf"]));
+	const filters = $derived(parseFilters(object.fields));
+	const sorts = $derived(parseSorts(object.fields));
+
+	// ── Persist ───────────────────────────────────────────────────
+	async function saveSources(next: string[]) {
+		await note.setField(object.id, "setOf", { valuesValue: { items: next.map((s) => ({ stringValue: s })) } });
+		await onchanged();
+	}
+
+	async function saveFilters(next: FilterRule[]) {
+		await note.setField(object.id, "viewFilters", {
+			valuesValue: {
+				items: next.map((f) => ({
+					mapValue: {
+						entries: {
+							key: { stringValue: f.key },
+							condition: { stringValue: f.condition },
+							value: { valuesValue: { items: f.value.map((v) => ({ stringValue: v })) } },
+						},
+					},
+				})),
+			},
+		});
+		await onchanged();
+	}
+
+	async function saveSorts(next: SortRule[]) {
+		await note.setField(object.id, "viewSorts", {
+			valuesValue: {
+				items: next.map((s) => ({
+					mapValue: { entries: { key: { stringValue: s.key }, type: { stringValue: s.type } } },
+				})),
+			},
+		});
+		await onchanged();
+	}
+
+	// ── Condition catalog per relation format ─────────────────────
+	interface ConditionDef {
+		id: string;
+		label: string;
+		needsValue: boolean;
+	}
+
+	const TEXT_CONDITIONS: ConditionDef[] = [
+		{ id: "like", label: "contains", needsValue: true },
+		{ id: "notLike", label: "doesn't contain", needsValue: true },
+		{ id: "equal", label: "is", needsValue: true },
+		{ id: "notEqual", label: "is not", needsValue: true },
+		{ id: "empty", label: "is empty", needsValue: false },
+		{ id: "notEmpty", label: "is not empty", needsValue: false },
+	];
+	const NUMBER_CONDITIONS: ConditionDef[] = [
+		{ id: "equal", label: "=", needsValue: true },
+		{ id: "notEqual", label: "≠", needsValue: true },
+		{ id: "greater", label: ">", needsValue: true },
+		{ id: "less", label: "<", needsValue: true },
+		{ id: "greaterOrEqual", label: "≥", needsValue: true },
+		{ id: "lessOrEqual", label: "≤", needsValue: true },
+		{ id: "empty", label: "is empty", needsValue: false },
+		{ id: "notEmpty", label: "is not empty", needsValue: false },
+	];
+	const SELECT_CONDITIONS: ConditionDef[] = [
+		{ id: "in", label: "has any of", needsValue: true },
+		{ id: "allIn", label: "has all of", needsValue: true },
+		{ id: "exactIn", label: "is exactly", needsValue: true },
+		{ id: "notIn", label: "has none of", needsValue: true },
+		{ id: "empty", label: "is empty", needsValue: false },
+		{ id: "notEmpty", label: "is not empty", needsValue: false },
+	];
+	const CHECKBOX_CONDITIONS: ConditionDef[] = [
+		{ id: "equal", label: "is checked", needsValue: false },
+		{ id: "notEqual", label: "is unchecked", needsValue: false },
+	];
+
+	function formatOf(key: string): string {
+		if (key === "type" || key === "id") return "shorttext";
+		if (key === "createdAt" || key === "updatedAt") return "number";
+		return relations.find((r) => r.key === key)?.format ?? "shorttext";
+	}
+
+	function conditionsFor(key: string): ConditionDef[] {
+		const f = formatOf(key);
+		if (f === "number" || f === "date") return NUMBER_CONDITIONS;
+		if (f === "tag" || f === "status") return SELECT_CONDITIONS;
+		if (f === "checkbox") return CHECKBOX_CONDITIONS;
+		return TEXT_CONDITIONS;
+	}
+
+	function optionsFor(key: string): string[] {
+		return (relations.find((r) => r.key === key)?.options ?? []).map((o) => o.text);
+	}
+
+	/** Filterable keys: virtual keys + every non-hidden relation. */
+	const filterKeys = $derived.by(() => {
+		const keys = relations.filter((r) => !r.hidden && r.key !== "setOf").map((r) => r.key);
+		return ["type", ...keys, "createdAt", "updatedAt"];
+	});
+
+	function labelOf(key: string): string {
+		if (key === "type") return "Type";
+		if (key === "createdAt") return "Created";
+		if (key === "updatedAt") return "Updated";
+		return relations.find((r) => r.key === key)?.name || key;
+	}
+
+	// ── UI state ──────────────────────────────────────────────────
+	let open = $state<"" | "source" | "filter" | "sort">("");
+	let newSource = $state("");
+
+	function updateFilter(idx: number, patch: Partial<FilterRule>) {
+		const next = filters.map((f, i) => (i === idx ? { ...f, ...patch } : f));
+		// Reset condition/value when the key's format changes the catalog.
+		if (patch.key !== undefined) {
+			next[idx].condition = conditionsFor(patch.key)[0].id;
+			next[idx].value = [];
+		}
+		void saveFilters(next);
+	}
+
+	function needsValue(f: FilterRule): boolean {
+		return conditionsFor(f.key).find((c) => c.id === f.condition)?.needsValue ?? true;
+	}
+</script>
+
+<div class="controls">
+	<button class="pill" class:active={open === "source"} onclick={() => (open = open === "source" ? "" : "source")}>
+		Source{sources.length ? `: ${sources.join(", ")}` : ""}
+	</button>
+	<button class="pill" class:active={open === "filter"} onclick={() => (open = open === "filter" ? "" : "filter")}>
+		Filter{filters.length ? ` · ${filters.length}` : ""}
+	</button>
+	<button class="pill" class:active={open === "sort"} onclick={() => (open = open === "sort" ? "" : "sort")}>
+		Sort{sorts.length ? ` · ${sorts.length}` : ""}
+	</button>
+</div>
+
+{#if open === "source"}
+	<div class="panel">
+		{#each sources as s, i (s + i)}
+			<div class="rule">
+				<span class="chip">{s}</span>
+				<button class="x" onclick={() => void saveSources(sources.filter((_, j) => j !== i))}>×</button>
+			</div>
+		{/each}
+		<form
+			class="rule"
+			onsubmit={(e) => {
+				e.preventDefault();
+				const v = newSource.trim().toLowerCase();
+				if (v && !sources.includes(v)) void saveSources([...sources, v]);
+				newSource = "";
+			}}
+		>
+			<input bind:value={newSource} placeholder="add type (note, task, …) or relation key" />
+		</form>
+	</div>
+{/if}
+
+{#if open === "filter"}
+	<div class="panel">
+		{#each filters as f, i (i)}
+			<div class="rule">
+				<select value={f.key} onchange={(e) => updateFilter(i, { key: e.currentTarget.value })}>
+					{#each filterKeys as k (k)}
+						<option value={k}>{labelOf(k)}</option>
+					{/each}
+				</select>
+				<select value={f.condition} onchange={(e) => updateFilter(i, { condition: e.currentTarget.value })}>
+					{#each conditionsFor(f.key) as c (c.id)}
+						<option value={c.id}>{c.label}</option>
+					{/each}
+				</select>
+				{#if needsValue(f)}
+					{#if optionsFor(f.key).length > 0}
+						<div class="tags">
+							{#each optionsFor(f.key) as opt (opt)}
+								<button
+									class="tag"
+									class:on={f.value.includes(opt)}
+									onclick={() => updateFilter(i, { value: f.value.includes(opt) ? f.value.filter((v) => v !== opt) : [...f.value, opt] })}
+								>{opt}</button>
+							{/each}
+						</div>
+					{:else}
+						<input
+							value={f.value[0] ?? ""}
+							placeholder="value"
+							onchange={(e) => updateFilter(i, { value: e.currentTarget.value === "" ? [] : [e.currentTarget.value] })}
+						/>
+					{/if}
+				{/if}
+				<button class="x" onclick={() => void saveFilters(filters.filter((_, j) => j !== i))}>×</button>
+			</div>
+		{/each}
+		<button class="add" onclick={() => void saveFilters([...filters, { key: "name", condition: "like", value: [] }])}>+ Add filter</button>
+	</div>
+{/if}
+
+{#if open === "sort"}
+	<div class="panel">
+		{#each sorts as s, i (i)}
+			<div class="rule">
+				<select value={s.key} onchange={(e) => void saveSorts(sorts.map((x, j) => (j === i ? { ...x, key: e.currentTarget.value } : x)))}>
+					{#each filterKeys as k (k)}
+						<option value={k}>{labelOf(k)}</option>
+					{/each}
+				</select>
+				<select value={s.type} onchange={(e) => void saveSorts(sorts.map((x, j) => (j === i ? { ...x, type: e.currentTarget.value === "desc" ? "desc" : "asc" } : x)))}>
+					<option value="asc">ascending</option>
+					<option value="desc">descending</option>
+				</select>
+				<button class="x" onclick={() => void saveSorts(sorts.filter((_, j) => j !== i))}>×</button>
+			</div>
+		{/each}
+		<button class="add" onclick={() => void saveSorts([...sorts, { key: "name", type: "asc" }])}>+ Add sort</button>
+	</div>
+{/if}
+
+<style>
+	.controls {
+		display: flex;
+		gap: 8px;
+		margin-bottom: 10px;
+	}
+	.pill {
+		background: none;
+		border: 1px solid var(--border);
+		color: var(--muted);
+		border-radius: 999px;
+		padding: 4px 12px;
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.pill:hover,
+	.pill.active {
+		color: var(--fg);
+		border-color: var(--accent);
+	}
+	.panel {
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 10px;
+		margin-bottom: 12px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.rule {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	select,
+	input {
+		background: var(--panel);
+		border: 1px solid var(--border);
+		color: var(--fg);
+		border-radius: 6px;
+		padding: 4px 8px;
+		font-size: 13px;
+	}
+	input:focus,
+	select:focus {
+		border-color: var(--accent);
+		outline: none;
+	}
+	.chip {
+		background: var(--panel);
+		border-radius: 6px;
+		padding: 4px 10px;
+		font-size: 13px;
+	}
+	.tags {
+		display: flex;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
+	.tag {
+		border: 1px solid var(--border);
+		background: none;
+		color: var(--fg);
+		border-radius: 999px;
+		padding: 2px 10px;
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.tag.on {
+		background: var(--accent);
+		border-color: var(--accent);
+		color: #fff;
+	}
+	.x {
+		border: none;
+		background: none;
+		color: var(--muted);
+		cursor: pointer;
+		font-size: 14px;
+	}
+	.x:hover {
+		color: #f55522;
+	}
+	.add {
+		border: none;
+		background: none;
+		color: var(--muted);
+		text-align: left;
+		font-size: 13px;
+		cursor: pointer;
+		padding: 2px 0;
+	}
+	.add:hover {
+		color: var(--fg);
+	}
+</style>
