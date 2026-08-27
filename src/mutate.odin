@@ -167,6 +167,147 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		}
 		ok_response(sock)
 
+	// -- Tables (Anytype BlockTableCreate + row/column ops) --------
+	//
+	// A table is an ordinary block subtree (see glon.proto TableContent),
+	// so every action below is just Block_Adds/Removes bundled into ONE
+	// Change - atomic, and replays like any other block edit.
+
+	case "table_create":
+		object_id := json_str(parsed, "object_id")
+		if object_id == "" {
+			respond_error(sock, "object_id required")
+			return
+		}
+		rows, has_rows := json_int(parsed, "rows")
+		cols, has_cols := json_int(parsed, "cols")
+		if !has_rows || rows < 1 do rows = 3
+		if !has_cols || cols < 1 do cols = 3
+		position, _ := json_int(parsed, "position")
+		ops := make([dynamic]Operation, context.temp_allocator)
+		tid := new_uuid(context.temp_allocator)
+		append(&ops, Operation {
+			kind      = .Block_Add,
+			block     = Block{id = tid, content = {kind = .Table}},
+			target_id = json_str(parsed, "target_id"),
+			position  = position,
+		})
+		cols_layout := new_uuid(context.temp_allocator)
+		append(&ops, Operation {
+			kind      = .Block_Add,
+			block     = Block{id = cols_layout, content = {kind = .Layout, layout_style = LAYOUT_TABLE_COLUMNS}},
+			target_id = tid,
+			position  = POS_INNER,
+		})
+		col_ids := make([dynamic]string, context.temp_allocator)
+		for _ in 0 ..< cols {
+			cid := new_uuid(context.temp_allocator)
+			append(&col_ids, cid)
+			append(&ops, Operation {
+				kind      = .Block_Add,
+				block     = Block{id = cid, content = {kind = .Table_Column}},
+				target_id = cols_layout,
+				position  = POS_INNER,
+			})
+		}
+		rows_layout := new_uuid(context.temp_allocator)
+		append(&ops, Operation {
+			kind      = .Block_Add,
+			block     = Block{id = rows_layout, content = {kind = .Layout, layout_style = LAYOUT_TABLE_ROWS}},
+			target_id = tid,
+			position  = POS_INNER,
+		})
+		for _ in 0 ..< rows {
+			rid := new_uuid(context.temp_allocator)
+			append(&ops, Operation {
+				kind      = .Block_Add,
+				block     = Block{id = rid, content = {kind = .Table_Row}},
+				target_id = rows_layout,
+				position  = POS_INNER,
+			})
+			append_cell_ops(&ops, rid, col_ids[:])
+		}
+		if !commit_ops(object_id, ops[:]) {
+			respond_error(sock, "write failed", "500 Internal Server Error")
+			return
+		}
+		extra := jobj()
+		extra["id"] = json.String(tid)
+		ok_response(sock, extra)
+
+	case "table_row_add":
+		object_id := json_str(parsed, "object_id")
+		table_id := json_str(parsed, "table_id")
+		shape := table_shape(object_id, table_id)
+		if !shape.found {
+			respond_error(sock, "table not found")
+			return
+		}
+		ops := make([dynamic]Operation, context.temp_allocator)
+		rid := new_uuid(context.temp_allocator)
+		append(&ops, Operation {
+			kind      = .Block_Add,
+			block     = Block{id = rid, content = {kind = .Table_Row}},
+			target_id = shape.rows_layout,
+			position  = POS_INNER,
+		})
+		append_cell_ops(&ops, rid, shape.col_ids[:])
+		if !commit_ops(object_id, ops[:]) {
+			respond_error(sock, "write failed", "500 Internal Server Error")
+			return
+		}
+		ok_response(sock)
+
+	case "table_col_add":
+		object_id := json_str(parsed, "object_id")
+		table_id := json_str(parsed, "table_id")
+		shape := table_shape(object_id, table_id)
+		if !shape.found {
+			respond_error(sock, "table not found")
+			return
+		}
+		ops := make([dynamic]Operation, context.temp_allocator)
+		cid := new_uuid(context.temp_allocator)
+		append(&ops, Operation {
+			kind      = .Block_Add,
+			block     = Block{id = cid, content = {kind = .Table_Column}},
+			target_id = shape.cols_layout,
+			position  = POS_INNER,
+		})
+		for rid in shape.row_ids {
+			append(&ops, Operation {
+				kind      = .Block_Add,
+				block     = Block{id = fmt.tprintf("%s-%s", rid, cid), content = {kind = .Text}},
+				target_id = rid,
+				position  = POS_INNER,
+			})
+		}
+		if !commit_ops(object_id, ops[:]) {
+			respond_error(sock, "write failed", "500 Internal Server Error")
+			return
+		}
+		ok_response(sock)
+
+	case "table_col_remove":
+		object_id := json_str(parsed, "object_id")
+		table_id := json_str(parsed, "table_id")
+		column_id := json_str(parsed, "column_id")
+		shape := table_shape(object_id, table_id)
+		if !shape.found || column_id == "" {
+			respond_error(sock, "table not found")
+			return
+		}
+		ops := make([dynamic]Operation, context.temp_allocator)
+		append(&ops, Operation{kind = .Block_Remove, block_id = column_id})
+		for rid in shape.row_ids {
+			append(&ops, Operation{kind = .Block_Remove, block_id = fmt.tprintf("%s-%s", rid, column_id)})
+		}
+		if !commit_ops(object_id, ops[:]) {
+			respond_error(sock, "write failed", "500 Internal Server Error")
+			return
+		}
+		ok_response(sock)
+
 	case "block_set_attrs":
 		object_id := json_str(parsed, "object_id")
 		block_id := json_str(parsed, "block_id")
@@ -512,4 +653,66 @@ bootstrap_relations :: proc() {
 		if commit_ops(id, ops) do created += 1
 	}
 	if created > 0 do fmt.printfln("[glon-odin] bootstrapped %d bundled relation(s)", created)
+}
+
+// -- Table helpers ------------------------------------------------
+
+Table_Shape :: struct {
+	object_id:   string,
+	table_id:    string,
+	cols_layout: string,
+	rows_layout: string,
+	col_ids:     [dynamic]string,
+	row_ids:     [dynamic]string,
+	found:       bool,
+}
+
+/**
+ * Read a table's live structure (column/row ids in order) from computed
+ * state. Ids are cloned to the temp allocator - store strings die when
+ * the generation arena is invalidated by our own commit.
+ */
+table_shape :: proc(object_id, table_id: string) -> Table_Shape {
+	shape := Table_Shape {
+		object_id = object_id,
+		table_id  = table_id,
+	}
+	shape.col_ids = make([dynamic]string, context.temp_allocator)
+	shape.row_ids = make([dynamic]string, context.temp_allocator)
+	if object_id == "" || table_id == "" do return shape
+	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+		s := (^Table_Shape)(user)
+		st, ok := states[s.object_id]
+		if !ok do return
+		by_id := make(map[string]^Block, context.temp_allocator)
+		for &b in st.blocks do by_id[b.id] = &b
+		t, tok := by_id[s.table_id]
+		if !tok || t.content.kind != .Table do return
+		for cid in t.children_ids {
+			c, cok := by_id[cid]
+			if !cok || c.content.kind != .Layout do continue
+			switch c.content.layout_style {
+			case LAYOUT_TABLE_COLUMNS:
+				s.cols_layout = strings.clone(cid, context.temp_allocator)
+				for k in c.children_ids do append(&s.col_ids, strings.clone(k, context.temp_allocator))
+			case LAYOUT_TABLE_ROWS:
+				s.rows_layout = strings.clone(cid, context.temp_allocator)
+				for k in c.children_ids do append(&s.row_ids, strings.clone(k, context.temp_allocator))
+			}
+		}
+		s.found = s.cols_layout != "" && s.rows_layout != ""
+	}, &shape)
+	return shape
+}
+
+/** Append one empty text-cell Block_Add per column, id "<row>-<col>". */
+append_cell_ops :: proc(ops: ^[dynamic]Operation, row_id: string, col_ids: []string) {
+	for cid in col_ids {
+		append(ops, Operation {
+			kind      = .Block_Add,
+			block     = Block{id = fmt.tprintf("%s-%s", row_id, cid), content = {kind = .Text}},
+			target_id = row_id,
+			position  = POS_INNER,
+		})
+	}
 }

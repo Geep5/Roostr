@@ -63,6 +63,17 @@ export const note = {
 	del: (objectId: string) => mutate("delete", { object_id: objectId }),
 };
 
+export const table = {
+	create: (objectId: string, targetId = "", position = 0, rows = 3, cols = 3) =>
+		mutate("table_create", { object_id: objectId, target_id: targetId, position, rows, cols }) as Promise<{ id: string }>,
+	rowAdd: (objectId: string, tableId: string) =>
+		mutate("table_row_add", { object_id: objectId, table_id: tableId }),
+	colAdd: (objectId: string, tableId: string) =>
+		mutate("table_col_add", { object_id: objectId, table_id: tableId }),
+	colRemove: (objectId: string, tableId: string, columnId: string) =>
+		mutate("table_col_remove", { object_id: objectId, table_id: tableId, column_id: columnId }),
+};
+
 export const channel = {
 	create: (name: string, icon?: string) =>
 		mutate("channel_create", { name, icon }) as Promise<{ id: string; key_id: number }>,

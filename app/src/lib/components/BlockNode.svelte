@@ -3,10 +3,12 @@
 	import { Pos, Style, Layout } from "$lib/types";
 	import { toHtml } from "$lib/marks";
 	import BlockNode from "./BlockNode.svelte";
+	import TableBlock from "./TableBlock.svelte";
 
 	let {
 		id,
 		byId,
+		objectId,
 		draggingId,
 		onkeydown,
 		oninput,
@@ -16,9 +18,11 @@
 		ondrop,
 		ontogglecheck,
 		onmenu,
+		onrefresh,
 	}: {
 		id: string;
 		byId: Map<string, BlockJSON>;
+		objectId: string;
 		draggingId: string;
 		onkeydown: (e: KeyboardEvent, id: string) => void;
 		oninput: (id: string) => void;
@@ -29,6 +33,8 @@
 		ontogglecheck: (id: string, checked: boolean) => void;
 		/** Open the block action menu at viewport coordinates. */
 		onmenu: (id: string, x: number, y: number) => void;
+		/** Re-pull object state after a structural table mutation. */
+		onrefresh: () => void | Promise<void>;
 	} = $props();
 
 	const block = $derived(byId.get(id));
@@ -86,14 +92,54 @@
 	{#if block.content.layout?.style === Layout.ROW}
 		<div class="row" data-block={block.id} style="grid-template-columns: {block.childrenIds.map(widthOf).join(' ')}">
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} />
+				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} />
 			{/each}
 		</div>
 	{:else if block.content.layout?.style === Layout.COLUMN}
 		<div class="col" data-block={block.id}>
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} />
+				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} />
 			{/each}
+		</div>
+	{:else if block.content.table}
+		<div
+			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}"
+			data-table={block.id}
+			role="presentation"
+			ondragover={(e) => {
+				if (!draggingId || draggingId === block.id) return;
+				e.preventDefault();
+				zone = computeZone(e);
+			}}
+			ondragleave={() => (zone = 0)}
+			ondrop={(e) => {
+				e.preventDefault();
+				const z = zone;
+				zone = 0;
+				ondrop(block.id, z || Pos.BOTTOM);
+			}}
+			oncontextmenu={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				onmenu(block.id, e.clientX, e.clientY);
+			}}
+		>
+			<div class="gutter">
+				<button
+					class="handle"
+					title="Click for actions; drag to move"
+					draggable="true"
+					ondragstart={(e) => {
+						e.dataTransfer?.setData("text/plain", block.id);
+						ondragbegin(block.id);
+					}}
+					onclick={(e) => {
+						const r = e.currentTarget.getBoundingClientRect();
+						onmenu(block.id, r.right + 8, r.top);
+					}}>⠿</button
+				>
+			</div>
+			<TableBlock {block} {byId} {objectId} {onrefresh} {oninput} {onblur} />
 		</div>
 	{:else if block.content.text}
 		{@const t = block.content.text}
@@ -180,7 +226,7 @@
 			{#if block.childrenIds.length > 0}
 				<div class="nested">
 					{#each block.childrenIds as cid (cid)}
-						<BlockNode id={cid} {byId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} />
+						<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} />
 					{/each}
 				</div>
 			{/if}
@@ -189,7 +235,7 @@
 		<div class="block custom" data-block={block.id}>
 			<span class="chip">{block.content.custom.contentType}</span>
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} />
+				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} />
 			{/each}
 		</div>
 	{/if}

@@ -28,6 +28,9 @@ export interface BlockJSON {
 		text?: { text: string; style: number; marks?: MarkJSON[]; checked?: boolean; color?: string };
 		custom?: { contentType: string; meta?: Record<string, string> };
 		layout?: { style: number };
+		table?: Record<string, never>;
+		tableColumn?: Record<string, never>;
+		tableRow?: { isHeader?: boolean };
 	};
 	fields?: { entries: Record<string, ValueJSON> };
 	align?: number;
@@ -105,7 +108,7 @@ export const Style = {
 } as const;
 
 /** glon.LayoutStyle values. */
-export const Layout = { ROW: 0, COLUMN: 1, DIV: 2, HEADER: 3 } as const;
+export const Layout = { ROW: 0, COLUMN: 1, DIV: 2, HEADER: 3, TABLE_ROWS: 4, TABLE_COLUMNS: 5 } as const;
 
 /** glon.MarkType values. */
 export const MarkT = {

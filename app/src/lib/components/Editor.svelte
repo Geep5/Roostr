@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { ObjectJSON, BlockJSON } from "$lib/types";
-	import { Pos, Style, MarkT } from "$lib/types";
-	import { note } from "$lib/api";
+	import { Pos, Style, MarkT, Layout } from "$lib/types";
+	import { note, table, fetchObject } from "$lib/api";
 	import { fromDom, selectionOffsets, setCaret, toggleMark } from "$lib/marks";
 	import BlockNode from "./BlockNode.svelte";
 	import BlockMenu from "./BlockMenu.svelte";
@@ -238,6 +238,16 @@
 		await refresh();
 	}
 
+	/** Slash "Table": the slash menu only opens on an empty block, so the
+	 * 3x3 table (Anytype's default) simply replaces it. */
+	async function insertTable(id: string) {
+		slashFor = null;
+		cancelPending(id);
+		lastLocalEdit = Date.now();
+		await table.create(object.id, id, Pos.REPLACE);
+		await refresh();
+	}
+
 	// ── Marks toolbar ─────────────────────────────────────────────
 	function onSelect(id: string) {
 		const el = blockEl(id);
@@ -330,12 +340,39 @@
 		await refresh();
 	}
 
+	/** Column/row id lists of a table block, from the two marker layouts. */
+	function tableShape(t: BlockJSON) {
+		const kids = t.childrenIds.map((i) => byId.get(i));
+		return {
+			cols: kids.find((b) => b?.content.layout?.style === Layout.TABLE_COLUMNS)?.childrenIds ?? [],
+			rows: kids.find((b) => b?.content.layout?.style === Layout.TABLE_ROWS)?.childrenIds ?? [],
+		};
+	}
+
 	/** Duplicate a block's subtree below it (fresh ids, preserved order). */
 	async function duplicateBlock(id: string) {
 		const src = byId.get(id);
 		if (!src) return;
 		cancelPending(id);
 		lastLocalEdit = Date.now();
+		if (src.content.table) {
+			// Cells are addressed "<rowId>-<colId>", so a generic clone would
+			// break the grid. Create a fresh same-size table, then copy cells.
+			const { cols, rows } = tableShape(src);
+			const { id: newId } = await table.create(object.id, id, Pos.BOTTOM, rows.length, cols.length);
+			const fresh = await fetchObject(object.id);
+			const freshBy = new Map(fresh.blocks.map((b) => [b.id, b]));
+			const nshape = tableShape(freshBy.get(newId)!);
+			for (let r = 0; r < rows.length; r++) {
+				for (let c = 0; c < cols.length; c++) {
+					const cell = byId.get(`${rows[r]}-${cols[c]}`)?.content.text;
+					if (!cell || (!cell.text && !(cell.marks ?? []).length)) continue;
+					await note.blockUpdate(object.id, `${nshape.rows[r]}-${nshape.cols[c]}`, { text: cell });
+				}
+			}
+			await refresh();
+			return;
+		}
 		const cloneInto = async (srcId: string, targetId: string, position: number) => {
 			const s = byId.get(srcId);
 			if (!s) return;
@@ -381,6 +418,7 @@
 		<BlockNode
 			{id}
 			{byId}
+			objectId={object.id}
 			{draggingId}
 			onkeydown={onKeydown}
 			oninput={scheduleSave}
@@ -390,6 +428,7 @@
 			ondrop={onDrop}
 			ontogglecheck={toggleChecked}
 			onmenu={openBlockMenu}
+			onrefresh={refresh}
 		/>
 	{/each}
 	{#if rootIds.length === 0}
@@ -423,6 +462,7 @@
 		{#each SLASH_ITEMS as item (item.style)}
 			<button onclick={() => void applyStyle(slashFor!, item.style)}>{item.label}</button>
 		{/each}
+		<button onclick={() => void insertTable(slashFor!)}>Table</button>
 	</div>
 {/if}
 

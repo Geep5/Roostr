@@ -74,6 +74,9 @@ Content_Kind :: enum u8 {
 	Text,
 	Custom,
 	Layout,
+	Table,
+	Table_Column,
+	Table_Row,
 }
 
 Block_Content :: struct {
@@ -81,6 +84,7 @@ Block_Content :: struct {
 	text:         Text_Content,
 	custom:       Custom_Content,
 	layout_style: i64,
+	is_header:    bool, // Table_Row
 }
 
 Block :: struct {
@@ -387,6 +391,23 @@ decode_block_content :: proc(data: []byte, allocator := context.allocator) -> Bl
 				stag := read_varint(&sub)
 				if stag >> 3 == 1 {
 					c.layout_style = as_i64(read_varint(&sub))
+				} else {
+					skip_field(&sub, stag & 7)
+				}
+			}
+		case 4:
+			c.kind = .Table
+			skip_field(&r, tag & 7)
+		case 5:
+			c.kind = .Table_Column
+			skip_field(&r, tag & 7)
+		case 6:
+			c.kind = .Table_Row
+			sub := Reader{data = read_bytes(&r)}
+			for sub.pos < len(sub.data) && !sub.err {
+				stag := read_varint(&sub)
+				if stag >> 3 == 1 {
+					c.is_header = read_varint(&sub) != 0
 				} else {
 					skip_field(&sub, stag & 7)
 				}
@@ -797,6 +818,15 @@ encode_block_content :: proc(c: Block_Content, w: ^Writer) {
 		sub: Writer
 		write_i64_field(&sub, 1, c.layout_style)
 		write_len_prefixed(w, 3, sub.buf[:])
+		delete(sub.buf)
+	case .Table:
+		write_len_prefixed(w, 4, {})
+	case .Table_Column:
+		write_len_prefixed(w, 5, {})
+	case .Table_Row:
+		sub: Writer
+		write_bool_field(&sub, 1, c.is_header)
+		write_len_prefixed(w, 6, sub.buf[:])
 		delete(sub.buf)
 	}
 }

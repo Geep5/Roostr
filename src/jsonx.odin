@@ -97,6 +97,14 @@ block_to_json :: proc(b: Block, allocator := context.temp_allocator) -> json.Val
 		l := jobj(allocator)
 		l["style"] = json.Integer(b.content.layout_style)
 		content["layout"] = json.Object(l)
+	case .Table:
+		content["table"] = json.Object(jobj(allocator))
+	case .Table_Column:
+		content["tableColumn"] = json.Object(jobj(allocator))
+	case .Table_Row:
+		r := jobj(allocator)
+		r["isHeader"] = json.Boolean(b.content.is_header)
+		content["tableRow"] = json.Object(r)
 	}
 	o["content"] = json.Object(content)
 
@@ -285,6 +293,23 @@ content_from_json :: proc(v: json.Value, allocator := context.allocator) -> Bloc
 	if l, ok := json_field(v, "layout"); ok {
 		c.kind = .Layout
 		c.layout_style, _ = json_int(l, "style")
+		return c
+	}
+	if t, ok := json_field(v, "table"); ok {
+		c.kind = .Table
+		_ = t
+		return c
+	}
+	if t, ok := json_field(v, "tableColumn"); ok {
+		c.kind = .Table_Column
+		_ = t
+		return c
+	}
+	if t, ok := json_field(v, "tableRow"); ok {
+		c.kind = .Table_Row
+		if h, hok := json_field(t, "isHeader"); hok {
+			if b, bok := h.(json.Boolean); bok do c.is_header = bool(b)
+		}
 		return c
 	}
 	if cu, ok := json_field(v, "custom"); ok {

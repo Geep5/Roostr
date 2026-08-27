@@ -189,6 +189,8 @@ is_layout :: proc(b: ^Block, style: i64 = -1) -> bool {
 LAYOUT_ROW :: 0
 LAYOUT_COLUMN :: 1
 LAYOUT_DIV :: 2
+LAYOUT_TABLE_ROWS :: 4
+LAYOUT_TABLE_COLUMNS :: 5
 
 POS_NONE :: 0
 POS_TOP :: 1
