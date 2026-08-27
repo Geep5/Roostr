@@ -3,6 +3,7 @@
 	import { fetchQuery, type QueryResultRow } from "$lib/api";
 	import { store } from "$lib/data.svelte";
 	import { activeChannel } from "$lib/channel.svelte";
+	import { objectIcon } from "$lib/icons";
 
 	let { onclose }: { onclose: () => void } = $props();
 
@@ -82,7 +83,7 @@
 		if (e.key === "Enter" && results[selected]) open(results[selected]);
 	}
 
-	const ICON: Record<string, string> = { query: "▤", set: "▤", collection: "⛁", note: "▨", task: "☐", person: "◉", channel: "◍", agent: "◈" };
+	
 
 	/** Split text into [before, match, after] for highlight rendering. */
 	function highlight(text: string, q: string): [string, string, string] {
@@ -109,7 +110,7 @@
 				{@const name = row.name || "Untitled"}
 				{@const [b, m, a] = highlight(name, query.trim())}
 				<button class="row" class:selected={i === selected} onclick={() => open(row)} onmouseenter={() => (selected = i)}>
-					<span class="icon">{ICON[row.typeKey] ?? "•"}</span>
+					<span class="icon">{objectIcon(row.fields["iconEmoji"]?.stringValue, row.typeKey)}</span>
 					<span class="texts">
 						<span class="name">{b}{#if m}<mark>{m}</mark>{/if}{a}</span>
 						{#if row.snippet}

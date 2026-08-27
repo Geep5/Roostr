@@ -2,6 +2,7 @@
 	import { fetchQuery, type QueryResultRow } from "$lib/api";
 	import type { RelationDefJSON, ValueJSON } from "$lib/types";
 	import { fieldStr } from "$lib/types";
+	import { objectIcon } from "$lib/icons";
 
 	/** `body` is a /api/query request body (setId, filters, type, …).
 	 * `defaultSorts` applies until the user clicks a column header. */
@@ -92,7 +93,7 @@
 		<tbody>
 			{#each rows as r (r.id)}
 				<tr onclick={() => (location.href = `/object/${r.id}`)}>
-					<td class="name">{fieldStr(r.fields, "name") || r.id.slice(0, 8)}</td>
+					<td class="name"><span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || r.id.slice(0, 8)}</td>
 					{#each columns as c (c)}
 						<td>{cell(r.fields[c], formatOf(c))}</td>
 					{/each}

@@ -4,6 +4,7 @@
 	import { page } from "$app/state";
 	import { activeChannel } from "$lib/channel.svelte";
 	import { channel as channelApi } from "$lib/api";
+	import { objectIcon } from "$lib/icons";
 	import { store, refreshAll, connectEvents } from "$lib/data.svelte";
 
 	let { children }: { children: import("svelte").Snippet } = $props();
@@ -46,7 +47,7 @@
 		selectChannel(id);
 	}
 
-	const icon = (typeKey: string) => ({ query: "▤", set: "▤", collection: "⛁", note: "▨", task: "☐", person: "◉" })[typeKey] ?? "•";
+	const icon = (o: { icon?: string; typeKey: string }) => objectIcon(o.icon, o.typeKey);
 
 	let showSettings = $state(false);
 	let showSearch = $state(false);
@@ -111,7 +112,7 @@
 					<div class="section-name">Pinned</div>
 					{#each pinned as p (p.id)}
 						<a class="item" class:current={page.url.pathname === `/object/${p.id}`} href="/object/{p.id}">
-							<span class="obj-icon">{icon(p.typeKey)}</span>{p.name || "Untitled"}
+							<span class="obj-icon">{icon(p)}</span>{p.name || "Untitled"}
 						</a>
 					{/each}
 				</div>
@@ -121,7 +122,7 @@
 				<div class="section-name">Recently edited</div>
 				{#each recent as r (r.id)}
 					<a class="item" class:current={page.url.pathname === `/object/${r.id}`} href="/object/{r.id}">
-						<span class="obj-icon">{icon(r.typeKey)}</span>{r.name || "Untitled"}
+						<span class="obj-icon">{icon(r)}</span>{r.name || "Untitled"}
 					</a>
 				{/each}
 				{#if recent.length === 0}

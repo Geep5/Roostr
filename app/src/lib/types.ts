@@ -51,6 +51,8 @@ export interface ObjectSummary {
 	updatedAt: number;
 	/** Scoping channel object id ("" = personal/unassigned). */
 	channelId: string;
+	/** Object's emoji icon ("" = none, render the type glyph). */
+	icon: string;
 }
 
 export interface ChannelJSON {

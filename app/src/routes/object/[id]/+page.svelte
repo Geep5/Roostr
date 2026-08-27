@@ -10,6 +10,8 @@
 	import SetTable from "$lib/components/SetTable.svelte";
 	import QueryControls from "$lib/components/QueryControls.svelte";
 	import ChannelManage from "$lib/components/ChannelManage.svelte";
+	import EmojiPicker from "$lib/components/EmojiPicker.svelte";
+	import { objectIcon } from "$lib/icons";
 
 	let object = $state<ObjectJSON>();
 	let editor = $state<Editor>();
@@ -38,6 +40,14 @@
 	async function saveName() {
 		if (!object || nameDraft === fieldStr(object.fields, "name")) return;
 		await note.setField(object.id, "name", { stringValue: nameDraft });
+		await refresh();
+	}
+
+	let showEmoji = $state(false);
+
+	async function setEmoji(emoji: string) {
+		if (!object) return;
+		await note.setField(object.id, "iconEmoji", { stringValue: emoji });
 		await refresh();
 	}
 
@@ -163,6 +173,25 @@
 {#if object}
 	<article>
 		<div class="title-row">
+			<div class="icon-wrap">
+				<button
+					class="obj-emoji"
+					class:placeholder={!object.fields["iconEmoji"]?.stringValue}
+					title="Set icon"
+					onclick={() => (showEmoji = !showEmoji)}
+				>
+					{objectIcon(object.fields["iconEmoji"]?.stringValue, object.typeKey)}
+				</button>
+				{#if showEmoji}
+					<EmojiPicker
+						onpick={(e) => {
+							showEmoji = false;
+							void setEmoji(e);
+						}}
+						onclose={() => (showEmoji = false)}
+					/>
+				{/if}
+			</div>
 			<input
 				class="title"
 				placeholder="Untitled"
@@ -224,8 +253,31 @@
 {:else}
 	<p class="muted">Loading…</p>
 {/if}
-
 <style>
+	.icon-wrap {
+		position: relative;
+		flex: none;
+	}
+	.obj-emoji {
+		width: 44px;
+		height: 44px;
+		border: none;
+		background: none;
+		font-size: 30px;
+		border-radius: 10px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	.obj-emoji:hover {
+		background: var(--hover);
+	}
+	.obj-emoji.placeholder {
+		color: var(--muted);
+		font-size: 22px;
+		opacity: 0.6;
+	}
 	.title-row {
 		display: flex;
 		align-items: center;

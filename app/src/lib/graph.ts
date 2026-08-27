@@ -87,7 +87,7 @@ export async function buildGraph(channelId: string, isDefaultChannel: boolean): 
 		index.set(r.id, nodes.length);
 		nodes.push({
 			id: r.id,
-			name: r.fields["name"]?.stringValue || r.id.slice(0, 8),
+			name: [r.fields["iconEmoji"]?.stringValue, r.fields["name"]?.stringValue || r.id.slice(0, 8)].filter(Boolean).join(" "),
 			kind: r.typeKey,
 			radius: 10,
 			color: typeColor(r.typeKey),

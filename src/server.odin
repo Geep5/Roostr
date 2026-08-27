@@ -219,6 +219,9 @@ handle_list_objects :: proc(sock: net.TCP_Socket) {
 			channel_id := ""
 			if v, ok := fields_get(s.fields, "channel"); ok && v.kind == .String do channel_id = v.str
 			o["channelId"] = json.String(channel_id)
+			emoji := ""
+			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do emoji = v.str
+			o["icon"] = json.String(emoji)
 			append(&arr, json.Object(o))
 		}
 		// Newest first.

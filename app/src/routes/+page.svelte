@@ -2,6 +2,7 @@
 	import { goto } from "$app/navigation";
 	import { note } from "$lib/api";
 	import { activeChannel } from "$lib/channel.svelte";
+	import { objectIcon, TYPE_GLYPHS } from "$lib/icons";
 	import { store, refreshAll } from "$lib/data.svelte";
 
 	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
@@ -53,7 +54,7 @@
 		await goto(`/object/${id}`);
 	}
 
-	const ICON_BY_TYPE: Record<string, string> = { query: "▤", set: "▤", collection: "⛁", note: "▨", task: "☐", person: "◉" };
+	const ICON_BY_TYPE = TYPE_GLYPHS;
 </script>
 
 <div class="actions">
@@ -84,7 +85,7 @@
 	{#each objects as o (o.id)}
 		<li>
 			<a href="/object/{o.id}">
-				<span class="icon">{ICON_BY_TYPE[o.typeKey] ?? "•"}</span>
+				<span class="icon">{objectIcon(o.icon, o.typeKey)}</span>
 				<span class="name">{o.name || "Untitled"}</span>
 				<span class="type">{o.typeKey}</span>
 				<span class="when">{o.updatedAt ? new Date(o.updatedAt).toLocaleString() : ""}</span>
