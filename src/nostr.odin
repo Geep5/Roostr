@@ -138,11 +138,6 @@ handle_settings :: proc(sock: net.TCP_Socket) {
 	for r in s.relays do append(&relays, json.String(r))
 	o["relays"] = json.Array(relays)
 	o["authorId"] = json.String(author_id())
-	auth := auth_read()
-	agent := jobj()
-	agent["anthropic"] = json.String(auth_masked(auth.anthropic))
-	agent["kimi"] = json.String(auth_masked(auth.kimi))
-	o["agentKeys"] = json.Object(agent)
 	respond_json(sock, json.Object(o))
 }
 
@@ -204,69 +199,3 @@ mutate_relays_set :: proc(sock: net.TCP_Socket, parsed: json.Value) {
 	respond_json(sock, json.Object(o))
 }
 
-// ── Agent LLM credentials (auth.json, glon /auth convention) ─────────
-//
-// {version:1, anthropic:"sk-…", kimi:"…"} under GLON_DATA, mode 0600.
-// The harness resolves auth.json → env → Claude Code keychain, so this
-// file is what the Settings UI manages on a fresh install.
-
-auth_path :: proc() -> string {
-	p, _ := filepath.join({g_store.data_root, "auth.json"}, context.temp_allocator)
-	return p
-}
-
-Agent_Auth :: struct {
-	anthropic: string,
-	kimi:      string,
-}
-
-auth_read :: proc(allocator := context.temp_allocator) -> Agent_Auth {
-	a: Agent_Auth
-	data, rerr := os.read_entire_file(auth_path(), allocator)
-	if rerr == nil {
-		parsed, perr := json.parse(data, allocator = allocator)
-		if perr == nil {
-			a.anthropic = json_str(parsed, "anthropic")
-			a.kimi = json_str(parsed, "kimi")
-		}
-	}
-	return a
-}
-
-auth_write :: proc(a: Agent_Auth) {
-	root := jobj()
-	root["version"] = json.Integer(1)
-	if a.anthropic != "" do root["anthropic"] = json.String(a.anthropic)
-	if a.kimi != "" do root["kimi"] = json.String(a.kimi)
-	_ = os.write_entire_file(auth_path(), marshal(json.Object(root)), perm = {.Read_User, .Write_User})
-}
-
-/** Masked tail for status display — never returns the full key. */
-auth_masked :: proc(key: string) -> string {
-	if key == "" do return ""
-	if len(key) <= 8 do return "…"
-	return fmt.tprintf("…%s", key[len(key) - 4:])
-}
-
-/** mutate action: agent_key_set {provider: "anthropic"|"kimi", key} — empty key clears. */
-mutate_agent_key_set :: proc(sock: net.TCP_Socket, parsed: json.Value) {
-	provider := json_str(parsed, "provider")
-	key := strings.trim_space(json_str(parsed, "key"))
-	if provider != "anthropic" && provider != "kimi" {
-		respond_error(sock, "provider must be anthropic or kimi")
-		return
-	}
-	sync.lock(&g_nostr_mu)
-	defer sync.unlock(&g_nostr_mu)
-	a := auth_read()
-	switch provider {
-	case "anthropic":
-		a.anthropic = key
-	case "kimi":
-		a.kimi = key
-	}
-	auth_write(a)
-	o := jobj()
-	o["ok"] = json.Boolean(true)
-	respond_json(sock, json.Object(o))
-}

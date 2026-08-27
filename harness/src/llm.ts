@@ -6,6 +6,7 @@
  */
 
 import type { LLMResult, ToolDef, Turn } from "./types";
+import { resolveAnthropicAuth, resolveKimiKey } from "./auth";
 
 export interface LLMRequest {
 	model: string;
@@ -43,55 +44,6 @@ const CLAUDE_CODE_STAINLESS_HEADERS: Record<string, string> = {
 	"X-Stainless-Os": "MacOS",
 	"X-Stainless-Timeout": "600",
 };
-
-interface AnthropicAuth {
-	token: string;
-	isOAuth: boolean;
-}
-
-/** GLON_DATA/auth.json — written by the Settings UI (Settings → Agent). */
-async function readAuthFile(): Promise<{ anthropic?: string; kimi?: string }> {
-	const root = process.env.GLON_DATA ?? `${process.env.HOME}/.glon`;
-	try {
-		return (await Bun.file(`${root}/auth.json`).json()) as { anthropic?: string; kimi?: string };
-	} catch {
-		return {};
-	}
-}
-
-let cachedKeychainAuth: AnthropicAuth | null = null;
-
-/**
- * Resolution order: auth.json (Settings UI) → env → Claude Code keychain
- * OAuth. auth.json is re-read every call so a key saved in Settings takes
- * effect without restarting the daemon.
- */
-async function resolveAnthropicAuth(): Promise<AnthropicAuth> {
-	const file = await readAuthFile();
-	if (file.anthropic) return { token: file.anthropic, isOAuth: false };
-	const envKey = process.env.ANTHROPIC_API_KEY;
-	if (envKey) return { token: envKey, isOAuth: false };
-	if (cachedKeychainAuth) return cachedKeychainAuth;
-	try {
-		const proc = Bun.spawn(["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"], { stdout: "pipe", stderr: "ignore" });
-		const raw = await new Response(proc.stdout).text();
-		const parsed = JSON.parse(raw.trim()) as { claudeAiOauth?: { accessToken?: string } };
-		const token = parsed.claudeAiOauth?.accessToken;
-		if (token) {
-			cachedKeychainAuth = { token, isOAuth: true };
-			return cachedKeychainAuth;
-		}
-	} catch {
-		/* fall through */
-	}
-	throw new Error("No Anthropic credentials: add a key in Settings → Agent, set ANTHROPIC_API_KEY, or log into Claude Code.");
-}
-
-/** Kimi key: auth.json → env. */
-export async function resolveKimiKey(): Promise<string> {
-	const file = await readAuthFile();
-	return file.kimi ?? process.env.KIMI_API_KEY ?? process.env.MOONSHOT_API_KEY ?? "";
-}
 
 /** Prompt-caching stamps (agent-llm.ts:137-163). */
 function applyPromptCaching(body: Record<string, unknown>): void {

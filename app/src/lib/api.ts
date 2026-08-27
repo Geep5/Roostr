@@ -96,7 +96,6 @@ export interface NostrSettings {
 	hasKey: boolean;
 	relays: string[];
 	authorId: string;
-	agentKeys?: { anthropic: string; kimi: string };
 }
 
 export const settings = {
@@ -107,8 +106,6 @@ export const settings = {
 	},
 	exportKey: () => mutate("nostr_key_export", {}) as Promise<{ nsec: string; hex: string }>,
 	setRelays: (relays: string[]) => mutate("nostr_relays_set", { relays }) as Promise<{ relays: string[] }>,
-	setAgentKey: (provider: "anthropic" | "kimi", key: string) =>
-		mutate("agent_key_set", { provider, key }),
 };
 
 export const chat = {

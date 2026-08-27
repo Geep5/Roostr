@@ -638,9 +638,6 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 	case "nostr_relays_set":
 		mutate_relays_set(sock, parsed)
 
-	case "agent_key_set":
-		mutate_agent_key_set(sock, parsed)
-
 	case:
 		respond_error(sock, fmt.tprintf("unknown action %q", action))
 	}

@@ -86,9 +86,12 @@ bun run src/index.ts serve                        # SSE daemon: replies to chats
 bun run src/index.ts ask <agentId> "message"      # one-shot turn
 ```
 
-Credentials: `ANTHROPIC_API_KEY`, or the Claude Code OAuth token from the
-macOS keychain (impersonation headers ported from glon agent-llm.ts).
-Model `mock` runs the full loop offline for smoke tests.
+Credentials (Settings → Agent in the app, served by the harness on
+:7334): "Sign in with Claude" runs the Authorization-Code+PKCE flow
+against your Pro/Max plan (port of glon auth.ts — claude.ai authorize,
+paste-back code, token exchange + auto-refresh into `~/.glon/auth.json`,
+0600). Fallbacks: pasted API key → `ANTHROPIC_API_KEY` env → Claude Code
+keychain token. Model `mock` runs the full loop offline for smoke tests.
 
 Ported from glon's holdfast with the OMP lifts: view-only tool-output
 pruning before compaction, usage-calibrated token estimator, touched-object

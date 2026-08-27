@@ -12,29 +12,79 @@
 	let copied = $state("");
 	let saveState = $state("");
 
-	// Agent credentials (auth.json on the server, masked in status).
-	let agentKeys = $state<{ anthropic: string; kimi: string }>({ anthropic: "", kimi: "" });
+	// Agent credentials: managed by the harness daemon's localhost auth
+	// endpoint (it owns auth.json and the OAuth exchange).
+	const HARNESS = "http://127.0.0.1:7334";
+	interface ProviderStatus {
+		mode: "plan" | "api_key" | "env" | "claude_code" | "none";
+		masked?: string;
+		expires?: number;
+	}
+	let agentAuth = $state<{ anthropic: ProviderStatus; kimi: ProviderStatus } | null | undefined>(undefined);
 	let anthropicDraft = $state("");
 	let kimiDraft = $state("");
 	let agentSaved = $state("");
+	let loginPending = $state(false);
+	let loginCode = $state("");
+	let loginError = $state("");
+
+	async function loadAgentAuth() {
+		try {
+			const res = await fetch(`${HARNESS}/auth/status`);
+			agentAuth = (await res.json()) as { anthropic: ProviderStatus; kimi: ProviderStatus };
+		} catch {
+			agentAuth = null; // daemon offline
+		}
+	}
 
 	async function load() {
 		const s = await settings.fetch();
 		relays = s.relays;
-		agentKeys = s.agentKeys ?? { anthropic: "", kimi: "" };
+		await loadAgentAuth();
 	}
 
 	onMount(() => {
 		void load();
 	});
 
+	function flashSaved(label: string) {
+		agentSaved = label;
+		setTimeout(() => (agentSaved = ""), 1500);
+	}
+
 	async function saveAgentKey(provider: "anthropic" | "kimi", key: string) {
-		await settings.setAgentKey(provider, key.trim());
+		await fetch(`${HARNESS}/auth/key`, { method: "POST", body: JSON.stringify({ provider, key: key.trim() }) });
 		anthropicDraft = "";
 		kimiDraft = "";
-		await load();
-		agentSaved = key.trim() ? "Saved" : "Cleared";
-		setTimeout(() => (agentSaved = ""), 1500);
+		await loadAgentAuth();
+		flashSaved(key.trim() ? "Saved" : "Cleared");
+	}
+
+	/** Plan sign-in: open claude.ai authorize page, then paste the code back. */
+	async function startLogin() {
+		loginError = "";
+		const res = await fetch(`${HARNESS}/auth/anthropic/start`, { method: "POST" });
+		const out = (await res.json()) as { authUrl?: string; error?: string };
+		if (!out.authUrl) {
+			loginError = out.error ?? "could not start login";
+			return;
+		}
+		loginPending = true;
+		window.open(out.authUrl, "_blank", "noopener");
+	}
+
+	async function finishLogin() {
+		loginError = "";
+		const res = await fetch(`${HARNESS}/auth/anthropic/finish`, { method: "POST", body: JSON.stringify({ code: loginCode.trim() }) });
+		const out = (await res.json()) as { ok?: boolean; error?: string };
+		if (!out.ok) {
+			loginError = out.error ?? "exchange failed";
+			return;
+		}
+		loginPending = false;
+		loginCode = "";
+		await loadAgentAuth();
+		flashSaved("Signed in");
 	}
 
 	async function reveal() {
@@ -128,51 +178,111 @@
 
 		<section>
 			<h3>Agent {agentSaved ? `· ${agentSaved}` : ""}</h3>
-			<p class="hint">
-				Credentials for your agent's model. A key saved here is stored locally
-				(<code>~/.glon/auth.json</code>, owner-only) and takes effect immediately. Without one,
-				the harness falls back to the <code>ANTHROPIC_API_KEY</code> environment variable, then
-				to your Claude Code login (Pro/Max plan) if present on this Mac.
-			</p>
-			<div class="provider">
-				<span class="pname">Anthropic</span>
-				{#if agentKeys.anthropic}
-					<code class="masked">key set ({agentKeys.anthropic})</code>
-					<button onclick={() => void saveAgentKey("anthropic", "")}>Clear</button>
-				{:else}
+			{#if agentAuth === undefined}
+				<p class="hint">Checking agent daemon…</p>
+			{:else if agentAuth === null}
+				<p class="hint">
+					Agent daemon is offline — start it to manage credentials:
+					<code>cd harness && bun run serve</code>
+				</p>
+			{:else}
+				<p class="hint">
+					Sign in with your Claude <b>Pro/Max plan</b> (recommended) or paste an API key.
+					Credentials live in <code>~/.glon/auth.json</code> (owner-only) and apply immediately.
+				</p>
+				<div class="provider">
+					<span class="pname">Anthropic</span>
+					{#if agentAuth.anthropic.mode === "plan"}
+						<code class="masked">Signed in with Claude plan</code>
+						<button onclick={() => void saveAgentKey("anthropic", "")}>Sign out</button>
+					{:else if agentAuth.anthropic.mode === "api_key"}
+						<code class="masked">API key set ({agentAuth.anthropic.masked})</code>
+						<button onclick={() => void saveAgentKey("anthropic", "")}>Clear</button>
+					{:else if loginPending}
+						<form
+							class="code-form"
+							onsubmit={(e) => {
+								e.preventDefault();
+								if (loginCode.trim()) void finishLogin();
+							}}
+						>
+							<input bind:value={loginCode} placeholder="Paste the code from claude.ai" autocomplete="off" />
+							<button type="submit">Finish</button>
+							<button type="button" class="subtle-btn" onclick={() => { loginPending = false; loginCode = ""; loginError = ""; }}>Cancel</button>
+						</form>
+					{:else}
+						<button class="action" onclick={() => void startLogin()}>Sign in with Claude</button>
+						{#if agentAuth.anthropic.mode === "claude_code"}
+							<span class="fallback">currently using your Claude Code login</span>
+						{:else if agentAuth.anthropic.mode === "env"}
+							<span class="fallback">currently using ANTHROPIC_API_KEY from the environment</span>
+						{/if}
+					{/if}
+				</div>
+				{#if loginPending}
+					<p class="hint">A claude.ai tab opened — approve access, copy the code it shows, and paste it above.</p>
+				{/if}
+				{#if loginError}
+					<p class="hint error">{loginError}</p>
+				{/if}
+				{#if agentAuth.anthropic.mode !== "plan" && agentAuth.anthropic.mode !== "api_key" && !loginPending}
 					<form
+						class="keyrow-form"
 						onsubmit={(e) => {
 							e.preventDefault();
 							if (anthropicDraft.trim()) void saveAgentKey("anthropic", anthropicDraft);
 						}}
 					>
-						<input bind:value={anthropicDraft} type="password" placeholder="sk-ant-…" autocomplete="off" />
+						<input bind:value={anthropicDraft} type="password" placeholder="or paste an API key: sk-ant-…" autocomplete="off" />
 						<button type="submit">Save</button>
 					</form>
 				{/if}
-			</div>
-			<div class="provider">
-				<span class="pname">Kimi (Moonshot)</span>
-				{#if agentKeys.kimi}
-					<code class="masked">key set ({agentKeys.kimi})</code>
-					<button onclick={() => void saveAgentKey("kimi", "")}>Clear</button>
-				{:else}
-					<form
-						onsubmit={(e) => {
-							e.preventDefault();
-							if (kimiDraft.trim()) void saveAgentKey("kimi", kimiDraft);
-						}}
-					>
-						<input bind:value={kimiDraft} type="password" placeholder="sk-…" autocomplete="off" />
-						<button type="submit">Save</button>
-					</form>
-				{/if}
-			</div>
+				<div class="provider">
+					<span class="pname">Kimi (Moonshot)</span>
+					{#if agentAuth.kimi.mode === "api_key"}
+						<code class="masked">API key set ({agentAuth.kimi.masked})</code>
+						<button onclick={() => void saveAgentKey("kimi", "")}>Clear</button>
+					{:else}
+						<form
+							onsubmit={(e) => {
+								e.preventDefault();
+								if (kimiDraft.trim()) void saveAgentKey("kimi", kimiDraft);
+							}}
+						>
+							<input bind:value={kimiDraft} type="password" placeholder="sk-…" autocomplete="off" />
+							<button type="submit">Save</button>
+						</form>
+					{/if}
+				</div>
+			{/if}
 		</section>
 	</div>
 </div>
 
 <style>
+	.fallback {
+		color: var(--muted);
+		font-size: 11px;
+	}
+	.error {
+		color: #e8524a;
+	}
+	.code-form,
+	.keyrow-form {
+		display: flex;
+		gap: 8px;
+		flex: 1;
+	}
+	.keyrow-form {
+		margin: 4px 0 10px 140px;
+	}
+	.keyrow-form input,
+	.code-form input {
+		flex: 1;
+	}
+	.subtle-btn {
+		color: var(--muted);
+	}
 	.provider {
 		display: flex;
 		align-items: center;

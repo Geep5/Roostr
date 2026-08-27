@@ -11,6 +11,7 @@
 import { chatPost, fetchObject, query, setField, str, subscribe, sv, createObject } from "./api";
 import { runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
+import { startAuthServer } from "./authserver";
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);
@@ -79,6 +80,7 @@ async function handleAgentEvent(agentId: string, busy: Set<string>): Promise<voi
 }
 
 async function serve(): Promise<void> {
+	startAuthServer();
 	const agents = new Set(await principalAgents());
 	console.log(`[harness] watching ${agents.size} agent(s): ${[...agents].map((a) => a.slice(0, 8)).join(", ")}`);
 	const busy = new Set<string>();
