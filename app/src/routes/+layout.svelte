@@ -49,6 +49,14 @@
 	const icon = (typeKey: string) => ({ query: "▤", set: "▤", collection: "⛁", note: "▨", task: "☐", person: "◉" })[typeKey] ?? "•";
 
 	let showSettings = $state(false);
+	let showSearch = $state(false);
+
+	function onGlobalKeydown(e: KeyboardEvent) {
+		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+			e.preventDefault();
+			showSearch = true;
+		}
+	}
 
 	onMount(() => {
 		void refreshAll().then(() => {
@@ -93,6 +101,11 @@
 				<span class="gear">⚙</span>
 			</a>
 
+			<button class="search-entry" onclick={() => (showSearch = true)}>
+				<span class="search-icon">⌕</span> Search
+				<span class="kbd">⌘K</span>
+			</button>
+
 			{#if pinned.length > 0}
 				<div class="section">
 					<div class="section-name">Pinned</div>
@@ -136,6 +149,14 @@
 	{/await}
 {/if}
 
+{#if showSearch}
+	{#await import("$lib/components/SearchModal.svelte") then { default: SearchModal }}
+		<SearchModal onclose={() => (showSearch = false)} />
+	{/await}
+{/if}
+
+<svelte:window onkeydown={onGlobalKeydown} />
+
 <style>
 	:global(:root) {
 		--bg: #101216;
@@ -145,6 +166,33 @@
 		--fg: #e8eaed;
 		--muted: #8b909b;
 		--accent: #ffa02f;
+	}
+	.search-entry {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		color: var(--muted);
+		border-radius: 8px;
+		padding: 6px 10px;
+		font-size: 13px;
+		cursor: pointer;
+		text-align: left;
+	}
+	.search-entry:hover {
+		border-color: var(--accent);
+		color: var(--fg);
+	}
+	.search-icon {
+		font-size: 14px;
+	}
+	.kbd {
+		margin-left: auto;
+		font-size: 10px;
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		padding: 1px 5px;
 	}
 	:global(body) {
 		margin: 0;

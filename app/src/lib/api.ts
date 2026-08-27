@@ -18,6 +18,8 @@ export const fetchRelations = () => getJSON<RelationDefJSON[]>("/api/relations")
 export interface QueryResultRow {
 	id: string;
 	typeKey: string;
+	name?: string;
+	snippet?: string;
 	fields: Record<string, ValueJSON>;
 }
 

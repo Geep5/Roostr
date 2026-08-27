@@ -372,7 +372,32 @@ text_matches :: proc(s: ^Object_State, needle: string) -> bool {
 			if x.kind == .String && strings.contains(strings.to_lower(x.str, context.temp_allocator), n) do return true
 		}
 	}
+	// Fulltext over block content (Anytype's ObjectSearchWithMeta scope).
+	for b in s.blocks {
+		if b.content.kind != .Text do continue
+		if strings.contains(strings.to_lower(b.content.text.text, context.temp_allocator), n) do return true
+	}
 	return false
+}
+
+/** First block whose text matches, trimmed around the hit — the result
+ * row's snippet line (Anytype's search meta). */
+text_snippet :: proc(s: ^Object_State, needle: string) -> string {
+	n := strings.to_lower(needle, context.temp_allocator)
+	for b in s.blocks {
+		if b.content.kind != .Text do continue
+		text := b.content.text.text
+		lower := strings.to_lower(text, context.temp_allocator)
+		idx := strings.index(lower, n)
+		if idx < 0 do continue
+		start := max(idx - 40, 0)
+		end := min(idx + len(n) + 60, len(text))
+		out := text[start:end]
+		if start > 0 do out = strings.concatenate({"…", out}, context.temp_allocator)
+		if end < len(text) do out = strings.concatenate({out, "…"}, context.temp_allocator)
+		return out
+	}
+	return ""
 }
 
 // ── Entry point ──────────────────────────────────────────────────────

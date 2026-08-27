@@ -389,6 +389,7 @@ handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
 		}
 
 		matched := run_query(states, c.body, extra)
+		text := json_str(c.body, "textQuery")
 		records := make([dynamic]json.Value, context.temp_allocator)
 		for s in matched {
 			o := jobj()
@@ -398,6 +399,10 @@ handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
 			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
 			o["name"] = json.String(name)
 			o["fields"] = fields_to_json(s.fields)
+			if text != "" {
+				snippet := text_snippet(s, text)
+				if snippet != "" do o["snippet"] = json.String(snippet)
+			}
 			append(&records, json.Object(o))
 		}
 		out := jobj()
