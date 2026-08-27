@@ -74,3 +74,18 @@ export const channel = {
 	},
 	keyRotate: (channelId: string) => mutate("channel_key_rotate", { channel_id: channelId }),
 };
+
+export interface NostrSettings {
+	hasKey: boolean;
+	relays: string[];
+}
+
+export const settings = {
+	fetch: async (): Promise<NostrSettings> => {
+		const res = await fetch(`${API}/api/settings`);
+		if (!res.ok) throw new Error(`settings: ${res.status}`);
+		return res.json();
+	},
+	exportKey: () => mutate("nostr_key_export", {}) as Promise<{ nsec: string; hex: string }>,
+	setRelays: (relays: string[]) => mutate("nostr_relays_set", { relays }) as Promise<{ relays: string[] }>,
+};

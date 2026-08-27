@@ -47,6 +47,8 @@
 
 	const icon = (typeKey: string) => ({ query: "▤", set: "▤", collection: "⛁", note: "▨", task: "☐", person: "◉" })[typeKey] ?? "•";
 
+	let showSettings = $state(false);
+
 	onMount(() => {
 		void refreshAll().then(() => {
 			// Restore selection; bootstrap a Personal channel on first run.
@@ -79,6 +81,8 @@
 			</button>
 		{/each}
 		<button class="space add" title="New channel" onclick={() => void newChannel()}>+</button>
+		<div class="rail-spacer"></div>
+		<button class="space settings" title="Settings" onclick={() => (showSettings = true)}>⚙</button>
 	</nav>
 
 	<aside class="widgets">
@@ -123,6 +127,12 @@
 		<main>{@render children()}</main>
 	</div>
 </div>
+
+{#if showSettings}
+	{#await import("$lib/components/Settings.svelte") then { default: Settings }}
+		<Settings onclose={() => (showSettings = false)} />
+	{/await}
+{/if}
 
 <style>
 	:global(:root) {
@@ -180,6 +190,19 @@
 		color: var(--muted);
 		background: none;
 		border-style: dashed;
+	}
+	.rail-spacer {
+		flex: 1;
+	}
+	.space.settings {
+		color: var(--muted);
+		background: none;
+		border-color: transparent;
+		font-size: 17px;
+	}
+	.space.settings:hover {
+		color: var(--fg);
+		border-color: var(--accent);
 	}
 	.widgets {
 		border-right: 1px solid var(--border);

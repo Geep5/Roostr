@@ -10,6 +10,7 @@ import "core:os"
 import "core:fmt"
 import "core:strconv"
 import "core:path/filepath"
+import "core:encoding/hex"
 
 main :: proc() {
 	data_root := os.get_env_alloc("GLON_DATA", context.allocator)
@@ -31,6 +32,12 @@ main :: proc() {
 			os.exit(1)
 		}
 		cli_dump(args[2])
+	case "bech32-test":
+		// NIP-19 test vector.
+		raw, _ := hex.decode(transmute([]byte)string("67dea2ed018072d675f5415ecfaed7d2597555e202d85b3d65ea4e58d2d92ffa"), context.temp_allocator)
+		got := bech32_encode("nsec", raw)
+		want := "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5"
+		fmt.println(got == want ? "PASS" : "FAIL", got)
 	case "serve":
 		port := 7333
 		if len(args) > 2 {

@@ -346,6 +346,12 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		extra["payload"] = json.Object(payload)
 		ok_response(sock, extra)
 
+	case "nostr_key_export":
+		mutate_key_export(sock)
+
+	case "nostr_relays_set":
+		mutate_relays_set(sock, parsed)
+
 	case:
 		respond_error(sock, fmt.tprintf("unknown action %q", action))
 	}
