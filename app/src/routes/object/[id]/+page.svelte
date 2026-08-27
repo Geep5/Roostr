@@ -137,25 +137,6 @@
 	const isChannel = $derived(object?.typeKey === "channel");
 	const channelInfo = $derived(store.channels.find((c) => c.id === object?.id));
 
-	/** The channel this object belongs to (unassigned → first channel). */
-	const owningChannel = $derived.by(() => {
-		if (!object || isChannel) return undefined;
-		const cid = object.fields["channel"]?.stringValue || store.channels[0]?.id;
-		return store.channels.find((c) => c.id === cid);
-	});
-	const isPinned = $derived(object ? (owningChannel?.pinnedIds.includes(object.id) ?? false) : false);
-
-	async function togglePin() {
-		if (!object || !owningChannel) return;
-		const objectId = object.id;
-		const next = isPinned
-			? owningChannel.pinnedIds.filter((id) => id !== objectId)
-			: [...owningChannel.pinnedIds, objectId];
-		await note.setField(owningChannel.id, "pinnedIds", {
-			valuesValue: { items: next.map((id) => ({ stringValue: id })) },
-		});
-		await refreshAll();
-	}
 
 	onMount(() =>
 		onObjectEvent((objectId) => {
@@ -201,14 +182,6 @@
 					if (e.key === "Enter") e.currentTarget.blur();
 				}}
 			/>
-			{#if !isChannel}
-				<a class="pin graph-link" title="Show in graph" href="/graph?focus={object.id}">◉</a>
-			{/if}
-			{#if owningChannel}
-				<button class="pin" class:on={isPinned} title={isPinned ? "Unpin from sidebar" : "Pin to sidebar"} onclick={() => void togglePin()}>
-					{isPinned ? "★" : "☆"}
-				</button>
-			{/if}
 		</div>
 
 		{#if isChannel}
@@ -282,23 +255,6 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
-	}
-	.graph-link {
-		font-size: 16px;
-		display: flex;
-		align-items: center;
-	}
-	.pin {
-		border: none;
-		background: none;
-		color: var(--muted);
-		font-size: 22px;
-		cursor: pointer;
-		padding: 4px;
-	}
-	.pin:hover,
-	.pin.on {
-		color: var(--accent);
 	}
 	.title {
 		width: 100%;
