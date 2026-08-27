@@ -331,21 +331,15 @@ export async function startNostrSync(): Promise<void> {
 	// Pull everything newer than our cursor (first run: everything).
 	const backfill = await pool.querySync(id.relays, { kinds: [CHANGE_KIND], authors: [id.pk], since: state.cursor || undefined });
 	console.log(`[sync] backfill: ${backfill.length} event(s) from relays`);
-	const b64s: string[] = [];
+	// Route every event through the chunk-aware path (sorted so multi-part
+	// groups assemble in one pass); onRelayEvent advances the cursor.
+	backfill.sort((a, b) => a.created_at - b.created_at);
+	let assembled = 0;
 	for (const event of backfill) {
-		try {
-			b64s.push(nip44.decrypt(event.content, id.conversationKey));
-			if (event.created_at > state.cursor) state.cursor = event.created_at;
-		} catch {
-			/* skip */
-		}
+		await onRelayEvent(event);
+		assembled++;
 	}
-	if (b64s.length > 0) {
-		const res = await localImport(b64s);
-		// Relay-held changes are published by definition — never echo them.
-		for (const hex of res.ids) state.published[hex] = true;
-		console.log(`[sync] imported ${res.imported}, rejected ${res.rejected}`);
-	}
+	if (assembled > 0) console.log(`[sync] backfill processed ${assembled} event(s)`);
 	dirty = true;
 
 	const keyringEvents = await pool.querySync(id.relays, { kinds: [KEYRING_KIND], authors: [id.pk], "#d": [KEYRING_D] });
