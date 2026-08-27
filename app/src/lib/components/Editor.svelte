@@ -142,17 +142,56 @@
 		}
 
 		if (e.key === "Enter" && !e.shiftKey) {
+			// Anytype: Enter inside a code block inserts a newline, never splits
+			// (Shift+Enter splits nothing anywhere - both fall through to the
+			// browser's native newline insertion).
+			if (byId.get(id)?.content.text?.style === Style.CODE) return;
 			e.preventDefault();
 			const sel = selectionOffsets(el);
 			const { text, marks } = fromDom(el);
 			const at = sel?.from ?? text.length;
+			const curStyle = byId.get(id)?.content.text?.style ?? Style.PARAGRAPH;
+			const isList = curStyle === Style.BULLET || curStyle === Style.NUMBERED || curStyle === Style.CHECKBOX;
+			const isQuoteish = curStyle === Style.QUOTE || curStyle === Style.CALLOUT;
+
+			// Anytype editor/page.tsx onEnterBlock: Enter on an EMPTY list/quote/
+			// callout block exits the list — the block turns into a paragraph.
+			if (text.length === 0 && (isList || isQuoteish)) {
+				const curText = byId.get(id)!.content.text!;
+				cancelPending(id);
+				lastLocalEdit = Date.now();
+				await note.blockUpdate(object.id, id, { text: { ...curText, text: "", marks: [], style: Style.PARAGRAPH, checked: false } });
+				focusRequest = { blockId: id, offset: 0 };
+				await refresh();
+				return;
+			}
+
+			// Anytype blockSplit style rules: lists continue their style in the
+			// new block; quote/callout continue only when splitting mid-text;
+			// headers and everything else yield a paragraph.
+			let newStyle: number = Style.PARAGRAPH;
+			if (isList) newStyle = curStyle;
+			else if (isQuoteish && at < text.length) newStyle = curStyle;
+
 			const newId = crypto.randomUUID();
 			cancelPending(id);
 			lastLocalEdit = Date.now();
+
+			// Cursor at start of a non-empty block: Anytype splits mode=Top — an
+			// empty block appears above, the current block keeps its text/style
+			// (checkboxes spawn a fresh unchecked checkbox, others a paragraph).
+			if (at === 0 && text.length > 0) {
+				const aboveStyle = curStyle === Style.CHECKBOX ? Style.CHECKBOX : Style.PARAGRAPH;
+				await note.blockAdd(object.id, { id: newId, childrenIds: [], content: { text: { text: "", style: aboveStyle } } }, id, Pos.TOP);
+				focusRequest = { blockId: id, offset: 0 };
+				await refresh();
+				return;
+			}
+
 			await note.blockUpdate(object.id, id, contentFor(id, text.slice(0, at), marks.filter((m) => m.from < at).map((m) => ({ ...m, to: Math.min(m.to, at) }))));
 			await note.blockAdd(
 				object.id,
-				{ id: newId, childrenIds: [], content: { text: { text: text.slice(at), style: Style.PARAGRAPH, marks: marks.filter((m) => m.to > at).map((m) => ({ ...m, from: Math.max(0, m.from - at), to: m.to - at })) } } },
+				{ id: newId, childrenIds: [], content: { text: { text: text.slice(at), style: newStyle, marks: marks.filter((m) => m.to > at).map((m) => ({ ...m, from: Math.max(0, m.from - at), to: m.to - at })) } } },
 				id,
 				Pos.BOTTOM,
 			);
