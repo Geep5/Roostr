@@ -27,7 +27,7 @@
 			if (c) return { icon: c.icon || "◍", name: c.name };
 			return { icon: "▨", name: "…" };
 		}
-		if (path === "/graph") return { icon: "◉", name: `Graph — ${current?.name ?? ""}` };
+		if (path === "/graph") return { icon: "⌬", name: `Graph — ${current?.name ?? ""}` };
 		return { icon: "◍", name: current?.name ?? "glon" };
 	});
 
@@ -218,7 +218,7 @@
 				{/if}
 			</div>
 
-			<a class="all" class:current-view={page.url.pathname === "/graph"} href="/graph">◉ Graph</a>
+			<a class="all" class:current-view={page.url.pathname === "/graph"} href="/graph">⌬ Graph</a>
 			<a class="all" href="/">All objects →</a>
 		{/if}
 	</aside>
@@ -238,7 +238,7 @@
 				<span class="path-name">{headerPath.name}</span>
 			</button>
 			<div class="header-side right">
-				<a class="hbtn" title="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}>◉</a>
+				<a class="hbtn" title="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}>⌬</a>
 				{#if objectSummary}
 					<div class="more-wrap">
 						<button class="hbtn" title="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
