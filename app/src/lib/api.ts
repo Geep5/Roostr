@@ -95,6 +95,7 @@ export const channel = {
 export interface NostrSettings {
 	hasKey: boolean;
 	relays: string[];
+	authorId: string;
 }
 
 export const settings = {
@@ -105,4 +106,11 @@ export const settings = {
 	},
 	exportKey: () => mutate("nostr_key_export", {}) as Promise<{ nsec: string; hex: string }>,
 	setRelays: (relays: string[]) => mutate("nostr_relays_set", { relays }) as Promise<{ relays: string[] }>,
+};
+
+export const chat = {
+	post: (objectId: string, text: string, replyTo = "") =>
+		mutate("chat_post", { object_id: objectId, text, reply_to: replyTo }) as Promise<{ id: string }>,
+	react: (objectId: string, messageId: string, emoji: string) =>
+		mutate("chat_react", { object_id: objectId, message_id: messageId, emoji }),
 };

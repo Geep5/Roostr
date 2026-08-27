@@ -12,6 +12,7 @@ import "core:sync"
 import "core:crypto"
 import "core:encoding/json"
 import "core:encoding/hex"
+import "core:crypto/sha2"
 import "core:path/filepath"
 import "core:net"
 import "core:strings"
@@ -135,7 +136,22 @@ handle_settings :: proc(sock: net.TCP_Socket) {
 	relays := make([dynamic]json.Value, context.temp_allocator)
 	for r in s.relays do append(&relays, json.String(r))
 	o["relays"] = json.Array(relays)
+	o["authorId"] = json.String(author_id())
 	respond_json(sock, json.Object(o))
+}
+
+/**
+ * Stable non-reversible author id for chat messages: first 16 hex chars of
+ * sha256(privkey). Every device sharing the key posts as the same author.
+ */
+author_id :: proc(allocator := context.temp_allocator) -> string {
+	s := nostr_ensure()
+	ctx: sha2.Context_256
+	sha2.init_256(&ctx)
+	sha2.update(&ctx, transmute([]byte)s.privkey_hex)
+	digest: [32]byte
+	sha2.final(&ctx, digest[:])
+	return strings.clone(string(hex.encode(digest[:8], context.temp_allocator)), allocator)
 }
 
 /** mutate action: nostr_key_export → {nsec, hex}. */

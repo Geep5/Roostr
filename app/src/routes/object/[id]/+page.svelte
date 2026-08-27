@@ -7,6 +7,7 @@
 	import { store, refreshAll, onObjectEvent } from "$lib/data.svelte";
 	import Editor from "$lib/components/Editor.svelte";
 	import FeaturedProps from "$lib/components/FeaturedProps.svelte";
+	import Discussion from "$lib/components/Discussion.svelte";
 	import SetTable from "$lib/components/SetTable.svelte";
 	import QueryControls from "$lib/components/QueryControls.svelte";
 	import ChannelManage from "$lib/components/ChannelManage.svelte";
@@ -223,6 +224,10 @@
 			{/if}
 		{:else}
 			<Editor bind:this={editor} {object} onchanged={refresh} />
+		{/if}
+
+		{#if !isChannel}
+			<Discussion {object} onchanged={refresh} />
 		{/if}
 
 	</article>

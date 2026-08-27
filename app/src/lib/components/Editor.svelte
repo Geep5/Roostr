@@ -15,7 +15,7 @@
 	const rootIds = $derived.by(() => {
 		const referenced = new Set<string>();
 		for (const b of object.blocks) for (const c of b.childrenIds) referenced.add(c);
-		return object.blocks.filter((b) => !referenced.has(b.id) && b.id !== "__content__").map((b) => b.id);
+		return object.blocks.filter((b) => !referenced.has(b.id) && b.id !== "__content__" && b.id !== "__discussion__").map((b) => b.id);
 	});
 
 	/** Text blocks in document order, for prev/next navigation and merge. */

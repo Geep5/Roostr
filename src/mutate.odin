@@ -308,6 +308,133 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		}
 		ok_response(sock)
 
+	// -- Discussion (Anytype object chat: reply + emoji reactions) --
+	//
+	// Messages are blocks under a "__discussion__" root: custom content
+	// {contentType:"chat", meta:{author, ts, text, replyTo, reactions}}.
+	// reactions is a JSON object emoji -> [author ids]. Block adds merge
+	// cleanly across devices; a reaction toggle is a whole-message LWW.
+
+	case "chat_post":
+		object_id := json_str(parsed, "object_id")
+		text := json_str(parsed, "text")
+		if object_id == "" || text == "" {
+			respond_error(sock, "object_id and text required")
+			return
+		}
+		ops := make([dynamic]Operation, context.temp_allocator)
+		// Idempotent: replay skips the add when the id already exists.
+		root_meta := make([dynamic]Str_Pair, context.temp_allocator)
+		append(&ops, Operation {
+			kind      = .Block_Add,
+			block     = Block{id = "__discussion__", content = {kind = .Custom, custom = {content_type = "discussion", meta = root_meta}}},
+			target_id = "",
+			position  = 0,
+		})
+		meta := make([dynamic]Str_Pair, context.temp_allocator)
+		append(&meta, Str_Pair{key = "author", value = author_id()})
+		append(&meta, Str_Pair{key = "ts", value = fmt.tprintf("%d", unix_ms())})
+		append(&meta, Str_Pair{key = "text", value = text})
+		if reply := json_str(parsed, "reply_to"); reply != "" {
+			append(&meta, Str_Pair{key = "replyTo", value = reply})
+		}
+		mid := new_uuid(context.temp_allocator)
+		append(&ops, Operation {
+			kind      = .Block_Add,
+			block     = Block{id = mid, content = {kind = .Custom, custom = {content_type = "chat", meta = meta}}},
+			target_id = "__discussion__",
+			position  = POS_INNER,
+		})
+		if !commit_ops(object_id, ops[:]) {
+			respond_error(sock, "write failed", "500 Internal Server Error")
+			return
+		}
+		extra := jobj()
+		extra["id"] = json.String(mid)
+		ok_response(sock, extra)
+
+	case "chat_react":
+		object_id := json_str(parsed, "object_id")
+		message_id := json_str(parsed, "message_id")
+		emoji := json_str(parsed, "emoji")
+		if object_id == "" || message_id == "" || emoji == "" {
+			respond_error(sock, "object_id, message_id, emoji required")
+			return
+		}
+		meta := block_custom_meta(object_id, message_id)
+		if !meta.found {
+			respond_error(sock, "message not found")
+			return
+		}
+		me := author_id()
+		// Reactions live in ONE meta pair: "reactions" -> "emoji|a1,a2;emoji|a1".
+		// Odin's json marshal writes emoji object KEYS as \U escapes its own
+		// parser (and every other consumer) rejects - so emoji stay in the
+		// VALUE, which marshals as plain UTF-8.
+		Entry :: struct {
+			emoji:   string,
+			authors: [dynamic]string,
+		}
+		entries := make([dynamic]Entry, context.temp_allocator)
+		new_meta := make([dynamic]Str_Pair, context.temp_allocator)
+		for p in meta.pairs {
+			if p.key != "reactions" {
+				append(&new_meta, p)
+				continue
+			}
+			for chunk in strings.split(p.value, ";", context.temp_allocator) {
+				bar := strings.index(chunk, "|")
+				if bar <= 0 do continue
+				e := Entry{emoji = chunk[:bar]}
+				e.authors = make([dynamic]string, context.temp_allocator)
+				for a in strings.split(chunk[bar + 1:], ",", context.temp_allocator) {
+					if a != "" do append(&e.authors, a)
+				}
+				append(&entries, e)
+			}
+		}
+		// Toggle me on the target emoji.
+		found_entry := false
+		for &e in entries {
+			if e.emoji != emoji do continue
+			found_entry = true
+			had := false
+			kept := make([dynamic]string, context.temp_allocator)
+			for a in e.authors {
+				if a == me {
+					had = true
+					continue
+				}
+				append(&kept, a)
+			}
+			if !had do append(&kept, me)
+			e.authors = kept
+		}
+		if !found_entry {
+			e := Entry{emoji = emoji}
+			e.authors = make([dynamic]string, context.temp_allocator)
+			append(&e.authors, me)
+			append(&entries, e)
+		}
+		chunks := make([dynamic]string, context.temp_allocator)
+		for e in entries {
+			if len(e.authors) == 0 do continue
+			append(&chunks, fmt.tprintf("%s|%s", e.emoji, strings.join(e.authors[:], ",", context.temp_allocator)))
+		}
+		if len(chunks) > 0 {
+			append(&new_meta, Str_Pair{key = "reactions", value = strings.join(chunks[:], ";", context.temp_allocator)})
+		}
+		op := Operation {
+			kind     = .Block_Update,
+			block_id = message_id,
+			content  = Block_Content{kind = .Custom, custom = {content_type = "chat", meta = new_meta}},
+		}
+		if !commit_ops(object_id, {op}) {
+			respond_error(sock, "write failed", "500 Internal Server Error")
+			return
+		}
+		ok_response(sock)
+
 	case "block_set_attrs":
 		object_id := json_str(parsed, "object_id")
 		block_id := json_str(parsed, "block_id")
@@ -729,4 +856,38 @@ append_cell_ops :: proc(ops: ^[dynamic]Operation, row_id: string, col_ids: []str
 			position  = POS_INNER,
 		})
 	}
+}
+
+Block_Meta :: struct {
+	object_id: string,
+	block_id:  string,
+	pairs:     [dynamic]Str_Pair,
+	found:     bool,
+}
+
+/** Read a custom block's meta pairs from computed state (temp-cloned). */
+block_custom_meta :: proc(object_id, block_id: string) -> Block_Meta {
+	m := Block_Meta {
+		object_id = object_id,
+		block_id  = block_id,
+	}
+	m.pairs = make([dynamic]Str_Pair, context.temp_allocator)
+	if object_id == "" || block_id == "" do return m
+	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+		m := (^Block_Meta)(user)
+		st, ok := states[m.object_id]
+		if !ok do return
+		for &b in st.blocks {
+			if b.id != m.block_id || b.content.kind != .Custom do continue
+			for p in b.content.custom.meta {
+				append(&m.pairs, Str_Pair {
+					key   = strings.clone(p.key, context.temp_allocator),
+					value = strings.clone(p.value, context.temp_allocator),
+				})
+			}
+			m.found = true
+			return
+		}
+	}, &m)
+	return m
 }
