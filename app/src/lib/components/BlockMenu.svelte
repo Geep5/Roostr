@@ -39,17 +39,18 @@
 		};
 	});
 
-	const STYLES: Array<{ label: string; value: number }> = [
-		{ label: "Text", value: Style.PARAGRAPH },
-		{ label: "Heading 1", value: Style.HEADER1 },
-		{ label: "Heading 2", value: Style.HEADER2 },
-		{ label: "Heading 3", value: Style.HEADER3 },
-		{ label: "Bulleted list", value: Style.BULLET },
-		{ label: "Numbered list", value: Style.NUMBERED },
-		{ label: "Checkbox", value: Style.CHECKBOX },
-		{ label: "Quote", value: Style.QUOTE },
-		{ label: "Code", value: Style.CODE },
-		{ label: "Callout", value: Style.CALLOUT },
+	/** Turn-into entries with a rendered preview + description, Anytype-style. */
+	const STYLES: Array<{ label: string; value: number; desc: string; preview: string; cls: string }> = [
+		{ label: "Text", value: Style.PARAGRAPH, desc: "Plain paragraph", preview: "Ag", cls: "pv-p" },
+		{ label: "Heading 1", value: Style.HEADER1, desc: "Big section heading", preview: "Ag", cls: "pv-h1" },
+		{ label: "Heading 2", value: Style.HEADER2, desc: "Medium section heading", preview: "Ag", cls: "pv-h2" },
+		{ label: "Heading 3", value: Style.HEADER3, desc: "Small section heading", preview: "Ag", cls: "pv-h3" },
+		{ label: "Bulleted list", value: Style.BULLET, desc: "Simple list of items", preview: "•—", cls: "pv-list" },
+		{ label: "Numbered list", value: Style.NUMBERED, desc: "Ordered list of items", preview: "1—", cls: "pv-list" },
+		{ label: "Checkbox", value: Style.CHECKBOX, desc: "Task with a to-do state", preview: "☑", cls: "pv-check" },
+		{ label: "Quote", value: Style.QUOTE, desc: "Highlight a passage", preview: "Ag", cls: "pv-quote" },
+		{ label: "Code", value: Style.CODE, desc: "Monospaced snippet", preview: "</>", cls: "pv-code" },
+		{ label: "Callout", value: Style.CALLOUT, desc: "Bordered emphasis box", preview: "Ag", cls: "pv-callout" },
 	];
 
 	const ALIGNS: Array<{ label: string; value: number }> = [
@@ -78,13 +79,26 @@
 		action: MenuAction;
 		active?: boolean;
 		swatch?: string;
+		desc?: string;
+		preview?: string;
+		previewClass?: string;
 	}
 
 	const items = $derived.by((): Item[] => {
 		const t = block.content.text;
 		const out: Item[] = [];
 		if (t) {
-			for (const s of STYLES) out.push({ section: "Turn into", label: s.label, action: { kind: "style", value: s.value }, active: t.style === s.value });
+			for (const s of STYLES) {
+				out.push({
+					section: "Turn into",
+					label: s.label,
+					action: { kind: "style", value: s.value },
+					active: t.style === s.value,
+					desc: s.desc,
+					preview: s.preview,
+					previewClass: s.cls,
+				});
+			}
 		}
 		for (const a of ALIGNS) out.push({ section: "Align", label: a.label, action: { kind: "align", value: a.value }, active: (block.align ?? 0) === a.value });
 		if (t) {
@@ -140,7 +154,15 @@
 						{#if item.swatch !== undefined}
 							<span class="swatch" style="background:{item.swatch}"></span>
 						{/if}
-						{item.label}
+						{#if item.preview}
+							<span class="preview {item.previewClass}">{item.preview}</span>
+							<span class="texts">
+								<span class="label-line">{item.label}</span>
+								<span class="desc">{item.desc}</span>
+							</span>
+						{:else}
+							{item.label}
+						{/if}
 						{#if item.active}<span class="check">✓</span>{/if}
 					</button>
 				{/each}
@@ -223,5 +245,40 @@
 		color: var(--muted);
 		font-size: 13px;
 		padding: 12px;
+	}
+	.preview {
+		width: 34px;
+		height: 30px;
+		flex: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--bg);
+		color: var(--fg);
+		overflow: hidden;
+	}
+	.pv-p { font-size: 12px; color: var(--muted); }
+	.pv-h1 { font-size: 16px; font-weight: 750; }
+	.pv-h2 { font-size: 14px; font-weight: 650; }
+	.pv-h3 { font-size: 12px; font-weight: 600; }
+	.pv-list { font-size: 11px; letter-spacing: 1px; color: var(--muted); }
+	.pv-check { font-size: 14px; color: var(--accent); }
+	.pv-quote { font-size: 12px; font-style: italic; border-left: 3px solid var(--accent); }
+	.pv-code { font-family: ui-monospace, monospace; font-size: 10px; color: var(--muted); }
+	.pv-callout { font-size: 12px; background: var(--hover); }
+	.texts {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		min-width: 0;
+	}
+	.label-line {
+		font-size: 13px;
+	}
+	.desc {
+		font-size: 11px;
+		color: var(--muted);
 	}
 </style>
