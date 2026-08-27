@@ -82,7 +82,6 @@
 			</button>
 		{/each}
 		<button class="space add" title="New channel" onclick={() => void newChannel()}>+</button>
-		<button class="space add" title="Graph" onclick={() => void goto("/graph")}>◉</button>
 		<div class="rail-spacer"></div>
 		<button class="space settings" title="Settings" onclick={() => (showSettings = true)}>⚙</button>
 	</nav>
@@ -117,6 +116,7 @@
 				{/if}
 			</div>
 
+			<a class="all" class:current-view={page.url.pathname === "/graph"} href="/graph">◉ Graph</a>
 			<a class="all" href="/">All objects →</a>
 		{/if}
 	</aside>
@@ -284,6 +284,9 @@
 		border-bottom: 1px solid var(--border);
 		max-width: 920px;
 		margin: 0 auto;
+	}
+	.all.current-view {
+		color: var(--accent);
 	}
 	.brand {
 		font-weight: 750;

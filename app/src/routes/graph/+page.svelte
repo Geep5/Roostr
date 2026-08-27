@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from "$app/navigation";
+	import { page } from "$app/state";
 	import { buildGraph, simStep, type ObjectGraph } from "$lib/graph";
 	import { activeChannel } from "$lib/channel.svelte";
 	import { store, refreshAll } from "$lib/data.svelte";
@@ -17,6 +18,9 @@
 	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
 	const channelId = $derived(activeChannel.id || defaultChannelId);
 	const channelName = $derived(store.channels.find((c) => c.id === channelId)?.name ?? "");
+	// ?focus=<objectId>: highlight + center that object (Anytype's
+	// "show in graph" from an open object).
+	const focusId = $derived(page.url.searchParams.get("focus") ?? "");
 
 	$effect(() => {
 		const id = channelId;
@@ -70,6 +74,7 @@
 			let offsetY = 0;
 			let alpha = 1;
 			let hovered = -1;
+			const focused = focusId ? graph.nodes.findIndex((node) => node.id === focusId) : -1;
 			let dragNode = -1;
 			let panning = false;
 			let moved = 0;
@@ -109,6 +114,13 @@
 
 			const fit = () => {
 				const { w, h } = cssSize();
+				if (focused >= 0) {
+					// Center the focused object; comfortable fixed zoom.
+					scale = 1.2;
+					offsetX = graph.nodes[focused].x;
+					offsetY = graph.nodes[focused].y;
+					return;
+				}
 				let r = 1;
 				for (const node of graph.nodes) r = Math.max(r, Math.hypot(node.x, node.y) + node.radius + 40);
 				scale = Math.min(1.6, Math.min(w, h) / (2 * r));
@@ -185,7 +197,7 @@
 				for (const [i, node] of graph.nodes.entries()) {
 					centers[i * 2] = node.x;
 					centers[i * 2 + 1] = node.y;
-					flags[i] = i === hovered ? 1 : 0;
+					flags[i] = i === hovered || i === focused ? 1 : 0;
 				}
 				for (const [i, e] of graph.edges.entries()) {
 					starts[i * 2] = graph.nodes[e.a].x;
@@ -216,7 +228,7 @@
 
 				// Labels: biggest nodes first, culled to the pool (Anytype: ≤100).
 				const order = graph.nodes
-					.map((node, i) => ({ i, r: node.radius + (i === hovered ? 100 : 0) }))
+					.map((node, i) => ({ i, r: node.radius + (i === hovered ? 100 : 0) + (i === focused ? 200 : 0) }))
 					.sort((a, b) => b.r - a.r);
 				for (const [li, div] of labels.entries()) {
 					const entry = order[li];
