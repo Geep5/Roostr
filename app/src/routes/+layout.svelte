@@ -16,6 +16,21 @@
 
 	const current = $derived(channels.find((c) => c.id === activeChannel.id) ?? channels[0]);
 
+	/** Header center (Anytype's .path): icon + name of what you're looking at; click opens search. */
+	const headerPath = $derived.by(() => {
+		const path = page.url.pathname;
+		if (path.startsWith("/object/")) {
+			const id = path.slice("/object/".length);
+			const s = store.summaries.find((x) => x.id === id);
+			if (s) return { icon: objectIcon(s.icon, s.typeKey), name: s.name || "Untitled" };
+			const c = channels.find((x) => x.id === id);
+			if (c) return { icon: c.icon || "◍", name: c.name };
+			return { icon: "▨", name: "…" };
+		}
+		if (path === "/graph") return { icon: "◉", name: `Graph — ${current?.name ?? ""}` };
+		return { icon: "◍", name: current?.name ?? "glon" };
+	});
+
 	/** Pinned objects of the current channel, in pinned order. */
 	const pinned = $derived.by(() => {
 		if (!current) return [];
@@ -137,8 +152,10 @@
 
 	<div class="main-col">
 		<header>
-			<a class="brand" href="/">glon</a>
-			<span class="sub">{current?.name ?? "notes"}</span>
+			<button class="path" title="Search (⌘K)" onclick={() => (showSearch = true)}>
+				<span class="path-icon">{headerPath.icon}</span>
+				<span class="path-name">{headerPath.name}</span>
+			</button>
 		</header>
 		<main>{@render children()}</main>
 	</div>
@@ -327,8 +344,8 @@
 	}
 	header {
 		display: flex;
-		align-items: baseline;
-		gap: 8px;
+		align-items: center;
+		justify-content: center;
 		padding: 18px 0 8px;
 		border-bottom: 1px solid var(--border);
 		max-width: 920px;
@@ -337,14 +354,30 @@
 	.all.current-view {
 		color: var(--accent);
 	}
-	.brand {
-		font-weight: 750;
-		font-size: 17px;
-		color: var(--accent);
+	.path {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		border: none;
+		background: none;
+		color: var(--fg);
+		font-size: 14px;
+		font-weight: 600;
+		padding: 4px 10px;
+		border-radius: 8px;
+		cursor: pointer;
+		max-width: 60%;
 	}
-	.sub {
-		color: var(--muted);
-		font-size: 13px;
+	.path:hover {
+		background: var(--hover);
+	}
+	.path-icon {
+		font-size: 15px;
+	}
+	.path-name {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	main {
 		padding: 24px 0 80px;
