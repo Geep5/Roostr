@@ -42,12 +42,35 @@
 
 	/** Anytype default grid columns for a fresh view. */
 	const DEFAULT_COLUMNS = ["type", "updatedAt"];
+	const DEFAULT_WIDTH = 150;
+	const MIN_WIDTH = 60;
 
-	const columns = $derived.by(() => {
+	interface Col {
+		key: string;
+		width: number;
+	}
+
+	/** Anytype viewRelation = {relationKey, width, isVisible}; ours is a
+	 * {key, width} map per item. Plain-string items (pre-width format)
+	 * still parse. */
+	const stored = $derived.by((): Col[] => {
 		const items = object.fields["viewRelations"]?.valuesValue?.items ?? [];
-		const keys = items.map((i) => i.stringValue).filter((s): s is string => typeof s === "string");
-		return keys.length > 0 ? keys : DEFAULT_COLUMNS;
+		const out: Col[] = [];
+		for (const i of items) {
+			if (typeof i.stringValue === "string") {
+				out.push({ key: i.stringValue, width: DEFAULT_WIDTH });
+			} else if (i.mapValue) {
+				const k = i.mapValue.entries["key"]?.stringValue;
+				if (k) out.push({ key: k, width: i.mapValue.entries["width"]?.intValue ?? DEFAULT_WIDTH });
+			}
+		}
+		return out.length > 0 ? out : DEFAULT_COLUMNS.map((k) => ({ key: k, width: DEFAULT_WIDTH }));
 	});
+
+	/** Uncommitted state during a resize/reorder gesture. */
+	let local = $state<Col[] | null>(null);
+	const cols = $derived(local ?? stored);
+	const columns = $derived(cols.map((c) => c.key));
 
 	const addable = $derived.by(() => {
 		const have = new Set(columns);
@@ -59,12 +82,54 @@
 
 	let adding = $state(false);
 
-	async function saveColumns(keys: string[]) {
+	async function saveColumns(next: Col[]) {
 		adding = false;
+		local = next;
 		await note.setField(object.id, "viewRelations", {
-			valuesValue: { items: keys.map((k) => ({ stringValue: k })) },
+			valuesValue: {
+				items: next.map((c) => ({
+					mapValue: { entries: { key: { stringValue: c.key }, width: { intValue: c.width } } },
+				})),
+			},
 		});
 		await onchanged();
+		local = null;
+	}
+
+	// ── Column resize (drag the header's right edge) ──────────────
+	function startResize(e: PointerEvent, idx: number) {
+		e.preventDefault();
+		e.stopPropagation();
+		const startX = e.clientX;
+		const startW = cols[idx].width;
+		const snapshot = cols.map((c) => ({ ...c }));
+		const move = (ev: PointerEvent) => {
+			snapshot[idx] = { ...snapshot[idx], width: Math.max(MIN_WIDTH, startW + (ev.clientX - startX)) };
+			local = [...snapshot];
+		};
+		const up = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", up);
+			void saveColumns(snapshot);
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", up);
+	}
+
+	// ── Column reorder (drag a header onto another) ───────────────
+	let dragIdx = $state(-1);
+	let overIdx = $state(-1);
+
+	function dropColumn() {
+		if (dragIdx < 0 || overIdx < 0 || dragIdx === overIdx) {
+			dragIdx = overIdx = -1;
+			return;
+		}
+		const next = cols.map((c) => ({ ...c }));
+		const [moved] = next.splice(dragIdx, 1);
+		next.splice(overIdx, 0, moved);
+		dragIdx = overIdx = -1;
+		void saveColumns(next);
 	}
 
 	async function load() {
@@ -117,15 +182,50 @@
 
 <div class="set-table">
 	<table>
+		<colgroup>
+			<col />
+			{#each cols as c (c.key)}
+				<col style="width: {c.width}px" />
+			{/each}
+			<col style="width: 32px" />
+		</colgroup>
 		<thead>
 			<tr>
 				<th>
 					<button class="head" onclick={() => toggleSort("name")}>Name {sortKey === "name" ? (sortDir === "asc" ? "↑" : "↓") : ""}</button>
 				</th>
-				{#each columns as c (c)}
-					<th>
-						<button class="head" onclick={() => toggleSort(c)}>{colName(c)} {sortKey === c ? (sortDir === "asc" ? "↑" : "↓") : ""}</button>
-						<button class="hide" title="Hide column" onclick={() => void saveColumns(columns.filter((k) => k !== c))}>×</button>
+				{#each cols as c, i (c.key)}
+					<th
+						class:drag-over={overIdx === i && dragIdx !== i}
+						draggable="true"
+						ondragstart={(e) => {
+							dragIdx = i;
+							e.dataTransfer?.setData("text/plain", c.key);
+						}}
+						ondragover={(e) => {
+							if (dragIdx < 0) return;
+							e.preventDefault();
+							overIdx = i;
+						}}
+						ondragleave={() => {
+							if (overIdx === i) overIdx = -1;
+						}}
+						ondrop={(e) => {
+							e.preventDefault();
+							overIdx = i;
+							dropColumn();
+						}}
+						ondragend={() => (dragIdx = overIdx = -1)}
+					>
+						<button class="head" onclick={() => toggleSort(c.key)}>{colName(c.key)} {sortKey === c.key ? (sortDir === "asc" ? "↑" : "↓") : ""}</button>
+						<button class="hide" title="Hide column" onclick={() => void saveColumns(cols.filter((x) => x.key !== c.key))}>×</button>
+						<span
+							class="resize"
+							role="separator"
+							aria-orientation="vertical"
+							title="Drag to resize"
+							onpointerdown={(e) => startResize(e, i)}
+						></span>
 					</th>
 				{/each}
 				<th class="plus-col">
@@ -133,7 +233,7 @@
 					{#if adding}
 						<div class="col-menu">
 							{#each addable as a (a.key)}
-								<button onclick={() => void saveColumns([...columns, a.key])}>{a.name}</button>
+								<button onclick={() => void saveColumns([...cols, { key: a.key, width: DEFAULT_WIDTH }])}>{a.name}</button>
 							{/each}
 							{#if addable.length === 0}<span class="muted">No more properties</span>{/if}
 						</div>
@@ -168,6 +268,7 @@
 	table {
 		width: 100%;
 		border-collapse: collapse;
+		table-layout: fixed;
 		font-size: 13px;
 	}
 	th {
@@ -176,6 +277,22 @@
 		padding: 0;
 		white-space: nowrap;
 		position: relative;
+	}
+	th.drag-over {
+		box-shadow: inset 2px 0 0 var(--accent);
+	}
+	.resize {
+		position: absolute;
+		top: 0;
+		right: -3px;
+		width: 7px;
+		height: 100%;
+		cursor: col-resize;
+		z-index: 2;
+	}
+	.resize:hover {
+		background: var(--accent);
+		opacity: 0.5;
 	}
 	th .head {
 		border: none;
