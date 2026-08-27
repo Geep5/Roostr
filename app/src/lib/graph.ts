@@ -207,4 +207,35 @@ export function simStep(g: ObjectGraph, alpha: number, pinned = -1): void {
 		node.x += node.vx;
 		node.y += node.vy;
 	}
+
+	// d3 forceCollide semantics: positional separation so nodes never
+	// touch — padded by COLLIDE_PAD, displacement split by radius weight,
+	// a pinned (dragged) node stays put and pushes the other fully.
+	const COLLIDE_PAD = 6;
+	for (let iter = 0; iter < 2; iter++) {
+		for (let i = 0; i < n; i++) {
+			for (let j = i + 1; j < n; j++) {
+				const a = g.nodes[i];
+				const b = g.nodes[j];
+				let dx = b.x - a.x;
+				let dy = b.y - a.y;
+				const minDist = a.radius + b.radius + COLLIDE_PAD;
+				let l = Math.hypot(dx, dy);
+				if (l >= minDist) continue;
+				if (l === 0) {
+					// Coincident: nudge apart deterministically by index.
+					dx = Math.cos(i * 2.399963);
+					dy = Math.sin(i * 2.399963);
+					l = 1;
+				}
+				const overlap = (minDist - l) / l;
+				const wa = i === pinned ? 0 : j === pinned ? 1 : b.radius / (a.radius + b.radius);
+				const wb = 1 - wa;
+				a.x -= dx * overlap * wa;
+				a.y -= dy * overlap * wa;
+				b.x += dx * overlap * wb;
+				b.y += dy * overlap * wb;
+			}
+		}
+	}
 }
