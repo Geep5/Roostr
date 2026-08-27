@@ -6,6 +6,7 @@
 	import { channel as channelApi, note, fetchObject } from "$lib/api";
 	import { objectIcon } from "$lib/icons";
 	import { store, refreshAll, connectEvents } from "$lib/data.svelte";
+	import GraphIcon from "$lib/components/GraphIcon.svelte";
 
 	let { children }: { children: import("svelte").Snippet } = $props();
 
@@ -27,7 +28,7 @@
 			if (c) return { icon: c.icon || "◍", name: c.name };
 			return { icon: "▨", name: "…" };
 		}
-		if (path === "/graph") return { icon: "⌬", name: `Graph — ${current?.name ?? ""}` };
+		if (path === "/graph") return { icon: "graph", name: `Graph — ${current?.name ?? ""}` };
 		return { icon: "◍", name: current?.name ?? "glon" };
 	});
 
@@ -218,7 +219,7 @@
 				{/if}
 			</div>
 
-			<a class="all" class:current-view={page.url.pathname === "/graph"} href="/graph">⌬ Graph</a>
+			<a class="all" class:current-view={page.url.pathname === "/graph"} href="/graph"><GraphIcon /> Graph</a>
 			<a class="all" href="/">All objects →</a>
 		{/if}
 	</aside>
@@ -230,7 +231,9 @@
 				<button class="hbtn" title="Forward" onclick={() => history.forward()}>›</button>
 			</div>
 			<button class="path" title="Search (⌘K)" onclick={() => (showSearch = true)}>
-				{#if headerPath.icon.startsWith("http")}
+				{#if headerPath.icon === "graph"}
+					<span class="path-icon"><GraphIcon /></span>
+				{:else if headerPath.icon.startsWith("http")}
 					<img class="path-img" src={headerPath.icon} alt="" />
 				{:else}
 					<span class="path-icon">{headerPath.icon}</span>
@@ -238,7 +241,7 @@
 				<span class="path-name">{headerPath.name}</span>
 			</button>
 			<div class="header-side right">
-				<a class="hbtn" title="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}>⌬</a>
+				<a class="hbtn" title="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}><GraphIcon size={16} /></a>
 				{#if objectSummary}
 					<div class="more-wrap">
 						<button class="hbtn" title="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
