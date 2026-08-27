@@ -12,9 +12,30 @@
 	let copied = $state("");
 	let saveState = $state("");
 
+	// Agent credentials (auth.json on the server, masked in status).
+	let agentKeys = $state<{ anthropic: string; kimi: string }>({ anthropic: "", kimi: "" });
+	let anthropicDraft = $state("");
+	let kimiDraft = $state("");
+	let agentSaved = $state("");
+
+	async function load() {
+		const s = await settings.fetch();
+		relays = s.relays;
+		agentKeys = s.agentKeys ?? { anthropic: "", kimi: "" };
+	}
+
 	onMount(() => {
-		void settings.fetch().then((s) => (relays = s.relays));
+		void load();
 	});
+
+	async function saveAgentKey(provider: "anthropic" | "kimi", key: string) {
+		await settings.setAgentKey(provider, key.trim());
+		anthropicDraft = "";
+		kimiDraft = "";
+		await load();
+		agentSaved = key.trim() ? "Saved" : "Cleared";
+		setTimeout(() => (agentSaved = ""), 1500);
+	}
 
 	async function reveal() {
 		const out = await settings.exportKey();
@@ -104,10 +125,76 @@
 				</div>
 			{/if}
 		</section>
+
+		<section>
+			<h3>Agent {agentSaved ? `· ${agentSaved}` : ""}</h3>
+			<p class="hint">
+				Credentials for your agent's model. A key saved here is stored locally
+				(<code>~/.glon/auth.json</code>, owner-only) and takes effect immediately. Without one,
+				the harness falls back to the <code>ANTHROPIC_API_KEY</code> environment variable, then
+				to your Claude Code login (Pro/Max plan) if present on this Mac.
+			</p>
+			<div class="provider">
+				<span class="pname">Anthropic</span>
+				{#if agentKeys.anthropic}
+					<code class="masked">key set ({agentKeys.anthropic})</code>
+					<button onclick={() => void saveAgentKey("anthropic", "")}>Clear</button>
+				{:else}
+					<form
+						onsubmit={(e) => {
+							e.preventDefault();
+							if (anthropicDraft.trim()) void saveAgentKey("anthropic", anthropicDraft);
+						}}
+					>
+						<input bind:value={anthropicDraft} type="password" placeholder="sk-ant-…" autocomplete="off" />
+						<button type="submit">Save</button>
+					</form>
+				{/if}
+			</div>
+			<div class="provider">
+				<span class="pname">Kimi (Moonshot)</span>
+				{#if agentKeys.kimi}
+					<code class="masked">key set ({agentKeys.kimi})</code>
+					<button onclick={() => void saveAgentKey("kimi", "")}>Clear</button>
+				{:else}
+					<form
+						onsubmit={(e) => {
+							e.preventDefault();
+							if (kimiDraft.trim()) void saveAgentKey("kimi", kimiDraft);
+						}}
+					>
+						<input bind:value={kimiDraft} type="password" placeholder="sk-…" autocomplete="off" />
+						<button type="submit">Save</button>
+					</form>
+				{/if}
+			</div>
+		</section>
 	</div>
 </div>
 
 <style>
+	.provider {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 6px 0;
+	}
+	.pname {
+		flex: 0 0 130px;
+		font-size: 13px;
+	}
+	.provider form {
+		display: flex;
+		gap: 8px;
+		flex: 1;
+	}
+	.provider input {
+		flex: 1;
+	}
+	.masked {
+		color: var(--muted);
+		font-size: 12px;
+	}
 	.overlay {
 		position: fixed;
 		inset: 0;

@@ -49,29 +49,48 @@ interface AnthropicAuth {
 	isOAuth: boolean;
 }
 
-let cachedAuth: AnthropicAuth | null = null;
-
-/** Env API key first; else the Claude Code OAuth token from the keychain. */
-async function resolveAnthropicAuth(): Promise<AnthropicAuth> {
-	if (cachedAuth) return cachedAuth;
-	const envKey = process.env.ANTHROPIC_API_KEY;
-	if (envKey) {
-		cachedAuth = { token: envKey, isOAuth: false };
-		return cachedAuth;
+/** GLON_DATA/auth.json — written by the Settings UI (Settings → Agent). */
+async function readAuthFile(): Promise<{ anthropic?: string; kimi?: string }> {
+	const root = process.env.GLON_DATA ?? `${process.env.HOME}/.glon`;
+	try {
+		return (await Bun.file(`${root}/auth.json`).json()) as { anthropic?: string; kimi?: string };
+	} catch {
+		return {};
 	}
+}
+
+let cachedKeychainAuth: AnthropicAuth | null = null;
+
+/**
+ * Resolution order: auth.json (Settings UI) → env → Claude Code keychain
+ * OAuth. auth.json is re-read every call so a key saved in Settings takes
+ * effect without restarting the daemon.
+ */
+async function resolveAnthropicAuth(): Promise<AnthropicAuth> {
+	const file = await readAuthFile();
+	if (file.anthropic) return { token: file.anthropic, isOAuth: false };
+	const envKey = process.env.ANTHROPIC_API_KEY;
+	if (envKey) return { token: envKey, isOAuth: false };
+	if (cachedKeychainAuth) return cachedKeychainAuth;
 	try {
 		const proc = Bun.spawn(["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"], { stdout: "pipe", stderr: "ignore" });
 		const raw = await new Response(proc.stdout).text();
 		const parsed = JSON.parse(raw.trim()) as { claudeAiOauth?: { accessToken?: string } };
 		const token = parsed.claudeAiOauth?.accessToken;
 		if (token) {
-			cachedAuth = { token, isOAuth: true };
-			return cachedAuth;
+			cachedKeychainAuth = { token, isOAuth: true };
+			return cachedKeychainAuth;
 		}
 	} catch {
 		/* fall through */
 	}
-	throw new Error("No Anthropic credentials: set ANTHROPIC_API_KEY or log into Claude Code.");
+	throw new Error("No Anthropic credentials: add a key in Settings → Agent, set ANTHROPIC_API_KEY, or log into Claude Code.");
+}
+
+/** Kimi key: auth.json → env. */
+export async function resolveKimiKey(): Promise<string> {
+	const file = await readAuthFile();
+	return file.kimi ?? process.env.KIMI_API_KEY ?? process.env.MOONSHOT_API_KEY ?? "";
 }
 
 /** Prompt-caching stamps (agent-llm.ts:137-163). */
@@ -163,8 +182,8 @@ async function callAnthropic(req: LLMRequest): Promise<LLMResult> {
 	};
 }
 async function callKimi(req: LLMRequest): Promise<LLMResult> {
-	const key = process.env.KIMI_API_KEY ?? process.env.MOONSHOT_API_KEY;
-	if (!key) throw new Error("KIMI_API_KEY not set");
+	const key = await resolveKimiKey();
+	if (!key) throw new Error("No Kimi key: add one in Settings → Agent or set KIMI_API_KEY.");
 	// OpenAI-shaped; tools mapped to function-calling.
 	const messages: Array<Record<string, unknown>> = [{ role: "system", content: req.system }];
 	for (const t of req.turns) {
