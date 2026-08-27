@@ -2,10 +2,11 @@
 	import type { ObjectJSON, BlockJSON } from "$lib/types";
 	import { Pos, Style, MarkT, Layout } from "$lib/types";
 	import { note, table, fetchObject } from "$lib/api";
-	import { fromDom, selectionOffsets, setCaret, toggleMark } from "$lib/marks";
+	import { fromDom, selectionOffsets, setCaret, toggleMark, toHtml } from "$lib/marks";
 	import BlockNode from "./BlockNode.svelte";
 	import BlockMenu from "./BlockMenu.svelte";
 	import type { MenuAction } from "./BlockMenu.svelte";
+	import SlashMenu, { type SlashPick } from "./SlashMenu.svelte";
 
 	let { object, onchanged }: { object: ObjectJSON; onchanged: () => Promise<void> } = $props();
 
@@ -33,7 +34,9 @@
 	let draggingId = $state("");
 	let focusRequest = $state<{ blockId: string; offset: number } | null>(null);
 	let toolbar = $state<{ blockId: string; from: number; to: number; x: number; y: number } | null>(null);
-	let slashFor = $state<string | null>(null);
+	/** Slash menu: block, offset of the "/", live filter, caret anchor. */
+	let slash = $state<{ blockId: string; start: number; filter: string; x: number; y: number } | null>(null);
+	let slashMenu: { move: (d: number) => void; confirm: () => void } | undefined = $state();
 	const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	let lastLocalEdit = $state(0);
 
@@ -116,6 +119,15 @@
 		const el = blockEl(id);
 		if (!el) return;
 
+		// While the slash menu is open it owns navigation keys; everything
+		// else keeps typing into the block (Anytype behavior).
+		if (slash && slash.blockId === id) {
+			if (e.key === "ArrowDown") { e.preventDefault(); slashMenu?.move(1); return; }
+			if (e.key === "ArrowUp") { e.preventDefault(); slashMenu?.move(-1); return; }
+			if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); slashMenu?.confirm(); return; }
+			if (e.key === "Escape") { e.preventDefault(); slash = null; return; }
+		}
+
 		if (e.key === "Enter" && !e.shiftKey) {
 			e.preventDefault();
 			const sel = selectionOffsets(el);
@@ -172,16 +184,26 @@
 			}
 		}
 
-		if (e.key === "/" ) {
-			const { text } = fromDom(el);
-			if (text.length === 0) {
-				e.preventDefault();
-				slashFor = id;
-				return;
-			}
+		if (e.key === "/") {
+			// Open at the caret; the "/" lands in the block and is stripped on
+			// apply. Position is read after the character is inserted.
+			const sel = selectionOffsets(el);
+			const start = sel?.from ?? 0;
+			requestAnimationFrame(() => {
+				const winSel = window.getSelection();
+				const r = winSel && winSel.rangeCount > 0 ? winSel.getRangeAt(0).getBoundingClientRect() : null;
+				const er = el.getBoundingClientRect();
+				const anchored = r && (r.left !== 0 || r.bottom !== 0);
+				slash = {
+					blockId: id,
+					start,
+					filter: "",
+					x: anchored ? r.left : er.left,
+					y: (anchored ? r.bottom : er.bottom) + 6,
+				};
+			});
 		}
 		if (e.key === "Escape") {
-			slashFor = null;
 			toolbar = null;
 		}
 
@@ -213,21 +235,70 @@
 	}
 
 	// ── Slash menu ────────────────────────────────────────────────
-	const SLASH_ITEMS: Array<{ label: string; style: number }> = [
-		{ label: "Text", style: Style.PARAGRAPH },
-		{ label: "Heading 1", style: Style.HEADER1 },
-		{ label: "Heading 2", style: Style.HEADER2 },
-		{ label: "Heading 3", style: Style.HEADER3 },
-		{ label: "Bulleted list", style: Style.BULLET },
-		{ label: "Numbered list", style: Style.NUMBERED },
-		{ label: "Checkbox", style: Style.CHECKBOX },
-		{ label: "Quote", style: Style.QUOTE },
-		{ label: "Code", style: Style.CODE },
-		{ label: "Callout", style: Style.CALLOUT },
-	];
 
+	/** Track the filter typed after "/"; close if the slash was deleted. */
+	function updateSlash(id: string) {
+		if (!slash || slash.blockId !== id) return;
+		const el = blockEl(id);
+		if (!el) {
+			slash = null;
+			return;
+		}
+		const { text } = fromDom(el);
+		if (text[slash.start] !== "/") {
+			slash = null;
+			return;
+		}
+		const sel = selectionOffsets(el);
+		const end = sel?.to ?? text.length;
+		if (end <= slash.start) {
+			slash = null;
+			return;
+		}
+		slash = { ...slash, filter: text.slice(slash.start + 1, end) };
+	}
+
+	function onInput(id: string) {
+		updateSlash(id);
+		scheduleSave(id);
+	}
+
+	/** Apply a slash pick: strip "/filter" from the block, then act. */
+	async function applySlash(pick: SlashPick) {
+		if (!slash) return;
+		const { blockId: id, start, filter } = slash;
+		slash = null;
+		const cur = byId.get(id)?.content.text;
+		const el = blockEl(id);
+		const { text, marks } = el ? fromDom(el) : { text: cur?.text ?? "", marks: cur?.marks ?? [] };
+		const clean = text.slice(0, start) + text.slice(start + 1 + filter.length);
+		// The block keeps focus while the menu is open, and a focused element
+		// is never repopulated from state - rewrite the DOM directly so the
+		// "/filter" text visibly disappears.
+		if (el) {
+			el.innerHTML = toHtml(clean, marks);
+			setCaret(el, start);
+		}
+		cancelPending(id);
+		lastLocalEdit = Date.now();
+		if (pick.kind === "table") {
+			// Anytype default 3x3: replace the block when it's empty,
+			// otherwise keep the text and insert the table below it.
+			if (clean === "") {
+				await table.create(object.id, id, Pos.REPLACE);
+			} else {
+				await note.blockUpdate(object.id, id, contentFor(id, clean, marks));
+				await table.create(object.id, id, Pos.BOTTOM);
+			}
+		} else {
+			await note.blockUpdate(object.id, id, { text: { text: clean, marks, style: pick.value, checked: cur?.checked ?? false, color: cur?.color ?? "" } });
+			focusRequest = { blockId: id, offset: start };
+		}
+		await refresh();
+	}
+
+	/** Turn-into from the block action menu. */
 	async function applyStyle(id: string, style: number) {
-		slashFor = null;
 		const cur = byId.get(id)?.content.text;
 		const el = blockEl(id);
 		const { text, marks } = el ? fromDom(el) : { text: cur?.text ?? "", marks: cur?.marks ?? [] };
@@ -235,16 +306,6 @@
 		lastLocalEdit = Date.now();
 		await note.blockUpdate(object.id, id, { text: { text, marks, style, checked: cur?.checked ?? false, color: cur?.color ?? "" } });
 		focusRequest = { blockId: id, offset: text.length };
-		await refresh();
-	}
-
-	/** Slash "Table": the slash menu only opens on an empty block, so the
-	 * 3x3 table (Anytype's default) simply replaces it. */
-	async function insertTable(id: string) {
-		slashFor = null;
-		cancelPending(id);
-		lastLocalEdit = Date.now();
-		await table.create(object.id, id, Pos.REPLACE);
 		await refresh();
 	}
 
@@ -325,7 +386,7 @@
 
 	function openBlockMenu(id: string, x: number, y: number) {
 		toolbar = null;
-		slashFor = null;
+		slash = null;
 		blockMenu = { blockId: id, x, y };
 	}
 
@@ -421,7 +482,7 @@
 			objectId={object.id}
 			{draggingId}
 			onkeydown={onKeydown}
-			oninput={scheduleSave}
+			oninput={onInput}
 			onblur={flushSave}
 			onselect={onSelect}
 			ondragbegin={(bid) => (draggingId = bid)}
@@ -457,13 +518,8 @@
 	</div>
 {/if}
 
-{#if slashFor}
-	<div class="slash-menu">
-		{#each SLASH_ITEMS as item (item.style)}
-			<button onclick={() => void applyStyle(slashFor!, item.style)}>{item.label}</button>
-		{/each}
-		<button onclick={() => void insertTable(slashFor!)}>Table</button>
-	</div>
+{#if slash}
+	<SlashMenu bind:this={slashMenu} filter={slash.filter} x={slash.x} y={slash.y} onpick={(p) => void applySlash(p)} onclose={() => (slash = null)} />
 {/if}
 
 <style>
@@ -503,34 +559,6 @@
 		font-size: 14px;
 	}
 	.toolbar button:hover {
-		background: var(--hover);
-	}
-	.slash-menu {
-		position: fixed;
-		left: 50%;
-		top: 30%;
-		transform: translateX(-50%);
-		background: var(--panel);
-		border: 1px solid var(--border);
-		border-radius: 10px;
-		padding: 6px;
-		display: flex;
-		flex-direction: column;
-		min-width: 220px;
-		box-shadow: 0 16px 48px rgb(0 0 0 / 0.45);
-		z-index: 60;
-	}
-	.slash-menu button {
-		text-align: left;
-		border: none;
-		background: none;
-		color: var(--fg);
-		padding: 8px 10px;
-		border-radius: 6px;
-		cursor: pointer;
-		font-size: 14px;
-	}
-	.slash-menu button:hover {
 		background: var(--hover);
 	}
 </style>
