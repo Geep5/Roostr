@@ -11,6 +11,24 @@
 	let revealed = $state(false);
 	let copied = $state("");
 	let saveState = $state("");
+	let importing = $state(false);
+	let importDraft = $state("");
+	let importError = $state("");
+
+	async function importKey() {
+		importError = "";
+		try {
+			await settings.importKey(importDraft.trim());
+			importing = false;
+			importDraft = "";
+			revealed = false;
+			nsec = "";
+			hexKey = "";
+			await load();
+		} catch (err) {
+			importError = err instanceof Error ? err.message : String(err);
+		}
+	}
 
 	// Agent credentials: managed by the harness daemon's localhost auth
 	// endpoint (it owns auth.json and the OAuth exchange).
@@ -144,6 +162,26 @@
 				</div>
 				<button class="action subtle" onclick={() => { revealed = false; nsec = ""; hexKey = ""; }}>Hide</button>
 			{/if}
+			{#if !importing}
+				<button class="action subtle" onclick={() => (importing = true)}>Sign in with existing key…</button>
+			{:else}
+				<p class="hint">
+					<b>Replaces this device's identity.</b> Paste the nsec from your other device — after the
+					sync daemon connects, your objects will backfill from the relays.
+				</p>
+				<form
+					class="import-form"
+					onsubmit={(e) => {
+						e.preventDefault();
+						if (importDraft.trim()) void importKey();
+					}}
+				>
+					<input bind:value={importDraft} type="password" placeholder="nsec1… or 64-char hex" autocomplete="off" />
+					<button type="submit">Import</button>
+					<button type="button" onclick={() => { importing = false; importDraft = ""; importError = ""; }}>Cancel</button>
+				</form>
+				{#if importError}<p class="hint error">{importError}</p>{/if}
+			{/if}
 		</section>
 
 		<section>
@@ -260,6 +298,14 @@
 </div>
 
 <style>
+	.import-form {
+		display: flex;
+		gap: 8px;
+		margin-top: 6px;
+	}
+	.import-form input {
+		flex: 1;
+	}
 	.fallback {
 		color: var(--muted);
 		font-size: 11px;

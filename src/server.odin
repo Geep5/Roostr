@@ -174,6 +174,12 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 		handle_list_objects(sock)
 	case req.method == "GET" && strings.has_prefix(req.path, "/api/objects/"):
 		handle_get_object(sock, req.path[len("/api/objects/"):])
+	case req.method == "GET" && req.path == "/api/changes":
+		handle_changes_manifest(sock)
+	case req.method == "GET" && strings.has_prefix(req.path, "/api/changes/"):
+		handle_changes_get(sock, req.path[len("/api/changes/"):])
+	case req.method == "POST" && req.path == "/api/changes":
+		handle_changes_import(sock, req.body)
 	case req.method == "GET" && req.path == "/api/settings":
 		handle_settings(sock)
 	case req.method == "GET" && req.path == "/api/relations":

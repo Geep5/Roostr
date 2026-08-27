@@ -12,16 +12,20 @@ import { chatPost, fetchObject, query, setField, str, subscribe, sv, createObjec
 import { runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { startAuthServer } from "./authserver";
+import { readRoster, setEnabled, syncHeartbeats } from "./roster";
+import { startNostrSync } from "./nostrsync";
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);
 	return idx >= 0 ? (process.argv[idx + 1] ?? "") : "";
 }
 
-/** Principal agents = agent objects without a spawn_parent. */
-async function principalAgents(): Promise<string[]> {
-	const rows = await query({ type: "agent", limit: 100 });
-	return rows.filter((r) => !str(r.fields, "spawn_parent")).map((r) => r.id);
+/** Agents THIS machine serves: local roster ∩ live agent objects. */
+async function servedAgents(): Promise<Set<string>> {
+	const roster = new Set(await readRoster());
+	if (roster.size === 0) return roster;
+	const rows = await query({ type: "agent", limit: 200 });
+	return new Set(rows.filter((r) => roster.has(r.id) && !str(r.fields, "spawn_parent")).map((r) => r.id));
 }
 
 async function setup(): Promise<void> {
@@ -36,7 +40,10 @@ async function setup(): Promise<void> {
 	};
 	if (argValue("--channel")) fields.channel = sv(argValue("--channel"));
 	const { id } = await createObject(name, "agent", fields);
-	console.log(`created agent "${name}": ${id}`);
+	// Setup on this machine claims serving responsibility here — "mine"
+	// is a local fact, not a synced one.
+	await setEnabled(id, true);
+	console.log(`created agent "${name}": ${id} (enabled on this machine)`);
 }
 
 /** Newest unanswered user chat block id, or "" when up to date. */
@@ -80,23 +87,23 @@ async function handleAgentEvent(agentId: string, busy: Set<string>): Promise<voi
 }
 
 async function serve(): Promise<void> {
-	startAuthServer();
-	const agents = new Set(await principalAgents());
-	console.log(`[harness] watching ${agents.size} agent(s): ${[...agents].map((a) => a.slice(0, 8)).join(", ")}`);
+	const agents = await servedAgents();
+	startAuthServer(agents, (next) => {
+		agents.clear();
+		for (const id of next) agents.add(id);
+		syncHeartbeats(agents);
+		for (const id of agents) void handleAgentEvent(id, busy);
+	});
+	console.log(`[harness] serving ${agents.size} agent(s): ${[...agents].map((a) => a.slice(0, 8)).join(", ") || "(none — enable one from an agent page)"}`);
 	const busy = new Set<string>();
+	syncHeartbeats(agents);
 	// Catch up on anything that arrived while the harness was down.
 	for (const id of agents) void handleAgentEvent(id, busy);
 	subscribe((objectId) => {
 		if (agents.has(objectId)) void handleAgentEvent(objectId, busy);
-		else {
-			// A new agent object may have been created.
-			void (async () => {
-				const fresh = await principalAgents();
-				for (const id of fresh) agents.add(id);
-			})();
-		}
 	});
 	console.log("[harness] SSE connected; serving.");
+	void startNostrSync();
 }
 
 async function ask(): Promise<void> {

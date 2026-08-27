@@ -104,6 +104,7 @@ export const settings = {
 		if (!res.ok) throw new Error(`settings: ${res.status}`);
 		return res.json();
 	},
+	importKey: (key: string) => mutate("nostr_key_import", { key }),
 	exportKey: () => mutate("nostr_key_export", {}) as Promise<{ nsec: string; hex: string }>,
 	setRelays: (relays: string[]) => mutate("nostr_relays_set", { relays }) as Promise<{ relays: string[] }>,
 };

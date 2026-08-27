@@ -72,6 +72,22 @@ GET  /api/events             SSE: {"objectId"} per committed change
 - SSE only observes changes written through this server (no fs watch);
   external writers need a manual refresh.
 
+## Sync (nostr)
+
+Relays are the transport between your devices; the `.pb` files stay
+canonical. The harness daemon publishes every local change as a kind-1078
+event (content = NIP-44 self-encryption of the raw change bytes, "h" tag =
+blinded object id) and imports everything it sees for your pubkey — the
+Odin server verifies each content address on import (`/api/changes`
+export/import endpoints). Channel keys ride a kind-30078 replaceable
+event, merged by union. Configure relays in Settings; import your nsec on
+a second machine ("Sign in with existing key") and it backfills.
+
+Agents are served by whichever machine set them up ("Run on this machine"
+toggle on the agent page; roster in `GLON_DATA/harness.json`). Presence
+heartbeats (`harness_seen_at`/`harness_host`) show every device where an
+agent lives and whether it's awake.
+
 ## Harness (`harness/`)
 
 The holdfast agent harness, ported as a Bun sidecar that is a pure HTTP

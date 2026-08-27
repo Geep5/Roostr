@@ -8,6 +8,7 @@
 	import Editor from "$lib/components/Editor.svelte";
 	import FeaturedProps from "$lib/components/FeaturedProps.svelte";
 	import Discussion from "$lib/components/Discussion.svelte";
+	import AgentBar from "$lib/components/AgentBar.svelte";
 	import SetTable from "$lib/components/SetTable.svelte";
 	import QueryControls from "$lib/components/QueryControls.svelte";
 	import ChannelManage from "$lib/components/ChannelManage.svelte";
@@ -184,8 +185,10 @@
 				}}
 			/>
 		</div>
-
 		{#if !isChannel}
+			{#if object.typeKey === "agent"}
+				<AgentBar {object} />
+			{/if}
 			<FeaturedProps {object} relations={store.relations} onchanged={refresh} />
 		{/if}
 

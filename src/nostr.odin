@@ -128,6 +128,73 @@ bech32_encode :: proc(hrp: string, data: []byte, allocator := context.temp_alloc
 	return strings.to_string(out)
 }
 
+/** Decode a bech32 string; returns (hrp, 8-bit data). Checksum-verified. */
+bech32_decode :: proc(s: string, allocator := context.temp_allocator) -> (hrp: string, data: []byte, ok: bool) {
+	lower := strings.to_lower(s, context.temp_allocator)
+	sep := strings.last_index(lower, "1")
+	if sep <= 0 || sep + 7 > len(lower) do return "", nil, false
+	hrp = lower[:sep]
+	charset := BECH32_CHARSET
+	five := make([dynamic]u8, context.temp_allocator)
+	for c in lower[sep + 1:] {
+		idx := strings.index_byte(charset, u8(c))
+		if idx < 0 do return "", nil, false
+		append(&five, u8(idx))
+	}
+	// Verify checksum.
+	expanded := make([dynamic]u8, context.temp_allocator)
+	for c in hrp do append(&expanded, u8(c) >> 5)
+	append(&expanded, 0)
+	for c in hrp do append(&expanded, u8(c) & 31)
+	append(&expanded, ..five[:])
+	if bech32_polymod(expanded[:]) != 1 do return "", nil, false
+	// 5-bit → 8-bit, dropping the 6 checksum groups.
+	payload := five[:len(five) - 6]
+	out := make([dynamic]u8, allocator)
+	acc: u32 = 0
+	bits: u32 = 0
+	for v in payload {
+		acc = acc << 5 | u32(v)
+		bits += 5
+		if bits >= 8 {
+			bits -= 8
+			append(&out, u8(acc >> bits & 255))
+		}
+	}
+	return hrp, out[:], true
+}
+
+/** mutate action: nostr_key_import {key: "nsec1…" | 64-hex}. Replaces the identity. */
+mutate_key_import :: proc(sock: net.TCP_Socket, parsed: json.Value) {
+	raw := strings.trim_space(json_str(parsed, "key"))
+	priv_hex := ""
+	if strings.has_prefix(raw, "nsec1") {
+		hrp, data, ok := bech32_decode(raw)
+		if !ok || hrp != "nsec" || len(data) != 32 {
+			respond_error(sock, "invalid nsec")
+			return
+		}
+		priv_hex = string(hex.encode(data, context.temp_allocator))
+	} else if len(raw) == 64 {
+		if _, ok := hex.decode(transmute([]byte)raw, context.temp_allocator); !ok {
+			respond_error(sock, "invalid hex key")
+			return
+		}
+		priv_hex = strings.to_lower(raw, context.temp_allocator)
+	} else {
+		respond_error(sock, "key must be nsec1… or 64 hex chars")
+		return
+	}
+	sync.lock(&g_nostr_mu)
+	defer sync.unlock(&g_nostr_mu)
+	s := nostr_read()
+	s.privkey_hex = priv_hex
+	nostr_write(s)
+	o := jobj()
+	o["ok"] = json.Boolean(true)
+	respond_json(sock, json.Object(o))
+}
+
 // ── HTTP handlers ────────────────────────────────────────────────────
 
 handle_settings :: proc(sock: net.TCP_Socket) {
