@@ -127,6 +127,10 @@
 		{ id: "empty", label: "is empty", needsValue: false },
 		{ id: "notEmpty", label: "is not empty", needsValue: false },
 	];
+	const PRESENCE_CONDITIONS: ConditionDef[] = [
+		{ id: "empty", label: "is empty", needsValue: false },
+		{ id: "notEmpty", label: "is not empty", needsValue: false },
+	];
 	const CHECKBOX_CONDITIONS: ConditionDef[] = [
 		{ id: "equal", label: "is checked", needsValue: false },
 		{ id: "notEqual", label: "is unchecked", needsValue: false },
@@ -143,6 +147,7 @@
 		if (f === "number" || f === "date") return NUMBER_CONDITIONS;
 		if (f === "tag" || f === "status") return SELECT_CONDITIONS;
 		if (f === "checkbox") return CHECKBOX_CONDITIONS;
+		if (f === "object") return PRESENCE_CONDITIONS;
 		return TEXT_CONDITIONS;
 	}
 

@@ -8,6 +8,7 @@
 	 * (hide column); click a header to sort.
 	 */
 	import { fetchQuery, note, type QueryResultRow } from "$lib/api";
+	import { store } from "$lib/data.svelte";
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
 	import { fieldStr } from "$lib/types";
 	import { objectIcon } from "$lib/icons";
@@ -164,6 +165,11 @@
 		const v: ValueJSON | undefined = r.fields[key];
 		const format = formatOf(key);
 		if (!v) return "";
+		if (format === "object" && v.valuesValue) {
+			return v.valuesValue.items
+				.map((i) => store.summaries.find((s) => s.id === i.stringValue)?.name || (i.stringValue ?? "").slice(0, 6))
+				.join(", ");
+		}
 		if (v.stringValue !== undefined) return v.stringValue;
 		if (v.boolValue !== undefined) return v.boolValue ? "✓" : "";
 		if (v.intValue !== undefined) return format === "date" ? new Date(v.intValue).toLocaleDateString() : String(v.intValue);

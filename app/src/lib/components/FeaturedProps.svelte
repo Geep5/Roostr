@@ -8,6 +8,8 @@
 	 */
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
 	import { note } from "$lib/api";
+	import { store, refreshAll } from "$lib/data.svelte";
+	import PropertyValue from "./PropertyValue.svelte";
 
 	let {
 		object,
@@ -65,39 +67,70 @@
 		if (rel.format === "checkbox") return p === true ? "✓" : "✗";
 		if (rel.format === "date") {
 			const ms = v?.intValue ?? v?.floatValue;
-			return ms ? new Date(ms).toLocaleDateString() : "";
+			return ms ? new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "";
+		}
+		if (rel.format === "object") {
+			const ids = p as string[];
+			return ids.map((id) => store.summaries.find((s) => s.id === id)?.name || id.slice(0, 6)).join(", ");
 		}
 		if (Array.isArray(p)) return p.join(", ");
+		if (rel.format === "longtext") return String(p).slice(0, 60);
 		return String(p);
 	}
 
-	async function save(key: string, format: string, raw: string | number | boolean | string[]) {
-		let value: ValueJSON;
-		if (format === "checkbox") value = { boolValue: raw === true };
-		else if (format === "number") value = Number.isInteger(Number(raw)) ? { intValue: Number(raw) } : { floatValue: Number(raw) };
-		else if (format === "date") value = { intValue: typeof raw === "string" ? new Date(raw).getTime() : Number(raw) };
-		else if (format === "tag") value = { valuesValue: { items: (raw as string[]).map((s) => ({ stringValue: s })) } };
-		else value = { stringValue: String(raw) };
+	async function saveValue(key: string, value: ValueJSON) {
 		await note.setField(object.id, key, value);
 		await onchanged();
+	}
+
+	/** Initialize a property so it appears (empty per-format default). */
+	async function addProp(rel: RelationDefJSON) {
+		const empty: ValueJSON =
+			rel.format === "checkbox" ? { boolValue: false }
+			: rel.format === "tag" || rel.format === "object" ? { valuesValue: { items: [] } }
+			: rel.format === "number" || rel.format === "date" ? { intValue: 0 }
+			: { stringValue: "" };
+		await saveValue(rel.key, empty);
+		editing = rel.key;
+	}
+
+	// ── New property (Anytype "create from scratch") ──────────────
+	const FORMATS = ["shorttext", "longtext", "number", "status", "tag", "date", "checkbox", "url", "email", "phone", "object"] as const;
+	let creating = $state(false);
+	let newName = $state("");
+	let newFormat = $state<string>("shorttext");
+
+	async function createProperty() {
+		const name = newName.trim();
+		if (!name) return;
+		const key = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || `prop_${Date.now()}`;
+		if (relations.some((r) => r.key === key)) {
+			creating = false;
+			return;
+		}
+		await note.create(name, "relation", {
+			key: { stringValue: key },
+			name: { stringValue: name },
+			format: { stringValue: newFormat },
+			hidden: { boolValue: false },
+			readOnly: { boolValue: false },
+			maxCount: { intValue: newFormat === "status" ? 1 : 0 },
+			options: { valuesValue: { items: [] } },
+			bundled: { boolValue: false },
+		});
+		await refreshAll();
+		creating = false;
+		adding = false;
+		const rel = store.relations.find((r) => r.key === key);
+		if (rel) await addProp(rel);
+		newName = "";
+		newFormat = "shorttext";
 	}
 
 	async function removeProp(key: string) {
 		editing = null;
 		await note.deleteField(object.id, key);
 		await onchanged();
-	}
-
-	function dateInput(v: ValueJSON | undefined): string {
-		const ms = v?.intValue ?? v?.floatValue;
-		if (!ms) return "";
-		return new Date(ms).toISOString().slice(0, 10);
-	}
-
-	async function toggleTag(rel: RelationDefJSON, tag: string) {
-		const cur = plain(object.fields[rel.key], "tag") as string[];
-		const next = cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag];
-		await save(rel.key, "tag", next);
 	}
 
 	function closeAll() {
@@ -136,36 +169,12 @@
 							<span class="pop-name">{rel.name || rel.key}</span>
 							<button class="pop-rm" title="Remove property" onclick={() => void removeProp(rel.key)}>Remove</button>
 						</div>
-						{#if rel.format === "checkbox"}
-							<input type="checkbox" checked={plain(v, "checkbox") === true} onchange={(e) => void save(rel.key, "checkbox", e.currentTarget.checked)} />
-						{:else if rel.format === "number"}
-							<input type="number" value={plain(v, "number")} onchange={(e) => void save(rel.key, "number", e.currentTarget.value)} />
-						{:else if rel.format === "date"}
-							<input type="date" value={dateInput(v)} onchange={(e) => void save(rel.key, "date", e.currentTarget.value)} />
-						{:else if rel.format === "status"}
-							<select value={plain(v, "status")} onchange={(e) => void save(rel.key, "status", e.currentTarget.value)}>
-								<option value=""></option>
-								{#each rel.options as o (o.id)}
-									<option value={o.text}>{o.text}</option>
-								{/each}
-							</select>
-						{:else if rel.format === "tag"}
-							<div class="tag-list">
-								{#each plain(v, "tag") as string[] as t (t)}
-									<button class="tag on" onclick={() => void toggleTag(rel, t)}>{t} ×</button>
-								{/each}
-								{#each rel.options.filter((o) => !(plain(v, "tag") as string[]).includes(o.text)) as o (o.id)}
-									<button class="tag" style="border-color:{o.color}" onclick={() => void toggleTag(rel, o.text)}>{o.text}</button>
-								{/each}
-							</div>
-						{:else}
-							<input type="text" value={plain(v, rel.format)} onchange={(e) => void save(rel.key, rel.format, e.currentTarget.value)} />
-						{/if}
+						<PropertyValue {rel} value={v} onsave={(nv) => void saveValue(rel.key, nv)} />
 					</div>
 				{/if}
 			</span>
 		{/each}
-		{#if addable.length > 0}
+		{#if true}
 			<span class="cell-wrap">
 				<button
 					class="cell add"
@@ -182,10 +191,29 @@
 								class="add-item"
 								onclick={() => {
 									adding = false;
-									void save(rel.key, rel.format, rel.format === "checkbox" ? false : rel.format === "tag" ? [] : "");
+									void addProp(rel);
 								}}>{rel.name || rel.key} <span class="fmt">{rel.format}</span></button
 							>
 						{/each}
+						{#if !creating}
+							<button class="add-item new" onclick={() => (creating = true)}>+ New property…</button>
+						{:else}
+							<form
+								class="new-form"
+								onsubmit={(e) => {
+									e.preventDefault();
+									void createProperty();
+								}}
+							>
+								<input bind:value={newName} placeholder="Property name" />
+								<select bind:value={newFormat}>
+									{#each FORMATS as f (f)}
+										<option value={f}>{f}</option>
+									{/each}
+								</select>
+								<button type="submit">Create</button>
+							</form>
+						{/if}
 					</div>
 				{/if}
 			</span>
@@ -285,28 +313,6 @@
 	.pop-rm:hover {
 		color: #e8524a;
 	}
-	.pop input[type="text"],
-	.pop input[type="number"],
-	.pop input[type="date"],
-	.pop select {
-		background: var(--bg, #101216);
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		color: inherit;
-		padding: 5px 8px;
-		font-size: 13px;
-	}
-	.tag-list {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 4px;
-	}
-	.tag-list .tag {
-		cursor: pointer;
-	}
-	.tag-list .tag.on {
-		background: var(--hover);
-	}
 	.add-item {
 		display: flex;
 		justify-content: space-between;
@@ -326,6 +332,34 @@
 	.fmt {
 		color: var(--muted);
 		font-size: 11px;
+	}
+	.add-item.new {
+		color: var(--accent);
+	}
+	.new-form {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.new-form input,
+	.new-form select {
+		background: var(--bg, #101216);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		color: inherit;
+		padding: 5px 8px;
+		font-size: 13px;
+	}
+	.new-form button {
+		border: 1px solid var(--border);
+		background: none;
+		color: inherit;
+		border-radius: 6px;
+		padding: 5px 8px;
+		cursor: pointer;
+	}
+	.new-form button:hover {
+		border-color: var(--accent);
 	}
 	.backdrop {
 		position: fixed;
