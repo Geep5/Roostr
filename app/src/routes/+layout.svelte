@@ -7,6 +7,7 @@
 	import { objectIcon } from "$lib/icons";
 	import { store, refreshAll, connectEvents } from "$lib/data.svelte";
 	import GraphIcon from "$lib/components/GraphIcon.svelte";
+	import { CREATABLE_TYPES, typeGlyph, createTyped, createCollection, createQuery } from "$lib/create";
 
 	let { children }: { children: import("svelte").Snippet } = $props();
 
@@ -45,6 +46,20 @@
 
 	let showMore = $state(false);
 	let showCollections = $state(false);
+	let showCreate = $state(false);
+
+	/** Sidebar create (Anytype's typeSuggest menu): pick a type, get an object. */
+	async function sidebarCreate(kind: string) {
+		showCreate = false;
+		const ch = activeChannel.id || defaultChannelId;
+		if (kind === "collection") return void (await createCollection(ch));
+		if (kind === "query") {
+			const source = prompt("Query objects of which type? (e.g. note, task)", "note");
+			if (!source) return;
+			return void (await createQuery(ch, source));
+		}
+		await createTyped(kind, ch);
+	}
 
 	const collections = $derived(
 		store.summaries.filter(
@@ -191,10 +206,31 @@
 				<span class="gear">⚙</span>
 			</a>
 
-			<button class="search-entry" onclick={() => (showSearch = true)}>
-				<span class="search-icon">⌕</span> Search
-				<span class="kbd">⌘K</span>
-			</button>
+			<div class="search-row">
+				<button class="search-entry" onclick={() => (showSearch = true)}>
+					<span class="search-icon">⌕</span> Search
+					<span class="kbd">⌘K</span>
+				</button>
+				<div class="create-wrap">
+					<button class="create-btn" title="New object" aria-expanded={showCreate} onclick={() => (showCreate = !showCreate)}>＋</button>
+					{#if showCreate}
+						<div class="create-menu" role="menu">
+							{#each CREATABLE_TYPES as t (t)}
+								<button role="menuitem" onclick={() => void sidebarCreate(t)}>
+									<span class="obj-icon">{typeGlyph(t)}</span>{t[0].toUpperCase() + t.slice(1)}
+								</button>
+							{/each}
+							<div class="create-sep"></div>
+							<button role="menuitem" onclick={() => void sidebarCreate("collection")}>
+								<span class="obj-icon">{typeGlyph("collection")}</span>Collection
+							</button>
+							<button role="menuitem" onclick={() => void sidebarCreate("query")}>
+								<span class="obj-icon">{typeGlyph("query")}</span>Query
+							</button>
+						</div>
+					{/if}
+				</div>
+			</div>
 
 			{#if pinned.length > 0}
 				<div class="section">
@@ -271,8 +307,8 @@
 			</div>
 		</header>
 
-{#if showMore}
-	<button class="menu-backdrop" aria-label="Close menu" onclick={() => { showMore = false; showCollections = false; }}></button>
+{#if showMore || showCreate}
+	<button class="menu-backdrop" aria-label="Close menu" onclick={() => { showMore = false; showCollections = false; showCreate = false; }}></button>
 {/if}
 		<main>{@render children()}</main>
 	</div>
@@ -302,22 +338,83 @@
 		--muted: #8b909b;
 		--accent: #ffa02f;
 	}
+	.search-row {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
 	.search-entry {
+		flex: 1;
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		background: var(--bg);
-		border: 1px solid var(--border);
+		background: none;
+		border: none;
 		color: var(--muted);
 		border-radius: 8px;
-		padding: 6px 10px;
+		padding: 6px 8px;
 		font-size: 13px;
 		cursor: pointer;
 		text-align: left;
 	}
 	.search-entry:hover {
-		border-color: var(--accent);
+		background: var(--hover);
 		color: var(--fg);
+	}
+	.create-wrap {
+		position: relative;
+	}
+	.create-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		background: none;
+		border: none;
+		border-radius: 8px;
+		color: var(--muted);
+		font-size: 15px;
+		cursor: pointer;
+	}
+	.create-btn:hover {
+		background: var(--hover);
+		color: var(--fg);
+	}
+	.create-menu {
+		position: absolute;
+		top: 32px;
+		right: 0;
+		z-index: 90;
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 6px;
+		min-width: 170px;
+		display: flex;
+		flex-direction: column;
+		box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
+	}
+	.create-menu > button {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		text-align: left;
+		background: none;
+		border: none;
+		color: var(--fg);
+		font-size: 13px;
+		padding: 6px 8px;
+		border-radius: 6px;
+		cursor: pointer;
+	}
+	.create-menu > button:hover {
+		background: var(--hover);
+	}
+	.create-sep {
+		height: 1px;
+		background: var(--border);
+		margin: 4px 2px;
 	}
 	.search-icon {
 		font-size: 14px;

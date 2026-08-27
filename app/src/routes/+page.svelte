@@ -1,9 +1,8 @@
 <script lang="ts">
-	import { goto } from "$app/navigation";
-	import { note } from "$lib/api";
 	import { activeChannel } from "$lib/channel.svelte";
 	import { objectIcon, TYPE_GLYPHS } from "$lib/icons";
 	import { store, refreshAll } from "$lib/data.svelte";
+	import { createTyped, createCollection as libCreateCollection, createQuery as libCreateQuery } from "$lib/create";
 
 	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
 	const channelId = $derived(activeChannel.id || defaultChannelId);
@@ -25,33 +24,21 @@
 	let picking = $state(false);
 	let customType = $state("");
 
-	/** Every creation lands in the active channel. */
-	const channelField = () => ({ channel: { stringValue: channelId } });
-
 	async function createObject(typeKey: string) {
 		picking = false;
 		const clean = typeKey.trim().toLowerCase();
 		if (!clean) return;
-		const { id } = await note.create("Untitled", clean, channelField());
-		await goto(`/object/${id}`);
+		await createTyped(clean, channelId);
 	}
 
 	async function createCollection() {
-		const { id } = await note.create("New collection", "collection", {
-			...channelField(),
-			collectionIds: { valuesValue: { items: [] } },
-		});
-		await goto(`/object/${id}`);
+		await libCreateCollection(channelId);
 	}
 
 	async function createQuery() {
 		const source = prompt("Query objects of which type? (e.g. note, task)", "note");
 		if (!source) return;
-		const { id } = await note.create(`${source} query`, "query", {
-			...channelField(),
-			setOf: { valuesValue: { items: [{ stringValue: source.trim().toLowerCase() }] } },
-		});
-		await goto(`/object/${id}`);
+		await libCreateQuery(channelId, source);
 	}
 
 	const ICON_BY_TYPE = TYPE_GLYPHS;

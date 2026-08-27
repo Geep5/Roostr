@@ -4,6 +4,7 @@
 	import { store } from "$lib/data.svelte";
 	import { activeChannel } from "$lib/channel.svelte";
 	import { objectIcon } from "$lib/icons";
+	import { createTyped } from "$lib/create";
 
 	let { onclose }: { onclose: () => void } = $props();
 
@@ -70,17 +71,31 @@
 		void goto(`/object/${row.id}`);
 	}
 
+	/** Anytype: the search popup appends a `Create object "<filter>"` row. */
+	const canCreate = $derived(query.trim() !== "");
+	const rowCount = $derived(results.length + (canCreate ? 1 : 0));
+
+	async function createFromQuery() {
+		const name = query.trim();
+		if (!name) return;
+		onclose();
+		await createTyped("note", channelId, name);
+	}
+
 	function onKeydown(e: KeyboardEvent) {
 		if (e.key === "Escape") onclose();
 		if (e.key === "ArrowDown") {
 			e.preventDefault();
-			selected = Math.min(selected + 1, results.length - 1);
+			selected = Math.min(selected + 1, rowCount - 1);
 		}
 		if (e.key === "ArrowUp") {
 			e.preventDefault();
 			selected = Math.max(selected - 1, 0);
 		}
-		if (e.key === "Enter" && results[selected]) open(results[selected]);
+		if (e.key === "Enter") {
+			if (results[selected]) open(results[selected]);
+			else if (canCreate && selected === results.length) void createFromQuery();
+		}
 	}
 
 	
@@ -121,8 +136,15 @@
 					<span class="kind">{row.typeKey}</span>
 				</button>
 			{/each}
-			{#if results.length === 0 && !searching}
-				<div class="none">{query.trim() === "" ? "Nothing here yet." : "No matches."}</div>
+			{#if canCreate && !searching}
+				<button class="row create" class:selected={selected === results.length} onclick={() => void createFromQuery()} onmouseenter={() => (selected = results.length)}>
+					<span class="icon">＋</span>
+					<span class="texts"><span class="name">Create object "{query.trim()}"</span></span>
+					<span class="kind">note</span>
+				</button>
+			{/if}
+			{#if results.length === 0 && !searching && !canCreate}
+				<div class="none">Nothing here yet.</div>
 			{/if}
 		</div>
 
@@ -239,6 +261,9 @@
 		flex: none;
 		font-size: 11px;
 		color: var(--muted);
+	}
+	.row.create .icon {
+		color: var(--accent);
 	}
 	.none {
 		color: var(--muted);
