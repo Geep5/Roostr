@@ -6,20 +6,26 @@
 	 * arrow-key navigation. The editor owns the keyboard focus (typing keeps
 	 * going into the block) and forwards nav keys via move()/confirm().
 	 */
-	import { Style } from "$lib/types";
-	import { store } from "$lib/data.svelte";
+	import { Style, type RelationDefJSON } from "$lib/types";
 
-	export type SlashPick = { kind: "style"; value: number } | { kind: "table" } | { kind: "relation"; key: string };
+	export type SlashPick =
+		| { kind: "style"; value: number }
+		| { kind: "table" }
+		| { kind: "relation"; key: string }
+		| { kind: "property_add" };
 	let {
 		filter,
 		x,
 		y,
+		presentRelations = [],
 		onpick,
 		onclose,
 	}: {
 		filter: string;
 		x: number;
 		y: number;
+		/** The object's already-present properties (Anytype inlines these). */
+		presentRelations?: RelationDefJSON[];
 		onpick: (item: SlashPick) => void;
 		onclose: () => void;
 	} = $props();
@@ -50,20 +56,28 @@
 		{ section: "Other", label: "Table", desc: "3×3 simple table", preview: "⊞", cls: "pv-table", aliases: ["table", "grid"], pick: { kind: "table" } },
 	];
 
-	/** Anytype's slash "Relations" section: insert a property inline. */
-	const relationEntries = $derived.by((): Entry[] =>
-		store.relations
-			.filter((r) => !r.hidden)
-			.map((r) => ({
-				section: "Properties",
-				label: r.name || r.key,
-				desc: r.format,
-				preview: "≔",
-				cls: "pv-rel",
-				aliases: [r.key, r.format, "property", "relation"],
-				pick: { kind: "relation", key: r.key } as SlashPick,
-			})),
-	);
+	/** Anytype's slash "Relations" section (menu/block/add.tsx:111-131):
+	 * "New relation" first, then only the OBJECT's present properties. */
+	const relationEntries = $derived.by((): Entry[] => [
+		{
+			section: "Properties",
+			label: "Add property",
+			desc: "pick existing or create new",
+			preview: "＋",
+			cls: "pv-rel",
+			aliases: ["property", "relation", "field", "add property", "new property"],
+			pick: { kind: "property_add" } as SlashPick,
+		},
+		...presentRelations.map((r) => ({
+			section: "Properties",
+			label: r.name || r.key,
+			desc: r.format,
+			preview: "≔",
+			cls: "pv-rel",
+			aliases: [r.key, "property", "relation"],
+			pick: { kind: "relation", key: r.key } as SlashPick,
+		})),
+	]);
 
 	const all = $derived([...ENTRIES, ...relationEntries]);
 

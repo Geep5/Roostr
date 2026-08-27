@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ObjectJSON, BlockJSON } from "$lib/types";
+	import type { ObjectJSON, BlockJSON, MarkJSON } from "$lib/types";
 	import { Pos, Style, MarkT, Layout } from "$lib/types";
 	import { note, table, fetchObject } from "$lib/api";
 	import { fromDom, selectionOffsets, setCaret, toggleMark, toHtml } from "$lib/marks";
@@ -7,6 +7,10 @@
 	import BlockMenu from "./BlockMenu.svelte";
 	import type { MenuAction } from "./BlockMenu.svelte";
 	import SlashMenu, { type SlashPick } from "./SlashMenu.svelte";
+	import PropertySuggest from "./PropertySuggest.svelte";
+	import { store } from "$lib/data.svelte";
+	import { RESERVED_KEYS, emptyValueFor } from "$lib/relations";
+	import type { RelationDefJSON } from "$lib/types";
 	import { getProcessorByUrl, getEmbedUrl, isSingleUrl, type EmbedProcessor } from "$lib/embed";
 
 	let { object, onchanged }: { object: ObjectJSON; onchanged: () => Promise<void> } = $props();
@@ -38,6 +42,12 @@
 	/** Slash menu: block, offset of the "/", live filter, caret anchor. */
 	let slash = $state<{ blockId: string; start: number; filter: string; x: number; y: number } | null>(null);
 	let slashMenu: { move: (d: number) => void; confirm: () => void } | undefined = $state();
+	/** Object's present, non-hidden properties for the slash section. */
+	const presentRelations = $derived(store.relations.filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && r.key in object.fields));
+
+	/** Property-suggest popover opened from slash "Add property". */
+	let propertySuggest = $state<{ blockId: string; x: number; y: number } | null>(null);
+
 	/** "Paste as" menu (Anytype editor/page.tsx onPasteUrl). */
 	let pasteMenu = $state<{ blockId: string; url: string; processor: EmbedProcessor | null; x: number; y: number; at: number } | null>(null);
 	const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -270,6 +280,7 @@
 	async function applySlash(pick: SlashPick) {
 		if (!slash) return;
 		const { blockId: id, start, filter } = slash;
+		const slashPos = { x: slash.x, y: slash.y };
 		slash = null;
 		const cur = byId.get(id)?.content.text;
 		const el = blockEl(id);
@@ -294,14 +305,10 @@
 				await table.create(object.id, id, Pos.BOTTOM);
 			}
 		} else if (pick.kind === "relation") {
-			// Anytype relation block: property rendered inline in the doc.
-			const relBlock = { id: crypto.randomUUID(), childrenIds: [], content: { custom: { contentType: "relation", meta: { key: pick.key } } } };
-			if (clean === "") {
-				await note.blockAdd(object.id, relBlock, id, Pos.REPLACE);
-			} else {
-				await note.blockUpdate(object.id, id, contentFor(id, clean, marks));
-				await note.blockAdd(object.id, relBlock, id, Pos.BOTTOM);
-			}
+			await insertRelationBlock(id, clean, marks, pick.key);
+		} else if (pick.kind === "property_add") {
+			// Anytype: "New relation" opens the relationSuggest menu.
+			propertySuggest = { blockId: id, x: slashPos.x, y: slashPos.y };
 		} else {
 			await note.blockUpdate(object.id, id, { text: { text: clean, marks, style: pick.value, checked: cur?.checked ?? false, color: cur?.color ?? "" } });
 			focusRequest = { blockId: id, offset: start };
@@ -393,6 +400,35 @@
 		await refresh();
 	}
 
+
+	/** Insert an inline relation block (empty text block → replace, else below)
+	 * and initialize the field so it shows everywhere. */
+	async function insertRelationBlock(id: string, clean: string, marks: MarkJSON[], key: string) {
+		const relBlock = { id: crypto.randomUUID(), childrenIds: [], content: { custom: { contentType: "relation", meta: { key } } } };
+		if (clean === "") {
+			await note.blockAdd(object.id, relBlock, id, Pos.REPLACE);
+		} else {
+			await note.blockUpdate(object.id, id, contentFor(id, clean, marks));
+			await note.blockAdd(object.id, relBlock, id, Pos.BOTTOM);
+		}
+		if (!(key in object.fields)) {
+			const rel = store.relations.find((r) => r.key === key);
+			await note.setField(object.id, key, emptyValueFor(rel?.format ?? "shorttext"));
+		}
+	}
+
+	async function onSuggestPick(rel: RelationDefJSON) {
+		if (!propertySuggest) return;
+		const id = propertySuggest.blockId;
+		propertySuggest = null;
+		const el = blockEl(id);
+		const cur = byId.get(id)?.content.text;
+		const { text, marks } = el ? fromDom(el) : { text: cur?.text ?? "", marks: cur?.marks ?? [] };
+		cancelPending(id);
+		lastLocalEdit = Date.now();
+		await insertRelationBlock(id, text, marks, rel.key);
+		await refresh();
+	}
 
 	/** Turn-into from the block action menu. */
 	async function applyStyle(id: string, style: number) {
@@ -605,6 +641,10 @@
 	/>
 {/if}
 
+{#if propertySuggest}
+	<PropertySuggest x={propertySuggest.x} y={propertySuggest.y} onpick={(r) => void onSuggestPick(r)} onclose={() => (propertySuggest = null)} />
+{/if}
+
 {#if pasteMenu}
 	<div class="paste-menu" style="left: {pasteMenu.x}px; top: {pasteMenu.y}px">
 		<div class="paste-head">Paste as</div>
@@ -630,7 +670,7 @@
 {/if}
 
 {#if slash}
-	<SlashMenu bind:this={slashMenu} filter={slash.filter} x={slash.x} y={slash.y} onpick={(p) => void applySlash(p)} onclose={() => (slash = null)} />
+	<SlashMenu bind:this={slashMenu} filter={slash.filter} x={slash.x} y={slash.y} {presentRelations} onpick={(p) => void applySlash(p)} onclose={() => (slash = null)} />
 {/if}
 
 <style>

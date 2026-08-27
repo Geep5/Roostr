@@ -8,7 +8,8 @@
 	 */
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
 	import { note } from "$lib/api";
-	import { store, refreshAll } from "$lib/data.svelte";
+	import { store } from "$lib/data.svelte";
+	import { CREATABLE_FORMATS, RESERVED_KEYS, createRelation, emptyValueFor } from "$lib/relations";
 	import PropertyValue from "./PropertyValue.svelte";
 
 	let {
@@ -17,22 +18,6 @@
 		onchanged,
 	}: { object: ObjectJSON; relations: RelationDefJSON[]; onchanged: () => Promise<void> } = $props();
 
-	const RESERVED: Record<string, true> = {
-		name: true,
-		iconEmoji: true,
-		iconImage: true,
-		setOf: true,
-		featuredRelations: true,
-		collectionIds: true,
-		viewFilters: true,
-		viewSorts: true,
-		viewRelations: true,
-		channel: true,
-		pinnedIds: true,
-		members: true,
-		keyId: true,
-	};
-
 	const featuredKeys = $derived.by(() => {
 		const items = object.fields["featuredRelations"]?.valuesValue?.items ?? [];
 		return items.map((i) => i.stringValue).filter((s): s is string => typeof s === "string");
@@ -40,11 +25,11 @@
 
 	/** Present, editable properties: featured order first, then the rest. */
 	const shown = $derived.by(() => {
-		const present = relations.filter((r) => !r.hidden && !RESERVED[r.key] && r.key in object.fields);
+		const present = relations.filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && r.key in object.fields);
 		const rank = new Map(featuredKeys.map((k, i) => [k, i]));
 		return present.toSorted((a, b) => (rank.get(a.key) ?? 999) - (rank.get(b.key) ?? 999));
 	});
-	const addable = $derived(relations.filter((r) => !r.hidden && !RESERVED[r.key] && !(r.key in object.fields)));
+	const addable = $derived(relations.filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && !(r.key in object.fields)));
 
 	let editing = $state<string | null>(null);
 	let adding = $state(false);
@@ -85,17 +70,11 @@
 
 	/** Initialize a property so it appears (empty per-format default). */
 	async function addProp(rel: RelationDefJSON) {
-		const empty: ValueJSON =
-			rel.format === "checkbox" ? { boolValue: false }
-			: rel.format === "tag" || rel.format === "object" ? { valuesValue: { items: [] } }
-			: rel.format === "number" || rel.format === "date" ? { intValue: 0 }
-			: { stringValue: "" };
-		await saveValue(rel.key, empty);
+		await saveValue(rel.key, emptyValueFor(rel.format));
 		editing = rel.key;
 	}
 
 	// ── New property (Anytype "create from scratch") ──────────────
-	const FORMATS = ["shorttext", "longtext", "number", "status", "tag", "date", "checkbox", "url", "email", "phone", "object"] as const;
 	let creating = $state(false);
 	let newName = $state("");
 	let newFormat = $state<string>("shorttext");
@@ -103,28 +82,12 @@
 	async function createProperty() {
 		const name = newName.trim();
 		if (!name) return;
-		const key = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || `prop_${Date.now()}`;
-		if (relations.some((r) => r.key === key)) {
-			creating = false;
-			return;
-		}
-		await note.create(name, "relation", {
-			key: { stringValue: key },
-			name: { stringValue: name },
-			format: { stringValue: newFormat },
-			hidden: { boolValue: false },
-			readOnly: { boolValue: false },
-			maxCount: { intValue: newFormat === "status" ? 1 : 0 },
-			options: { valuesValue: { items: [] } },
-			bundled: { boolValue: false },
-		});
-		await refreshAll();
+		const rel = await createRelation(name, newFormat);
 		creating = false;
 		adding = false;
-		const rel = store.relations.find((r) => r.key === key);
-		if (rel) await addProp(rel);
 		newName = "";
 		newFormat = "shorttext";
+		if (rel && !(rel.key in object.fields)) await addProp(rel);
 	}
 
 	async function removeProp(key: string) {
@@ -207,7 +170,7 @@
 							>
 								<input bind:value={newName} placeholder="Property name" />
 								<select bind:value={newFormat}>
-									{#each FORMATS as f (f)}
+									{#each CREATABLE_FORMATS as f (f)}
 										<option value={f}>{f}</option>
 									{/each}
 								</select>
