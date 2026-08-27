@@ -328,8 +328,29 @@ export async function startNostrSync(): Promise<void> {
 	// ── Startup: backfill both directions ─────────────────────────
 	console.log(`[sync] identity ${id.pk.slice(0, 8)}… relays: ${id.relays.join(", ")}`);
 
-	// Pull everything newer than our cursor (first run: everything).
-	const backfill = await pool.querySync(id.relays, { kinds: [CHANGE_KIND], authors: [id.pk], since: state.cursor || undefined });
+	// Full reconcile on every startup: page back through EVERYTHING the
+	// relays hold (no since — relays drop events silently, so the persisted
+	// published-set can't be trusted) and rebuild it from relay reality.
+	// Anything in the local manifest the relays didn't return gets
+	// re-published below. Negentropy can replace this scan later.
+	state.published = {};
+	const backfill: Event[] = [];
+	const seenIds = new Set<string>();
+	let until: number | undefined = undefined;
+	for (;;) {
+		const page = await pool.querySync(id.relays, {
+			kinds: [CHANGE_KIND],
+			authors: [id.pk],
+			until,
+			limit: 500,
+		});
+		const fresh = page.filter((e) => !seenIds.has(e.id));
+		if (fresh.length === 0) break;
+		for (const e of fresh) seenIds.add(e.id);
+		backfill.push(...fresh);
+		until = Math.min(...fresh.map((e) => e.created_at));
+		if (page.length < 100) break; // relays exhausted
+	}
 	console.log(`[sync] backfill: ${backfill.length} event(s) from relays`);
 	// Route every event through the chunk-aware path (sorted so multi-part
 	// groups assemble in one pass); onRelayEvent advances the cursor.

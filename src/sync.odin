@@ -110,10 +110,19 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 			rejected += 1
 			continue
 		}
-		// Verify the content address: id must equal the hash of the encoding
-		// with the id zeroed. A mismatch is a forgery or corruption.
-		hashed := encode_change(c, for_hashing = true, allocator = context.temp_allocator)
-		digest := sha256(hashed)
+		// Verify the content address over the RAW WIRE BYTES: the id is
+		// defined as sha256(bytes with the id field zeroed to `0a00`), and
+		// every writer emits the id as the leading field (0x0a 0x20 + 32).
+		// Re-encoding through our codec would reject legacy changes whose
+		// exact encoding predates schema evolution — bytes are the truth.
+		if len(data) < 34 || data[0] != 0x0a || data[1] != 0x20 {
+			rejected += 1
+			continue
+		}
+		hashed := make([dynamic]byte, 0, len(data) - 32, context.temp_allocator)
+		append(&hashed, 0x0a, 0x00)
+		append(&hashed, ..data[34:])
+		digest := sha256(hashed[:])
 		if string(digest[:]) != string(c.id) {
 			rejected += 1
 			continue

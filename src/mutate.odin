@@ -785,7 +785,10 @@ bootstrap_relations :: proc() {
 	created := 0
 	for r in BUNDLED_RELATIONS {
 		if have[r.key] do continue
-		id := new_uuid(context.temp_allocator)
+		// Deterministic id: every machine's bootstrap converges on the SAME
+		// object, so multi-device sync unions changes instead of duplicating
+		// relation definitions per install.
+		id := fmt.tprintf("bundled-rel-%s", r.key)
 		empty: []Value
 		ops := []Operation{
 			{kind = .Object_Create, type_key = "relation"},
