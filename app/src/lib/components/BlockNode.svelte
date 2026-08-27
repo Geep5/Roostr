@@ -19,6 +19,7 @@
 		ontogglecheck,
 		onmenu,
 		onrefresh,
+		onpaste,
 	}: {
 		id: string;
 		byId: Map<string, BlockJSON>;
@@ -35,6 +36,8 @@
 		onmenu: (id: string, x: number, y: number) => void;
 		/** Re-pull object state after a structural table mutation. */
 		onrefresh: () => void | Promise<void>;
+		/** URL-paste interception (Anytype "Paste as" menu). */
+		onpaste: (e: ClipboardEvent, id: string) => void;
 	} = $props();
 
 	const block = $derived(byId.get(id));
@@ -92,13 +95,13 @@
 	{#if block.content.layout?.style === Layout.ROW}
 		<div class="row" data-block={block.id} style="grid-template-columns: {block.childrenIds.map(widthOf).join(' ')}">
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} />
+				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
 			{/each}
 		</div>
 	{:else if block.content.layout?.style === Layout.COLUMN}
 		<div class="col" data-block={block.id}>
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} />
+				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
 			{/each}
 		</div>
 	{:else if block.content.table}
@@ -215,6 +218,7 @@
 				contenteditable="true"
 				bind:this={textEl}
 				onkeydown={(e) => onkeydown(e, block.id)}
+				onpaste={(e) => onpaste(e, block.id)}
 				oninput={() => oninput(block.id)}
 				onblur={() => onblur(block.id)}
 				onmouseup={() => onselect(block.id)}
@@ -226,16 +230,76 @@
 			{#if block.childrenIds.length > 0}
 				<div class="nested">
 					{#each block.childrenIds as cid (cid)}
-						<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} />
+						<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
 					{/each}
 				</div>
+			{/if}
+		</div>
+	{:else if block.content.custom?.contentType === "embed" || block.content.custom?.contentType === "bookmark"}
+		{@const meta = block.content.custom.meta ?? {}}
+		<div
+			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}"
+			data-table={block.id}
+			role="presentation"
+			ondragover={(e) => {
+				if (!draggingId || draggingId === block.id) return;
+				e.preventDefault();
+				zone = computeZone(e);
+			}}
+			ondragleave={() => (zone = 0)}
+			ondrop={(e) => {
+				e.preventDefault();
+				const z = zone;
+				zone = 0;
+				ondrop(block.id, z || Pos.BOTTOM);
+			}}
+			oncontextmenu={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				onmenu(block.id, e.clientX, e.clientY);
+			}}
+		>
+			<div class="gutter">
+				<button
+					class="handle"
+					title="Click for actions; drag to move"
+					draggable="true"
+					ondragstart={(e) => {
+						e.dataTransfer?.setData("text/plain", block.id);
+						ondragbegin(block.id);
+					}}
+					onclick={(e) => {
+						const r = e.currentTarget.getBoundingClientRect();
+						onmenu(block.id, r.right + 8, r.top);
+					}}>⠿</button
+				>
+			</div>
+			{#if block.content.custom.contentType === "embed"}
+				<iframe
+					class="embed"
+					class:audio={meta["processor"] === "spotify"}
+					src={meta["src"]}
+					title={meta["url"] ?? "Embedded content"}
+					frameborder="0"
+					allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+					allowfullscreen
+				></iframe>
+			{:else}
+				{@const host = (() => { try { return new URL(meta["url"] ?? "").hostname; } catch { return meta["url"] ?? ""; } })()}
+				<a class="bookmark" href={meta["url"]} target="_blank" rel="noopener noreferrer" onclick={(e) => e.stopPropagation()}>
+					<img class="favicon" src="https://www.google.com/s2/favicons?domain={host}&sz=32" alt="" />
+					<span class="bm-meta">
+						<span class="bm-title">{meta["title"] || host}</span>
+						<span class="bm-url">{meta["url"]}</span>
+					</span>
+				</a>
 			{/if}
 		</div>
 	{:else if block.content.custom}
 		<div class="block custom" data-block={block.id}>
 			<span class="chip">{block.content.custom.contentType}</span>
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} />
+				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
 			{/each}
 		</div>
 	{/if}
@@ -371,6 +435,59 @@
 		border-radius: 4px;
 		padding: 0 4px;
 		font-size: 0.9em;
+	}
+	.embed {
+		flex: 1;
+		min-width: 0;
+		width: 100%;
+		aspect-ratio: 16 / 9;
+		border: none;
+		border-radius: 10px;
+		background: #000;
+		margin: 4px 0;
+	}
+	.embed.audio {
+		aspect-ratio: auto;
+		height: 152px;
+		background: none;
+	}
+	.bookmark {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 10px 12px;
+		margin: 4px 0;
+		text-decoration: none;
+		color: inherit;
+	}
+	.bookmark:hover {
+		background: var(--hover);
+	}
+	.favicon {
+		width: 20px;
+		height: 20px;
+		border-radius: 4px;
+		flex: none;
+	}
+	.bm-meta {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+	.bm-title {
+		font-size: 13px;
+		font-weight: 550;
+	}
+	.bm-url {
+		font-size: 11px;
+		color: var(--muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	:global(.m-link) { color: var(--accent); text-decoration: underline; cursor: pointer; }
 </style>

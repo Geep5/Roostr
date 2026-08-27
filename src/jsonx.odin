@@ -5,6 +5,7 @@ package glon
 
 import "core:encoding/json"
 import "core:fmt"
+import "core:strings"
 
 // ── Model → json.Value ───────────────────────────────────────────────
 
@@ -316,6 +317,15 @@ content_from_json :: proc(v: json.Value, allocator := context.allocator) -> Bloc
 		c.kind = .Custom
 		c.custom.content_type = json_str(cu, "contentType")
 		c.custom.meta = make([dynamic]Str_Pair, allocator)
+		if m, mok := json_field(cu, "meta"); mok {
+			if obj, ook := m.(json.Object); ook {
+				for key, val in obj {
+					if s, sok := val.(json.String); sok {
+						append(&c.custom.meta, Str_Pair{key = strings.clone(key, allocator), value = strings.clone(string(s), allocator)})
+					}
+				}
+			}
+		}
 		return c
 	}
 	return c

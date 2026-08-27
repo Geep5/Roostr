@@ -7,6 +7,7 @@
 	import BlockMenu from "./BlockMenu.svelte";
 	import type { MenuAction } from "./BlockMenu.svelte";
 	import SlashMenu, { type SlashPick } from "./SlashMenu.svelte";
+	import { getProcessorByUrl, getEmbedUrl, isSingleUrl, type EmbedProcessor } from "$lib/embed";
 
 	let { object, onchanged }: { object: ObjectJSON; onchanged: () => Promise<void> } = $props();
 
@@ -37,6 +38,8 @@
 	/** Slash menu: block, offset of the "/", live filter, caret anchor. */
 	let slash = $state<{ blockId: string; start: number; filter: string; x: number; y: number } | null>(null);
 	let slashMenu: { move: (d: number) => void; confirm: () => void } | undefined = $state();
+	/** "Paste as" menu (Anytype editor/page.tsx onPasteUrl). */
+	let pasteMenu = $state<{ blockId: string; url: string; processor: EmbedProcessor | null; x: number; y: number; at: number } | null>(null);
 	const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	let lastLocalEdit = $state(0);
 
@@ -296,6 +299,91 @@
 		}
 		await refresh();
 	}
+	// ── URL paste (Anytype editor/page.tsx onPasteUrl) ───────────
+
+	function onPasteText(e: ClipboardEvent, id: string) {
+		const text = e.clipboardData?.getData("text/plain") ?? "";
+		if (!isSingleUrl(text)) return; // ordinary paste
+		e.preventDefault();
+		const url = text.trim();
+		const el = blockEl(id);
+		const sel = el ? selectionOffsets(el) : null;
+		const from = sel?.from ?? 0;
+		const to = sel?.to ?? from;
+		// Pasting over a selection link-marks it directly, no menu.
+		if (to > from && el) {
+			void linkRange(id, url, from, to);
+			return;
+		}
+		const winSel = window.getSelection();
+		const r = winSel && winSel.rangeCount > 0 ? winSel.getRangeAt(0).getBoundingClientRect() : null;
+		const er = el?.getBoundingClientRect();
+		const anchored = r && (r.left !== 0 || r.bottom !== 0);
+		pasteMenu = {
+			blockId: id,
+			url,
+			processor: getProcessorByUrl(url),
+			x: anchored ? r.left : (er?.left ?? 120),
+			y: (anchored ? r.bottom : (er?.bottom ?? 120)) + 6,
+			at: from,
+		};
+	}
+
+	async function linkRange(id: string, url: string, from: number, to: number) {
+		const el = blockEl(id);
+		if (!el) return;
+		const { text, marks } = fromDom(el);
+		marks.push({ from, to, type: MarkT.LINK, param: url });
+		el.innerHTML = toHtml(text, marks);
+		setCaret(el, to);
+		cancelPending(id);
+		lastLocalEdit = Date.now();
+		await note.blockUpdate(object.id, id, contentFor(id, text, marks));
+		await refresh();
+	}
+
+	/** Insert the URL as text at the caret; optionally link-marked. */
+	async function pasteAsText(withMark: boolean) {
+		if (!pasteMenu) return;
+		const { blockId: id, url, at } = pasteMenu;
+		pasteMenu = null;
+		const el = blockEl(id);
+		if (!el) return;
+		const { text, marks } = fromDom(el);
+		const value = text.slice(0, at) + url + " " + text.slice(at);
+		const shifted = marks.map((m) => (m.from >= at ? { ...m, from: m.from + url.length + 1, to: m.to + url.length + 1 } : m));
+		if (withMark) shifted.push({ from: at, to: at + url.length, type: MarkT.LINK, param: url });
+		el.innerHTML = toHtml(value, shifted);
+		setCaret(el, at + url.length + 1);
+		cancelPending(id);
+		lastLocalEdit = Date.now();
+		await note.blockUpdate(object.id, id, contentFor(id, value, shifted));
+		await refresh();
+	}
+
+	/** Create an embed/bookmark block: replace an empty block, else below. */
+	async function pasteAsBlock(kind: "embed" | "bookmark") {
+		if (!pasteMenu) return;
+		const { blockId: id, url, processor } = pasteMenu;
+		pasteMenu = null;
+		const cur = byId.get(id)?.content.text;
+		const el = blockEl(id);
+		const { text } = el ? fromDom(el) : { text: cur?.text ?? "" };
+		const meta: Record<string, string> =
+			kind === "embed" && processor
+				? { processor, url, src: getEmbedUrl(processor, url) }
+				: { url };
+		cancelPending(id);
+		lastLocalEdit = Date.now();
+		await note.blockAdd(
+			object.id,
+			{ id: crypto.randomUUID(), childrenIds: [], content: { custom: { contentType: kind, meta } } },
+			id,
+			text === "" ? Pos.REPLACE : Pos.BOTTOM,
+		);
+		await refresh();
+	}
+
 
 	/** Turn-into from the block action menu. */
 	async function applyStyle(id: string, style: number) {
@@ -490,6 +578,7 @@
 			ontogglecheck={toggleChecked}
 			onmenu={openBlockMenu}
 			onrefresh={refresh}
+			onpaste={onPasteText}
 		/>
 	{/each}
 	{#if rootIds.length === 0}
@@ -505,6 +594,19 @@
 		onaction={(a) => void onMenuAction(a)}
 		onclose={() => (blockMenu = null)}
 	/>
+{/if}
+
+{#if pasteMenu}
+	<div class="paste-menu" style="left: {pasteMenu.x}px; top: {pasteMenu.y}px">
+		<div class="paste-head">Paste as</div>
+		{#if pasteMenu.processor}
+			<button onclick={() => void pasteAsBlock("embed")}>Embed</button>
+		{/if}
+		<button onclick={() => void pasteAsBlock("bookmark")}>Bookmark</button>
+		<button onclick={() => void pasteAsText(true)}>Link</button>
+		<button onclick={() => void pasteAsText(false)}>Text</button>
+	</div>
+	<button class="paste-backdrop" aria-label="Close" onclick={() => (pasteMenu = null)}></button>
 {/if}
 
 {#if toolbar}
@@ -560,5 +662,45 @@
 	}
 	.toolbar button:hover {
 		background: var(--hover);
+	}
+	.paste-menu {
+		position: fixed;
+		z-index: 120;
+		min-width: 160px;
+		background: var(--panel, #1a1d23);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 6px;
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+		display: flex;
+		flex-direction: column;
+	}
+	.paste-head {
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--muted);
+		padding: 6px 8px 4px;
+	}
+	.paste-menu button {
+		border: none;
+		background: none;
+		color: inherit;
+		text-align: left;
+		padding: 6px 8px;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 13px;
+	}
+	.paste-menu button:hover {
+		background: var(--hover);
+	}
+	.paste-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 110;
+		background: none;
+		border: none;
+		cursor: default;
 	}
 </style>
