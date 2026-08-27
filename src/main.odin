@@ -38,6 +38,10 @@ main :: proc() {
 		got := bech32_encode("nsec", raw)
 		want := "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5"
 		fmt.println(got == want ? "PASS" : "FAIL", got)
+	case "cosmos":
+		shot := ""
+		if len(args) > 3 && args[2] == "--shot" do shot = args[3]
+		cosmos(shot)
 	case "serve":
 		port := 7333
 		if len(args) > 2 {
