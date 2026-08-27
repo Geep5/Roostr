@@ -293,6 +293,15 @@
 				await note.blockUpdate(object.id, id, contentFor(id, clean, marks));
 				await table.create(object.id, id, Pos.BOTTOM);
 			}
+		} else if (pick.kind === "relation") {
+			// Anytype relation block: property rendered inline in the doc.
+			const relBlock = { id: crypto.randomUUID(), childrenIds: [], content: { custom: { contentType: "relation", meta: { key: pick.key } } } };
+			if (clean === "") {
+				await note.blockAdd(object.id, relBlock, id, Pos.REPLACE);
+			} else {
+				await note.blockUpdate(object.id, id, contentFor(id, clean, marks));
+				await note.blockAdd(object.id, relBlock, id, Pos.BOTTOM);
+			}
 		} else {
 			await note.blockUpdate(object.id, id, { text: { text: clean, marks, style: pick.value, checked: cur?.checked ?? false, color: cur?.color ?? "" } });
 			focusRequest = { blockId: id, offset: start };
@@ -567,7 +576,7 @@
 		<BlockNode
 			{id}
 			{byId}
-			objectId={object.id}
+			{object}
 			{draggingId}
 			onkeydown={onKeydown}
 			oninput={onInput}

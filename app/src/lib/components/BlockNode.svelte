@@ -1,14 +1,15 @@
 <script lang="ts">
-	import type { BlockJSON } from "$lib/types";
+	import type { BlockJSON, ObjectJSON } from "$lib/types";
 	import { Pos, Style, Layout } from "$lib/types";
 	import { toHtml } from "$lib/marks";
 	import BlockNode from "./BlockNode.svelte";
 	import TableBlock from "./TableBlock.svelte";
+	import RelationBlock from "./RelationBlock.svelte";
 
 	let {
 		id,
 		byId,
-		objectId,
+		object,
 		draggingId,
 		onkeydown,
 		oninput,
@@ -23,7 +24,7 @@
 	}: {
 		id: string;
 		byId: Map<string, BlockJSON>;
-		objectId: string;
+		object: ObjectJSON;
 		draggingId: string;
 		onkeydown: (e: KeyboardEvent, id: string) => void;
 		oninput: (id: string) => void;
@@ -95,13 +96,13 @@
 	{#if block.content.layout?.style === Layout.ROW}
 		<div class="row" data-block={block.id} style="grid-template-columns: {block.childrenIds.map(widthOf).join(' ')}">
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
+				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
 			{/each}
 		</div>
 	{:else if block.content.layout?.style === Layout.COLUMN}
 		<div class="col" data-block={block.id}>
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
+				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
 			{/each}
 		</div>
 	{:else if block.content.table}
@@ -142,7 +143,7 @@
 					}}>⠿</button
 				>
 			</div>
-			<TableBlock {block} {byId} {objectId} {onrefresh} {oninput} {onblur} />
+			<TableBlock {block} {byId} objectId={object.id} {onrefresh} {oninput} {onblur} />
 		</div>
 	{:else if block.content.text}
 		{@const t = block.content.text}
@@ -230,10 +231,50 @@
 			{#if block.childrenIds.length > 0}
 				<div class="nested">
 					{#each block.childrenIds as cid (cid)}
-						<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
+						<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
 					{/each}
 				</div>
 			{/if}
+		</div>
+	{:else if block.content.custom?.contentType === "relation"}
+		<div
+			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}"
+			data-table={block.id}
+			role="presentation"
+			ondragover={(e) => {
+				if (!draggingId || draggingId === block.id) return;
+				e.preventDefault();
+				zone = computeZone(e);
+			}}
+			ondragleave={() => (zone = 0)}
+			ondrop={(e) => {
+				e.preventDefault();
+				const z = zone;
+				zone = 0;
+				ondrop(block.id, z || Pos.BOTTOM);
+			}}
+			oncontextmenu={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				onmenu(block.id, e.clientX, e.clientY);
+			}}
+		>
+			<div class="gutter">
+				<button
+					class="handle"
+					title="Click for actions; drag to move"
+					draggable="true"
+					ondragstart={(e) => {
+						e.dataTransfer?.setData("text/plain", block.id);
+						ondragbegin(block.id);
+					}}
+					onclick={(e) => {
+						const r = e.currentTarget.getBoundingClientRect();
+						onmenu(block.id, r.right + 8, r.top);
+					}}>⠿</button
+				>
+			</div>
+			<RelationBlock {block} {object} {onrefresh} />
 		</div>
 	{:else if block.content.custom?.contentType === "embed" || block.content.custom?.contentType === "bookmark"}
 		{@const meta = block.content.custom.meta ?? {}}
@@ -299,7 +340,7 @@
 		<div class="block custom" data-block={block.id}>
 			<span class="chip">{block.content.custom.contentType}</span>
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {objectId} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
+				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
 			{/each}
 		</div>
 	{/if}

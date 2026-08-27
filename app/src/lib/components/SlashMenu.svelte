@@ -7,9 +7,9 @@
 	 * going into the block) and forwards nav keys via move()/confirm().
 	 */
 	import { Style } from "$lib/types";
+	import { store } from "$lib/data.svelte";
 
-	export type SlashPick = { kind: "style"; value: number } | { kind: "table" };
-
+	export type SlashPick = { kind: "style"; value: number } | { kind: "table" } | { kind: "relation"; key: string };
 	let {
 		filter,
 		x,
@@ -50,10 +50,27 @@
 		{ section: "Other", label: "Table", desc: "3×3 simple table", preview: "⊞", cls: "pv-table", aliases: ["table", "grid"], pick: { kind: "table" } },
 	];
 
+	/** Anytype's slash "Relations" section: insert a property inline. */
+	const relationEntries = $derived.by((): Entry[] =>
+		store.relations
+			.filter((r) => !r.hidden)
+			.map((r) => ({
+				section: "Properties",
+				label: r.name || r.key,
+				desc: r.format,
+				preview: "≔",
+				cls: "pv-rel",
+				aliases: [r.key, r.format, "property", "relation"],
+				pick: { kind: "relation", key: r.key } as SlashPick,
+			})),
+	);
+
+	const all = $derived([...ENTRIES, ...relationEntries]);
+
 	const filtered = $derived.by(() => {
 		const q = filter.trim().toLowerCase();
-		if (!q) return ENTRIES;
-		return ENTRIES.filter(
+		if (!q) return all;
+		return all.filter(
 			(e) => e.label.toLowerCase().includes(q) || e.desc.toLowerCase().includes(q) || e.aliases.some((a) => a.includes(q)),
 		);
 	});
@@ -104,7 +121,7 @@
 	{#if filtered.length === 0}
 		<div class="none">No matches</div>
 	{/if}
-	{#each filtered as item, i (item.label)}
+	{#each filtered as item, i (item.section + item.label)}
 		{#if i === 0 || filtered[i - 1].section !== item.section}
 			<div class="section">{item.section}</div>
 		{/if}
@@ -197,4 +214,5 @@
 	.pv-code { font-family: ui-monospace, monospace; font-size: 10px; color: var(--muted); }
 	.pv-callout { font-size: 12px; background: var(--hover); }
 	.pv-table { font-size: 16px; color: var(--muted); }
+	.pv-rel { font-size: 14px; color: var(--accent); }
 </style>
