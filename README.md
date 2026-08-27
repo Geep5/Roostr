@@ -1,9 +1,12 @@
-# glonOdin
+# Roostr
 
-The glon notes substrate on **Odin + Svelte**: a native backend serving
-the same content-addressed protobuf Change-DAG as the TS implementation
-(`projekt/3/glon`), with the block editor / queries / channels SPA as a
-pure client.
+Anytype-style notes on the **glon** substrate, built on Odin + Svelte:
+a native backend serving a content-addressed protobuf Change-DAG, with
+the block editor / queries / channels / discussions SPA as a pure
+client. Nostr-ready: your key is your identity, sync rides relays.
+
+(Formerly "glonOdin" — the TS reference implementation lives in
+`projekt/3/glon`.)
 
 Both stacks read and write the same `~/.glon/changes/<objectId>/<hex>.pb`
 files — content addresses verify across implementations
