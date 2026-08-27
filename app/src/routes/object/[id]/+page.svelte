@@ -6,7 +6,7 @@
 	import { fetchObject, fetchQuery, note } from "$lib/api";
 	import { store, refreshAll, onObjectEvent } from "$lib/data.svelte";
 	import Editor from "$lib/components/Editor.svelte";
-	import PropertiesPanel from "$lib/components/PropertiesPanel.svelte";
+	import FeaturedProps from "$lib/components/FeaturedProps.svelte";
 	import SetTable from "$lib/components/SetTable.svelte";
 	import QueryControls from "$lib/components/QueryControls.svelte";
 	import ChannelManage from "$lib/components/ChannelManage.svelte";
@@ -184,6 +184,10 @@
 			/>
 		</div>
 
+		{#if !isChannel}
+			<FeaturedProps {object} relations={store.relations} onchanged={refresh} />
+		{/if}
+
 		{#if isChannel}
 			<ChannelManage {object} {channelInfo} relations={store.relations} onchanged={refresh} />
 		{:else if isQuery || isCollection}
@@ -213,7 +217,7 @@
 				<QueryControls {object} relations={store.relations} onchanged={refresh} />
 			{/if}
 			{#if tableBody}
-				<SetTable bind:this={table} body={tableBody} relations={store.relations} defaultSorts={viewSorts} />
+				<SetTable bind:this={table} body={tableBody} {object} relations={store.relations} defaultSorts={viewSorts} onchanged={refresh} />
 			{:else}
 				<p class="muted">Empty collection — add objects.</p>
 			{/if}
@@ -221,7 +225,6 @@
 			<Editor bind:this={editor} {object} onchanged={refresh} />
 		{/if}
 
-		<PropertiesPanel {object} relations={store.relations} onchanged={refresh} />
 	</article>
 {:else}
 	<p class="muted">Loading…</p>

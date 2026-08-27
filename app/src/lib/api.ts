@@ -20,6 +20,8 @@ export interface QueryResultRow {
 	typeKey: string;
 	name?: string;
 	snippet?: string;
+	createdAt: number;
+	updatedAt: number;
 	fields: Record<string, ValueJSON>;
 }
 
@@ -60,6 +62,8 @@ export const note = {
 		mutate("block_remove", { object_id: objectId, block_id: blockId }),
 	setField: (objectId: string, key: string, value: ValueJSON) =>
 		mutate("set_field", { object_id: objectId, key, value }),
+	deleteField: (objectId: string, key: string) =>
+		mutate("delete_field", { object_id: objectId, key }),
 	del: (objectId: string) => mutate("delete", { object_id: objectId }),
 };
 

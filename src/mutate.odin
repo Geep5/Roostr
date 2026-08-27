@@ -345,6 +345,20 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		}
 		ok_response(sock)
 
+	case "delete_field":
+		object_id := json_str(parsed, "object_id")
+		key := json_str(parsed, "key")
+		if object_id == "" || key == "" {
+			respond_error(sock, "object_id and key required")
+			return
+		}
+		op := Operation{kind = .Field_Delete, key = key}
+		if !commit_ops(object_id, {op}) {
+			respond_error(sock, "write failed", "500 Internal Server Error")
+			return
+		}
+		ok_response(sock)
+
 	case "delete":
 		object_id := json_str(parsed, "object_id")
 		if object_id == "" {

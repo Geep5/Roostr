@@ -101,7 +101,7 @@
 	</div>
 
 	<h3>Objects in this channel</h3>
-	<SetTable body={{ filters: [{ key: "channel", condition: "equal", value: object.id }] }} {relations} />
+	<SetTable body={{ filters: [{ key: "channel", condition: "equal", value: object.id }] }} {object} {relations} {onchanged} />
 </section>
 
 <style>

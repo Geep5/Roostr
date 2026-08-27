@@ -402,6 +402,8 @@ handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
 			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
 			o["name"] = json.String(name)
 			o["fields"] = fields_to_json(s.fields)
+			o["createdAt"] = json.Integer(s.created_at)
+			o["updatedAt"] = json.Integer(s.updated_at)
 			if text != "" {
 				snippet := text_snippet(s, text)
 				if snippet != "" do o["snippet"] = json.String(snippet)
