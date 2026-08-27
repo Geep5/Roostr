@@ -81,6 +81,7 @@
 			</button>
 		{/each}
 		<button class="space add" title="New channel" onclick={() => void newChannel()}>+</button>
+		<button class="space add" title="Graph" onclick={() => void goto("/graph")}>◉</button>
 		<div class="rail-spacer"></div>
 		<button class="space settings" title="Settings" onclick={() => (showSettings = true)}>⚙</button>
 	</nav>
