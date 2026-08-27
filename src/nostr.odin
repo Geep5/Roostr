@@ -60,6 +60,8 @@ nostr_write :: proc(s: Nostr_Settings) {
 	// Private key inside — owner-only, like wallet.json.
 	_ = os.write_entire_file(nostr_settings_path(), marshal(json.Object(root)), perm = {.Read_User, .Write_User})
 }
+/** Battle-tested public relays seeded on fresh installs (Settings can edit). */
+DEFAULT_RELAYS :: []string{"wss://relay.damus.io", "wss://nos.lol", "wss://relay.nostr.band"}
 
 /** Settings with a key, generating one on first access. */
 nostr_ensure :: proc(allocator := context.temp_allocator) -> Nostr_Settings {
@@ -70,6 +72,11 @@ nostr_ensure :: proc(allocator := context.temp_allocator) -> Nostr_Settings {
 		raw: [32]byte
 		crypto.rand_bytes(raw[:])
 		s.privkey_hex = strings.clone(string(hex.encode(raw[:], context.temp_allocator)), allocator)
+		// Fresh identity ⇒ fresh install: seed the default relay set so
+		// sync works out of the box.
+		if len(s.relays) == 0 {
+			for r in DEFAULT_RELAYS do append(&s.relays, r)
+		}
 		nostr_write(s)
 	}
 	return s

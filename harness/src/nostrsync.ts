@@ -131,42 +131,152 @@ export async function startNostrSync(): Promise<void> {
 	};
 	setInterval(persist, 5000);
 
-	async function publishChange(objectId: string, changeHex: string, b64: string): Promise<void> {
-		if (state.published[changeHex]) return;
-		const ciphertext = nip44.encrypt(b64, id!.conversationKey);
-		const event = finalizeEvent(
-			{
-				kind: CHANGE_KIND,
-				created_at: Math.floor(Date.now() / 1000),
-				tags: [["h", blindObjectId(id!, objectId)]],
-				content: ciphertext,
-			},
-			id!.sk,
-		);
-		await Promise.any(pool.publish(id!.relays, event));
-		state.published[changeHex] = true;
-		dirty = true;
+	// ── Paced publish queue ────────────────────────────────────────
+	//
+	// Public relays rate-limit bursts (a fresh node pushes its whole
+	// corpus). One event every PUBLISH_SPACING_MS; failures re-queue with
+	// exponential backoff and are never dropped — publish is eventually
+	// durable as long as the daemon lives.
+	const PUBLISH_SPACING_MS = 120;
+	interface QueueItem {
+		objectId: string;
+		changeHex: string;
+		b64: string;
+		attempts: number;
+		notBefore: number;
 	}
+	const queue: QueueItem[] = [];
+	const queued = new Set<string>();
+	let failuresLogged = 0;
+
+	function enqueue(objectId: string, changeHex: string, b64: string): void {
+		if (state.published[changeHex] || queued.has(changeHex)) return;
+		queued.add(changeHex);
+		queue.push({ objectId, changeHex, b64, attempts: 0, notBefore: 0 });
+	}
+
+	/** Relay + NIP-44 limits: chunk big changes into ≤CHUNK_CHARS parts.
+	 * Group id is content-derived so retries republish identical parts and
+	 * the receiver dedupes naturally. */
+	const CHUNK_CHARS = 40_000;
+
+	function chunkGroupId(b64: string): string {
+		const h = new Bun.CryptoHasher("sha256");
+		h.update(b64);
+		return h.digest("hex").slice(0, 16);
+	}
+
+	async function publishOnce(item: QueueItem): Promise<boolean> {
+		const parts: string[] = [];
+		for (let i = 0; i < item.b64.length; i += CHUNK_CHARS) parts.push(item.b64.slice(i, i + CHUNK_CHARS));
+		const gid = parts.length > 1 ? chunkGroupId(item.b64) : "";
+		try {
+			for (let i = 0; i < parts.length; i++) {
+				const tags: string[][] = [["h", blindObjectId(id!, item.objectId)]];
+				if (gid) tags.push(["c", gid, String(i), String(parts.length)]);
+				const event = finalizeEvent(
+					{
+						kind: CHANGE_KIND,
+						created_at: Math.floor(Date.now() / 1000),
+						tags,
+						content: nip44.encrypt(parts[i], id!.conversationKey),
+					},
+					id!.sk,
+				);
+				await Promise.any(pool.publish(id!.relays, event));
+				if (parts.length > 1 && i < parts.length - 1) {
+					const { promise, resolve } = Promise.withResolvers<void>();
+					setTimeout(resolve, PUBLISH_SPACING_MS);
+					await promise;
+				}
+			}
+			return true;
+		} catch (err) {
+			if (failuresLogged < 5) {
+				failuresLogged++;
+				const reasons = err instanceof AggregateError ? err.errors.map((e) => String(e).slice(0, 80)).join(" | ") : String(err).slice(0, 120);
+				console.error(`[sync] publish rejected (attempt ${item.attempts + 1}): ${reasons}`);
+			}
+			return false;
+		}
+	}
+
+	void (async () => {
+		for (;;) {
+			const now = Date.now();
+			const idx = queue.findIndex((q) => q.notBefore <= now);
+			if (idx === -1) {
+				const { promise, resolve } = Promise.withResolvers<void>();
+				setTimeout(resolve, 500);
+				await promise;
+				continue;
+			}
+			const [item] = queue.splice(idx, 1);
+			if (state.published[item.changeHex]) {
+				queued.delete(item.changeHex);
+				continue;
+			}
+			if (await publishOnce(item)) {
+				state.published[item.changeHex] = true;
+				queued.delete(item.changeHex);
+				dirty = true;
+			} else {
+				item.attempts++;
+				item.notBefore = Date.now() + Math.min(300_000, 2000 * 2 ** item.attempts);
+				queue.push(item);
+			}
+			const { promise, resolve } = Promise.withResolvers<void>();
+			setTimeout(resolve, PUBLISH_SPACING_MS);
+			await promise;
+		}
+	})();
 
 	async function publishObject(objectId: string): Promise<void> {
 		try {
 			const changes = await localChanges(objectId);
-			for (const c of changes) {
-				if (!state.published[c.id]) await publishChange(objectId, c.id, c.b64);
-			}
+			for (const c of changes) enqueue(objectId, c.id, c.b64);
 		} catch (err) {
-			console.error(`[sync] publish failed for ${objectId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
+			console.error(`[sync] enqueue failed for ${objectId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
 		}
+	}
+
+	/** Reassembly buffer for chunked changes: gid → parts. */
+	const chunkGroups = new Map<string, { total: number; parts: Map<number, string> }>();
+
+	async function importB64(b64: string): Promise<void> {
+		const res = await localImport([b64]);
+		// Anything the relay already holds must never be echoed back.
+		for (const hex of res.ids) state.published[hex] = true;
+		dirty = true;
 	}
 
 	async function onRelayEvent(event: Event): Promise<void> {
 		try {
-			const b64 = nip44.decrypt(event.content, id!.conversationKey);
-			const res = await localImport([b64]);
-			// Anything the relay already holds must never be echoed back.
-			for (const hex of res.ids) state.published[hex] = true;
-			if (event.created_at > state.cursor) state.cursor = event.created_at;
-			dirty = true;
+			const part = nip44.decrypt(event.content, id!.conversationKey);
+			const chunkTag = event.tags.find((t) => t[0] === "c");
+			if (event.created_at > state.cursor) {
+				state.cursor = event.created_at;
+				dirty = true;
+			}
+			if (!chunkTag) {
+				await importB64(part);
+				return;
+			}
+			const [, gid, idxStr, totalStr] = chunkTag;
+			const total = parseInt(totalStr, 10);
+			if (!gid || !Number.isFinite(total) || total < 2 || total > 64) return;
+			let group = chunkGroups.get(gid);
+			if (!group) {
+				group = { total, parts: new Map() };
+				chunkGroups.set(gid, group);
+			}
+			group.parts.set(parseInt(idxStr, 10), part);
+			if (group.parts.size === group.total) {
+				chunkGroups.delete(gid);
+				let full = "";
+				for (let i = 0; i < group.total; i++) full += group.parts.get(i) ?? "";
+				await importB64(full);
+			}
 		} catch {
 			/* not ours / garbled — ignore */
 		}
