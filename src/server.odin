@@ -336,9 +336,14 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 			name := ""
 			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
 			o["name"] = json.String(name)
-			icon := ""
+		// Anytype precedence: image wins over emoji, else caller falls back
+		// to the first letter (their generated-tile equivalent).
+		icon := ""
+		if v, ok := fields_get(s.fields, "iconImage"); ok && v.kind == .String do icon = v.str
+		if icon == "" {
 			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do icon = v.str
-			o["icon"] = json.String(icon)
+		}
+		o["icon"] = json.String(icon)
 			pinned := make([dynamic]json.Value, context.temp_allocator)
 			if v, ok := fields_get(s.fields, "pinnedIds"); ok && v.kind == .List {
 				for item in v.items do if item.kind == .String do append(&pinned, json.String(item.str))

@@ -171,7 +171,11 @@
 				title="{c.name}{c.members.length ? ` · ${c.members.length} member(s)` : ''}"
 				onclick={() => selectChannel(c.id)}
 			>
-				{c.icon || c.name.slice(0, 1).toUpperCase() || "?"}
+				{#if c.icon?.startsWith("http")}
+					<img class="rail-img" src={c.icon} alt={c.name} />
+				{:else}
+					{c.icon || c.name.slice(0, 1).toUpperCase() || "?"}
+				{/if}
 			</button>
 		{/each}
 		<button class="space add" title="New channel" onclick={() => void newChannel()}>+</button>
@@ -226,7 +230,11 @@
 				<button class="hbtn" title="Forward" onclick={() => history.forward()}>›</button>
 			</div>
 			<button class="path" title="Search (⌘K)" onclick={() => (showSearch = true)}>
-				<span class="path-icon">{headerPath.icon}</span>
+				{#if headerPath.icon.startsWith("http")}
+					<img class="path-img" src={headerPath.icon} alt="" />
+				{:else}
+					<span class="path-icon">{headerPath.icon}</span>
+				{/if}
 				<span class="path-name">{headerPath.name}</span>
 			</button>
 			<div class="header-side right">
@@ -561,6 +569,18 @@
 	}
 	.path:hover {
 		background: var(--hover);
+	}
+	.rail-img {
+		width: 100%;
+		height: 100%;
+		border-radius: inherit;
+		object-fit: cover;
+	}
+	.path-img {
+		width: 18px;
+		height: 18px;
+		border-radius: 5px;
+		object-fit: cover;
 	}
 	.path-icon {
 		font-size: 15px;

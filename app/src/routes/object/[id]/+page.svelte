@@ -47,9 +47,12 @@
 
 	let showEmoji = $state(false);
 
-	async function setEmoji(emoji: string) {
+	/** Anytype setIcon semantics: emoji and image are mutually exclusive. */
+	async function setEmoji(value: string) {
 		if (!object) return;
-		await note.setField(object.id, "iconEmoji", { stringValue: emoji });
+		const isImage = /^https?:\/\//.test(value);
+		await note.setField(object.id, isImage ? "iconImage" : "iconEmoji", { stringValue: value });
+		await note.deleteField(object.id, isImage ? "iconEmoji" : "iconImage").catch(() => {});
 		await refresh();
 	}
 
@@ -163,10 +166,15 @@
 					title="Set icon"
 					onclick={() => (showEmoji = !showEmoji)}
 				>
-					{objectIcon(object.fields["iconEmoji"]?.stringValue, object.typeKey)}
+					{#if object.fields["iconImage"]?.stringValue}
+						<img class="obj-img" src={object.fields["iconImage"].stringValue} alt="icon" />
+					{:else}
+						{objectIcon(object.fields["iconEmoji"]?.stringValue, object.typeKey)}
+					{/if}
 				</button>
 				{#if showEmoji}
 					<EmojiPicker
+						withImage={true}
 						onpick={(e) => {
 							showEmoji = false;
 							void setEmoji(e);
@@ -238,6 +246,12 @@
 	<p class="muted">Loading…</p>
 {/if}
 <style>
+	.obj-img {
+		width: 34px;
+		height: 34px;
+		border-radius: 8px;
+		object-fit: cover;
+	}
 	.icon-wrap {
 		position: relative;
 		flex: none;

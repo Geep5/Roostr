@@ -18,6 +18,7 @@
 	const RESERVED: Record<string, true> = {
 		name: true,
 		iconEmoji: true,
+		iconImage: true,
 		setOf: true,
 		featuredRelations: true,
 		collectionIds: true,

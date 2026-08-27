@@ -6,7 +6,16 @@
 	 * Unicode — portable through nostr sync as-is (NIP-30 image emoji
 	 * can layer on later).
 	 */
-	let { onpick, onclose }: { onpick: (emoji: string) => void; onclose: () => void } = $props();
+	let {
+		onpick,
+		onclose,
+		withImage = false,
+	}: {
+		onpick: (emoji: string) => void;
+		onclose: () => void;
+		/** Anytype's Upload tab analog: accept an image URL as the icon. */
+		withImage?: boolean;
+	} = $props();
 
 	let query = $state("");
 	let inputEl = $state<HTMLInputElement>();
@@ -71,6 +80,8 @@
 
 	/** Query can be a pasted emoji — offer it directly as the first cell. */
 	const isEmojiQuery = $derived(query.trim() !== "" && /\p{Extended_Pictographic}/u.test(query.trim()));
+	/** A pasted URL becomes an image icon when the caller allows it. */
+	const isUrlQuery = $derived(withImage && /^https?:\/\/\S+$/.test(query.trim()));
 
 	const filtered = $derived.by(() => {
 		const q = query.trim().toLowerCase();
@@ -96,12 +107,16 @@
 
 <div class="picker" bind:this={menuEl} role="dialog" aria-label="Choose emoji">
 	<div class="top">
-		<input bind:this={inputEl} bind:value={query} placeholder="Search or paste an emoji…" />
+		<input bind:this={inputEl} bind:value={query} placeholder={withImage ? "Search, paste an emoji or an image URL…" : "Search or paste an emoji…"} />
 		<button title="Random" onclick={random}>🎲</button>
 		<button title="Remove icon" onclick={() => onpick("")}>×</button>
 	</div>
 	<div class="grid">
-		{#if isEmojiQuery}
+		{#if isUrlQuery}
+			<button class="cell img-cell" title="Use image" onclick={() => onpick(query.trim())}>
+				<img src={query.trim()} alt="icon" />
+			</button>
+		{:else if isEmojiQuery}
 			<button class="cell paste" title="Use {query.trim()}" onclick={() => onpick(query.trim())}>{query.trim()}</button>
 		{/if}
 		{#each filtered as x (x.e)}
@@ -175,6 +190,12 @@
 	}
 	.cell:hover {
 		background: var(--hover);
+	}
+	.img-cell img {
+		width: 26px;
+		height: 26px;
+		border-radius: 6px;
+		object-fit: cover;
 	}
 	.cell.paste {
 		outline: 1px dashed var(--accent);
