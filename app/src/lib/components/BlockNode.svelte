@@ -139,7 +139,24 @@
 				>
 			</div>
 			{#if t.style === Style.CHECKBOX}
-				<input class="check" type="checkbox" checked={t.checked ?? false} onchange={(e) => ontogglecheck(block.id, e.currentTarget.checked)} />
+				<!-- Anytype's circular checkbox: outlined circle → accent-filled circle + white check. -->
+				<button
+					class="check-circle"
+					class:on={t.checked ?? false}
+					aria-label={t.checked ? "Mark undone" : "Mark done"}
+					onclick={() => ontogglecheck(block.id, !(t.checked ?? false))}
+				>
+					{#if t.checked}
+						<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+							<path d="M2 10C2 5.58172 5.58172 2 10 2C14.4183 2 18 5.58172 18 10C18 14.4183 14.4183 18 10 18C5.58172 18 2 14.4183 2 10Z" fill="currentColor" />
+							<path d="M13.0975 6.16216C13.2842 5.87198 13.6705 5.78818 13.9608 5.97466C14.251 6.16128 14.3348 6.54761 14.1483 6.83794L9.65222 13.8379C9.54506 14.0046 9.36554 14.1111 9.16785 14.1241C8.97004 14.1371 8.77734 14.0547 8.64929 13.9034L5.89929 10.6534C5.67673 10.3899 5.71015 9.99535 5.97351 9.77251C6.23702 9.54995 6.63153 9.58337 6.85437 9.84673L9.0575 12.4502L13.0975 6.16216Z" fill="white" />
+						</svg>
+					{:else}
+						<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+							<path d="M10 2.5C14.1421 2.5 17.5 5.85786 17.5 10C17.5 14.1421 14.1421 17.5 10 17.5C5.85786 17.5 2.5 14.1421 2.5 10C2.5 5.85786 5.85786 2.5 10 2.5Z" stroke="currentColor" class="ring" />
+						</svg>
+					{/if}
+				</button>
 			{/if}
 			{#if t.style === Style.BULLET}<span class="marker">•</span>{/if}
 			{#if t.style === Style.NUMBERED}<span class="marker">1.</span>{/if}
@@ -229,9 +246,30 @@
 	.handle:hover {
 		background: var(--hover);
 	}
-	.check {
-		margin-top: 8px;
-		accent-color: var(--accent);
+	/* Anytype marker: 24×24 box, 20×20 circle icon, muted → accent when checked. */
+	.check-circle {
+		width: 24px;
+		height: 24px;
+		flex: none;
+		margin-top: 3px;
+		padding: 0;
+		border: none;
+		background: none;
+		color: var(--muted);
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	.check-circle svg {
+		width: 20px;
+		height: 20px;
+	}
+	.check-circle:hover .ring {
+		fill: rgb(79 79 79 / 0.08);
+	}
+	.check-circle.on {
+		color: var(--accent);
 	}
 	.marker {
 		padding-top: 4px;
@@ -268,7 +306,8 @@
 	.codeblock { font-family: ui-monospace, monospace; background: var(--panel); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
 	.callout { background: var(--panel); border-radius: 8px; padding: 10px 12px; }
 	.description { color: var(--muted); }
-	.done { text-decoration: line-through; color: var(--muted); }
+	/* Checked text dims (Anytype), no strikethrough. */
+	.done { color: var(--muted); }
 	.custom .chip {
 		font-size: 11px;
 		color: var(--muted);
