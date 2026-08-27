@@ -186,10 +186,11 @@ async function runExtractionLoop(agentId: string, model: string, items: Classifi
 }
 
 /**
- * Compact: cut, (extract), summarize, append ONE compaction_summary block.
+ * Compact: cut, (extract), summarize, append ONE compaction_summary block
+ * to the conversation object (the agent's chat; subagents' own object).
  * Returns true when a compaction happened.
  */
-export async function doCompact(agentId: string, view: ConversationView, cfg: CompactionConfig, ratio: number): Promise<boolean> {
+export async function doCompact(agentId: string, convId: string, view: ConversationView, cfg: CompactionConfig, ratio: number): Promise<boolean> {
 	const cut = findCutIndex(view.items, cfg.keepRecentTokens, ratio);
 	if (cut <= 0) return false;
 	const toCompact = view.items.slice(0, cut);
@@ -223,7 +224,7 @@ export async function doCompact(agentId: string, view: ConversationView, cfg: Co
 	for (const item of toCompact) tokensBefore += estimateTokens(itemText(item), ratio);
 
 	await addBlock(
-		agentId,
+		convId,
 		{
 			id: crypto.randomUUID(),
 			childrenIds: [],

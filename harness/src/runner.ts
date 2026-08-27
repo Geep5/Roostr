@@ -22,18 +22,19 @@ import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRU
 
 const DEFAULT_SYSTEM = `You are a helpful agent living inside Roostr, a local-first notes app where
 everything is an object in a content-addressed DAG. You converse with your
-principal through the discussion on your own agent object. Use tools to read,
-search, create, and organize objects; use memory_* tools to pin durable facts
-and milestones. Be concise and concrete. When a listed skill matches the task,
-read it with skill_read before starting.`;
+principal through your chat and through any object's discussion — messages
+from other objects arrive framed with their origin and the object's contents.
+Use tools to read, search, create, and organize objects; use memory_* tools
+to pin durable facts and milestones. Be concise and concrete. When a listed
+skill matches the task, read it with skill_read before starting.`;
 
 function tokenRatio(obj: ObjectJSON): number {
 	return num(obj.fields, "token_ratio") ?? 1;
 }
 
-async function persistToolUse(agentId: string, use: { id: string; name: string; input: Record<string, unknown> }): Promise<void> {
+async function persistToolUse(convId: string, use: { id: string; name: string; input: Record<string, unknown> }): Promise<void> {
 	await addBlock(
-		agentId,
+		convId,
 		{
 			id: crypto.randomUUID(),
 			childrenIds: [],
@@ -49,9 +50,9 @@ async function persistToolUse(agentId: string, use: { id: string; name: string; 
 	);
 }
 
-async function persistToolResult(agentId: string, toolUseId: string, content: string, isError: boolean): Promise<void> {
+async function persistToolResult(convId: string, toolUseId: string, content: string, isError: boolean): Promise<void> {
 	await addBlock(
-		agentId,
+		convId,
 		{
 			id: crypto.randomUUID(),
 			childrenIds: [],
@@ -93,10 +94,12 @@ async function buildEffectiveSystem(agent: ObjectJSON, view: ConversationView, o
 
 /**
  * Run the agent until it stops calling tools. Returns the final reply text.
- * Every turn artifact (assistant text, tool_use, tool_result) is persisted
- * to the DAG as it happens — a crash resumes cleanly via repairToolPairs.
+ * The conversation lives on `convId` (the agent's holistic chat; subagents
+ * converse on their own object, convId === agentId). Every turn artifact
+ * (assistant text, tool_use, tool_result) is persisted to the DAG as it
+ * happens — a crash resumes cleanly via repairToolPairs.
  */
-export async function runTurn(agentId: string, opts: RunOptions = {}): Promise<string> {
+export async function runTurn(agentId: string, convId: string, opts: RunOptions = {}): Promise<string> {
 	let overflowRetries = 0;
 	let lastText = "";
 
@@ -113,20 +116,21 @@ export async function runTurn(agentId: string, opts: RunOptions = {}): Promise<s
 		// Fresh fetch each iteration: picks up steered user messages and the
 		// blocks we just appended.
 		const agent = await fetchObject(agentId);
+		const conv = convId === agentId ? agent : await fetchObject(convId);
 		ctx.channelId = str(agent.fields, "channel");
 		const ratio = tokenRatio(agent);
 		const cfg = compactionConfig(agent);
 		const model = str(agent.fields, "model") || "mock";
 		const tools = toolDefs(opts.template ?? "", ctx.depth);
 
-		let view = buildConversationView(agent, agentId, ratio);
+		let view = buildConversationView(conv, agentId, ratio);
 		const system = await buildEffectiveSystem(agent, view, opts);
 
 		// Pre-flight auto-compaction (agent-runner.ts:369-374).
 		if (shouldAutoCompact(system, view, tools, cfg, ratio)) {
-			const compacted = await doCompact(agentId, view, cfg, ratio);
+			const compacted = await doCompact(agentId, convId, view, cfg, ratio);
 			if (compacted) {
-				const fresh = await fetchObject(agentId);
+				const fresh = await fetchObject(convId);
 				view = buildConversationView(fresh, agentId, ratio);
 			}
 		}
@@ -140,7 +144,7 @@ export async function runTurn(agentId: string, opts: RunOptions = {}): Promise<s
 			// Overflow → compact → retry (agent-runner.ts:507-527).
 			if (isContextOverflowError(err) && overflowRetries < 2 && cfg.enabled) {
 				overflowRetries++;
-				await doCompact(agentId, view, cfg, ratio);
+				await doCompact(agentId, convId, view, cfg, ratio);
 				continue;
 			}
 			throw err;
@@ -157,7 +161,7 @@ export async function runTurn(agentId: string, opts: RunOptions = {}): Promise<s
 		}
 
 		if (res.text.trim()) {
-			await chatPost(agentId, res.text.trim(), agentId);
+			await chatPost(convId, res.text.trim(), agentId);
 			lastText = res.text.trim();
 		}
 

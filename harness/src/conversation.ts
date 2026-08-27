@@ -1,5 +1,6 @@
 /**
- * Conversation view: projects the agent object's __discussion__ blocks into
+ * Conversation view: projects the conversation object's __discussion__ blocks into
+ * (the agent's holistic chat; a subagent's own object)
  * Anthropic messages. Ported from glon agent-conversation.ts (classify /
  * filterToKept / repairToolPairs / groupIntoTurns / mergeConsecutiveTurns /
  * findCutIndex) with two OMP lifts:

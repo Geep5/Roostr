@@ -10,6 +10,7 @@ export const TYPE_GLYPHS: Record<string, string> = {
 	peer: "◉",
 	agent: "◈",
 	channel: "◍",
+	chat: "💬",
 };
 
 export function objectIcon(emoji: string | undefined, typeKey: string): string {

@@ -9,12 +9,14 @@
 	 */
 	import type { ObjectJSON } from "$lib/types";
 	import { chat, settings } from "$lib/api";
+	import { store } from "$lib/data.svelte";
 	import EmojiPicker from "./EmojiPicker.svelte";
 
 	let {
 		object,
+		full = false,
 		onchanged,
-	}: { object: ObjectJSON; onchanged: () => Promise<void> } = $props();
+	}: { object: ObjectJSON; full?: boolean; onchanged: () => Promise<void> } = $props();
 
 	interface Message {
 		id: string;
@@ -22,6 +24,7 @@
 		ts: number;
 		text: string;
 		replyTo: string;
+		origin: string;
 		reactions: Array<{ emoji: string; authors: string[] }>;
 	}
 
@@ -49,6 +52,7 @@
 				ts: Number(meta["ts"] ?? 0),
 				text: meta["text"] ?? "",
 				replyTo: meta["replyTo"] ?? "",
+				origin: meta["origin"] ?? "",
 				reactions,
 			});
 		}
@@ -58,6 +62,7 @@
 	const messageById = $derived(new Map(messages.map((m) => [m.id, m])));
 
 	let open = $state(false);
+	const isOpen = $derived(full || open);
 	let draft = $state("");
 	let replyTo = $state("");
 	let pickerFor = $state("");
@@ -69,9 +74,15 @@
 
 	function who(author: string): string {
 		if (author === me) return "You";
-		// The agent posts as its own object id.
+		// The agent posts as its own object id; on its chat, the agent field.
 		if (author === object.id) return object.fields["name"]?.stringValue || "Agent";
+		if (author && author === object.fields["agent"]?.stringValue)
+			return store.summaries.find((s) => s.id === author)?.name || object.fields["name"]?.stringValue || "Agent";
 		return author.slice(0, 6);
+	}
+
+	function originName(id: string): string {
+		return store.summaries.find((s) => s.id === id)?.name || "object";
 	}
 
 	/** Stable avatar hue from the author id. */
@@ -104,16 +115,18 @@
 	}
 </script>
 
-<section class="discussion">
-	{#if !open}
+<section class="discussion" class:full>
+	{#if !isOpen}
 		<button class="opener" onclick={() => (open = true)}>
 			💬 {messages.length > 0 ? `Discussion · ${messages.length}` : "Start a discussion"}
 		</button>
 	{:else}
-		<div class="head">
-			<span class="head-title">Discussion</span>
-			<button class="collapse" title="Collapse" onclick={() => (open = false)}>×</button>
-		</div>
+		{#if !full}
+			<div class="head">
+				<span class="head-title">Discussion</span>
+				<button class="collapse" title="Collapse" onclick={() => (open = false)}>×</button>
+			</div>
+		{/if}
 		<div class="messages">
 			{#each messages as m (m.id)}
 				<div class="msg" id="msg-{m.id}">
@@ -128,6 +141,9 @@
 						{/if}
 						<div class="meta-row">
 							<span class="author">{who(m.author)}</span>
+							{#if m.origin}
+								<a class="origin" href="/object/{m.origin}" title="Asked from this object">↳ {originName(m.origin)}</a>
+							{/if}
 							<span class="time">{when(m.ts)}</span>
 						</div>
 						<div class="text">{m.text}</div>
@@ -191,6 +207,29 @@
 		margin-top: 32px;
 		border-top: 1px solid var(--border);
 		padding-top: 12px;
+	}
+	.discussion.full {
+		margin-top: 8px;
+		border-top: none;
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		min-height: 60vh;
+	}
+	.discussion.full .messages {
+		max-height: none;
+		flex: 1;
+	}
+	.origin {
+		font-size: 11px;
+		color: var(--accent);
+		text-decoration: none;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		padding: 0 6px;
+	}
+	.origin:hover {
+		border-color: var(--accent);
 	}
 	.opener {
 		border: none;

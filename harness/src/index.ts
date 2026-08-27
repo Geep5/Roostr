@@ -1,19 +1,25 @@
 /**
- * Roostr harness daemon — the /holdfast analog. Idempotent setup creates
- * the agent object; `serve` watches SSE for user chat messages on agent
- * objects and runs a turn; `ask` is a one-shot CLI turn for smoke tests.
+ * Roostr harness daemon — the /holdfast analog, surface model ported from
+ * GrantAgentSetup's bot.odin. Each served agent owns one holistic chat per
+ * channel (a `chat` object); the agent is also reachable through ANY
+ * object's discussion in its channel — those messages are copied into the
+ * chat framed with their origin + the object's body, and the reply posts
+ * back to the surface that asked. One turn answers one surface; messages
+ * arriving elsewhere mid-turn wait (same-chat follow-ups steer in via the
+ * runner's per-iteration refetch).
  *
  *   bun run src/index.ts setup --name Gracie [--model claude-…] [--channel id]
  *   bun run src/index.ts serve
  *   bun run src/index.ts ask <agentId> "message"
  */
 
-import { chatPost, fetchObject, query, setField, str, subscribe, sv, createObject } from "./api";
+import { API, chatPost, fetchObject, query, setField, str, subscribe, sv, createObject } from "./api";
 import { runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled, syncHeartbeats } from "./roster";
 import { startNostrSync } from "./nostrsync";
+import { ensureChat, frameMessage, ingestIntoChat, pendingMessages, setMark } from "./surfaces";
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);
@@ -46,62 +52,156 @@ async function setup(): Promise<void> {
 	console.log(`created agent "${name}": ${id} (enabled on this machine)`);
 }
 
-/** Newest unanswered user chat block id, or "" when up to date. */
-async function pendingUserMessage(agentId: string): Promise<string> {
-	const obj = await fetchObject(agentId);
-	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
-	const root = byId.get("__discussion__");
-	if (!root) return "";
-	const lastProcessed = str(obj.fields, "last_ingested_block");
-	let newestUser = "";
-	let sawProcessed = lastProcessed === "";
-	for (const cid of root.childrenIds) {
-		if (cid === lastProcessed) {
-			sawProcessed = true;
-			newestUser = "";
-			continue;
-		}
-		const meta = byId.get(cid)?.content.custom;
-		if (meta?.contentType === "chat" && meta.meta?.["author"] !== agentId) newestUser = cid;
-	}
-	return sawProcessed ? newestUser : newestUser; // unknown lastProcessed ⇒ treat all as new
+interface Served {
+	agentId: string;
+	chatId: string;
+	channelId: string;
 }
 
-async function handleAgentEvent(agentId: string, busy: Set<string>): Promise<void> {
-	if (busy.has(agentId)) return; // steering: runTurn re-fetches every iteration
-	const pending = await pendingUserMessage(agentId);
-	if (!pending) return;
-	busy.add(agentId);
-	try {
-		await setField(agentId, "last_ingested_block", sv(pending));
-		const reply = await runTurn(agentId, { spawn: spawnSubagent });
-		console.log(`[${new Date().toISOString()}] ${agentId.slice(0, 8)} replied: ${reply.slice(0, 120)}`);
-	} catch (err) {
-		console.error(`[harness] turn failed for ${agentId}:`, err);
-	} finally {
-		busy.delete(agentId);
-		// A message may have landed while we were busy — check once more.
-		const again = await pendingUserMessage(agentId);
-		if (again) void handleAgentEvent(agentId, busy);
+/** Unassigned (pre-channel) objects live in the default channel — UI rule. */
+let defaultChannelId = "";
+
+/** agentId → Served; rebuilt on roster change. */
+async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
+	const out = new Map<string, Served>();
+	// Same source + order as the UI: /api/channels, first entry is default.
+	const channels = (await (await fetch(`${API}/api/channels`)).json()) as Array<{ id: string }>;
+	const defaultChannel = channels[0]?.id ?? "";
+	defaultChannelId = defaultChannel;
+	for (const agentId of agents) {
+		try {
+			const agent = await fetchObject(agentId);
+			const channelId = str(agent.fields, "channel") || defaultChannel;
+			const chatId = await ensureChat(agent, channelId);
+			out.set(agentId, { agentId, chatId, channelId });
+		} catch (err) {
+			console.error(`[harness] failed to prepare agent ${agentId.slice(0, 8)}:`, err);
+		}
 	}
+	return out;
+}
+
+// Ingest sections (fetch → pending → mark → copy) must not interleave for
+// one surface: two SSE events for the same commit would both read the old
+// mark and double-ingest. Guarded by a per-surface in-flight set; a skipped
+// event is safe because the drain loop re-checks after the turn.
+const ingesting = new Set<string>();
+
+/** Fetch → pending → advance mark → (origin surfaces) copy into the chat. */
+async function ingestSurface(s: Served, surfaceId: string): Promise<boolean> {
+	if (ingesting.has(surfaceId)) return false;
+	ingesting.add(surfaceId);
+	try {
+		const surface = await fetchObject(surfaceId);
+		const pending = await pendingMessages(surface, s.agentId);
+		if (pending.length === 0) return false;
+		await setMark(surfaceId, pending[pending.length - 1].blockId);
+		if (surfaceId !== s.chatId) {
+			const framed = frameMessage(surface, pending);
+			await ingestIntoChat(s.chatId, surfaceId, pending[pending.length - 1].author || "user", framed);
+		}
+		return true;
+	} finally {
+		ingesting.delete(surfaceId);
+	}
+}
+
+/**
+ * Handle a message on one surface: ingest, run the turn on the chat, reply
+ * where asked.
+ */
+async function handleSurface(s: Served, surfaceId: string): Promise<boolean> {
+	if (!(await ingestSurface(s, surfaceId))) return false;
+	const reply = await runTurn(s.agentId, s.chatId, { spawn: spawnSubagent });
+	if (surfaceId !== s.chatId && reply.trim()) {
+		await chatPost(surfaceId, reply.trim(), s.agentId);
+	}
+	console.log(`[${new Date().toISOString()}] ${s.agentId.slice(0, 8)} answered in ${surfaceId.slice(0, 8)}: ${reply.slice(0, 120)}`);
+	return true;
 }
 
 async function serve(): Promise<void> {
 	const agents = await servedAgents();
+	let served = await buildServed(agents);
+	const busy = new Set<string>();
+	const active = new Map<string, string>(); // agentId → surface of the in-flight turn
+	const dirty = new Map<string, Set<string>>(); // agentId → surfaces awaiting a turn
+
+	async function drive(s: Served, surfaceId: string): Promise<void> {
+		if (busy.has(s.agentId)) {
+			if (surfaceId === active.get(s.agentId) && surfaceId !== s.chatId) {
+				// Same-surface follow-up: fold into the in-flight turn (steer).
+				// Chat-surface follow-ups need nothing — the runner refetches.
+				await ingestSurface(s, surfaceId);
+			} else if (surfaceId !== active.get(s.agentId)) {
+				// Another surface mid-turn: wait for the next turn (bot.odin rule).
+				let set = dirty.get(s.agentId);
+				if (!set) dirty.set(s.agentId, (set = new Set()));
+				set.add(surfaceId);
+			}
+			return;
+		}
+		busy.add(s.agentId);
+		active.set(s.agentId, surfaceId);
+		try {
+			await handleSurface(s, surfaceId);
+		} catch (err) {
+			console.error(`[harness] turn failed for ${s.agentId.slice(0, 8)}:`, err);
+		} finally {
+			busy.delete(s.agentId);
+			active.delete(s.agentId);
+			// Drain: the chat first (its own messages), then queued surfaces.
+			const queued = [...(dirty.get(s.agentId) ?? [])];
+			dirty.delete(s.agentId);
+			for (const q of [s.chatId, ...queued]) {
+				const surface = await fetchObject(q).catch(() => null);
+				if (surface && (await pendingMessages(surface, s.agentId)).length > 0) {
+					void drive(s, q);
+					break;
+				}
+			}
+		}
+	}
+
+	/** Route an SSE object event to the agent whose surface it is. */
+	async function route(objectId: string): Promise<void> {
+		for (const s of served.values()) {
+			if (objectId === s.chatId) return void drive(s, objectId);
+		}
+		if (agents.has(objectId)) return; // agent objects are not surfaces anymore
+		// Any other object in a served agent's channel is a surface.
+		let obj;
+		try {
+			obj = await fetchObject(objectId);
+		} catch {
+			return;
+		}
+		if (obj.typeKey === "chat" || obj.typeKey === "agent") return; // other agents' chats/brains
+		const channelId = str(obj.fields, "channel") || defaultChannelId;
+		for (const s of served.values()) {
+			if (channelId === s.channelId || objectId === s.channelId) {
+				const pending = await pendingMessages(obj, s.agentId);
+				if (pending.length > 0) void drive(s, objectId);
+				return;
+			}
+		}
+	}
+
 	startAuthServer(agents, (next) => {
 		agents.clear();
 		for (const id of next) agents.add(id);
 		syncHeartbeats(agents);
-		for (const id of agents) void handleAgentEvent(id, busy);
+		void buildServed(agents).then((next) => {
+			served = next;
+			for (const s of served.values()) void drive(s, s.chatId);
+		});
 	});
 	console.log(`[harness] serving ${agents.size} agent(s): ${[...agents].map((a) => a.slice(0, 8)).join(", ") || "(none — enable one from an agent page)"}`);
-	const busy = new Set<string>();
 	syncHeartbeats(agents);
-	// Catch up on anything that arrived while the harness was down.
-	for (const id of agents) void handleAgentEvent(id, busy);
-	subscribe((objectId) => {
-		if (agents.has(objectId)) void handleAgentEvent(objectId, busy);
-	});
+	// Catch up on chat messages that arrived while the harness was down.
+	// (Origin surfaces catch up on their next event.)
+	for (const s of served.values()) void drive(s, s.chatId);
+	subscribe((objectId) => void route(objectId));
 	console.log("[harness] SSE connected; serving.");
 	void startNostrSync();
 }
@@ -113,8 +213,11 @@ async function ask(): Promise<void> {
 		console.error("usage: ask <agentId> <message>");
 		process.exit(1);
 	}
-	await chatPost(agentId, text);
-	const reply = await runTurn(agentId, { spawn: spawnSubagent });
+	const agent = await fetchObject(agentId);
+	const channels = (await (await fetch(`${API}/api/channels`)).json()) as Array<{ id: string }>;
+	const chatId = await ensureChat(agent, str(agent.fields, "channel") || channels[0]?.id || "");
+	await chatPost(chatId, text);
+	const reply = await runTurn(agentId, chatId, { spawn: spawnSubagent });
 	console.log(reply);
 }
 

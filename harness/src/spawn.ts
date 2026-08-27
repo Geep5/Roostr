@@ -74,7 +74,7 @@ export async function spawnSubagent(task: string, templateName: string, parentCt
 
 		let submitted = "";
 		await chatPost(id, task); // the task is the first user message
-		const finalText = await runTurn(id, {
+		const finalText = await runTurn(id, id, {
 			template: template.name,
 			depth: parentCtx.depth + 1,
 			spawn: template.name === "task" ? spawnSubagent : undefined,

@@ -59,6 +59,23 @@
 	// ── Query / collection tables ─────────────────────────────────
 	const isQuery = $derived(object?.typeKey === "query" || object?.typeKey === "set");
 	const isCollection = $derived(object?.typeKey === "collection");
+	const isChat = $derived(object?.typeKey === "chat");
+	const isAgent = $derived(object?.typeKey === "agent");
+
+	/** The agent's holistic chat for this channel (created by the harness). */
+	async function openAgentChat() {
+		if (!object) return;
+		const res = await fetchQuery({
+			filters: [
+				{ key: "type", condition: "equal", value: "chat" },
+				{ key: "agent", condition: "equal", value: object.id },
+			],
+			limit: 1,
+		});
+		const chat = res.records[0];
+		if (chat) location.href = `/object/${chat.id}`;
+		else alert("No chat yet — start the harness once to create it.");
+	}
 
 	const memberIds = $derived.by(() => {
 		const items = object?.fields["collectionIds"]?.valuesValue?.items ?? [];
@@ -193,15 +210,18 @@
 				}}
 			/>
 		</div>
-		{#if !isChannel}
+		{#if !isChannel && !isChat}
 			{#if object.typeKey === "agent"}
 				<AgentBar {object} />
+				<button class="open-chat" onclick={() => void openAgentChat()}>💬 Open chat →</button>
 			{/if}
 			<FeaturedProps {object} relations={store.relations} onchanged={refresh} />
 		{/if}
 
 		{#if isChannel}
 			<ChannelManage {object} {channelInfo} relations={store.relations} onchanged={refresh} />
+		{:else if isChat}
+			<Discussion {object} full onchanged={refresh} />
 		{:else if isQuery || isCollection}
 			{#if isCollection}
 				<div class="collection-bar">
@@ -237,7 +257,7 @@
 			<Editor bind:this={editor} {object} onchanged={refresh} />
 		{/if}
 
-		{#if !isChannel}
+		{#if !isChannel && !isChat && !isAgent}
 			<Discussion {object} onchanged={refresh} />
 		{/if}
 
@@ -246,6 +266,20 @@
 	<p class="muted">Loading…</p>
 {/if}
 <style>
+	.open-chat {
+		align-self: flex-start;
+		background: none;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		color: var(--fg);
+		font-size: 13px;
+		padding: 6px 10px;
+		cursor: pointer;
+		margin: 4px 0 8px;
+	}
+	.open-chat:hover {
+		border-color: var(--accent);
+	}
 	.obj-img {
 		width: 34px;
 		height: 34px;
