@@ -211,22 +211,32 @@
 	}
 
 	/** "＋ New … property" entries create the relation, then select it. */
-	async function onGroupPick(el: HTMLSelectElement) {
-		if (el.value !== "__new__") return void setGroupKey(el.value);
+	async function onGroupPick(v: string) {
+		if (v !== "__new__") return void setGroupKey(v);
 		const name = prompt("New tag property name:");
-		el.value = groupKey; // restore until created
 		if (!name?.trim()) return;
 		const rel = await createRelation(name.trim(), "tag");
 		if (rel) await setGroupKey(rel.key);
 	}
 
-	async function onDatePick(el: HTMLSelectElement) {
-		if (el.value !== "__new__") return void setDateKey(el.value);
+	async function onDatePick(v: string) {
+		if (v !== "__new__") return void setDateKey(v);
 		const name = prompt("New date property name:");
-		el.value = dateKey;
 		if (!name?.trim()) return;
 		const rel = await createRelation(name.trim(), "date");
 		if (rel) await setDateKey(rel.key);
+	}
+
+	// ── View settings menu (Anytype dataviewViewSettings) ───────────
+	// The controls row carries a single settings button; Layout (and the
+	// board/calendar config rows) live in its two-pane popover menu.
+	let settingsOpen = $state(false);
+	let settingsPane = $state<"root" | "layout" | "group" | "date">("root");
+	const VIEW_GLYPHS: Record<string, string> = { table: "▤", gallery: "▧", kanban: "▥", calendar: "▦" };
+
+	function toggleSettings() {
+		settingsOpen = !settingsOpen;
+		settingsPane = "root";
 	}
 
 	// ── UI state ──────────────────────────────────────────────────
@@ -250,6 +260,8 @@
 	}
 </script>
 
+<svelte:window onmousedown={(e) => { if (settingsOpen && !(e.target as HTMLElement).closest(".settings-anchor")) settingsOpen = false; }} onkeydown={(e) => { if (e.key === "Escape") settingsOpen = false; }} />
+
 <div class="controls">
 	<button class="pill" class:active={open === "source"} onclick={() => (open = open === "source" ? "" : "source")}>
 		Source{sources.length ? `: ${sources.join(", ")}` : ""}
@@ -261,36 +273,79 @@
 		Sort{sorts.length ? ` · ${sorts.length}` : ""}
 	</button>
 	<span class="spacer"></span>
-	<span class="views">
-		{#each [["table", "▤"], ["gallery", "▧"], ["kanban", "▥"], ["calendar", "▦"]] as [v, glyph] (v)}
-			<button class="pill view" class:active={viewType === v} title={v} onclick={() => void setView(v)}>{glyph} {v[0].toUpperCase() + v.slice(1)}</button>
-		{/each}
+	<span class="view-chip">{VIEW_GLYPHS[viewType]} {viewType[0].toUpperCase() + viewType.slice(1)}</span>
+	<span class="settings-anchor">
+		<button class="pill" class:active={settingsOpen} title="View settings" onclick={toggleSettings}>⚙ Settings</button>
+		{#if settingsOpen}
+			<!-- Anytype dataviewViewSettings: Layout row (caption = current
+			     layout) opening the dataviewViewLayout picker; board group
+			     and calendar date rows for those layouts. -->
+			<div class="vmenu" role="menu">
+				{#if settingsPane === "root"}
+					<button class="vrow" onclick={() => (settingsPane = "layout")}>
+						<span>Layout</span>
+						<span class="vcap">{viewType[0].toUpperCase() + viewType.slice(1)} ›</span>
+					</button>
+					{#if viewType === "kanban"}
+						<button class="vrow" onclick={() => (settingsPane = "group")}>
+							<span>Group by</span>
+							<span class="vcap">{groupOptions.find((g) => g.key === groupKey)?.name || groupKey || "—"} ›</span>
+						</button>
+					{/if}
+					{#if viewType === "calendar"}
+						<button class="vrow" onclick={() => (settingsPane = "date")}>
+							<span>Date</span>
+							<span class="vcap">{dateOptions.find((d) => d.key === dateKey)?.name || dateKey} ›</span>
+						</button>
+					{/if}
+				{:else if settingsPane === "layout"}
+					<button class="vback" onclick={() => (settingsPane = "root")}>‹ Layout</button>
+					{#each [["table", "Table"], ["gallery", "Gallery"], ["kanban", "Kanban"], ["calendar", "Calendar"]] as [v, label] (v)}
+						<button
+							class="vrow"
+							onclick={() => {
+								void setView(v);
+								settingsPane = "root";
+							}}
+						>
+							<span>{VIEW_GLYPHS[v]} {label}</span>
+							{#if viewType === v}<span class="vcheck">✓</span>{/if}
+						</button>
+					{/each}
+				{:else if settingsPane === "group"}
+					<button class="vback" onclick={() => (settingsPane = "root")}>‹ Group by</button>
+					{#each groupOptions as g (g.key)}
+						<button
+							class="vrow"
+							onclick={() => {
+								void onGroupPick(g.key);
+								settingsPane = "root";
+							}}
+						>
+							<span>{g.name || g.key}</span>
+							{#if groupKey === g.key}<span class="vcheck">✓</span>{/if}
+						</button>
+					{/each}
+					<button class="vrow" onclick={() => void onGroupPick("__new__")}><span>＋ New tag property…</span></button>
+				{:else if settingsPane === "date"}
+					<button class="vback" onclick={() => (settingsPane = "root")}>‹ Date</button>
+					{#each dateOptions as d (d.key)}
+						<button
+							class="vrow"
+							onclick={() => {
+								void onDatePick(d.key);
+								settingsPane = "root";
+							}}
+						>
+							<span>{d.name}</span>
+							{#if dateKey === d.key}<span class="vcheck">✓</span>{/if}
+						</button>
+					{/each}
+					<button class="vrow" onclick={() => void onDatePick("__new__")}><span>＋ New date property…</span></button>
+				{/if}
+			</div>
+		{/if}
 	</span>
-	{#if viewType === "kanban"}
-		<!-- Anytype board: pick WHICH select/tag property groups the board;
-		     columns follow the property's option order. -->
-		<label class="cfg-label">
-			Group by
-			<select class="cfg" value={groupKey} onchange={(e) => void onGroupPick(e.currentTarget)}>
-				<option value="" disabled>property…</option>
-				{#each groupOptions as g (g.key)}
-					<option value={g.key}>{g.name || g.key}</option>
-				{/each}
-				<option value="__new__">＋ New tag property…</option>
-			</select>
-		</label>
-	{/if}
-	{#if viewType === "calendar"}
-		<label class="cfg-label">
-			Date
-			<select class="cfg" value={dateKey} onchange={(e) => void onDatePick(e.currentTarget)}>
-				{#each dateOptions as d (d.key)}
-					<option value={d.key}>{d.name}</option>
-				{/each}
-				<option value="__new__">＋ New date property…</option>
-			</select>
-		</label>
-	{/if}
 </div>
 
 {#if open === "source"}
@@ -373,25 +428,6 @@
 <style>
 	.spacer {
 		flex: 1;
-	}
-	.views {
-		display: flex;
-		gap: 4px;
-	}
-	.cfg-label {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		font-size: 12px;
-		color: var(--muted);
-	}
-	.cfg {
-		background: var(--bg);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		color: var(--fg);
-		font-size: 12px;
-		padding: 3px 8px;
 	}
 	.controls {
 		display: flex;
@@ -486,6 +522,66 @@
 		padding: 2px 0;
 	}
 	.add:hover {
+		color: var(--fg);
+	}
+	.view-chip {
+		color: var(--muted);
+		font-size: 12px;
+		align-self: center;
+	}
+	.settings-anchor {
+		position: relative;
+		display: inline-block;
+	}
+	.vmenu {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 6px);
+		z-index: 110;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 220px;
+		background: var(--panel, #1a1d23);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 6px;
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+	}
+	.vrow {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		background: none;
+		border: none;
+		border-radius: 6px;
+		padding: 6px 8px;
+		cursor: pointer;
+		color: var(--fg);
+		font-size: 13px;
+		text-align: left;
+	}
+	.vrow:hover {
+		background: var(--hl-med);
+	}
+	.vcap {
+		color: var(--muted);
+		font-size: 12px;
+	}
+	.vcheck {
+		color: var(--accent);
+	}
+	.vback {
+		background: none;
+		border: none;
+		color: var(--muted);
+		font-size: 12px;
+		text-align: left;
+		padding: 4px 8px;
+		cursor: pointer;
+	}
+	.vback:hover {
 		color: var(--fg);
 	}
 </style>
