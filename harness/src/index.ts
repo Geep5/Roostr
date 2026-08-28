@@ -13,7 +13,7 @@
  *   bun run src/index.ts ask <agentId> "message"
  */
 
-import { API, chatPost, fetchObject, query, setField, str, subscribe, sv, createObject } from "./api";
+import { API, chatPost, fetchObject, list, query, setField, str, subscribe, sv, createObject } from "./api";
 import { runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { startAuthServer } from "./authserver";
@@ -56,6 +56,8 @@ interface Served {
 	agentId: string;
 	chatId: string;
 	channelId: string;
+	/** Type keys this agent is responsible for; "*" = everything else. */
+	types: string[];
 }
 
 /** Unassigned (pre-channel) objects live in the default channel — UI rule. */
@@ -73,7 +75,7 @@ async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
 			const agent = await fetchObject(agentId);
 			const channelId = str(agent.fields, "channel") || defaultChannel;
 			const chatId = await ensureChat(agent, channelId);
-			out.set(agentId, { agentId, chatId, channelId });
+			out.set(agentId, { agentId, chatId, channelId, types: list(agent.fields, "responsible_types") });
 		} catch (err) {
 			console.error(`[harness] failed to prepare agent ${agentId.slice(0, 8)}:`, err);
 		}
@@ -163,13 +165,38 @@ async function serve(): Promise<void> {
 		}
 	}
 
+	/**
+	 * The channel agent responsible for a type: explicit claim wins, else the
+	 * "*" (everything-else) agent, else a sole unconfigured agent handles all
+	 * (single-agent channels keep working without any assignment).
+	 */
+	function responsibleFor(channelId: string, typeKey: string): Served | undefined {
+		const inChannel = [...served.values()].filter((s) => s.channelId === channelId);
+		const explicit = inChannel.find((s) => s.types.includes(typeKey));
+		if (explicit) return explicit;
+		const rest = inChannel.find((s) => s.types.includes("*"));
+		if (rest) return rest;
+		if (inChannel.length === 1 && inChannel[0].types.length === 0) return inChannel[0];
+		return undefined;
+	}
+
 	/** Route an SSE object event to the agent whose surface it is. */
 	async function route(objectId: string): Promise<void> {
 		for (const s of served.values()) {
 			if (objectId === s.chatId) return void drive(s, objectId);
 		}
-		if (agents.has(objectId)) return; // agent objects are not surfaces anymore
-		// Any other object in a served agent's channel is a surface.
+		if (agents.has(objectId)) {
+			// Responsibility edits sync through the agent object — keep the
+			// served entry current without a roster round-trip.
+			const s = served.get(objectId);
+			if (s) {
+				const agent = await fetchObject(objectId).catch(() => null);
+				if (agent) s.types = list(agent.fields, "responsible_types");
+			}
+			return; // agent objects are not surfaces
+		}
+		// Any other object in a served agent's channel is a surface; the
+		// responsible agent (by type) answers.
 		let obj;
 		try {
 			obj = await fetchObject(objectId);
@@ -177,14 +204,11 @@ async function serve(): Promise<void> {
 			return;
 		}
 		if (obj.typeKey === "chat" || obj.typeKey === "agent") return; // other agents' chats/brains
-		const channelId = str(obj.fields, "channel") || defaultChannelId;
-		for (const s of served.values()) {
-			if (channelId === s.channelId || objectId === s.channelId) {
-				const pending = await pendingMessages(obj, s.agentId);
-				if (pending.length > 0) void drive(s, objectId);
-				return;
-			}
-		}
+		const channelId = objectId === defaultChannelId || obj.typeKey === "channel" ? objectId : str(obj.fields, "channel") || defaultChannelId;
+		const s = responsibleFor(channelId, obj.typeKey);
+		if (!s) return;
+		const pending = await pendingMessages(obj, s.agentId);
+		if (pending.length > 0) void drive(s, objectId);
 	}
 
 	startAuthServer(agents, (next) => {

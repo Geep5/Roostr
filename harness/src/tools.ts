@@ -143,7 +143,7 @@ const TOOLS: RegisteredTool[] = [
 	{
 		def: {
 			name: "chat_reply_on",
-			description: "Post a chat message on another object's discussion (not your own conversation).",
+			description: "Post an UNPROMPTED chat message on some object's discussion. NEVER use this to answer the message you are currently replying to — your final reply text is delivered to the asking surface automatically.",
 			input_schema: { type: "object", properties: { object_id: { type: "string" }, text: { type: "string" } }, required: ["object_id", "text"] },
 		},
 		handler: async (input, ctx) => {

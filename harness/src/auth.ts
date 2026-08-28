@@ -167,17 +167,16 @@ export interface ResolvedAuth {
 }
 
 let refreshInflight: Promise<OAuthCredential> | null = null;
-let cachedKeychain: ResolvedAuth | null = null;
 
+// Claude Code rotates its access token in place — never cache across turns,
+// or the harness 401s an hour after the app's next refresh.
 async function keychainAuth(): Promise<ResolvedAuth | null> {
-	if (cachedKeychain) return cachedKeychain;
 	try {
 		const proc = Bun.spawn(["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"], { stdout: "pipe", stderr: "ignore" });
 		const raw = await new Response(proc.stdout).text();
 		const parsed = JSON.parse(raw.trim()) as { claudeAiOauth?: { accessToken?: string } };
 		if (parsed.claudeAiOauth?.accessToken) {
-			cachedKeychain = { token: parsed.claudeAiOauth.accessToken, isOAuth: true };
-			return cachedKeychain;
+			return { token: parsed.claudeAiOauth.accessToken, isOAuth: true };
 		}
 	} catch {
 		/* no keychain entry */

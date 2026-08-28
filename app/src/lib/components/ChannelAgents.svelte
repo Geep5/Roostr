@@ -23,11 +23,14 @@
 		model: string;
 		seenAt: number;
 		host: string;
+		/** Responsible type keys; "*" = everything else. */
+		types: string[];
 	}
 
 	let agents = $state<AgentRow[]>([]);
 	let roster = $state<string[] | null>(null); // null = no local daemon
 	let now = $state(Date.now());
+	let assigning = $state(""); // agent id whose responsibility editor is open
 
 	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
 
@@ -45,7 +48,49 @@
 				model: r.fields["model"]?.stringValue ?? "",
 				seenAt: r.fields["harness_seen_at"]?.intValue ?? 0,
 				host: r.fields["harness_host"]?.stringValue ?? "",
+				types: (r.fields["responsible_types"]?.valuesValue?.items ?? []).map((i) => i.stringValue ?? "").filter(Boolean),
 			}));
+	}
+
+	// ── Responsibility (one owner per type; one "everything else") ──
+	//
+	// A type key is claimable by exactly ONE agent in the channel, and only
+	// one agent may hold "*" (whatever isn't explicitly claimed). The
+	// checkboxes below enforce it: claimed elsewhere = disabled, with the
+	// claimant named.
+
+	/** typeKey → claiming agent (excluding `except`). */
+	function claimants(except: string): Map<string, AgentRow> {
+		const m = new Map<string, AgentRow>();
+		for (const a of agents) {
+			if (a.id === except) continue;
+			for (const t of a.types) m.set(t, a);
+		}
+		return m;
+	}
+
+	async function saveTypes(a: AgentRow, next: string[]): Promise<void> {
+		await note.setField(a.id, "responsible_types", { valuesValue: { items: next.map((t) => ({ stringValue: t })) } });
+		await load();
+	}
+
+	async function toggleType(a: AgentRow, typeKey: string): Promise<void> {
+		const has = a.types.includes(typeKey);
+		// Claiming a specific type while holding "*" drops "*" only if
+		// explicit types are chosen alongside — "*" plus explicit is
+		// redundant; keep the model clean: explicit set XOR "*".
+		const base = a.types.filter((t) => t !== "*");
+		await saveTypes(a, has ? base.filter((t) => t !== typeKey) : [...base, typeKey]);
+	}
+
+	async function toggleRest(a: AgentRow): Promise<void> {
+		await saveTypes(a, a.types.includes("*") ? [] : ["*"]);
+	}
+
+	function describe(a: AgentRow): string {
+		if (a.types.includes("*")) return "Everything else";
+		if (a.types.length === 0) return agents.length === 1 ? "Everything (sole agent)" : "Nothing assigned";
+		return a.types.map((t) => store.types.find((x) => x.key === t)?.name ?? t).join(", ");
 	}
 
 	async function loadRoster() {
@@ -113,17 +158,47 @@
 {#each agents as a (a.id)}
 	{@const online = a.seenAt > 0 && now - a.seenAt < ONLINE_MS}
 	{@const runsHere = roster?.includes(a.id) ?? false}
-	<div class="agent">
-		<span class="dot" class:online></span>
-		<a class="name" href="/object/{a.id}" title="Agent settings">{a.name}</a>
-		<span class="meta">
-			{#if online}{a.host || "online"} · {ago(a.seenAt)}{:else if a.seenAt > 0}last seen {ago(a.seenAt)}{:else}never ran{/if}
-		</span>
-		<button onclick={() => void openChat(a.id)}>💬 Chat</button>
-		{#if roster !== null}
-			<button class:active={runsHere} onclick={() => void toggle(a.id, !runsHere)}>
-				{runsHere ? "Runs here" : "Run here"}
+	<div class="agent-wrap">
+		<div class="agent">
+			<span class="dot" class:online></span>
+			<a class="name" href="/object/{a.id}" title="Agent settings">{a.name}</a>
+			<span class="meta">
+				{#if online}{a.host || "online"} · {ago(a.seenAt)}{:else if a.seenAt > 0}last seen {ago(a.seenAt)}{:else}never ran{/if}
+			</span>
+			<button class="resp" class:unset={a.types.length === 0 && agents.length > 1} onclick={() => (assigning = assigning === a.id ? "" : a.id)}>
+				{describe(a)}
 			</button>
+			<button onclick={() => void openChat(a.id)}>💬 Chat</button>
+			{#if roster !== null}
+				<button class:active={runsHere} onclick={() => void toggle(a.id, !runsHere)}>
+					{runsHere ? "Runs here" : "Run here"}
+				</button>
+			{/if}
+		</div>
+		{#if assigning === a.id}
+			{@const claimed = claimants(a.id)}
+			{@const restHolder = [...claimed.entries()].find(([k]) => k === "*")?.[1]}
+			<div class="assign">
+				<div class="assign-title">Responsible for</div>
+				<label class="opt" class:disabled={!!restHolder}>
+					<input type="checkbox" checked={a.types.includes("*")} disabled={!!restHolder} onchange={() => void toggleRest(a)} />
+					Everything else <span class="opt-hint">{restHolder ? `— ${restHolder.name} has it` : "(whatever isn't explicitly assigned)"}</span>
+				</label>
+				<div class="assign-sep"></div>
+				{#each store.types as t (t.id)}
+					{@const owner = claimed.get(t.key)}
+					<label class="opt" class:disabled={!!owner || a.types.includes("*")}>
+						<input
+							type="checkbox"
+							checked={a.types.includes(t.key)}
+							disabled={!!owner || a.types.includes("*")}
+							onchange={() => void toggleType(a, t.key)}
+						/>
+						{t.name}
+						{#if owner}<span class="opt-hint">— {owner.name}</span>{/if}
+					</label>
+				{/each}
+			</div>
 		{/if}
 	</div>
 {/each}
@@ -146,15 +221,60 @@
 		font-size: 12px;
 		margin: 0 0 10px;
 	}
+	.agent-wrap {
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		margin-bottom: 6px;
+	}
 	.agent {
 		display: flex;
 		align-items: center;
 		gap: 10px;
 		padding: 8px 10px;
-		border: 1px solid var(--border);
-		border-radius: 10px;
-		margin-bottom: 6px;
 		font-size: 13px;
+	}
+	.resp {
+		max-width: 240px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		color: var(--muted);
+	}
+	.resp.unset {
+		color: var(--accent);
+		border-color: var(--accent);
+	}
+	.assign {
+		border-top: 1px solid var(--border);
+		padding: 8px 12px 10px;
+	}
+	.assign-title {
+		font-size: 11px;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--muted);
+		margin-bottom: 6px;
+	}
+	.assign-sep {
+		height: 1px;
+		background: var(--border);
+		margin: 6px 0;
+	}
+	.opt {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 13px;
+		padding: 3px 0;
+		cursor: pointer;
+	}
+	.opt.disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
+	.opt-hint {
+		color: var(--muted);
+		font-size: 11px;
 	}
 	.dot {
 		width: 8px;
