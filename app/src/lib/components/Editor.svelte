@@ -3,6 +3,7 @@
 	import { Pos, Style, MarkT, Layout } from "$lib/types";
 	import { note, table, fetchObject } from "$lib/api";
 	import { fromDom, selectionOffsets, setCaret, toggleMark, toHtml } from "$lib/marks";
+	import { isToggleOpen } from "$lib/toggles";
 	import BlockNode from "./BlockNode.svelte";
 	import BlockMenu from "./BlockMenu.svelte";
 	import type { MenuAction } from "./BlockMenu.svelte";
@@ -162,6 +163,19 @@
 				lastLocalEdit = Date.now();
 				await note.blockUpdate(object.id, id, { text: { ...curText, text: "", marks: [], style: Style.PARAGRAPH, checked: false } });
 				focusRequest = { blockId: id, offset: 0 };
+				await refresh();
+				return;
+			}
+
+			// Anytype onEnterBlock canToggle rules: Enter at the end of an OPEN
+			// toggle creates the first INNER child; a closed toggle gets a
+			// plain sibling below (the default split handles that).
+			if (curStyle === Style.TOGGLE && isToggleOpen(object.id, id) && at === text.length) {
+				const innerId = crypto.randomUUID();
+				cancelPending(id);
+				lastLocalEdit = Date.now();
+				await note.blockAdd(object.id, { id: innerId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } }, id, Pos.INNER_FIRST);
+				focusRequest = { blockId: innerId, offset: 0 };
 				await refresh();
 				return;
 			}

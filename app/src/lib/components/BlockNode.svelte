@@ -5,6 +5,7 @@
 	import BlockNode from "./BlockNode.svelte";
 	import TableBlock from "./TableBlock.svelte";
 	import RelationBlock from "./RelationBlock.svelte";
+	import { isToggleOpen, setToggleOpen } from "$lib/toggles";
 
 	let {
 		id,
@@ -44,6 +45,18 @@
 	const block = $derived(byId.get(id));
 	let zone = $state(0); // 0 none, else Pos value
 	let textEl: HTMLElement | undefined = $state();
+
+	// Anytype toggle: open state is per-device (localStorage), arrow rotates,
+	// children hidden while closed.
+	const isToggle = $derived(block?.content.text?.style === Style.TOGGLE);
+	let toggleOpen = $state(false);
+	$effect(() => {
+		if (isToggle) toggleOpen = isToggleOpen(object.id, id);
+	});
+	function flipToggle() {
+		toggleOpen = !toggleOpen;
+		setToggleOpen(object.id, id, toggleOpen);
+	}
 
 	const STYLE_CLASS: Record<number, string> = {
 		[Style.PARAGRAPH]: "p",
@@ -210,6 +223,9 @@
 			{/if}
 			{#if t.style === Style.BULLET}<span class="marker">•</span>{/if}
 			{#if t.style === Style.NUMBERED}<span class="marker">1.</span>{/if}
+			{#if t.style === Style.TOGGLE}
+				<button class="toggle-arrow" class:open={toggleOpen} aria-label={toggleOpen ? "Collapse" : "Expand"} onclick={flipToggle}>▶</button>
+			{/if}
 			<div
 				role="textbox"
 				tabindex="0"
@@ -228,7 +244,7 @@
 				}}
 				data-placeholder={t.style === Style.TITLE ? "Untitled" : "Type / for commands"}
 			></div>
-			{#if block.childrenIds.length > 0}
+			{#if block.childrenIds.length > 0 && (!isToggle || toggleOpen)}
 				<div class="nested">
 					{#each block.childrenIds as cid (cid)}
 						<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
@@ -421,6 +437,24 @@
 	}
 	.check-circle.on {
 		color: var(--accent);
+	}
+	.toggle-arrow {
+		background: none;
+		border: none;
+		color: var(--muted);
+		font-size: 9px;
+		width: 20px;
+		height: 24px;
+		flex: none;
+		cursor: pointer;
+		transition: transform 0.15s;
+		padding: 0;
+	}
+	.toggle-arrow.open {
+		transform: rotate(90deg);
+	}
+	.toggle-arrow:hover {
+		color: var(--fg);
 	}
 	.marker {
 		padding-top: 4px;

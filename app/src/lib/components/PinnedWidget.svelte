@@ -1,10 +1,10 @@
 <script lang="ts">
 	/**
-	 * Sidebar widget body for a pinned query/collection — port of Anytype's
-	 * widget view modes (widget/view/{list,gallery,board,calendar}): the
-	 * pinned entry renders a mini version of the set's CURRENT view.
-	 *   list/table → first rows · gallery → small card grid
-	 *   kanban     → groups with counts · calendar → mini month, dot days
+	 * Sidebar widget body for a pinned object — port of Anytype's widget
+	 * views. Sets (query/collection) render a mini version of their CURRENT
+	 * view: list/table → first rows · gallery → small card grid · kanban →
+	 * groups with counts · calendar → mini month with dot days. Any OTHER
+	 * object renders Anytype's TREE widget: the objects it links to.
 	 */
 	import { fetchObject, fetchQuery, type QueryResultRow } from "$lib/api";
 	import type { ObjectJSON, RelationDefJSON } from "$lib/types";
@@ -17,25 +17,46 @@
 
 	let obj = $state<ObjectJSON | null>(null);
 	let rows = $state<QueryResultRow[]>([]);
-
 	async function load() {
 		try {
 			const o = await fetchObject(id);
 			obj = o;
-			const memberIds = (o.fields["collectionIds"]?.valuesValue?.items ?? [])
-				.map((i) => i.stringValue)
-				.filter((s): s is string => !!s);
-			const body =
-				o.typeKey === "collection"
-					? memberIds.length
-						? { filters: [{ key: "id", condition: "in", value: memberIds }] }
-						: null
-					: { setId: o.id };
-			if (!body) {
+			const isSet = o.typeKey === "query" || o.typeKey === "set" || o.typeKey === "collection";
+			if (isSet) {
+				const memberIds = (o.fields["collectionIds"]?.valuesValue?.items ?? [])
+					.map((i) => i.stringValue)
+					.filter((s): s is string => !!s);
+				const body =
+					o.typeKey === "collection"
+						? memberIds.length
+							? { filters: [{ key: "id", condition: "in", value: memberIds }] }
+							: null
+						: { setId: o.id };
+				if (!body) {
+					rows = [];
+					return;
+				}
+				const res = await fetchQuery({ ...body, limit: 50 });
+				rows = res.records;
+				return;
+			}
+			// Tree widget: outbound links (same shapes as the graph/backlinks).
+			const targets = new Set<string>();
+			for (const [key, v] of Object.entries(o.fields)) {
+				if (key === "channel") continue;
+				if (v.linkValue?.targetId) targets.add(v.linkValue.targetId);
+				else if (v.valuesValue) {
+					for (const item of v.valuesValue.items) {
+						if (item.linkValue?.targetId) targets.add(item.linkValue.targetId);
+						else if (key === "collectionIds" && item.stringValue) targets.add(item.stringValue);
+					}
+				}
+			}
+			if (targets.size === 0) {
 				rows = [];
 				return;
 			}
-			const res = await fetchQuery({ ...body, limit: 50 });
+			const res = await fetchQuery({ filters: [{ key: "id", condition: "in", value: [...targets] }], limit: 20 });
 			rows = res.records;
 		} catch {
 			obj = null;
@@ -50,7 +71,8 @@
 		});
 	});
 
-	const viewType = $derived(obj?.fields["viewType"]?.stringValue || "table");
+	const isSet = $derived(!!obj && (obj.typeKey === "query" || obj.typeKey === "set" || obj.typeKey === "collection"));
+	const viewType = $derived(isSet ? obj?.fields["viewType"]?.stringValue || "table" : "table");
 	const groupKey = $derived(obj?.fields["viewGroupKey"]?.stringValue || "");
 	const dateKey = $derived(obj?.fields["viewDateKey"]?.stringValue || "createdDate");
 	const groupRel = $derived<RelationDefJSON | undefined>(store.relations.find((r) => r.key === groupKey));

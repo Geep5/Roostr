@@ -164,6 +164,21 @@
 
 	const icon = (o: { icon?: string; typeKey: string }) => objectIcon(o.icon, o.typeKey);
 
+	// Widget collapse state (Anytype Storage.checkToggle('widget', id)).
+	let widgetCollapsed = $state<Record<string, boolean>>(
+		(() => {
+			try {
+				return JSON.parse(localStorage.getItem("widget-collapsed") ?? "{}");
+			} catch {
+				return {};
+			}
+		})(),
+	);
+	function flipWidget(id: string) {
+		widgetCollapsed[id] = !widgetCollapsed[id];
+		localStorage.setItem("widget-collapsed", JSON.stringify(widgetCollapsed));
+	}
+
 	let showSettings = $state(false);
 	let showSearch = $state(false);
 
@@ -252,11 +267,19 @@
 			     sets render their current view beneath. No "Pinned" label. -->
 			{#each pinned as p (p.id)}
 				<div class="widget" class:current={page.url.pathname === `/object/${p.id}`}>
-					<a class="widget-head" href="/object/{p.id}">
-						<span class="obj-icon">{icon(p)}</span>
-						<span class="widget-name">{p.name || "Untitled"}</span>
-					</a>
-					{#if p.typeKey === "query" || p.typeKey === "set" || p.typeKey === "collection"}
+					<div class="widget-row">
+						<button
+							class="widget-collapse"
+							class:open={!widgetCollapsed[p.id]}
+							aria-label={widgetCollapsed[p.id] ? "Expand" : "Collapse"}
+							onclick={() => flipWidget(p.id)}>▶</button
+						>
+						<a class="widget-head" href="/object/{p.id}">
+							<span class="obj-icon">{icon(p)}</span>
+							<span class="widget-name">{p.name || "Untitled"}</span>
+						</a>
+					</div>
+					{#if !widgetCollapsed[p.id]}
 						<PinnedWidget id={p.id} />
 					{/if}
 				</div>
@@ -563,12 +586,37 @@
 		border-radius: 12px;
 		padding: 8px;
 	}
+	.widget-row {
+		display: flex;
+		align-items: center;
+	}
+	.widget-collapse {
+		background: none;
+		border: none;
+		color: var(--muted);
+		font-size: 8px;
+		width: 16px;
+		height: 24px;
+		padding: 0;
+		flex: none;
+		cursor: pointer;
+		opacity: 0.6;
+		transition: transform 0.15s;
+	}
+	.widget-collapse.open {
+		transform: rotate(90deg);
+	}
+	.widget-collapse:hover {
+		color: var(--fg);
+		opacity: 1;
+	}
 	.widget-head {
+		flex: 1;
 		display: flex;
 		align-items: center;
 		gap: 6px;
 		height: 28px;
-		padding: 0 8px;
+		padding: 0 8px 0 2px;
 		border-radius: 6px;
 		font-size: 14px;
 		font-weight: 600;
