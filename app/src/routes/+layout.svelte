@@ -207,6 +207,16 @@
 		localStorage.setItem("widget-collapsed", JSON.stringify(widgetCollapsed));
 	}
 
+	// Anytype widget sections (sidebar/page/widget.tsx onToggle): section
+	// headers collapse; a viewing preference, persisted per device.
+	let sectionCollapsed = $state<Record<string, boolean>>(
+		typeof localStorage === "undefined" ? {} : JSON.parse(localStorage.getItem("section-collapsed") ?? "{}"),
+	);
+	function flipSection(id: string) {
+		sectionCollapsed[id] = !sectionCollapsed[id];
+		localStorage.setItem("section-collapsed", JSON.stringify(sectionCollapsed));
+	}
+
 	let showSettings = $state(false);
 	let showSearch = $state(false);
 
@@ -336,28 +346,38 @@
 				</div>
 			{/each}
 
-			<div class="section">
-				<div class="section-name">Recently edited</div>
-				{#each recent as r (r.id)}
-					<a class="item" class:current={page.url.pathname === `/object/${r.id}`} href="/object/{r.id}">
-						<span class="obj-icon">{icon(r)}</span>{r.name || "Untitled"}
-					</a>
-				{/each}
-				{#if recent.length === 0}
-					<span class="none">Nothing yet</span>
+			<div class="section" class:closed={sectionCollapsed["recent"]}>
+				<div class="section-head">
+					<button class="section-name" onclick={() => flipSection("recent")}>
+						<span class="section-arrow" class:open={!sectionCollapsed["recent"]}>▶</span>Recently edited
+					</button>
+				</div>
+				{#if !sectionCollapsed["recent"]}
+					{#each recent as r (r.id)}
+						<a class="item" class:current={page.url.pathname === `/object/${r.id}`} href="/object/{r.id}">
+							<span class="obj-icon">{icon(r)}</span>{r.name || "Untitled"}
+						</a>
+					{/each}
+					{#if recent.length === 0}
+						<span class="none">Nothing yet</span>
+					{/if}
 				{/if}
 			</div>
 
-			<div class="section">
+			<div class="section" class:closed={sectionCollapsed["types"]}>
 				<div class="section-head">
-					<div class="section-name">Types</div>
+					<button class="section-name" onclick={() => flipSection("types")}>
+						<span class="section-arrow" class:open={!sectionCollapsed["types"]}>▶</span>Types
+					</button>
 					<button class="section-add" title="New type" onclick={() => void newType()}>＋</button>
 				</div>
-				{#each store.types as t (t.id)}
-					<a class="item" class:current={page.url.pathname === `/object/${t.id}`} href="/object/{t.id}">
-						<span class="obj-icon">{t.icon || typeGlyph(t.key)}</span>{t.name || t.key}
-					</a>
-				{/each}
+				{#if !sectionCollapsed["types"]}
+					{#each store.types as t (t.id)}
+						<a class="item" class:current={page.url.pathname === `/object/${t.id}`} href="/object/{t.id}">
+							<span class="obj-icon">{t.icon || typeGlyph(t.key)}</span>{t.name || t.key}
+						</a>
+					{/each}
+				{/if}
 			</div>
 
 		{/if}
@@ -737,11 +757,34 @@
 	}
 	/* Anytype nameWrap: 12px/18px medium, sentence case, secondary. */
 	.section-name {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		background: none;
+		border: none;
 		font-size: 12px;
 		line-height: 18px;
 		font-weight: 500;
+		font-family: inherit;
 		color: var(--muted);
 		padding: 2px 8px 6px;
+		cursor: pointer;
+		transition: color 0.15s;
+	}
+	.section-name:hover {
+		color: var(--fg);
+	}
+	.section-arrow {
+		font-size: 8px;
+		display: inline-block;
+		transition: transform 0.15s;
+		opacity: 0.7;
+	}
+	.section-arrow.open {
+		transform: rotate(90deg);
+	}
+	.section.closed {
+		padding-bottom: 2px;
 	}
 	/* Anytype tree item: 28px row, 6px radius, highlight-medium hover. */
 	.item {
