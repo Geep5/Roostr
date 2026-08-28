@@ -73,7 +73,14 @@ async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
 	for (const agentId of agents) {
 		try {
 			const agent = await fetchObject(agentId);
-			const channelId = str(agent.fields, "channel") || defaultChannel;
+			let channelId = str(agent.fields, "channel");
+			if (!channelId) {
+				// Never let an agent float on channel ordering: bind it to the
+				// current default PERMANENTLY. (An ordering flip once moved every
+				// floating agent - and their chats - into a duplicate channel.)
+				channelId = defaultChannel;
+				if (channelId) await setField(agentId, "channel", sv(channelId));
+			}
 			const chatId = await ensureChat(agent, channelId);
 			out.set(agentId, { agentId, chatId, channelId, types: list(agent.fields, "responsible_types") });
 		} catch (err) {

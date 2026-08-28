@@ -131,6 +131,29 @@
 		else alert("No chat yet — enable the agent on a machine running the harness first.");
 	}
 
+	let confirmRemove = $state("");
+
+	/** Tombstone the agent and its chats. Two-click confirm. */
+	async function removeAgent(a: AgentRow) {
+		if (confirmRemove !== a.id) {
+			confirmRemove = a.id;
+			setTimeout(() => (confirmRemove = ""), 4000);
+			return;
+		}
+		confirmRemove = "";
+		if (roster?.includes(a.id)) await toggle(a.id, false);
+		const chats = await fetchQuery({
+			filters: [
+				{ key: "type", condition: "equal", value: "chat" },
+				{ key: "agent", condition: "equal", value: a.id },
+			],
+			limit: 10,
+		});
+		for (const c of chats.records) await note.del(c.id);
+		await note.del(a.id);
+		await load();
+	}
+
 	async function newAgent() {
 		const name = prompt("Agent name:");
 		if (!name?.trim()) return;
@@ -161,7 +184,7 @@
 	<div class="agent-wrap">
 		<div class="agent">
 			<span class="dot" class:online></span>
-			<a class="name" href="/object/{a.id}" title="Agent settings">{a.name}</a>
+			<span class="name">{a.name}</span>
 			<span class="meta">
 				{#if online}{a.host || "online"} · {ago(a.seenAt)}{:else if a.seenAt > 0}last seen {ago(a.seenAt)}{:else}never ran{/if}
 			</span>
@@ -174,6 +197,9 @@
 					{runsHere ? "Runs here" : "Run here"}
 				</button>
 			{/if}
+			<button class="danger" onclick={() => void removeAgent(a)}>
+				{confirmRemove === a.id ? "Confirm remove" : "Remove"}
+			</button>
 		</div>
 		{#if assigning === a.id}
 			{@const claimed = claimants(a.id)}
@@ -289,10 +315,10 @@
 	.name {
 		color: var(--fg);
 		font-weight: 600;
-		text-decoration: none;
 	}
-	.name:hover {
-		color: var(--accent);
+	button.danger:hover {
+		border-color: #e05555;
+		color: #e05555;
 	}
 	.meta {
 		color: var(--muted);

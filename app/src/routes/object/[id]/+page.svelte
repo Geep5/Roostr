@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { page } from "$app/state";
+	import { goto } from "$app/navigation";
 	import type { ObjectJSON } from "$lib/types";
 	import { fieldStr } from "$lib/types";
 	import { fetchObject, fetchQuery, note } from "$lib/api";
@@ -8,7 +9,6 @@
 	import Editor from "$lib/components/Editor.svelte";
 	import FeaturedProps from "$lib/components/FeaturedProps.svelte";
 	import Discussion from "$lib/components/Discussion.svelte";
-	import AgentBar from "$lib/components/AgentBar.svelte";
 	import SetTable from "$lib/components/SetTable.svelte";
 	import QueryControls from "$lib/components/QueryControls.svelte";
 	import ChannelManage from "$lib/components/ChannelManage.svelte";
@@ -26,7 +26,18 @@
 		if (!id) return;
 		object = undefined;
 		void fetchObject(id).then((o) => {
-			if (page.params.id === id) object = o;
+			if (page.params.id !== id) return;
+			// Agents have no page of their own — they're managed in channel
+			// settings (and deleting the object there once looked like
+			// deleting "all agents").
+			if (o.typeKey === "agent") {
+				const ch = o.fields["channel"]?.stringValue || store.channels[0]?.id;
+				if (ch) {
+					void goto(`/object/${ch}`, { replaceState: true });
+					return;
+				}
+			}
+			object = o;
 		});
 	});
 
@@ -84,21 +95,6 @@
 		if (!object) return;
 		await note.setField(object.id, "done", { boolValue: !done });
 		await refresh();
-	}
-
-	/** The agent's holistic chat for this channel (created by the harness). */
-	async function openAgentChat() {
-		if (!object) return;
-		const res = await fetchQuery({
-			filters: [
-				{ key: "type", condition: "equal", value: "chat" },
-				{ key: "agent", condition: "equal", value: object.id },
-			],
-			limit: 1,
-		});
-		const chat = res.records[0];
-		if (chat) location.href = `/object/${chat.id}`;
-		else alert("No chat yet — start the harness once to create it.");
 	}
 
 	const memberIds = $derived.by(() => {
@@ -245,10 +241,6 @@
 			<p class="tpl-note">Template{templateTargetName ? ` of ${templateTargetName}` : ""} — new objects copy these blocks.</p>
 		{/if}
 		{#if !isChannel && !isChat && !isType}
-			{#if object.typeKey === "agent"}
-				<AgentBar {object} />
-				<button class="open-chat" onclick={() => void openAgentChat()}>💬 Open chat →</button>
-			{/if}
 			<FeaturedProps {object} relations={store.relations} onchanged={refresh} />
 		{/if}
 
@@ -327,20 +319,6 @@
 		color: var(--muted);
 		font-size: 12px;
 		margin: 0 0 8px;
-	}
-	.open-chat {
-		align-self: flex-start;
-		background: none;
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		color: var(--fg);
-		font-size: 13px;
-		padding: 6px 10px;
-		cursor: pointer;
-		margin: 4px 0 8px;
-	}
-	.open-chat:hover {
-		border-color: var(--accent);
 	}
 	.obj-img {
 		width: 34px;
