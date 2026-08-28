@@ -262,7 +262,7 @@
 	</button>
 	<span class="spacer"></span>
 	<span class="views">
-		{#each [["table", "▤"], ["kanban", "▥"], ["calendar", "▦"]] as [v, glyph] (v)}
+		{#each [["table", "▤"], ["gallery", "▧"], ["kanban", "▥"], ["calendar", "▦"]] as [v, glyph] (v)}
 			<button class="pill view" class:active={viewType === v} title={v} onclick={() => void setView(v)}>{glyph} {v[0].toUpperCase() + v.slice(1)}</button>
 		{/each}
 	</span>

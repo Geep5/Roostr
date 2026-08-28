@@ -7,6 +7,7 @@
 	import { objectIcon } from "$lib/icons";
 	import { store, refreshAll, connectEvents } from "$lib/data.svelte";
 	import GraphIcon from "$lib/components/GraphIcon.svelte";
+	import PinnedWidget from "$lib/components/PinnedWidget.svelte";
 	import { creatableTypes, typeGlyph, createTyped, createCollection, createQuery } from "$lib/create";
 
 	let { children }: { children: import("svelte").Snippet } = $props();
@@ -253,6 +254,11 @@
 						<a class="item" class:current={page.url.pathname === `/object/${p.id}`} href="/object/{p.id}">
 							<span class="obj-icon">{icon(p)}</span>{p.name || "Untitled"}
 						</a>
+						{#if p.typeKey === "query" || p.typeKey === "set" || p.typeKey === "collection"}
+							<!-- Anytype widget views: the pinned set renders a mini
+							     version of its current view (list/gallery/board/calendar). -->
+							<PinnedWidget id={p.id} />
+						{/if}
 					{/each}
 				</div>
 			{/if}

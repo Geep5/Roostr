@@ -13,6 +13,7 @@
 	import QueryControls from "$lib/components/QueryControls.svelte";
 	import KanbanView from "$lib/components/KanbanView.svelte";
 	import CalendarView from "$lib/components/CalendarView.svelte";
+	import GalleryView from "$lib/components/GalleryView.svelte";
 	import ChannelManage from "$lib/components/ChannelManage.svelte";
 	import TypePanel from "$lib/components/TypePanel.svelte";
 	import EmojiPicker from "$lib/components/EmojiPicker.svelte";
@@ -280,7 +281,9 @@
 			{/if}
 			{#if tableBody}
 				{@const viewType = object.fields["viewType"]?.stringValue || "table"}
-				{#if viewType === "kanban"}
+				{#if viewType === "gallery"}
+					<GalleryView body={tableBody} {object} relations={store.relations} />
+				{:else if viewType === "kanban"}
 					<KanbanView body={tableBody} {object} relations={store.relations} groupKey={object.fields["viewGroupKey"]?.stringValue || ""} onchanged={refresh} />
 				{:else if viewType === "calendar"}
 					<CalendarView body={tableBody} {object} dateKey={object.fields["viewDateKey"]?.stringValue || "createdDate"} />
