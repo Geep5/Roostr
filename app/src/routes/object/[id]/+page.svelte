@@ -336,24 +336,26 @@
 		margin: 0 0 8px 48px;
 	}
 	.obj-img {
-		width: 34px;
-		height: 34px;
-		border-radius: 8px;
+		width: 96px;
+		height: 96px;
+		border-radius: 18px;
 		object-fit: cover;
 	}
 	/* Anytype: the icon sits ABOVE the title at the content edge (48px). */
 	.icon-wrap {
 		position: relative;
-		margin: 12px 0 2px 44px;
+		margin: 16px 0 4px 44px;
 		width: fit-content;
 	}
+	/* Anytype blockIconPage: 80px emoji (96 with image), breathing room. */
 	.obj-emoji {
-		width: 40px;
-		height: 44px;
+		width: 80px;
+		height: 80px;
 		border: none;
 		background: none;
-		font-size: 28px;
-		border-radius: 10px;
+		font-size: 64px;
+		line-height: 1;
+		border-radius: 14px;
 		cursor: pointer;
 		display: flex;
 		align-items: center;
@@ -364,8 +366,8 @@
 	}
 	.obj-emoji.placeholder {
 		color: var(--muted);
-		font-size: 22px;
-		opacity: 0.6;
+		font-size: 32px;
+		opacity: 0.5;
 	}
 	.title-row {
 		display: flex;
