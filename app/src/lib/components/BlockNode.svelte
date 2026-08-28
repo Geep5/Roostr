@@ -156,7 +156,7 @@
 	{:else if block.content.table}
 		<div
 			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
-			data-table={block.id}
+			data-block={block.id}
 			role="presentation"
 			ondragover={(e) => {
 				if (!draggingId || draggingId === block.id) return;
@@ -307,7 +307,7 @@
 	{:else if block.content.custom?.contentType === "relation"}
 		<div
 			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
-			data-table={block.id}
+			data-block={block.id}
 			role="presentation"
 			ondragover={(e) => {
 				if (!draggingId || draggingId === block.id) return;
@@ -350,7 +350,7 @@
 		{@const meta = block.content.custom.meta ?? {}}
 		<div
 			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
-			data-table={block.id}
+			data-block={block.id}
 			role="presentation"
 			ondragover={(e) => {
 				if (!draggingId || draggingId === block.id) return;
