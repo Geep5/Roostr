@@ -346,6 +346,9 @@
 		--fg: #e8eaed;
 		--muted: #8b909b;
 		--accent: #ffa02f;
+		/* Anytype shape-highlight tokens (dark theme values). */
+		--hl-light: rgba(255, 255, 255, 0.03);
+		--hl-med: rgba(255, 255, 255, 0.05);
 	}
 	.search-row {
 		display: flex;
@@ -356,18 +359,20 @@
 		flex: 1;
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 6px;
 		background: none;
 		border: none;
 		color: var(--muted);
-		border-radius: 8px;
-		padding: 6px 8px;
-		font-size: 13px;
+		border-radius: 6px;
+		height: 28px;
+		padding: 0 8px;
+		font-size: 14px;
+		line-height: 22px;
 		cursor: pointer;
 		text-align: left;
 	}
 	.search-entry:hover {
-		background: var(--hover);
+		background: var(--hl-med);
 		color: var(--fg);
 	}
 	.create-wrap {
@@ -381,13 +386,13 @@
 		height: 28px;
 		background: none;
 		border: none;
-		border-radius: 8px;
+		border-radius: 6px;
 		color: var(--muted);
 		font-size: 15px;
 		cursor: pointer;
 	}
 	.create-btn:hover {
-		background: var(--hover);
+		background: var(--hl-med);
 		color: var(--fg);
 	}
 	.create-menu {
@@ -497,56 +502,75 @@
 	}
 	.widgets {
 		border-right: 1px solid var(--border);
-		padding: 14px 10px;
+		padding: 10px 8px;
 		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
-		gap: 14px;
+		gap: 8px;
 	}
+	/* Anytype spaceHead: 600-weight name, 6px radius, highlight hover,
+	   settings affordance revealed on hover. */
 	.channel-head {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		font-weight: 700;
+		font-weight: 600;
 		font-size: 14px;
-		padding: 4px 8px;
-		border-radius: 8px;
+		line-height: 22px;
+		padding: 4px 6px;
+		border-radius: 6px;
 	}
 	.channel-head:hover {
-		background: var(--hover);
+		background: var(--hl-med);
 	}
 	.gear {
 		color: var(--muted);
 		font-size: 13px;
+		opacity: 0;
+		transition: opacity 0.15s;
 	}
+	.channel-head:hover .gear {
+		opacity: 1;
+	}
+	/* Anytype widget cards: subtle solid, 12px radius, 8px padding. */
+	.section {
+		background: var(--hl-light);
+		border-radius: 12px;
+		padding: 8px;
+	}
+	/* Anytype nameWrap: 12px/18px medium, sentence case, secondary. */
 	.section-name {
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
+		font-size: 12px;
+		line-height: 18px;
+		font-weight: 500;
 		color: var(--muted);
-		padding: 0 8px 6px;
+		padding: 2px 8px 6px;
 	}
+	/* Anytype tree item: 28px row, 6px radius, highlight-medium hover. */
 	.item {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 5px 8px;
-		border-radius: 7px;
-		font-size: 13px;
+		gap: 6px;
+		height: 28px;
+		padding: 0 8px;
+		border-radius: 6px;
+		font-size: 14px;
+		line-height: 22px;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
 	.item:hover {
-		background: var(--hover);
+		background: var(--hl-med);
 	}
 	.item.current {
-		background: var(--hover);
-		color: var(--accent);
+		background: var(--hl-med);
 	}
 	.obj-icon {
 		color: var(--accent);
 		flex: none;
+		width: 20px;
+		text-align: center;
 	}
 	.none {
 		color: var(--muted);
@@ -556,10 +580,12 @@
 	.all {
 		color: var(--muted);
 		font-size: 12px;
-		padding: 0 8px;
+		padding: 2px 8px;
+		border-radius: 6px;
 	}
 	.all:hover {
 		color: var(--fg);
+		background: var(--hl-med);
 	}
 	.main-col {
 		overflow-y: auto;
