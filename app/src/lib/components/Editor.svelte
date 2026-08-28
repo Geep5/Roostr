@@ -4,6 +4,8 @@
 	import { note, table, fetchObject } from "$lib/api";
 	import { fromDom, selectionOffsets, setCaret, toggleMark, toHtml } from "$lib/marks";
 	import { isToggleOpen, setToggleOpen } from "$lib/toggles";
+	import { refreshSpell, misspelledAt } from "$lib/spelldom";
+	import { addToDictionary } from "$lib/spell";
 	import BlockNode from "./BlockNode.svelte";
 	import BlockMenu from "./BlockMenu.svelte";
 	import type { MenuAction } from "./BlockMenu.svelte";
@@ -40,6 +42,30 @@
 	// ── Editing state ─────────────────────────────────────────────
 	let draggingId = $state("");
 	let focusRequest = $state<{ blockId: string; offset: number } | null>(null);
+
+	// ── Spellcheck (basic English dictionary + ignore list) ─────────
+	let spellTimer: ReturnType<typeof setTimeout> | undefined;
+	let spellMenu = $state<{ word: string; x: number; y: number } | null>(null);
+
+	function scheduleSpell() {
+		clearTimeout(spellTimer);
+		spellTimer = setTimeout(() => {
+			if (editorEl) void refreshSpell(editorEl);
+		}, 350);
+	}
+
+	$effect(() => {
+		void object.blocks;
+		scheduleSpell();
+	});
+
+	function onEditorContextMenu(e: MouseEvent) {
+		const hit = misspelledAt(e.clientX, e.clientY);
+		if (!hit) return; // native menu (or block menu) as usual
+		e.preventDefault();
+		e.stopPropagation();
+		spellMenu = { word: hit.word, x: e.clientX, y: e.clientY };
+	}
 
 	// ── Multi-block selection (Anytype selection/provider.tsx) ──────
 	// Rect-drag from whitespace selects colliding blocks (cmd toggles vs
@@ -506,6 +532,7 @@
 	function onInput(id: string) {
 		updateSlash(id);
 		scheduleSave(id);
+		scheduleSpell();
 	}
 
 	/** Apply a slash pick: strip "/filter" from the block, then act. */
@@ -883,12 +910,18 @@
 	}
 </script>
 
-<svelte:window onkeydown={(e) => void onWindowKeydown(e)} />
+<svelte:window
+	onkeydown={(e) => void onWindowKeydown(e)}
+	onmousedown={(e) => {
+		if (spellMenu && !(e.target as HTMLElement).closest(".spell-menu")) spellMenu = null;
+	}}
+/>
 
 <div
 	class="editor"
 	role="presentation"
 	bind:this={editorEl}
+	oncontextmenucapture={onEditorContextMenu}
 	onmousedown={selMouseDown}
 	onclick={(e) => {
 		if (e.target === e.currentTarget && !selectedIds.length) void appendBlock();
@@ -918,6 +951,20 @@
 		<button class="empty-hint" onclick={() => void appendBlock()}>Click to start writing…</button>
 	{/if}
 </div>
+
+{#if spellMenu}
+	<div class="spell-menu" style="left:{spellMenu.x}px; top:{spellMenu.y + 6}px" role="menu">
+		<span class="sm-word">"{spellMenu.word}"</span>
+		<button
+			onclick={() => {
+				addToDictionary(spellMenu!.word);
+				spellMenu = null;
+				scheduleSpell();
+			}}>Add to dictionary</button
+		>
+		<button class="sm-close" onclick={() => (spellMenu = null)}>✕</button>
+	</div>
+{/if}
 
 {#if selRect}
 	<!-- Anytype #selection-rect: system-selection fill, hairline border. -->
@@ -1057,5 +1104,44 @@
 		border: 1px solid #2aa7ee;
 		border-radius: 2px;
 		pointer-events: none;
+	}
+	:global(::highlight(spell)) {
+		text-decoration: underline wavy #e2400c 1px;
+		text-decoration-skip-ink: none;
+	}
+	.spell-menu {
+		position: fixed;
+		z-index: 140;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		background: var(--panel, #1a1d23);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 5px 8px;
+		font-size: 13px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+	}
+	.sm-word {
+		color: var(--muted);
+		max-width: 160px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.spell-menu button {
+		background: none;
+		border: none;
+		color: var(--fg);
+		cursor: pointer;
+		font-size: 13px;
+		padding: 2px 6px;
+		border-radius: 5px;
+	}
+	.spell-menu button:hover {
+		background: var(--hl-med);
+	}
+	.sm-close {
+		color: var(--muted);
 	}
 </style>

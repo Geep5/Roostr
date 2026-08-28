@@ -298,6 +298,7 @@
 				onkeyup={(e) => {
 					if (e.shiftKey || e.key.startsWith("Arrow")) onselect(block.id);
 				}}
+				spellcheck="false"
 				data-placeholder={t.style === Style.TITLE ? "Untitled" : "Type / for commands"}
 			></div>
 			{#if block.childrenIds.length > 0 && (!isToggle || toggleOpen)}

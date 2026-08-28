@@ -2,6 +2,7 @@
 	import { onMount } from "svelte";
 	import { settings } from "$lib/api";
 	import { exportAll } from "$lib/export";
+	import { ignoredWords, removeFromDictionary } from "$lib/spell";
 
 	let { onclose }: { onclose: () => void } = $props();
 
@@ -143,6 +144,16 @@
 
 	const SUGGESTED = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.nostr.band"];
 
+	// ── Spellcheck ignore list ──────────────────────────────────────
+	let ignored = $state<string[]>([]);
+	$effect(() => {
+		ignored = ignoredWords();
+	});
+	function unignore(w: string) {
+		removeFromDictionary(w);
+		ignored = ignoredWords();
+	}
+
 	// ── Export (Anytype popup/export.tsx: Markdown | Any-Block) ─────
 	let exportFormat = $state<"markdown" | "json">("markdown");
 	let exporting = $state(false);
@@ -242,6 +253,20 @@
 				<div class="suggested">
 					{#each SUGGESTED as s (s)}
 						<button class="chip" onclick={() => void saveRelays([...relays, s])}>{s.replace("wss://", "")}</button>
+					{/each}
+				</div>
+			{/if}
+		</section>
+
+		<section>
+			<h3>Dictionary</h3>
+			<p class="hint">Words you added to the dictionary from the editor's spellcheck. Remove one to flag it again.</p>
+			{#if ignored.length === 0}
+				<p class="hint none">Nothing added yet — right-click a flagged word and choose "Add to dictionary".</p>
+			{:else}
+				<div class="dict-words">
+					{#each ignored as w (w)}
+						<span class="dict-word">{w} <button class="x" title="Remove" onclick={() => unignore(w)}>×</button></span>
 					{/each}
 				</div>
 			{/if}
@@ -463,6 +488,22 @@
 		font-weight: 400;
 		font-family: ui-monospace, monospace;
 		font-size: 11px;
+	}
+	.dict-words {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+	.dict-word {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		padding: 2px 4px 2px 12px;
+		font-size: 13px;
+		font-family: ui-monospace, monospace;
 	}
 	.export-row {
 		display: flex;
