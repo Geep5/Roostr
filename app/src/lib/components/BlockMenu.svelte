@@ -47,6 +47,7 @@
 		{ label: "Heading 3", value: Style.HEADER3, desc: "Small section heading", preview: "Ag", cls: "pv-h3" },
 		{ label: "Bulleted list", value: Style.BULLET, desc: "Simple list of items", preview: "•—", cls: "pv-list" },
 		{ label: "Numbered list", value: Style.NUMBERED, desc: "Ordered list of items", preview: "1—", cls: "pv-list" },
+		{ label: "Toggle", value: Style.TOGGLE, desc: "Collapsible content", preview: "▸", cls: "pv-list" },
 		{ label: "Checkbox", value: Style.CHECKBOX, desc: "Task with a to-do state", preview: "☑", cls: "pv-check" },
 		{ label: "Quote", value: Style.QUOTE, desc: "Highlight a passage", preview: "Ag", cls: "pv-quote" },
 		{ label: "Code", value: Style.CODE, desc: "Monospaced snippet", preview: "</>", cls: "pv-code" },
