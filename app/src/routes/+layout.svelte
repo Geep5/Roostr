@@ -147,6 +147,24 @@
 		selectChannel(id);
 	}
 
+	/** Create a type object (Anytype: U.Object.createType); opens its page. */
+	async function newType() {
+		const name = prompt("Type name:");
+		if (!name?.trim()) return;
+		let key = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+		if (!key) return;
+		if (store.types.some((t) => t.key === key)) {
+			alert(`A type with key "${key}" already exists.`);
+			return;
+		}
+		const { id } = await note.create(name.trim(), "type", {
+			key: { stringValue: key },
+			layout: { stringValue: "page" },
+		});
+		await refreshAll();
+		await goto(`/object/${id}`);
+	}
+
 	const icon = (o: { icon?: string; typeKey: string }) => objectIcon(o.icon, o.typeKey);
 
 	let showSettings = $state(false);
@@ -256,7 +274,10 @@
 			</div>
 
 			<div class="section">
-				<div class="section-name">Types</div>
+				<div class="section-head">
+					<div class="section-name">Types</div>
+					<button class="section-add" title="New type" onclick={() => void newType()}>＋</button>
+				</div>
 				{#each store.types as t (t.id)}
 					<a class="item" class:current={page.url.pathname === `/object/${t.id}`} href="/object/{t.id}">
 						<span class="obj-icon">{t.icon || typeGlyph(t.key)}</span>{t.name || t.key}
@@ -539,6 +560,29 @@
 		background: var(--hl-light);
 		border-radius: 12px;
 		padding: 8px;
+	}
+	.section-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+	/* Faint add affordance (Anytype nameWrap buttons). */
+	.section-add {
+		background: none;
+		border: none;
+		color: var(--muted);
+		opacity: 0.5;
+		font-size: 12px;
+		width: 20px;
+		height: 20px;
+		border-radius: 4px;
+		cursor: pointer;
+		margin-right: 2px;
+	}
+	.section-add:hover {
+		opacity: 1;
+		background: var(--hl-med);
+		color: var(--fg);
 	}
 	/* Anytype nameWrap: 12px/18px medium, sentence case, secondary. */
 	.section-name {
