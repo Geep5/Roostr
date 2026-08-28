@@ -264,8 +264,6 @@
 				{/each}
 			</div>
 
-			<a class="all" class:current-view={page.url.pathname === "/graph"} href="/graph"><GraphIcon /> Graph</a>
-			<a class="all" href="/">All objects →</a>
 		{/if}
 	</aside>
 
@@ -286,6 +284,7 @@
 				<span class="path-name">{headerPath.name}</span>
 			</button>
 			<div class="header-side right">
+				<a class="hbtn" title="All objects" href="/">▦</a>
 				<a class="hbtn" title="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}><GraphIcon size={16} /></a>
 				{#if objectSummary}
 					<div class="more-wrap">
@@ -577,16 +576,6 @@
 		font-size: 12px;
 		padding: 0 8px;
 	}
-	.all {
-		color: var(--muted);
-		font-size: 12px;
-		padding: 2px 8px;
-		border-radius: 6px;
-	}
-	.all:hover {
-		color: var(--fg);
-		background: var(--hl-med);
-	}
 	.main-col {
 		overflow-y: auto;
 		padding: 0 32px;
@@ -684,9 +673,6 @@
 		border-bottom: 1px solid var(--border);
 		max-width: 920px;
 		margin: 0 auto;
-	}
-	.all.current-view {
-		color: var(--accent);
 	}
 	.path {
 		display: flex;
