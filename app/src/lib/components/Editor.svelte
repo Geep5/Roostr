@@ -168,8 +168,8 @@
 			selectedIds = [];
 			return;
 		}
-		const ae = document.activeElement as HTMLElement | null;
-		if (ae?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(ae?.tagName ?? "")) return;
+		// Anytype: an active block selection owns Backspace/Delete outright —
+		// selection and text focus are mutually exclusive (selecting blurs).
 		if (e.key === "Backspace" || e.key === "Delete") {
 			e.preventDefault();
 			const tops = topmostSelected();
@@ -182,6 +182,14 @@
 			await refresh();
 		}
 	}
+
+	// Selecting clears text focus (Anytype's selection provider clears the
+	// focus state on select) — otherwise the focused block eats keystrokes.
+	$effect(() => {
+		if (selectedIds.length === 0) return;
+		const ae = document.activeElement as HTMLElement | null;
+		if (ae && (ae.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(ae.tagName))) ae.blur();
+	});
 	let toolbar = $state<{ blockId: string; from: number; to: number; x: number; y: number } | null>(null);
 	/** Slash menu: block, offset of the "/", live filter, caret anchor. */
 	let slash = $state<{ blockId: string; start: number; filter: string; x: number; y: number } | null>(null);
