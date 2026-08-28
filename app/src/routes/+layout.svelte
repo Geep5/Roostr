@@ -120,6 +120,34 @@
 		return current.pinnedIds.map((id) => byId.get(id)).filter((s): s is NonNullable<typeof s> => !!s);
 	});
 
+	// ── Widget reorder (Anytype sidebar/page/widget.tsx drag flow) ──
+	// Widgets drag whole; the hovered widget splits at its vertical
+	// midpoint into top/bottom (2px accent line), drop rewrites pinnedIds.
+	let widgetDragId = $state("");
+	let widgetOverId = $state("");
+	let widgetOverPos = $state<"top" | "bottom">("top");
+
+	function widgetDragOver(e: DragEvent, id: string) {
+		if (!widgetDragId || widgetDragId === id) return;
+		e.preventDefault();
+		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		widgetOverId = id;
+		widgetOverPos = e.clientY <= r.top + r.height / 2 ? "top" : "bottom";
+	}
+
+	async function widgetDrop() {
+		const dragged = widgetDragId;
+		const target = widgetOverId;
+		const pos = widgetOverPos;
+		widgetDragId = widgetOverId = "";
+		if (!current || !dragged || !target || dragged === target) return;
+		const ids = current.pinnedIds.filter((x) => x !== dragged);
+		const at = ids.indexOf(target) + (pos === "bottom" ? 1 : 0);
+		ids.splice(at, 0, dragged);
+		await note.setField(current.id, "pinnedIds", { valuesValue: { items: ids.map((id) => ({ stringValue: id })) } });
+		await refreshAll();
+	}
+
 	/** Recently edited in the current channel (unpinned). */
 	const recent = $derived.by(() => {
 		if (!current) return [];
@@ -266,7 +294,30 @@
 			     a 600-weight header row (widget/common.scss .head .clickable);
 			     sets render their current view beneath. No "Pinned" label. -->
 			{#each pinned as p (p.id)}
-				<div class="widget" class:current={page.url.pathname === `/object/${p.id}`}>
+				<div
+					class="widget"
+					class:current={page.url.pathname === `/object/${p.id}`}
+					class:drag-src={widgetDragId === p.id}
+					class:over-top={widgetOverId === p.id && widgetOverPos === "top"}
+					class:over-bottom={widgetOverId === p.id && widgetOverPos === "bottom"}
+					role="presentation"
+					draggable="true"
+					ondragstart={(e) => {
+						widgetDragId = p.id;
+						e.dataTransfer?.setData("text/plain", p.id);
+					}}
+					ondragover={(e) => widgetDragOver(e, p.id)}
+					ondragleave={() => {
+						if (widgetOverId === p.id) widgetOverId = "";
+					}}
+					ondrop={(e) => {
+						e.preventDefault();
+						void widgetDrop();
+					}}
+					ondragend={() => {
+						widgetDragId = widgetOverId = "";
+					}}
+				>
 					<div class="widget-row">
 						<button
 							class="widget-collapse"
@@ -585,6 +636,27 @@
 		background: var(--hl-light);
 		border-radius: 12px;
 		padding: 8px;
+		position: relative;
+	}
+	/* Anytype widget.scss .isOver::before: 2px accent line in the 5px gap. */
+	.widget.over-top::before,
+	.widget.over-bottom::before {
+		content: "";
+		position: absolute;
+		left: 12px;
+		width: calc(100% - 24px);
+		height: 2px;
+		border-radius: 2px;
+		background: var(--accent);
+	}
+	.widget.over-top::before {
+		top: -5px;
+	}
+	.widget.over-bottom::before {
+		bottom: -5px;
+	}
+	.widget.drag-src {
+		opacity: 0.4;
 	}
 	.widget-row {
 		display: flex;
