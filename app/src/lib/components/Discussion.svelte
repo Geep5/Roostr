@@ -62,7 +62,11 @@
 	const messageById = $derived(new Map(messages.map((m) => [m.id, m])));
 
 	let open = $state(false);
+	let composerEl = $state<HTMLInputElement>();
 	const isOpen = $derived(full || open);
+	$effect(() => {
+		if (isOpen) composerEl?.focus();
+	});
 	let draft = $state("");
 	let replyTo = $state("");
 	let pickerFor = $state("");
@@ -117,11 +121,17 @@
 
 <section class="discussion" class:full>
 	{#if !isOpen}
-		<button class="opener" onclick={() => (open = true)}>
-			💬 {messages.length > 0 ? `Discussion · ${messages.length}` : "Start a discussion"}
-		</button>
+		<!-- Anytype commentCounter: a centered floating pill, not a full-width bar. -->
+		<div class="counter-wrap">
+			<button class="opener" onclick={() => (open = true)}>
+				<span class="opener-icon">💬</span>
+				{messages.length > 0 ? `${messages.length} comment${messages.length === 1 ? "" : "s"}` : "Start a discussion"}
+			</button>
+		</div>
 	{:else}
 		{#if !full}
+			<!-- Anytype commentSection: a SHORT rule, then the 600-weight title. -->
+			<div class="rule"></div>
 			<div class="head">
 				<span class="head-title">Discussion</span>
 				<button class="collapse" title="Collapse" onclick={() => (open = false)}>×</button>
@@ -185,9 +195,12 @@
 				<button title="Cancel reply" onclick={() => (replyTo = "")}>×</button>
 			</div>
 		{/if}
+		<!-- Anytype commentForm: rounded highlight box, content area on top,
+		     toolbar row with the send control at the right. -->
 		<div class="composer">
 			<input
-				placeholder="Write a message…"
+				bind:this={composerEl}
+				placeholder="Write a comment…"
 				bind:value={draft}
 				onkeydown={(e) => {
 					if (e.key === "Enter" && !e.shiftKey) {
@@ -197,7 +210,12 @@
 					if (e.key === "Escape") replyTo = "";
 				}}
 			/>
-			<button class="send" disabled={!draft.trim()} onclick={() => void send()}>Send</button>
+			<div class="form-toolbar">
+				<span class="toolbar-side"></span>
+				<button class="send" disabled={!draft.trim()} aria-label="Send" onclick={() => void send()}>
+					<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 16V5M10 5L5 10M10 5l5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</button>
+			</div>
 		</div>
 	{/if}
 </section>
@@ -205,8 +223,18 @@
 <style>
 	.discussion {
 		margin-top: 32px;
-		border-top: 1px solid var(--border);
-		padding-top: 12px;
+	}
+	.counter-wrap {
+		display: flex;
+		justify-content: center;
+		padding: 4px 0 12px;
+	}
+	/* Anytype's short section rule — not full width. */
+	.rule {
+		width: 120px;
+		height: 1px;
+		background: var(--border);
+		margin: 0 0 14px 48px;
 	}
 	.discussion.full {
 		margin-top: 8px;
@@ -232,18 +260,25 @@
 		border-color: var(--accent);
 	}
 	.opener {
-		margin-left: 40px;
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
 		border: none;
-		background: none;
+		background: rgb(255 255 255 / 0.06);
+		backdrop-filter: blur(10px);
 		color: var(--muted);
-		font-size: 13px;
+		font-size: 12px;
+		font-weight: 500;
 		cursor: pointer;
-		padding: 6px 8px;
-		border-radius: 8px;
+		padding: 7px 12px 7px 10px;
+		border-radius: 18px;
 	}
 	.opener:hover {
 		background: var(--hover);
-		color: inherit;
+		color: var(--fg);
+	}
+	.opener-icon {
+		font-size: 12px;
 	}
 	.head {
 		display: flex;
@@ -401,31 +436,48 @@
 		cursor: pointer;
 		margin-left: auto;
 	}
+	/* Anytype commentForm: rounded shape-highlight-light box. */
 	.composer {
 		display: flex;
-		gap: 8px;
-		margin-top: 8px;
+		flex-direction: column;
+		background: var(--hl-light);
+		border-radius: 12px;
+		margin-top: 10px;
 	}
 	.composer input {
-		flex: 1;
-		background: var(--bg, #101216);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		color: inherit;
-		padding: 8px 10px;
-		font-size: 13px;
+		background: none;
+		border: none;
+		outline: none;
+		color: var(--fg);
+		font-size: 14px;
+		padding: 12px 12px 4px;
+	}
+	.form-toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 4px 8px 8px;
+		min-height: 36px;
 	}
 	.send {
-		border: 1px solid var(--border);
-		background: none;
-		color: inherit;
-		border-radius: 8px;
-		padding: 0 14px;
+		width: 28px;
+		height: 28px;
+		border-radius: 50%;
+		border: none;
+		background: var(--accent);
+		color: #14161a;
 		cursor: pointer;
-		font-size: 13px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+	}
+	.send :global(svg) {
+		width: 16px;
+		height: 16px;
 	}
 	.send:disabled {
-		opacity: 0.4;
+		opacity: 0.35;
 		cursor: default;
 	}
 	.send:not(:disabled):hover {
