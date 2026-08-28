@@ -3,7 +3,7 @@
 	import { Pos, Style, MarkT, Layout } from "$lib/types";
 	import { note, table, fetchObject } from "$lib/api";
 	import { fromDom, selectionOffsets, setCaret, toggleMark, toHtml } from "$lib/marks";
-	import { isToggleOpen } from "$lib/toggles";
+	import { isToggleOpen, setToggleOpen } from "$lib/toggles";
 	import BlockNode from "./BlockNode.svelte";
 	import BlockMenu from "./BlockMenu.svelte";
 	import type { MenuAction } from "./BlockMenu.svelte";
@@ -537,8 +537,21 @@
 		const dragged = draggingId;
 		draggingId = "";
 		if (!dragged || dragged === targetId) return;
+		// Never drop a block into its own subtree (Anytype checkParentIds).
+		let walk: string | undefined = targetId;
+		const parentOf = new Map<string, string>();
+		for (const b of object.blocks) for (const c of b.childrenIds) parentOf.set(c, b.id);
+		while (walk) {
+			if (walk === dragged) return;
+			walk = parentOf.get(walk);
+		}
 		lastLocalEdit = Date.now();
 		await note.blockMove(object.id, dragged, targetId, position);
+		// Dropping INSIDE a closed toggle opens it (drag/provider.tsx:295) —
+		// otherwise the block vanishes into a collapsed section.
+		if (position === Pos.INNER_FIRST && byId.get(targetId)?.content.text?.style === Style.TOGGLE) {
+			setToggleOpen(object.id, targetId, true);
+		}
 		await refresh();
 	}
 
