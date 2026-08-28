@@ -7,7 +7,7 @@
 	 * object itself, same as viewFilters/viewSorts. Hover a header for "×"
 	 * (hide column); click a header to sort.
 	 */
-	import PropertySuggest from "./PropertySuggest.svelte";
+	import PropertyFlow from "./PropertyFlow.svelte";
 	import { fetchQuery, note, type QueryResultRow } from "$lib/api";
 	import { store } from "$lib/data.svelte";
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
@@ -77,7 +77,6 @@
 	let adding = $state<{ x: number; y: number } | null>(null);
 
 	async function saveColumns(next: Col[]) {
-		adding = null;
 		local = next;
 		await note.setField(object.id, "viewRelations", {
 			valuesValue: {
@@ -256,16 +255,22 @@
 	{/if}
 </div>
 {#if adding}
-	<!-- Anytype's relationSuggest: pick an existing property, a system
-	     column, or create a new property (name + format). Fixed-position,
-	     viewport-clamped - immune to the table's overflow clipping. -->
-	<PropertySuggest
+	<!-- Anytype's property flow: toggle list -> Add property -> search all /
+	     create new -> name + type. Fixed-position, viewport-clamped. -->
+	<PropertyFlow
 		x={adding.x}
 		y={adding.y}
-		exclude={columns}
-		extras={SPECIALS.filter((sp) => !columns.includes(sp.key))}
-		onpick={(rel) => void saveColumns([...cols, { key: rel.key, width: DEFAULT_WIDTH }])}
-		onextra={(key) => void saveColumns([...cols, { key, width: DEFAULT_WIDTH }])}
+		items={[
+			...cols.map((c) => {
+				const sp = SPECIALS.find((x) => x.key === c.key);
+				const rel = relations.find((r) => r.key === c.key);
+				return { key: c.key, name: sp?.name ?? rel?.name ?? c.key, format: rel?.format ?? "shorttext", on: true };
+			}),
+			...SPECIALS.filter((sp) => !columns.includes(sp.key)).map((sp) => ({ key: sp.key, name: sp.name, format: "shorttext", on: false })),
+		]}
+		ontoggle={(key, on) =>
+			void saveColumns(on ? [...cols, { key, width: DEFAULT_WIDTH }] : cols.filter((c) => c.key !== key))}
+		onadd={(rel) => void saveColumns([...cols, { key: rel.key, width: DEFAULT_WIDTH }])}
 		onclose={() => (adding = null)}
 	/>
 {/if}

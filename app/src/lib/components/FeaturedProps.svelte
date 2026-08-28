@@ -9,8 +9,9 @@
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
 	import { note } from "$lib/api";
 	import { store } from "$lib/data.svelte";
-	import { CREATABLE_FORMATS, RESERVED_KEYS, createRelation, emptyValueFor } from "$lib/relations";
+	import { RESERVED_KEYS, emptyValueFor } from "$lib/relations";
 	import PropertyValue from "./PropertyValue.svelte";
+	import PropertyFlow from "./PropertyFlow.svelte";
 	import { fetchBacklinks, type Backlink } from "$lib/backlinks";
 
 	let {
@@ -47,7 +48,7 @@
 	});
 
 	let editing = $state<string | null>(null);
-	let adding = $state(false);
+	let adding = $state<{ x: number; y: number } | null>(null);
 
 	function plain(v: ValueJSON | undefined, format: string): string | number | boolean | string[] {
 		if (!v) return format === "checkbox" ? false : format === "tag" ? [] : "";
@@ -90,20 +91,6 @@
 	}
 
 	// ── New property (Anytype "create from scratch") ──────────────
-	let creating = $state(false);
-	let newName = $state("");
-	let newFormat = $state<string>("shorttext");
-
-	async function createProperty() {
-		const name = newName.trim();
-		if (!name) return;
-		const rel = await createRelation(name, newFormat);
-		creating = false;
-		adding = false;
-		newName = "";
-		newFormat = "shorttext";
-		if (rel && !(rel.key in object.fields)) await addProp(rel);
-	}
 
 	async function removeProp(key: string) {
 		editing = null;
@@ -113,7 +100,7 @@
 
 	function closeAll() {
 		editing = null;
-		adding = false;
+		adding = null;
 	}
 </script>
 
@@ -129,7 +116,7 @@
 		</span>
 		{#if backlinks.length > 0}
 			<span class="cell-wrap">
-				<button class="cell" title="Backlinks" onclick={() => { editing = null; adding = false; showBacklinks = !showBacklinks; }}>
+				<button class="cell" title="Backlinks" onclick={() => { editing = null; adding = null; showBacklinks = !showBacklinks; }}>
 					{backlinks.length} backlink{backlinks.length === 1 ? "" : "s"}
 				</button>
 				<span class="bullet">•</span>
@@ -154,7 +141,7 @@
 					class:empty={display(rel) === ""}
 					title={rel.name || rel.key}
 					onclick={() => {
-						adding = false;
+						adding = null;
 						editing = editing === rel.key ? null : rel.key;
 					}}
 				>
@@ -186,47 +173,36 @@
 				<button
 					class="cell add"
 					title="Add property"
-					onclick={() => {
+					onclick={(e) => {
 						editing = null;
-						adding = !adding;
+						const r = e.currentTarget.getBoundingClientRect();
+						adding = adding ? null : { x: r.left, y: r.bottom + 6 };
 					}}>+</button
 				>
-				{#if adding}
-					<div class="pop">
-						{#each addable as rel (rel.key)}
-							<button
-								class="add-item"
-								onclick={() => {
-									adding = false;
-									void addProp(rel);
-								}}>{rel.name || rel.key} <span class="fmt">{rel.format}</span></button
-							>
-						{/each}
-						{#if !creating}
-							<button class="add-item new" onclick={() => (creating = true)}>+ New property…</button>
-						{:else}
-							<form
-								class="new-form"
-								onsubmit={(e) => {
-									e.preventDefault();
-									void createProperty();
-								}}
-							>
-								<input bind:value={newName} placeholder="Property name" />
-								<select bind:value={newFormat}>
-									{#each CREATABLE_FORMATS as f (f)}
-										<option value={f}>{f}</option>
-									{/each}
-								</select>
-								<button type="submit">Create</button>
-							</form>
-						{/if}
-					</div>
-				{/if}
 			</span>
 		{/if}
 	</div>
-	{#if editing || adding}
+	{#if adding}
+		<!-- Anytype's property flow: toggle current properties, Add property
+		     -> search all / create new -> name + type. -->
+		<PropertyFlow
+			x={adding.x}
+			y={adding.y}
+			items={[
+				...shown.map((r) => ({ key: r.key, name: r.name || r.key, format: r.format, on: true })),
+				...addable.map((r) => ({ key: r.key, name: r.name || r.key, format: r.format, on: false })),
+			]}
+			ontoggle={(key, on) => {
+				const rel = relations.find((r) => r.key === key);
+				if (!rel) return;
+				if (on) void addProp(rel);
+				else void removeProp(key);
+			}}
+			onadd={(rel) => void addProp(rel)}
+			onclose={() => (adding = null)}
+		/>
+	{/if}
+	{#if editing}
 		<button class="backdrop" aria-label="Close" onclick={closeAll}></button>
 	{/if}
 {/if}
@@ -345,54 +321,6 @@
 	}
 	.pop-rm:hover {
 		color: #e8524a;
-	}
-	.add-item {
-		display: flex;
-		justify-content: space-between;
-		gap: 10px;
-		border: none;
-		background: none;
-		color: inherit;
-		padding: 5px 6px;
-		border-radius: 6px;
-		cursor: pointer;
-		font-size: 13px;
-		text-align: left;
-	}
-	.add-item:hover {
-		background: var(--hover);
-	}
-	.fmt {
-		color: var(--muted);
-		font-size: 11px;
-	}
-	.add-item.new {
-		color: var(--accent);
-	}
-	.new-form {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-	.new-form input,
-	.new-form select {
-		background: var(--bg, #101216);
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		color: inherit;
-		padding: 5px 8px;
-		font-size: 13px;
-	}
-	.new-form button {
-		border: 1px solid var(--border);
-		background: none;
-		color: inherit;
-		border-radius: 6px;
-		padding: 5px 8px;
-		cursor: pointer;
-	}
-	.new-form button:hover {
-		border-color: var(--accent);
 	}
 	.backdrop {
 		position: fixed;
