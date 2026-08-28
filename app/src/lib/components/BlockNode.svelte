@@ -310,12 +310,13 @@
 				     the children; dropping here lands AFTER this whole subtree. -->
 				<div
 					class="bot-strip"
+					class:over={zone === 12}
 					role="presentation"
 					style="pointer-events:{draggingId && draggingId !== block.id ? 'auto' : 'none'}"
 					ondragover={(e) => {
 						e.preventDefault();
 						e.stopPropagation();
-						zone = Pos.BOTTOM;
+						zone = 12; // AFTER sentinel: strip line only, no block shadow
 					}}
 					ondragleave={() => (zone = 0)}
 					ondrop={(e) => {
@@ -541,7 +542,11 @@
 	.block.zone-3 { box-shadow: -3px 0 0 var(--accent); }
 	.block.zone-4 { box-shadow: 3px 0 0 var(--accent); }
 	/* InnerFirst: drop INSIDE — Anytype outlines the whole target. */
-	.block.zone-7 { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 6px; }
+	/* Anytype .dropTarget.isOver.middle: translucent drop-zone fill. */
+	.block.zone-7 {
+		background: rgba(55, 122, 255, 0.25);
+		border-radius: 4px;
+	}
 	/* Anytype wrapMenu: a 48px left rail every block shares — content
 	   always starts at the same x; the handle hangs in the margin. */
 	.gutter {
@@ -840,5 +845,9 @@
 		bottom: -4px;
 		height: 10px;
 		z-index: 5;
+	}
+	/* Anytype .dropTarget.targetBot.isOver.bottom: 2px accent line inset. */
+	.bot-strip.over {
+		box-shadow: 0 2px 0 var(--accent) inset;
 	}
 </style>
