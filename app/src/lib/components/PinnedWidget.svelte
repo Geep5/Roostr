@@ -150,7 +150,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1px;
-		padding: 2px 0 4px 26px;
+		padding: 2px 0 0;
 	}
 	.w-row,
 	.w-group {

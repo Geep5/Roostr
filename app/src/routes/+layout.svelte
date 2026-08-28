@@ -247,21 +247,20 @@
 				</div>
 			</div>
 
-			{#if pinned.length > 0}
-				<div class="section">
-					<div class="section-name">Pinned</div>
-					{#each pinned as p (p.id)}
-						<a class="item" class:current={page.url.pathname === `/object/${p.id}`} href="/object/{p.id}">
-							<span class="obj-icon">{icon(p)}</span>{p.name || "Untitled"}
-						</a>
-						{#if p.typeKey === "query" || p.typeKey === "set" || p.typeKey === "collection"}
-							<!-- Anytype widget views: the pinned set renders a mini
-							     version of its current view (list/gallery/board/calendar). -->
-							<PinnedWidget id={p.id} />
-						{/if}
-					{/each}
+			<!-- Anytype widgets: each pinned object is its OWN widget card with
+			     a 600-weight header row (widget/common.scss .head .clickable);
+			     sets render their current view beneath. No "Pinned" label. -->
+			{#each pinned as p (p.id)}
+				<div class="widget" class:current={page.url.pathname === `/object/${p.id}`}>
+					<a class="widget-head" href="/object/{p.id}">
+						<span class="obj-icon">{icon(p)}</span>
+						<span class="widget-name">{p.name || "Untitled"}</span>
+					</a>
+					{#if p.typeKey === "query" || p.typeKey === "set" || p.typeKey === "collection"}
+						<PinnedWidget id={p.id} />
+					{/if}
 				</div>
-			{/if}
+			{/each}
 
 			<div class="section">
 				<div class="section-name">Recently edited</div>
@@ -556,6 +555,36 @@
 	}
 	.channel-head:hover .gear {
 		opacity: 1;
+	}
+	/* Anytype widget: each pinned object is its own card; the header is
+	   the 600-weight clickable row with hover highlight. */
+	.widget {
+		background: var(--hl-light);
+		border-radius: 12px;
+		padding: 8px;
+	}
+	.widget-head {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		height: 28px;
+		padding: 0 8px;
+		border-radius: 6px;
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 22px;
+		overflow: hidden;
+	}
+	.widget-head:hover {
+		background: var(--hl-med);
+	}
+	.widget.current .widget-head {
+		background: var(--hl-med);
+	}
+	.widget-name {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	/* Anytype widget cards: subtle solid, 12px radius, 8px padding. */
 	.section {
