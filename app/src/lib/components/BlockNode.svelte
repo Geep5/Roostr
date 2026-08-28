@@ -127,9 +127,16 @@
 		const r = el.getBoundingClientRect();
 		const gutter = el.querySelector(":scope > .gutter");
 		const contentLeft = gutter ? gutter.getBoundingClientRect().right : r.left;
+		// Anytype's content DropTarget wraps only the block's own row - the
+		// zone bands never span rendered children. Below the content row,
+		// the nested blocks (and the bot strip) own the pointer.
+		const kids = el.querySelector(":scope > .nested");
+		const contentBottom = kids ? kids.getBoundingClientRect().top : r.bottom;
+		if (e.clientY > contentBottom) return 0;
 		if (e.clientX < contentLeft) return Pos.LEFT;
 		if (e.clientX > r.right - 24) return Pos.RIGHT;
-		const y = (e.clientY - r.top) / r.height;
+		const h = contentBottom - r.top;
+		const y = h > 0 ? (e.clientY - r.top) / h : 0;
 		const style = block?.content.text?.style;
 		if (style !== undefined && CAN_HAVE_CHILDREN[style]) {
 			if (y <= 0.3) return Pos.TOP;
@@ -299,6 +306,25 @@
 						<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 					{/each}
 				</div>
+				<!-- Anytype targetBot (block/index.tsx:1219): a thin strip below
+				     the children; dropping here lands AFTER this whole subtree. -->
+				<div
+					class="bot-strip"
+					role="presentation"
+					style="pointer-events:{draggingId && draggingId !== block.id ? 'auto' : 'none'}"
+					ondragover={(e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						zone = Pos.BOTTOM;
+					}}
+					ondragleave={() => (zone = 0)}
+					ondrop={(e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						zone = 0;
+						ondrop(block.id, Pos.BOTTOM);
+					}}
+				></div>
 			{:else if isToggle && toggleOpen && block.childrenIds.length === 0}
 				<!-- Anytype .emptyToggle: muted hint, click creates the first child. -->
 				<button class="empty-toggle" onclick={() => onemptytoggle(block.id)}>Empty toggle. Click or drop Block inside</button>
@@ -806,5 +832,13 @@
 		font-size: 12px;
 		line-height: 16px;
 		color: var(--muted);
+	}
+	.bot-strip {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: -4px;
+		height: 10px;
+		z-index: 5;
 	}
 </style>
