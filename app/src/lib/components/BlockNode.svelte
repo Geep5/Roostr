@@ -98,11 +98,15 @@
 	}
 
 	/**
-	 * Anytype drag/provider.tsx zone math: left gutter → Left, right edge →
-	 * Right; within the block, top 30% → Top and bottom 30% → Bottom with
-	 * the MIDDLE 40% dropping INSIDE (InnerFirst) — but only on blocks that
+	 * Anytype drag/provider.tsx zone math (initVars/col1/col2): Left only
+	 * when the pointer is LEFT of the content rect (`ex <= x - blockMenu/4`
+	 * — i.e. out in the rail/margin), Right only PAST the right edge. Inside
+	 * the block body position is purely vertical: top 30% → Top, bottom 30%
+	 * → Bottom, middle 40% → INSIDE (InnerFirst) on blocks that
 	 * canHaveChildren (paragraph, lists, toggle, callout, quote — not
-	 * headers/code/title). Others split 50/50 top/bottom.
+	 * headers/code/title); others split 50/50. Our rows don't receive
+	 * dragover in the page margin, so the rail itself plays Left and a slim
+	 * right-edge strip plays Right.
 	 */
 	const CAN_HAVE_CHILDREN: Record<number, true> = {
 		[Style.PARAGRAPH]: true,
@@ -117,10 +121,11 @@
 	function computeZone(e: DragEvent): number {
 		const el = e.currentTarget as HTMLElement;
 		const r = el.getBoundingClientRect();
-		const x = (e.clientX - r.left) / r.width;
+		const gutter = el.querySelector(":scope > .gutter");
+		const contentLeft = gutter ? gutter.getBoundingClientRect().right : r.left;
+		if (e.clientX < contentLeft) return Pos.LEFT;
+		if (e.clientX > r.right - 24) return Pos.RIGHT;
 		const y = (e.clientY - r.top) / r.height;
-		if (x < 0.15) return Pos.LEFT;
-		if (x > 0.85) return Pos.RIGHT;
 		const style = block?.content.text?.style;
 		if (style !== undefined && CAN_HAVE_CHILDREN[style]) {
 			if (y <= 0.3) return Pos.TOP;
