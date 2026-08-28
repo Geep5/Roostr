@@ -31,6 +31,52 @@
 	} = $props();
 
 	let rows = $state<QueryResultRow[]>([]);
+
+	// ── Row multi-select (Anytype SelectType.Record) ────────────────
+	// Cmd/ctrl-click toggles, shift-click ranges from the anchor; a
+	// selection bar offers bulk delete; Escape or plain click clears.
+	let selectedRows = $state<string[]>([]);
+	let rowAnchor = "";
+
+	function toggleRow(id: string) {
+		rowAnchor = id;
+		selectedRows = selectedRows.includes(id) ? selectedRows.filter((x) => x !== id) : [...selectedRows, id];
+	}
+
+	function rangeRows(id: string) {
+		const a = rows.findIndex((r) => r.id === (rowAnchor || selectedRows[0]));
+		const b = rows.findIndex((r) => r.id === id);
+		if (a === -1 || b === -1) {
+			toggleRow(id);
+			return;
+		}
+		selectedRows = rows.slice(Math.min(a, b), Math.max(a, b) + 1).map((r) => r.id);
+	}
+
+	function onRowClick(e: MouseEvent, id: string) {
+		if (e.metaKey || e.ctrlKey) {
+			e.preventDefault();
+			toggleRow(id);
+			return;
+		}
+		if (e.shiftKey) {
+			e.preventDefault();
+			rangeRows(id);
+			return;
+		}
+		if (selectedRows.length) {
+			selectedRows = [];
+			return;
+		}
+		location.href = `/object/${id}`;
+	}
+
+	async function deleteSelected() {
+		const ids = [...selectedRows];
+		selectedRows = [];
+		for (const id of ids) await note.del(id);
+		await reload();
+	}
 	let override = $state<{ key: string; dir: "asc" | "desc" } | null>(null);
 	const sortKey = $derived(override?.key ?? defaultSorts[0]?.key ?? "updatedAt");
 	const sortDir = $derived(override?.dir ?? defaultSorts[0]?.type ?? "desc");
@@ -178,6 +224,8 @@
 	}
 </script>
 
+<svelte:window onkeydown={(e) => { if (e.key === "Escape") selectedRows = []; }} />
+
 <div class="set-table">
 	<table>
 		<colgroup>
@@ -240,7 +288,7 @@
 		</thead>
 		<tbody>
 			{#each rows as r (r.id)}
-				<tr onclick={() => (location.href = `/object/${r.id}`)}>
+				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)}>
 					<td class="name"><span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || r.id.slice(0, 8)}</td>
 					{#each columns as c (c)}
 						<td class:muted={c === "type" || c === "createdAt" || c === "updatedAt"}>{cell(r, c)}</td>
@@ -250,6 +298,13 @@
 			{/each}
 		</tbody>
 	</table>
+	{#if selectedRows.length}
+		<div class="sel-bar">
+			<span>{selectedRows.length} selected</span>
+			<button class="del" onclick={() => void deleteSelected()}>Delete</button>
+			<button class="clear" onclick={() => (selectedRows = [])}>✕</button>
+		</div>
+	{/if}
 	{#if rows.length === 0}
 		<p class="muted empty">No objects match.</p>
 	{/if}
@@ -361,5 +416,36 @@
 	}
 	.empty {
 		padding: 16px 10px;
+	}
+	tr.selected td {
+		background: rgba(55, 122, 255, 0.25);
+	}
+	.sel-bar {
+		position: sticky;
+		bottom: 8px;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		width: fit-content;
+		margin: 8px auto 0;
+		background: var(--panel, #1a1d23);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 6px 12px;
+		font-size: 13px;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+	}
+	.sel-bar .del {
+		background: none;
+		border: none;
+		color: #e05555;
+		cursor: pointer;
+		font-size: 13px;
+	}
+	.sel-bar .clear {
+		background: none;
+		border: none;
+		color: var(--muted);
+		cursor: pointer;
 	}
 </style>

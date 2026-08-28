@@ -39,6 +39,148 @@
 	// ── Editing state ─────────────────────────────────────────────
 	let draggingId = $state("");
 	let focusRequest = $state<{ blockId: string; offset: number } | null>(null);
+
+	// ── Multi-block selection (Anytype selection/provider.tsx) ──────
+	// Rect-drag from whitespace selects colliding blocks (cmd toggles vs
+	// the drag-start snapshot, alt removes); shift-click selects the
+	// contiguous tree-order range from the anchor; selected blocks get the
+	// translucent system-selection overlay. Backspace deletes the
+	// selection, Escape/plain click clears, dragging one moves all.
+	let selectedIds = $state<string[]>([]);
+	const selectedSet = $derived(new Set(selectedIds));
+	let selRect = $state<{ x: number; y: number; w: number; h: number } | null>(null);
+	let editorEl: HTMLElement | undefined = $state();
+	let lastFocused = "";
+	let dragSel: { x: number; y: number; base: string[]; mode: "replace" | "toggle" | "remove"; moved: boolean } | null = null;
+
+	/** Blocks in document order (tree DFS), Anytype's getTreeList. */
+	const flatIds = $derived.by(() => {
+		const out: string[] = [];
+		const walk = (id: string) => {
+			const b = byId.get(id);
+			if (!b) return;
+			out.push(id);
+			for (const c of b.childrenIds) walk(c);
+		};
+		for (const id of rootIds) walk(id);
+		return out;
+	});
+
+	/** Selected ids whose ancestors are NOT selected (subtrees move whole). */
+	function topmostSelected(): string[] {
+		const parentOf = new Map<string, string>();
+		for (const b of object.blocks) for (const c of b.childrenIds) parentOf.set(c, b.id);
+		return flatIds.filter((id) => {
+			if (!selectedSet.has(id)) return false;
+			let p = parentOf.get(id);
+			while (p) {
+				if (selectedSet.has(p)) return false;
+				p = parentOf.get(p);
+			}
+			return true;
+		});
+	}
+
+	function toggleSelect(id: string) {
+		selectedIds = selectedSet.has(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id];
+	}
+
+	/** Anytype onMouseUp shift branch: range between anchor and clicked. */
+	function rangeSelect(id: string) {
+		const anchor = selectedIds[0] ?? lastFocused;
+		const a = anchor ? flatIds.indexOf(anchor) : -1;
+		const b = flatIds.indexOf(id);
+		if (a === -1 || b === -1 || a === b) {
+			selectedIds = [id];
+			return;
+		}
+		selectedIds = flatIds.slice(Math.min(a, b), Math.max(a, b) + 1);
+	}
+
+	function selMouseDown(e: MouseEvent) {
+		if (e.button !== 0) return;
+		const t = e.target as HTMLElement;
+		const blockDiv = t.closest("[data-block]");
+		if (blockDiv && (e.shiftKey || e.metaKey || e.ctrlKey)) {
+			e.preventDefault();
+			const id = blockDiv.getAttribute("data-block")!;
+			if (e.shiftKey) rangeSelect(id);
+			else toggleSelect(id);
+			return;
+		}
+		if (t.closest("[contenteditable], input, textarea, select, button, a")) {
+			if (blockDiv) lastFocused = blockDiv.getAttribute("data-block")!;
+			selectedIds = [];
+			return;
+		}
+		dragSel = {
+			x: e.clientX,
+			y: e.clientY,
+			base: [...selectedIds],
+			mode: e.metaKey || e.ctrlKey ? "toggle" : e.altKey ? "remove" : "replace",
+			moved: false,
+		};
+		window.addEventListener("mousemove", selMouseMove);
+		window.addEventListener("mouseup", selMouseUp);
+	}
+
+	function selMouseMove(e: MouseEvent) {
+		if (!dragSel) return;
+		if (!dragSel.moved && Math.hypot(e.clientX - dragSel.x, e.clientY - dragSel.y) < 5) return;
+		dragSel.moved = true;
+		window.getSelection()?.removeAllRanges();
+		const x = Math.min(dragSel.x, e.clientX);
+		const y = Math.min(dragSel.y, e.clientY);
+		const w = Math.abs(e.clientX - dragSel.x);
+		const h = Math.abs(e.clientY - dragSel.y);
+		selRect = { x, y, w, h };
+		const hits: string[] = [];
+		if (editorEl) {
+			for (const el of editorEl.querySelectorAll("[data-block]")) {
+				const r = el.getBoundingClientRect();
+				if (r.left < x + w && r.right > x && r.top < y + h && r.bottom > y) {
+					hits.push(el.getAttribute("data-block")!);
+				}
+			}
+		}
+		if (dragSel.mode === "toggle") {
+			const base = new Set(dragSel.base);
+			selectedIds = [...dragSel.base.filter((i) => !hits.includes(i)), ...hits.filter((i) => !base.has(i))];
+		} else if (dragSel.mode === "remove") {
+			selectedIds = dragSel.base.filter((i) => !hits.includes(i));
+		} else {
+			selectedIds = hits;
+		}
+	}
+
+	function selMouseUp() {
+		if (dragSel && !dragSel.moved && dragSel.mode === "replace") selectedIds = [];
+		dragSel = null;
+		selRect = null;
+		window.removeEventListener("mousemove", selMouseMove);
+		window.removeEventListener("mouseup", selMouseUp);
+	}
+
+	async function onWindowKeydown(e: KeyboardEvent) {
+		if (!selectedIds.length) return;
+		if (e.key === "Escape") {
+			selectedIds = [];
+			return;
+		}
+		const ae = document.activeElement as HTMLElement | null;
+		if (ae?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(ae?.tagName ?? "")) return;
+		if (e.key === "Backspace" || e.key === "Delete") {
+			e.preventDefault();
+			const tops = topmostSelected();
+			selectedIds = [];
+			lastLocalEdit = Date.now();
+			for (const id of tops) {
+				cancelPending(id);
+				await note.blockRemove(object.id, id);
+			}
+			await refresh();
+		}
+	}
 	let toolbar = $state<{ blockId: string; from: number; to: number; x: number; y: number } | null>(null);
 	/** Slash menu: block, offset of the "/", live filter, caret anchor. */
 	let slash = $state<{ blockId: string; start: number; filter: string; x: number; y: number } | null>(null);
@@ -537,16 +679,26 @@
 		const dragged = draggingId;
 		draggingId = "";
 		if (!dragged || dragged === targetId) return;
-		// Never drop a block into its own subtree (Anytype checkParentIds).
-		let walk: string | undefined = targetId;
+		// Dragging a selected block moves the whole selection (Anytype
+		// drags the selection when the source is part of it).
+		const group = selectedSet.has(dragged) && selectedIds.length > 1 ? topmostSelected() : [dragged];
+		// Never drop into a dragged block's own subtree (checkParentIds).
 		const parentOf = new Map<string, string>();
 		for (const b of object.blocks) for (const c of b.childrenIds) parentOf.set(c, b.id);
+		let walk: string | undefined = targetId;
 		while (walk) {
-			if (walk === dragged) return;
+			if (group.includes(walk)) return;
 			walk = parentOf.get(walk);
 		}
 		lastLocalEdit = Date.now();
-		await note.blockMove(object.id, dragged, targetId, position);
+		// First block takes the drop position; the rest chain below it,
+		// preserving document order.
+		let prev = "";
+		for (const id of group) {
+			await note.blockMove(object.id, id, prev || targetId, prev ? Pos.BOTTOM : position);
+			prev = id;
+		}
+		selectedIds = [];
 		// Dropping INSIDE a closed toggle opens it (drag/provider.tsx:295) —
 		// otherwise the block vanishes into a collapsed section.
 		if (position === Pos.INNER_FIRST && byId.get(targetId)?.content.text?.style === Style.TOGGLE) {
@@ -682,13 +834,24 @@
 	}
 </script>
 
-<div class="editor" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) void appendBlock(); }}>
+<svelte:window onkeydown={(e) => void onWindowKeydown(e)} />
+
+<div
+	class="editor"
+	role="presentation"
+	bind:this={editorEl}
+	onmousedown={selMouseDown}
+	onclick={(e) => {
+		if (e.target === e.currentTarget && !selectedIds.length) void appendBlock();
+	}}
+>
 	{#each rootIds as id (id)}
 		<BlockNode
 			{id}
 			{byId}
 			{object}
 			{draggingId}
+			selectedIds={selectedSet}
 			onkeydown={onKeydown}
 			oninput={onInput}
 			onblur={flushSave}
@@ -706,6 +869,11 @@
 		<button class="empty-hint" onclick={() => void appendBlock()}>Click to start writing…</button>
 	{/if}
 </div>
+
+{#if selRect}
+	<!-- Anytype #selection-rect: system-selection fill, hairline border. -->
+	<div class="sel-rect" style="left:{selRect.x}px; top:{selRect.y}px; width:{selRect.w}px; height:{selRect.h}px"></div>
+{/if}
 
 {#if blockMenu && byId.has(blockMenu.blockId)}
 	<BlockMenu
@@ -828,5 +996,13 @@
 		background: none;
 		border: none;
 		cursor: default;
+	}
+	.sel-rect {
+		position: fixed;
+		z-index: 50;
+		background: rgba(55, 122, 255, 0.25);
+		border: 1px solid #2aa7ee;
+		border-radius: 2px;
+		pointer-events: none;
 	}
 </style>

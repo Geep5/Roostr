@@ -12,6 +12,7 @@
 		byId,
 		object,
 		draggingId,
+		selectedIds,
 		onkeydown,
 		oninput,
 		onblur,
@@ -28,6 +29,7 @@
 		byId: Map<string, BlockJSON>;
 		object: ObjectJSON;
 		draggingId: string;
+		selectedIds: Set<string>;
 		onkeydown: (e: KeyboardEvent, id: string) => void;
 		oninput: (id: string) => void;
 		onblur: (id: string) => void;
@@ -140,18 +142,18 @@
 	{#if block.content.layout?.style === Layout.ROW}
 		<div class="row" data-block={block.id} style="grid-template-columns: {block.childrenIds.map(widthOf).join(' ')}">
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
+				<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 			{/each}
 		</div>
 	{:else if block.content.layout?.style === Layout.COLUMN}
 		<div class="col" data-block={block.id}>
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
+				<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 			{/each}
 		</div>
 	{:else if block.content.table}
 		<div
-			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}"
+			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
 			data-table={block.id}
 			role="presentation"
 			ondragover={(e) => {
@@ -194,7 +196,7 @@
 	{:else if block.content.text}
 		{@const t = block.content.text}
 		<div
-			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}"
+			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
 			data-block={block.id}
 			role="presentation"
 			style={block.backgroundColor ? `background:${block.backgroundColor}` : ""}
@@ -292,7 +294,7 @@
 			{#if block.childrenIds.length > 0 && (!isToggle || toggleOpen)}
 				<div class="nested">
 					{#each block.childrenIds as cid (cid)}
-						<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
+						<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 					{/each}
 				</div>
 			{:else if isToggle && toggleOpen && block.childrenIds.length === 0}
@@ -302,7 +304,7 @@
 		</div>
 	{:else if block.content.custom?.contentType === "relation"}
 		<div
-			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}"
+			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
 			data-table={block.id}
 			role="presentation"
 			ondragover={(e) => {
@@ -345,7 +347,7 @@
 	{:else if block.content.custom?.contentType === "embed" || block.content.custom?.contentType === "bookmark"}
 		{@const meta = block.content.custom.meta ?? {}}
 		<div
-			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}"
+			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
 			data-table={block.id}
 			role="presentation"
 			ondragover={(e) => {
@@ -405,10 +407,10 @@
 			{/if}
 		</div>
 	{:else if block.content.custom}
-		<div class="block custom" data-block={block.id}>
+		<div class="block custom" class:selected={selectedIds.has(block.id)} data-block={block.id}>
 			<span class="chip">{block.content.custom.contentType}</span>
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
+				<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 			{/each}
 		</div>
 	{/if}
@@ -653,4 +655,13 @@
 		text-overflow: ellipsis;
 	}
 	:global(.m-link) { color: var(--accent); text-decoration: underline; cursor: pointer; }
+	.block.selected::after {
+		content: "";
+		position: absolute;
+		inset: 0;
+		background: rgba(55, 122, 255, 0.25);
+		border-radius: 2px;
+		pointer-events: none;
+		z-index: 10;
+	}
 </style>
