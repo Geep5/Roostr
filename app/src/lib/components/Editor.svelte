@@ -555,6 +555,15 @@
 		await refresh();
 	}
 
+	/** Empty-toggle placeholder click: create + focus the first child. */
+	async function onEmptyToggle(id: string) {
+		const innerId = crypto.randomUUID();
+		lastLocalEdit = Date.now();
+		await note.blockAdd(object.id, { id: innerId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } }, id, Pos.INNER_FIRST);
+		focusRequest = { blockId: innerId, offset: 0 };
+		await refresh();
+	}
+
 	async function toggleChecked(id: string, checked: boolean) {
 		const cur = byId.get(id)!.content.text!;
 		const el = blockEl(id);
@@ -687,6 +696,7 @@
 			ondragbegin={(bid) => (draggingId = bid)}
 			ondrop={onDrop}
 			ontogglecheck={toggleChecked}
+			onemptytoggle={onEmptyToggle}
 			onmenu={openBlockMenu}
 			onrefresh={refresh}
 			onpaste={onPasteText}

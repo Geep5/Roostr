@@ -22,6 +22,7 @@
 		onmenu,
 		onrefresh,
 		onpaste,
+		onemptytoggle,
 	}: {
 		id: string;
 		byId: Map<string, BlockJSON>;
@@ -40,6 +41,8 @@
 		onrefresh: () => void | Promise<void>;
 		/** URL-paste interception (Anytype "Paste as" menu). */
 		onpaste: (e: ClipboardEvent, id: string) => void;
+		/** Click on an open empty toggle's placeholder: create the first child. */
+		onemptytoggle: (id: string) => void;
 	} = $props();
 
 	const block = $derived(byId.get(id));
@@ -132,13 +135,13 @@
 	{#if block.content.layout?.style === Layout.ROW}
 		<div class="row" data-block={block.id} style="grid-template-columns: {block.childrenIds.map(widthOf).join(' ')}">
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
+				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 			{/each}
 		</div>
 	{:else if block.content.layout?.style === Layout.COLUMN}
 		<div class="col" data-block={block.id}>
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
+				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 			{/each}
 		</div>
 	{:else if block.content.table}
@@ -247,7 +250,17 @@
 			{#if t.style === Style.BULLET}<span class="marker">•</span>{/if}
 			{#if t.style === Style.NUMBERED}<span class="marker">1.</span>{/if}
 			{#if t.style === Style.TOGGLE}
-				<button class="toggle-arrow" class:open={toggleOpen} aria-label={toggleOpen ? "Collapse" : "Expand"} onclick={flipToggle}>▶</button>
+				<!-- Anytype markerToggle: 24x24 rounded chevron, rotates 90 when open. -->
+				<button class="toggle-arrow" class:open={toggleOpen} aria-label={toggleOpen ? "Collapse" : "Expand"} onclick={flipToggle}>
+					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+						<path
+							fill-rule="evenodd"
+							clip-rule="evenodd"
+							d="M10.2158 7.2226C10.5087 6.92971 10.9835 6.92971 11.2764 7.2226L15.9507 11.8969C16.0093 11.9554 16.0093 12.0504 15.9507 12.109L11.2764 16.7833C10.9835 17.0762 10.5087 17.0762 10.2158 16.7833C9.92287 16.4904 9.92287 16.0155 10.2158 15.7226L13.9354 12.0029L10.2158 8.28326C9.92287 7.99037 9.92287 7.51549 10.2158 7.2226Z"
+							fill="currentColor"
+						/>
+					</svg>
+				</button>
 			{/if}
 			<div
 				role="textbox"
@@ -270,9 +283,12 @@
 			{#if block.childrenIds.length > 0 && (!isToggle || toggleOpen)}
 				<div class="nested">
 					{#each block.childrenIds as cid (cid)}
-						<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
+						<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 					{/each}
 				</div>
+			{:else if isToggle && toggleOpen && block.childrenIds.length === 0}
+				<!-- Anytype .emptyToggle: muted hint, click creates the first child. -->
+				<button class="empty-toggle" onclick={() => onemptytoggle(block.id)}>Empty toggle. Click or drop Block inside</button>
 			{/if}
 		</div>
 	{:else if block.content.custom?.contentType === "relation"}
@@ -379,7 +395,7 @@
 		<div class="block custom" data-block={block.id}>
 			<span class="chip">{block.content.custom.contentType}</span>
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} />
+				<BlockNode id={cid} {byId} {object} {draggingId} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 			{/each}
 		</div>
 	{/if}
@@ -463,22 +479,41 @@
 	.check-circle.on {
 		color: var(--accent);
 	}
+	/* Anytype markers: 24x24 box, 6px right margin, aligned to the line. */
 	.toggle-arrow {
 		background: none;
 		border: none;
-		color: var(--muted);
-		font-size: 9px;
-		width: 20px;
+		color: var(--fg);
+		width: 24px;
 		height: 24px;
 		flex: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		margin-right: 6px;
 		cursor: pointer;
-		transition: transform 0.15s;
+		transition: transform 0.2s ease;
 		padding: 0;
 	}
 	.toggle-arrow.open {
 		transform: rotate(90deg);
 	}
-	.toggle-arrow:hover {
+	.empty-toggle {
+		flex-basis: 100%;
+		display: block;
+		background: none;
+		border: none;
+		margin-left: 30px;
+		padding: 2px 0;
+		font-size: inherit;
+		color: var(--muted);
+		cursor: pointer;
+		text-align: left;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.empty-toggle:hover {
 		color: var(--fg);
 	}
 	.marker {
