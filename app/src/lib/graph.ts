@@ -152,17 +152,18 @@ export async function buildGraph(channelId: string, isDefaultChannel: boolean): 
 	}
 
 	for (const [i, n] of nodes.entries()) {
-		n.radius = n.kind === "channel" ? 26 : 9 + 2.5 * Math.sqrt(degree[i]);
+		// Small flat dots (Anytype scale): channels stand out, degree adds a little.
+		n.radius = n.kind === "channel" ? 14 : 5 + 1.6 * Math.sqrt(degree[i]);
 	}
 	return { nodes, edges };
 }
 
 /** One d3-force step in 2D (velocity Verlet, decay 0.6). */
 export function simStep(g: ObjectGraph, alpha: number, pinned = -1): void {
-	const CHARGE = -250;
-	const LINK_DIST = 100;
-	const CENTER = 0.01;
-	const CLUSTER = 0.06;
+	const CHARGE = -600;
+	const LINK_DIST = 130;
+	const CENTER = 0.008;
+	const CLUSTER = 0.04;
 
 	const n = g.nodes.length;
 	for (let i = 0; i < n; i++) {
@@ -213,7 +214,7 @@ export function simStep(g: ObjectGraph, alpha: number, pinned = -1): void {
 	// d3 forceCollide semantics: positional separation so nodes never
 	// touch — padded by COLLIDE_PAD, displacement split by radius weight,
 	// a pinned (dragged) node stays put and pushes the other fully.
-	const COLLIDE_PAD = 6;
+	const COLLIDE_PAD = 14;
 	for (let iter = 0; iter < 2; iter++) {
 		for (let i = 0; i < n; i++) {
 			for (let j = i + 1; j < n; j++) {

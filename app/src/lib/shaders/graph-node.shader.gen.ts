@@ -38,17 +38,10 @@ fn vs_main(bm_in : BmVSIn) -> BmVSOut {
 @fragment
 fn fs_main(bm_in : BmVSOut) -> @location(0) vec4f {
   let s = bm_in.vUv * 1.25;
-  let dd = dot(s, s);
   let d = length(s);
-  let fill = 1.0 - smoothstep(0.96, 1.0, d);
+  let fill = 1.0 - smoothstep(0.9, 1.0, d);
   let ring = smoothstep(1.04, 1.1, d) * (1.0 - smoothstep(1.16, 1.24, d));
-  let nz = sqrt(max(1.0 - dd, 0.0));
-  let normal = vec3f(s.x, s.y, nz);
-  let light = normalize(vec3f(0.45, -0.55, 0.75));
-  let lambert = max(dot(normal, light), 0.0);
-  let rim = pow(1.0 - nz, 2.0) * 0.6;
-  let lit = bm_in.vTint * (0.3 + 0.8 * lambert) + bm_in.vTint * rim;
-  let color = lit * (1.0 + bm_in.vFlags * 0.3) + vec3f(1.0, 1.0, 1.0) * (ring * bm_in.vFlags * 0.9);
+  let color = bm_in.vTint * (1.0 + bm_in.vFlags * 0.25) + vec3f(1.0, 1.0, 1.0) * (ring * bm_in.vFlags * 0.9);
   let alpha = max(fill, ring * bm_in.vFlags);
   return vec4f(color * alpha, alpha);
 }

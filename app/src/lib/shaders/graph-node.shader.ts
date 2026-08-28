@@ -1,4 +1,4 @@
-import { shader, vec2, vec3, vec4, length, smoothstep, max, dot, sqrt, normalize, pow } from "brometal";
+import { shader, vec2, vec3, vec4, length, smoothstep, max } from "brometal";
 
 /**
  * Anytype-style 2D graph node: instanced anti-aliased circles.
@@ -28,20 +28,13 @@ export const GraphNode = shader({
 	},
 
 	fragment(_uniforms, { vUv, vTint, vFlags }) {
-		// Top-down sphere impostor: SDF disc + analytic normal, lambert + rim
-		// (same shading as the native wgpu cosmos, flattened onto the plane).
+		// Flat 2D disc (Anytype's graph look): anti-aliased fill, hover ring.
+		// No sphere shading — simple, readable, calm.
 		const s = vUv.scale(1.25);
-		const dd = dot(s, s);
 		const d = length(s);
-		const fill = 1 - smoothstep(0.96, 1.0, d);
+		const fill = 1 - smoothstep(0.9, 1.0, d);
 		const ring = smoothstep(1.04, 1.1, d) * (1 - smoothstep(1.16, 1.24, d));
-		const nz = sqrt(max(1 - dd, 0));
-		const normal = vec3(s.x, s.y, nz);
-		const light = normalize(vec3(0.45, 0 - 0.55, 0.75));
-		const lambert = max(dot(normal, light), 0);
-		const rim = pow(1 - nz, 2) * 0.6;
-		const lit = vTint.scale(0.3 + 0.8 * lambert).add(vTint.scale(rim));
-		const color = lit.scale(1 + vFlags * 0.3).add(vec3(1, 1, 1).scale(ring * vFlags * 0.9));
+		const color = vTint.scale(1 + vFlags * 0.25).add(vec3(1, 1, 1).scale(ring * vFlags * 0.9));
 		const alpha = max(fill, ring * vFlags);
 		return vec4(color.scale(alpha), alpha);
 	},
