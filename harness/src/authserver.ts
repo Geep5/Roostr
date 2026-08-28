@@ -5,8 +5,23 @@
  * roster ("run on this machine" toggle). Loopback-only.
  */
 
+import { getPublicKey, nip19 } from "nostr-tools";
+
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
 import { readRoster, setEnabled } from "./roster";
+
+/** Public identity (npub + hex pubkey) derived from the local nostr key. */
+async function identity(): Promise<{ npub: string; pubkeyHex: string } | { error: string }> {
+	const root = process.env.GLON_DATA ?? `${process.env.HOME}/.glon`;
+	try {
+		const parsed = (await Bun.file(`${root}/nostr.json`).json()) as { privkey?: string };
+		if (!parsed.privkey || parsed.privkey.length !== 64) return { error: "no key" };
+		const pk = getPublicKey(Uint8Array.from(Buffer.from(parsed.privkey, "hex")));
+		return { npub: nip19.npubEncode(pk), pubkeyHex: pk };
+	} catch {
+		return { error: "no key" };
+	}
+}
 
 export const AUTH_PORT = Number(process.env.GLON_AUTH_PORT ?? 7334);
 
@@ -34,6 +49,9 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 			try {
 				if (req.method === "GET" && url.pathname === "/auth/status") {
 					return json(await authStatus());
+				}
+				if (req.method === "GET" && url.pathname === "/identity") {
+					return json(await identity());
 				}
 				if (req.method === "POST" && url.pathname === "/auth/anthropic/start") {
 					return json({ authUrl: await startAnthropicLogin() });

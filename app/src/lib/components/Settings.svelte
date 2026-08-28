@@ -7,8 +7,8 @@
 	let relays = $state<string[]>([]);
 	let newRelay = $state("");
 	let nsec = $state("");
-	let hexKey = $state("");
 	let revealed = $state(false);
+	let npub = $state("");
 	let copied = $state("");
 	let saveState = $state("");
 	let importing = $state(false);
@@ -23,7 +23,6 @@
 			importDraft = "";
 			revealed = false;
 			nsec = "";
-			hexKey = "";
 			await load();
 		} catch (err) {
 			importError = err instanceof Error ? err.message : String(err);
@@ -59,6 +58,15 @@
 		const s = await settings.fetch();
 		relays = s.relays;
 		await loadAgentAuth();
+		// Public identity comes from the harness (the Odin server has no
+		// secp256k1); shareable, shown without a reveal step.
+		try {
+			const res = await fetch(`${HARNESS}/identity`);
+			const out = (await res.json()) as { npub?: string };
+			npub = out.npub ?? "";
+		} catch {
+			npub = "";
+		}
 	}
 
 	onMount(() => {
@@ -108,7 +116,6 @@
 	async function reveal() {
 		const out = await settings.exportKey();
 		nsec = out.nsec;
-		hexKey = out.hex;
 		revealed = true;
 	}
 
@@ -149,23 +156,23 @@
 				This key encrypts and signs everything you sync. Anyone holding it has your full identity —
 				export it only to back it up or to log in on another device.
 			</p>
+			{#if npub}
+				<div class="keylabel">Public key <span class="enc">npub</span> <span class="share">shareable</span></div>
+				<div class="keyrow">
+					<code>{npub}</code>
+					<button onclick={() => void copy(npub, "npub")}>{copied === "npub" ? "Copied" : "Copy"}</button>
+				</div>
+			{/if}
 			{#if !revealed}
 				<button class="action" onclick={() => void reveal()}>Reveal private key</button>
 			{:else}
-				<!-- Both rows are the PRIVATE key - nsec is the bech32 form,
-				     hex the raw form. Keep either secret. -->
-				<div class="keylabel">Private key <span class="enc">nsec · bech32</span> <span class="secret">secret</span></div>
+				<div class="keylabel">Private key <span class="enc">nsec</span> <span class="secret">secret</span></div>
 				<div class="keyrow">
 					<code>{nsec}</code>
 					<button onclick={() => void copy(nsec, "nsec")}>{copied === "nsec" ? "Copied" : "Copy"}</button>
 				</div>
-				<div class="keylabel">Private key <span class="enc">raw hex</span> <span class="secret">secret</span></div>
-				<div class="keyrow">
-					<code>{hexKey}</code>
-					<button onclick={() => void copy(hexKey, "hex")}>{copied === "hex" ? "Copied" : "Copy"}</button>
-				</div>
-				<p class="hint">These are the same key in two encodings — there is no public key here. Use nsec to sign in elsewhere.</p>
-				<button class="action subtle" onclick={() => { revealed = false; nsec = ""; hexKey = ""; }}>Hide</button>
+				<p class="hint">Paste this nsec into "Sign in with existing key" on another Roostr to log in as you.</p>
+				<button class="action subtle" onclick={() => { revealed = false; nsec = ""; }}>Hide</button>
 			{/if}
 			{#if !importing}
 				<button class="action subtle" onclick={() => (importing = true)}>Sign in with existing key…</button>
@@ -417,6 +424,16 @@
 		font-weight: 400;
 		font-family: ui-monospace, monospace;
 		font-size: 11px;
+	}
+	.keylabel .share {
+		color: #35b57f;
+		border: 1px solid rgba(53, 181, 127, 0.45);
+		border-radius: 999px;
+		font-size: 10px;
+		line-height: 16px;
+		padding: 0 8px;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
 	}
 	.keylabel .secret {
 		color: #e8524a;
