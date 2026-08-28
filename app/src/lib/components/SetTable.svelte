@@ -8,6 +8,8 @@
 	 * (hide column); click a header to sort.
 	 */
 	import PropertyFlow from "./PropertyFlow.svelte";
+	import OptionPicker from "./OptionPicker.svelte";
+	import { colorHex } from "$lib/options";
 	import { fetchQuery, note, type QueryResultRow } from "$lib/api";
 	import { store } from "$lib/data.svelte";
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
@@ -69,6 +71,38 @@
 			return;
 		}
 		location.href = `/object/${id}`;
+	}
+
+	// ── Inline cell editing (Anytype dataview.tsx onCellClick: only the
+	// name cell opens the object; select/tag cells open the option menu
+	// anchored at the cell) ──────────────────────────────────────────
+	let cellEdit = $state<{ recordId: string; key: string; x: number; y: number } | null>(null);
+
+	function isOptionFormat(key: string): boolean {
+		const f = formatOf(key);
+		return f === "tag" || f === "status";
+	}
+
+	function cellValues(recordId: string, key: string): string[] {
+		const r = rows.find((x) => x.id === recordId);
+		const v = r?.fields[key];
+		if (v?.valuesValue) return v.valuesValue.items.map((i) => i.stringValue ?? "").filter(Boolean);
+		return v?.stringValue ? [v.stringValue] : [];
+	}
+
+	async function cellPick(text: string) {
+		if (!cellEdit) return;
+		const { recordId, key } = cellEdit;
+		const multi = formatOf(key) === "tag";
+		const cur = cellValues(recordId, key);
+		let next: string[];
+		if (multi) next = cur.includes(text) ? cur.filter((t) => t !== text) : [...cur, text];
+		else {
+			next = cur.includes(text) ? [] : [text];
+			cellEdit = null;
+		}
+		await note.setField(recordId, key, { valuesValue: { items: next.map((t) => ({ stringValue: t })) } });
+		await reload();
 	}
 
 	async function deleteSelected() {
@@ -228,7 +262,7 @@
 	}
 </script>
 
-<svelte:window onkeydown={(e) => { if (e.key === "Escape") selectedRows = []; }} />
+<svelte:window onkeydown={(e) => { if (e.key === "Escape") { cellEdit = null; selectedRows = []; } }} onmousedown={(e) => { if (cellEdit && !(e.target as HTMLElement).closest(".cell-pop, td.editable")) cellEdit = null; }} />
 
 <div class="set-table">
 	<table>
@@ -295,13 +329,38 @@
 				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)}>
 					<td class="name"><span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || r.id.slice(0, 8)}</td>
 					{#each columns as c (c)}
-						<td class:muted={c === "type" || c === "createdAt" || c === "updatedAt"}>{cell(r, c)}</td>
+						{#if isOptionFormat(c)}
+							{@const rel = relations.find((x) => x.key === c)}
+							<td
+								class="editable"
+								onclick={(e) => {
+									e.stopPropagation();
+									const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+									cellEdit = cellEdit?.recordId === r.id && cellEdit.key === c ? null : { recordId: r.id, key: c, x: rect.left, y: rect.bottom + 4 };
+								}}
+							>
+								{#each cellValues(r.id, c) as t (t)}
+									{@const opt = rel?.options.find((o) => o.text === t)}
+									<span class="cell-tag" style={opt?.color ? `border-color:${colorHex(opt.color)}; color:${colorHex(opt.color)}` : ""}>{t}</span>
+								{/each}
+							</td>
+						{:else}
+							<td class:muted={c === "type" || c === "createdAt" || c === "updatedAt"}>{cell(r, c)}</td>
+						{/if}
 					{/each}
 					<td></td>
 				</tr>
 			{/each}
 		</tbody>
 	</table>
+	{#if cellEdit}
+		{@const rel = relations.find((x) => x.key === cellEdit!.key)}
+		{#if rel}
+			<div class="cell-pop" style="left:{Math.min(cellEdit.x, window.innerWidth - 300)}px; top:{cellEdit.y}px" role="dialog">
+				<OptionPicker {rel} selected={cellValues(cellEdit.recordId, cellEdit.key)} multi={formatOf(cellEdit.key) === "tag"} onpick={(t) => void cellPick(t)} />
+			</div>
+		{/if}
+	{/if}
 	{#if selectedRows.length}
 		<div class="sel-bar">
 			<span>{selectedRows.length} selected</span>
@@ -451,5 +510,29 @@
 		border: none;
 		color: var(--muted);
 		cursor: pointer;
+	}
+	td.editable {
+		cursor: pointer;
+	}
+	td.editable:hover {
+		background: var(--hl-light);
+	}
+	.cell-tag {
+		display: inline-block;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		padding: 0 7px;
+		font-size: 12px;
+		line-height: 20px;
+		margin-right: 4px;
+	}
+	.cell-pop {
+		position: fixed;
+		z-index: 130;
+		background: var(--panel, #1a1d23);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 8px;
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
 	}
 </style>
