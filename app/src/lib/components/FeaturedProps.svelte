@@ -239,7 +239,7 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: 2px 6px;
-		margin: 2px 0 14px;
+		margin: 2px 0 14px 48px;
 		font-size: 13px;
 	}
 	.cell-wrap {

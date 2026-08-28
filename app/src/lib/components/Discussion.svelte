@@ -232,6 +232,7 @@
 		border-color: var(--accent);
 	}
 	.opener {
+		margin-left: 40px;
 		border: none;
 		background: none;
 		color: var(--muted);

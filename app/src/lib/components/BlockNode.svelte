@@ -179,8 +179,10 @@
 					onclick={(e) => {
 						const r = e.currentTarget.getBoundingClientRect();
 						onmenu(block.id, r.right + 8, r.top);
-					}}>⠿</button
+					}}
 				>
+					<svg viewBox="0 0 2 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M0 1C0 0.447716 0.447715 0 1 0C1.55228 0 2 0.447716 2 1C2 1.55228 1.55228 2 1 2C0.447715 2 0 1.55228 0 1ZM0 6C0 5.44772 0.447715 5 1 5C1.55228 5 2 5.44772 2 6C2 6.55228 1.55228 7 1 7C0.447715 7 0 6.55228 0 6ZM1 10C0.447715 10 0 10.4477 0 11C0 11.5523 0.447715 12 1 12C1.55228 12 2 11.5523 2 11C2 10.4477 1.55228 10 1 10Z" fill="currentColor" /></svg>
+				</button>
 			</div>
 			<TableBlock {block} {byId} objectId={object.id} {onrefresh} {oninput} {onblur} />
 		</div>
@@ -224,8 +226,10 @@
 					onclick={(e) => {
 						const r = e.currentTarget.getBoundingClientRect();
 						onmenu(block.id, r.right + 8, r.top);
-					}}>⠿</button
+					}}
 				>
+					<svg viewBox="0 0 2 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M0 1C0 0.447716 0.447715 0 1 0C1.55228 0 2 0.447716 2 1C2 1.55228 1.55228 2 1 2C0.447715 2 0 1.55228 0 1ZM0 6C0 5.44772 0.447715 5 1 5C1.55228 5 2 5.44772 2 6C2 6.55228 1.55228 7 1 7C0.447715 7 0 6.55228 0 6ZM1 10C0.447715 10 0 10.4477 0 11C0 11.5523 0.447715 12 1 12C1.55228 12 2 11.5523 2 11C2 10.4477 1.55228 10 1 10Z" fill="currentColor" /></svg>
+				</button>
 			</div>
 			{#if t.style === Style.CHECKBOX}
 				<!-- Anytype's circular checkbox: outlined circle → accent-filled circle + white check. -->
@@ -326,8 +330,10 @@
 					onclick={(e) => {
 						const r = e.currentTarget.getBoundingClientRect();
 						onmenu(block.id, r.right + 8, r.top);
-					}}>⠿</button
+					}}
 				>
+					<svg viewBox="0 0 2 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M0 1C0 0.447716 0.447715 0 1 0C1.55228 0 2 0.447716 2 1C2 1.55228 1.55228 2 1 2C0.447715 2 0 1.55228 0 1ZM0 6C0 5.44772 0.447715 5 1 5C1.55228 5 2 5.44772 2 6C2 6.55228 1.55228 7 1 7C0.447715 7 0 6.55228 0 6ZM1 10C0.447715 10 0 10.4477 0 11C0 11.5523 0.447715 12 1 12C1.55228 12 2 11.5523 2 11C2 10.4477 1.55228 10 1 10Z" fill="currentColor" /></svg>
+				</button>
 			</div>
 			<RelationBlock {block} {object} {onrefresh} />
 		</div>
@@ -367,8 +373,10 @@
 					onclick={(e) => {
 						const r = e.currentTarget.getBoundingClientRect();
 						onmenu(block.id, r.right + 8, r.top);
-					}}>⠿</button
+					}}
 				>
+					<svg viewBox="0 0 2 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M0 1C0 0.447716 0.447715 0 1 0C1.55228 0 2 0.447716 2 1C2 1.55228 1.55228 2 1 2C0.447715 2 0 1.55228 0 1ZM0 6C0 5.44772 0.447715 5 1 5C1.55228 5 2 5.44772 2 6C2 6.55228 1.55228 7 1 7C0.447715 7 0 6.55228 0 6ZM1 10C0.447715 10 0 10.4477 0 11C0 11.5523 0.447715 12 1 12C1.55228 12 2 11.5523 2 11C2 10.4477 1.55228 10 1 10Z" fill="currentColor" /></svg>
+				</button>
 			</div>
 			{#if block.content.custom.contentType === "embed"}
 				<iframe
@@ -416,7 +424,6 @@
 		position: relative;
 		display: flex;
 		align-items: flex-start;
-		gap: 4px;
 		padding: 1px 0;
 		border-radius: 4px;
 		flex-wrap: wrap;
@@ -430,29 +437,45 @@
 	.block.zone-4 { box-shadow: 3px 0 0 var(--accent); }
 	/* InnerFirst: drop INSIDE — Anytype outlines the whole target. */
 	.block.zone-7 { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 6px; }
+	/* Anytype wrapMenu: a 48px left rail every block shares — content
+	   always starts at the same x; the handle hangs in the margin. */
 	.gutter {
-		width: 22px;
-		flex: none;
-		display: flex;
-		justify-content: center;
-		opacity: 0;
-		transition: opacity 0.1s;
-		padding-top: 4px;
+		width: 48px;
+		flex: 0 0 48px;
+		position: relative;
 	}
-	.block:hover > .gutter {
-		opacity: 1;
-	}
+	/* Anytype .icon.commonDnd: 12px-wide full-height pill, 3-dot column,
+	   invisible until block hover, grab cursor. */
 	.handle {
-		border: none;
+		position: absolute;
+		right: 6px;
+		top: 0;
+		height: 100%;
+		min-height: 24px;
+		width: 12px;
+		border: 1px solid var(--border);
+		border-radius: 6px;
 		background: none;
 		color: var(--muted);
 		cursor: grab;
-		font-size: 13px;
-		padding: 2px;
-		border-radius: 4px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		opacity: 0;
+		transition: opacity 0.1s;
+		padding: 0;
+	}
+	.handle :global(svg) {
+		width: 2px;
+		height: 12px;
+	}
+	.block:hover > .gutter .handle {
+		opacity: 1;
 	}
 	.handle:hover {
 		background: var(--hover);
+		border-color: var(--hover);
+		color: var(--fg);
 	}
 	/* Anytype marker: 24×24 box, 20×20 circle icon, muted → accent when checked. */
 	.check-circle {

@@ -756,6 +756,7 @@
 		cursor: text;
 	}
 	.empty-hint {
+		margin-left: 48px;
 		border: none;
 		background: none;
 		color: var(--muted);

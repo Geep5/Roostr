@@ -330,7 +330,7 @@
 	.tpl-note {
 		color: var(--muted);
 		font-size: 12px;
-		margin: 0 0 8px;
+		margin: 0 0 8px 48px;
 	}
 	.obj-img {
 		width: 34px;
@@ -338,16 +338,20 @@
 		border-radius: 8px;
 		object-fit: cover;
 	}
+	/* The 48px rail every editor block shares: the icon lives IN the rail
+	   so the title text starts exactly where block text starts. */
 	.icon-wrap {
 		position: relative;
-		flex: none;
+		flex: 0 0 48px;
+		display: flex;
+		justify-content: flex-end;
 	}
 	.obj-emoji {
-		width: 44px;
+		width: 40px;
 		height: 44px;
 		border: none;
 		background: none;
-		font-size: 30px;
+		font-size: 28px;
 		border-radius: 10px;
 		cursor: pointer;
 		display: flex;
@@ -365,7 +369,12 @@
 	.title-row {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: 0;
+	}
+	/* Task checkbox replaces the icon in the rail. */
+	.title-row > .done-check {
+		margin-left: 14px;
+		margin-right: 6px;
 	}
 	.title {
 		width: 100%;
