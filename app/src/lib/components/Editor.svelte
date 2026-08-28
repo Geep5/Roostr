@@ -859,6 +859,15 @@
 			case "duplicate":
 				await duplicateBlock(id);
 				break;
+			case "link_style": {
+				// Anytype menuBlockLinkSettings: cardStyle Text | Card.
+				const cur = byId.get(id)?.content.custom;
+				if (cur?.contentType === "link") {
+					await note.blockUpdate(object.id, id, { custom: { contentType: "link", meta: { ...cur.meta, style: a.value as string } } });
+					await refresh();
+				}
+				break;
+			}
 			case "delete":
 				await removeBlockById(id);
 				break;

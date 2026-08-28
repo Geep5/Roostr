@@ -412,6 +412,8 @@
 		<!-- Anytype BlockType.Link, text card style (block/link.tsx): 20px
 		     object icon + 500-weight name; ghost row when target deleted. -->
 		{@const target = store.summaries.find((s) => s.id === block.content.custom?.meta?.target)}
+		{@const linkStyle = block.content.custom?.meta?.style ?? "text"}
+		{@const typeName = target ? (store.types.find((t) => t.key === target.typeKey)?.name ?? target.typeKey) : ""}
 		<div
 			class="block link-block zone-{zone} {draggingId === block.id ? 'dragging' : ''}"
 			class:selected={selectedIds.has(block.id)}
@@ -452,17 +454,29 @@
 					<svg viewBox="0 0 2 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M0 1C0 0.447716 0.447715 0 1 0C1.55228 0 2 0.447716 2 1C2 1.55228 1.55228 2 1 2C0.447715 2 0 1.55228 0 1ZM0 6C0 5.44772 0.447715 5 1 5C1.55228 5 2 5.44772 2 6C2 6.55228 1.55228 7 1 7C0.447715 7 0 6.55228 0 6ZM1 10C0.447715 10 0 10.4477 0 11C0 11.5523 0.447715 12 1 12C1.55228 12 2 11.5523 2 11C2 10.4477 1.55228 10 1 10Z" fill="currentColor" /></svg>
 				</button>
 			</div>
-			{#if target}
-				<a class="link-body" href="/object/{target.id}">
-					<span class="link-icon">{objectIcon(target.icon, target.typeKey)}</span>
-					<span class="link-name">{target.name || "Untitled"}</span>
-				</a>
-			{:else}
-				<span class="link-body deleted">
-					<span class="link-icon">⌀</span>
-					<span class="link-name">Deleted object</span>
-				</span>
-			{/if}
+			<div class="link-wrap" style={block.align === 1 ? "justify-content:center" : block.align === 2 ? "justify-content:flex-end" : ""}>
+				{#if !target}
+					<span class="link-body deleted">
+						<span class="link-icon">⌀</span>
+						<span class="link-name">Deleted object</span>
+					</span>
+				{:else if linkStyle === "card"}
+					<!-- Anytype linkCard (link.scss:170): bordered 8px card,
+					     16px padding, name row + small secondary type row. -->
+					<a class="link-card" href="/object/{target.id}">
+						<span class="card-name">
+							<span class="link-icon">{objectIcon(target.icon, target.typeKey)}</span>
+							<span class="link-name">{target.name || "Untitled"}</span>
+						</span>
+						<span class="card-type">{typeName}</span>
+					</a>
+				{:else}
+					<a class="link-body" href="/object/{target.id}">
+						<span class="link-icon">{objectIcon(target.icon, target.typeKey)}</span>
+						<span class="link-name">{target.name || "Untitled"}</span>
+					</a>
+				{/if}
+			</div>
 		</div>
 	{:else if block.content.custom}
 		<div class="block custom" class:selected={selectedIds.has(block.id)} data-block={block.id}>
@@ -723,9 +737,14 @@
 		z-index: 10;
 	}
 	/* Anytype block/link.tsx text style: icon + medium name, underline
-	   from a light border, brightening on hover. */
-	.link-block {
-		align-items: center;
+	   from a light border, brightening on hover. NOTE: the row must keep
+	   default (stretch) alignment - the gutter/handle pill spans the block
+	   height like every other block. */
+	.link-wrap {
+		flex: 1;
+		display: flex;
+		min-width: 0;
+		padding: 3px 2px;
 	}
 	.link-body {
 		display: inline-flex;
@@ -755,5 +774,37 @@
 	}
 	.link-body.deleted .link-name {
 		border-bottom: none;
+	}
+	.link-card {
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		gap: 2px;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 16px;
+		min-width: 240px;
+		max-width: 100%;
+		color: var(--fg);
+		text-decoration: none;
+		box-shadow: 0 0 4px rgba(0, 0, 0, 0.05);
+		transition: border-color 0.15s;
+	}
+	.link-card:hover {
+		border-color: var(--muted);
+	}
+	.link-card .card-name {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+	}
+	.link-card .link-name {
+		border-bottom: none;
+	}
+	.link-card .card-type {
+		font-size: 12px;
+		line-height: 16px;
+		color: var(--muted);
 	}
 </style>

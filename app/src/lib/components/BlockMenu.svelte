@@ -3,7 +3,7 @@
 	import { Style } from "$lib/types";
 
 	export interface MenuAction {
-		kind: "style" | "align" | "color" | "background" | "duplicate" | "delete";
+		kind: "style" | "align" | "color" | "background" | "duplicate" | "delete" | "link_style";
 		value?: number | string;
 	}
 
@@ -87,6 +87,11 @@
 	const items = $derived.by((): Item[] => {
 		const t = block.content.text;
 		const out: Item[] = [];
+		if (block.content.custom?.contentType === "link") {
+			const cur = block.content.custom.meta?.style ?? "text";
+			out.push({ section: "Appearance", label: "Text", action: { kind: "link_style", value: "text" }, active: cur === "text", preview: "Ag", previewClass: "pv-p", desc: "Inline link" });
+			out.push({ section: "Appearance", label: "Card", action: { kind: "link_style", value: "card" }, active: cur === "card", preview: "▭", previewClass: "pv-p", desc: "Bordered preview card" });
+		}
 		if (t) {
 			for (const s of STYLES) {
 				out.push({
