@@ -455,36 +455,41 @@
 		grid-template-columns: 56px 220px 1fr;
 		height: 100vh;
 	}
+	/* Anytype pageVault: a rounded solid card, no border — panes separate
+	   by background, not lines. */
 	.vault {
-		border-right: 1px solid var(--border);
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		gap: 8px;
 		padding: 12px 0;
-		background: #0c0e11;
+		margin: 6px 0 6px 6px;
+		background: var(--panel);
+		border-radius: 16px;
 	}
 	.space {
 		width: 36px;
 		height: 36px;
 		border-radius: 10px;
-		border: 1px solid var(--border);
-		background: var(--panel);
+		border: none;
+		background: var(--hl-med);
 		color: var(--fg);
 		font-size: 15px;
 		cursor: pointer;
 	}
 	.space:hover {
-		border-color: var(--accent);
+		background: var(--hover);
 	}
 	.space.active {
-		border-color: var(--accent);
-		box-shadow: 0 0 0 1px var(--accent);
+		box-shadow: 0 0 0 2px var(--accent);
 	}
 	.space.add {
 		color: var(--muted);
 		background: none;
-		border-style: dashed;
+	}
+	.space.add:hover {
+		background: var(--hl-med);
+		color: var(--fg);
 	}
 	.rail-spacer {
 		flex: 1;
@@ -492,15 +497,13 @@
 	.space.settings {
 		color: var(--muted);
 		background: none;
-		border-color: transparent;
 		font-size: 17px;
 	}
 	.space.settings:hover {
 		color: var(--fg);
-		border-color: var(--accent);
+		background: var(--hl-med);
 	}
 	.widgets {
-		border-right: 1px solid var(--border);
 		padding: 10px 8px;
 		overflow-y: auto;
 		display: flex;
