@@ -11,6 +11,7 @@
 	import { store } from "$lib/data.svelte";
 	import { CREATABLE_FORMATS, RESERVED_KEYS, createRelation, emptyValueFor } from "$lib/relations";
 	import PropertyValue from "./PropertyValue.svelte";
+	import { fetchBacklinks, type Backlink } from "$lib/backlinks";
 
 	let {
 		object,
@@ -30,6 +31,20 @@
 		return present.toSorted((a, b) => (rank.get(a.key) ?? 999) - (rank.get(b.key) ?? 999));
 	});
 	const addable = $derived(relations.filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && !(r.key in object.fields)));
+
+	// ── Anytype's leading featured cells: object type + backlinks count ──
+	const typeDef = $derived(store.types.find((t) => t.key === object.typeKey));
+	const typeName = $derived(typeDef?.name || object.typeKey);
+
+	let backlinks = $state<Backlink[]>([]);
+	let showBacklinks = $state(false);
+	$effect(() => {
+		const id = object.id;
+		showBacklinks = false;
+		void fetchBacklinks(id).then((b) => {
+			if (object.id === id) backlinks = b;
+		});
+	});
 
 	let editing = $state<string | null>(null);
 	let adding = $state(false);
@@ -102,8 +117,35 @@
 	}
 </script>
 
-{#if shown.length > 0 || addable.length > 0}
+{#if shown.length > 0 || addable.length > 0 || typeName}
 	<div class="featured">
+		<span class="cell-wrap">
+			<button
+				class="cell type-cell"
+				title="Type"
+				onclick={() => { if (typeDef) location.href = `/object/${typeDef.id}`; }}
+			>{typeName}</button>
+			<span class="bullet">•</span>
+		</span>
+		{#if backlinks.length > 0}
+			<span class="cell-wrap">
+				<button class="cell" title="Backlinks" onclick={() => { editing = null; adding = false; showBacklinks = !showBacklinks; }}>
+					{backlinks.length} backlink{backlinks.length === 1 ? "" : "s"}
+				</button>
+				<span class="bullet">•</span>
+				{#if showBacklinks}
+					<div class="pop">
+						<div class="pop-head"><span class="pop-name">Linked from</span></div>
+						{#each backlinks as b (b.id)}
+							<a class="backlink" href="/object/{b.id}" onclick={() => (showBacklinks = false)}>
+								<span class="bl-icon">{b.icon || "▨"}</span>{b.name}
+								<span class="bl-kind">{b.typeKey}</span>
+							</a>
+						{/each}
+					</div>
+				{/if}
+			</span>
+		{/if}
 		{#each shown as rel, i (rel.key)}
 			{@const v = object.fields[rel.key]}
 			<span class="cell-wrap">
@@ -190,6 +232,32 @@
 {/if}
 
 <style>
+	.type-cell {
+		color: var(--muted);
+	}
+	.backlink {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 5px 8px;
+		border-radius: 6px;
+		color: var(--fg);
+		text-decoration: none;
+		font-size: 13px;
+	}
+	.backlink:hover {
+		background: var(--hover);
+	}
+	.bl-icon {
+		flex: none;
+		width: 18px;
+		text-align: center;
+	}
+	.bl-kind {
+		margin-left: auto;
+		color: var(--muted);
+		font-size: 11px;
+	}
 	.featured {
 		display: flex;
 		flex-wrap: wrap;
