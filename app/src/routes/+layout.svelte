@@ -346,25 +346,29 @@
 				</div>
 			{/each}
 
-			<div class="section" class:closed={sectionCollapsed["recent"]}>
+			<!-- Anytype widgetSection: the nameWrap sits on the sidebar
+			     background; only the items live inside the rounded card. -->
+			<div class="section">
 				<div class="section-head">
 					<button class="section-name" onclick={() => flipSection("recent")}>
 						<span class="section-arrow" class:open={!sectionCollapsed["recent"]}>▶</span>Recently edited
 					</button>
 				</div>
 				{#if !sectionCollapsed["recent"]}
-					{#each recent as r (r.id)}
-						<a class="item" class:current={page.url.pathname === `/object/${r.id}`} href="/object/{r.id}">
-							<span class="obj-icon">{icon(r)}</span>{r.name || "Untitled"}
-						</a>
-					{/each}
-					{#if recent.length === 0}
-						<span class="none">Nothing yet</span>
-					{/if}
+					<div class="section-body">
+						{#each recent as r (r.id)}
+							<a class="item" class:current={page.url.pathname === `/object/${r.id}`} href="/object/{r.id}">
+								<span class="obj-icon">{icon(r)}</span>{r.name || "Untitled"}
+							</a>
+						{/each}
+						{#if recent.length === 0}
+							<span class="none">Nothing yet</span>
+						{/if}
+					</div>
 				{/if}
 			</div>
 
-			<div class="section" class:closed={sectionCollapsed["types"]}>
+			<div class="section">
 				<div class="section-head">
 					<button class="section-name" onclick={() => flipSection("types")}>
 						<span class="section-arrow" class:open={!sectionCollapsed["types"]}>▶</span>Types
@@ -372,11 +376,13 @@
 					<button class="section-add" title="New type" onclick={() => void newType()}>＋</button>
 				</div>
 				{#if !sectionCollapsed["types"]}
-					{#each store.types as t (t.id)}
-						<a class="item" class:current={page.url.pathname === `/object/${t.id}`} href="/object/{t.id}">
-							<span class="obj-icon">{t.icon || typeGlyph(t.key)}</span>{t.name || t.key}
-						</a>
-					{/each}
+					<div class="section-body">
+						{#each store.types as t (t.id)}
+							<a class="item" class:current={page.url.pathname === `/object/${t.id}`} href="/object/{t.id}">
+								<span class="obj-icon">{t.icon || typeGlyph(t.key)}</span>{t.name || t.key}
+							</a>
+						{/each}
+					</div>
 				{/if}
 			</div>
 
@@ -727,7 +733,13 @@
 		text-overflow: ellipsis;
 	}
 	/* Anytype widget cards: subtle solid, 12px radius, 8px padding. */
+	/* Anytype widgetSection: name on the sidebar background (nameWrap
+	   padding 0 4px), items in their own rounded card. */
 	.section {
+		display: flex;
+		flex-direction: column;
+	}
+	.section-body {
 		background: var(--hl-light);
 		border-radius: 12px;
 		padding: 8px;
@@ -783,8 +795,8 @@
 	.section-arrow.open {
 		transform: rotate(90deg);
 	}
-	.section.closed {
-		padding-bottom: 2px;
+	.section-head {
+		padding: 0 4px;
 	}
 	/* Anytype tree item: 28px row, 6px radius, highlight-medium hover. */
 	.item {
