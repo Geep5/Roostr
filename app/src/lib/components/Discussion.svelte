@@ -221,8 +221,14 @@
 </section>
 
 <style>
+	/* Anytype commentSection: the whole section (divider, title, posts,
+	   composer) lives inside the content column - align to the 48px rail. */
 	.discussion {
 		margin-top: 32px;
+		margin-left: 48px;
+	}
+	.discussion.full {
+		margin-left: 0;
 	}
 	.counter-wrap {
 		display: flex;
@@ -230,11 +236,13 @@
 		padding: 4px 0 12px;
 	}
 	/* Anytype's short section rule — not full width. */
+	/* Anytype commentSection.isVisible: a full-width border-top across
+	   the section (comment.scss:40), aligned with the content column. */
 	.rule {
-		width: 120px;
+		width: 100%;
 		height: 1px;
 		background: var(--border);
-		margin: 0 0 14px 48px;
+		margin: 0 0 16px;
 	}
 	.discussion.full {
 		margin-top: 8px;
