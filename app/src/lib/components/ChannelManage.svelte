@@ -3,6 +3,7 @@
 	import { channel as channelApi } from "$lib/api";
 	import { invalidateAll } from "$app/navigation";
 	import SetTable from "./SetTable.svelte";
+	import ChannelAgents from "./ChannelAgents.svelte";
 	import type { RelationDefJSON } from "$lib/types";
 
 	let {
@@ -49,6 +50,8 @@
 </script>
 
 <section class="manage">
+	<ChannelAgents channelId={object.id} />
+
 	<h3>Members</h3>
 	<p class="hint">
 		Everyone holding this channel's key can read and write every object in it. Invites are delivered as a
@@ -101,7 +104,17 @@
 	</div>
 
 	<h3>Objects in this channel</h3>
-	<SetTable body={{ filters: [{ key: "channel", condition: "equal", value: object.id }] }} {object} {relations} {onchanged} />
+	<SetTable
+		body={{
+			filters: [
+				{ key: "channel", condition: "equal", value: object.id },
+				{ key: "type", condition: "notIn", value: ["agent"] },
+			],
+		}}
+		{object}
+		{relations}
+		{onchanged}
+	/>
 </section>
 
 <style>

@@ -39,6 +39,7 @@ const HIDDEN_KINDS: Record<string, true> = {
 	relation: true,
 	type: true,
 	template: true,
+	agent: true,
 };
 
 const TYPE_COLORS: Record<string, [number, number, number]> = {

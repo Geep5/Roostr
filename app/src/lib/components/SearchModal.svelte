@@ -25,7 +25,7 @@
 	});
 
 	/** Kernel/internal types never appear in search (they're channel-less). */
-	const TYPE_EXCLUDE = { key: "type", condition: "notIn", value: ["program", "typescript", "json", "proto", "relation", "channel", "type", "template"] };
+	const TYPE_EXCLUDE = { key: "type", condition: "notIn", value: ["program", "typescript", "json", "proto", "relation", "channel", "type", "template", "agent"] };
 
 	/** Channel scope filter: unassigned objects live in the default channel. */
 	function scopeFilters(): Array<Record<string, unknown>> {

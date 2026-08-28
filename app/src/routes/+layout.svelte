@@ -128,7 +128,7 @@
 		if (!current) return [];
 		const pinnedSet = new Set(current.pinnedIds);
 		return store.summaries
-			.filter((s) => !pinnedSet.has(s.id) && s.typeKey !== "type" && s.typeKey !== "template" && (s.channelId === current.id || (s.channelId === "" && current.id === defaultChannelId)))
+			.filter((s) => !pinnedSet.has(s.id) && !["type", "template", "agent", "pinned_fact", "milestone"].includes(s.typeKey) && (s.channelId === current.id || (s.channelId === "" && current.id === defaultChannelId)))
 			.slice(0, 8);
 	});
 

@@ -162,7 +162,7 @@
 	async function openPicker() {
 		if (!object) return;
 		const res = await fetchQuery({ limit: 200 });
-		const HIDDEN: Record<string, true> = { program: true, typescript: true, json: true, proto: true, relation: true, collection: true, query: true, set: true, type: true, template: true };
+		const HIDDEN: Record<string, true> = { program: true, typescript: true, json: true, proto: true, relation: true, collection: true, query: true, set: true, type: true, template: true, agent: true };
 		const currentId = object.id;
 		candidates = res.records
 			.filter((r) => r.id !== currentId && !memberIds.includes(r.id) && !HIDDEN[r.typeKey])
@@ -293,7 +293,8 @@
 			<Editor bind:this={editor} {object} onchanged={refresh} />
 		{/if}
 
-		{#if !isChannel && !isChat && !isAgent && !isType && !isTemplate}
+		<!-- Anytype: queries/collections (sets) carry no discussion. -->
+		{#if !isChannel && !isChat && !isAgent && !isType && !isTemplate && !isQuery && !isCollection}
 			<Discussion {object} onchanged={refresh} />
 		{/if}
 
