@@ -16,7 +16,11 @@ import "core:mem/virtual"
 import "core:encoding/hex"
 import "core:crypto"
 
-CACHE_TTL_MS :: 2000
+// Full rebuilds are expensive (every .pb decoded + replayed); they run only
+// at startup and every COMPACT_INTERVAL_MS to reclaim arena garbage left by
+// incremental reloads. Commits mark their object dirty; ensure_loaded
+// re-reads just those directories.
+COMPACT_INTERVAL_MS :: 10 * 60 * 1000
 
 Store :: struct {
 	root:      string, // <data>/changes
@@ -24,6 +28,7 @@ Store :: struct {
 	mu:        sync.Mutex,
 	arena:     virtual.Arena, // owns everything reachable from `states`
 	states:    map[string]^Object_State,
+	dirty:     map[string]bool, // object ids needing an incremental reload
 	loaded_at: i64,
 	valid:     bool,
 }
@@ -45,12 +50,34 @@ store_invalidate :: proc() {
 	g_store.valid = false
 }
 
+/** Mark one object stale; ensure_loaded re-reads only its directory. */
+store_mark_dirty :: proc(object_id: string) {
+	sync.lock(&g_store.mu)
+	defer sync.unlock(&g_store.mu)
+	if g_store.dirty == nil do g_store.dirty = make(map[string]bool)
+	g_store.dirty[strings.clone(object_id)] = true
+}
+
 /** Rebuild the state cache when stale. Caller must hold the lock. */
 ensure_loaded :: proc() {
 	now := time.tick_now()._nsec / 1_000_000
-	if g_store.valid && now - g_store.loaded_at < CACHE_TTL_MS do return
 
-	// Drop the previous generation entirely.
+	// Incremental path: reload only dirty objects. Replaced states leak in
+	// the arena until the next periodic full rebuild compacts them.
+	if g_store.valid && now - g_store.loaded_at < COMPACT_INTERVAL_MS {
+		if len(g_store.dirty) == 0 do return
+		alloc := virtual.arena_allocator(&g_store.arena)
+		for object_id in g_store.dirty {
+			dir_path, _ := filepath.join({g_store.root, object_id}, context.temp_allocator)
+			delete_key(&g_store.states, object_id)
+			load_object_dir(dir_path, object_id, alloc)
+		}
+		for k in g_store.dirty do delete(k)
+		clear(&g_store.dirty)
+		return
+	}
+
+	// Full rebuild: drop the previous generation entirely.
 	if g_store.states != nil {
 		delete(g_store.states)
 		virtual.arena_destroy(&g_store.arena)
@@ -58,6 +85,10 @@ ensure_loaded :: proc() {
 	_ = virtual.arena_init_growing(&g_store.arena)
 	alloc := virtual.arena_allocator(&g_store.arena)
 	g_store.states = make(map[string]^Object_State)
+	if g_store.dirty != nil {
+		for k in g_store.dirty do delete(k)
+		clear(&g_store.dirty)
+	}
 
 	dir, derr := os.open(g_store.root)
 	if derr == nil {
@@ -127,7 +158,7 @@ commit_change :: proc(c: ^Change) -> (string, bool) {
 	path, _ := filepath.join({dir, strings.concatenate({hex_str, ".pb"}, context.temp_allocator)}, context.temp_allocator)
 	if os.write_entire_file(path, full) != nil do return "", false
 
-	store_invalidate()
+	store_mark_dirty(c.object_id)
 	return strings.clone(hex_str), true
 }
 

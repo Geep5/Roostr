@@ -9,7 +9,7 @@
 
 	/** Objects in the active channel (unassigned objects live in the default channel). */
 	const objects = $derived(
-		store.summaries.filter((o) => o.channelId === channelId || (o.channelId === "" && channelId === defaultChannelId)),
+		store.summaries.filter((o) => o.typeKey !== "type" && o.typeKey !== "template" && (o.channelId === channelId || (o.channelId === "" && channelId === defaultChannelId))),
 	);
 
 	const DEFAULT_TYPES = ["note", "task", "person", "project", "bookmark"];

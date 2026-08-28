@@ -37,6 +37,8 @@ const HIDDEN_KINDS: Record<string, true> = {
 	json: true,
 	proto: true,
 	relation: true,
+	type: true,
+	template: true,
 };
 
 const TYPE_COLORS: Record<string, [number, number, number]> = {

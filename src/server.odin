@@ -6,6 +6,7 @@ package glon
 
 import "core:net"
 import "core:thread"
+import "core:time"
 import "core:strings"
 import "core:strconv"
 import "core:sync"
@@ -39,6 +40,29 @@ sse_broadcast :: proc(object_id: string) {
 	}
 }
 
+// Reap dead SSE clients: a comment line every 15s forces a write, so
+// sockets whose page is gone error out and get closed. Without this,
+// zombie streams pile up and exhaust the browser's 6-per-host pool.
+sse_ping_loop :: proc() {
+	for {
+		time.sleep(15 * time.Second)
+		ping := ": ping\n\n"
+		sync.lock(&g_sse.mu)
+		for i := len(g_sse.clients) - 1; i >= 0; i -= 1 {
+			_, err := net.send_tcp(g_sse.clients[i], transmute([]byte)ping)
+			if err != nil {
+				net.close(g_sse.clients[i])
+				unordered_remove(&g_sse.clients, i)
+			}
+		}
+		n := len(g_sse.clients)
+		sync.unlock(&g_sse.mu)
+		when #config(GLON_HTTP_TRACE, false) {
+			fmt.eprintfln("[sse] %d client(s)", n)
+		}
+	}
+}
+
 // ── Request plumbing ─────────────────────────────────────────────────
 
 Request :: struct {
@@ -49,13 +73,26 @@ Request :: struct {
 
 CORS :: "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n"
 
+/** send_tcp may write fewer bytes than asked; loop until done or error.
+ * A short write silently truncates an HTTP response — the client then
+ * waits for the promised Content-Length remainder forever. */
+send_all :: proc(sock: net.TCP_Socket, data: []byte) -> bool {
+	sent := 0
+	for sent < len(data) {
+		n, err := net.send_tcp(sock, data[sent:])
+		if err != nil || n <= 0 do return false
+		sent += n
+	}
+	return true
+}
+
 respond :: proc(sock: net.TCP_Socket, status: string, content_type: string, body: []byte) {
 	head := fmt.tprintf(
 		"HTTP/1.1 %s\r\n%sContent-Type: %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n",
 		status, CORS, content_type, len(body),
 	)
-	_, _ = net.send_tcp(sock, transmute([]byte)head)
-	_, _ = net.send_tcp(sock, body)
+	if !send_all(sock, transmute([]byte)head) do return
+	_ = send_all(sock, body)
 }
 
 respond_json :: proc(sock: net.TCP_Socket, v: json.Value, status := "200 OK") {
@@ -77,6 +114,9 @@ serve :: proc(port: int) {
 		os.exit(1)
 	}
 	fmt.printfln("[glon-odin] listening on http://127.0.0.1:%d (data: %s)", port, g_store.data_root)
+
+	pinger := thread.create_and_start(sse_ping_loop)
+	_ = pinger
 
 	for {
 		client, _, aerr := net.accept_tcp(sock)
@@ -107,9 +147,11 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 
 	// SSE keeps the socket; everything else closes after responding.
 	if req.method == "GET" && req.path == "/api/events" {
+		when #config(GLON_HTTP_TRACE, false) {
+			fmt.eprintfln("[trace] SSE subscribe")
+		}
 		head := fmt.tprintf("HTTP/1.1 200 OK\r\n%sContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\ndata: {{\"hello\":true}}\n\n", CORS)
-		_, serr := net.send_tcp(sock, transmute([]byte)head)
-		if serr == nil {
+		if send_all(sock, transmute([]byte)head) {
 			sync.lock(&g_sse.mu)
 			append(&g_sse.clients, sock)
 			sync.unlock(&g_sse.mu)
@@ -119,6 +161,9 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 		return
 	}
 
+	when #config(GLON_HTTP_TRACE, false) {
+		fmt.eprintfln("[trace] %s %s", req.method, req.path)
+	}
 	route(sock, req)
 	net.close(sock)
 }

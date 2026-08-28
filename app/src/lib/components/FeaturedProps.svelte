@@ -130,7 +130,9 @@
 					<div class="pop">
 						<div class="pop-head">
 							<span class="pop-name">{rel.name || rel.key}</span>
-							<button class="pop-rm" title="Remove property" onclick={() => void removeProp(rel.key)}>Remove</button>
+							{#if rel.key !== "done"}
+								<button class="pop-rm" title="Remove property" onclick={() => void removeProp(rel.key)}>Remove</button>
+							{/if}
 						</div>
 						<PropertyValue {rel} value={v} onsave={(nv) => void saveValue(rel.key, nv)} />
 					</div>

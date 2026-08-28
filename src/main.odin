@@ -48,6 +48,7 @@ main :: proc() {
 			if p, ok := strconv.parse_int(args[2]); ok do port = p
 		}
 		bootstrap_relations()
+		bootstrap_types()
 		serve(port)
 	case:
 		fmt.eprintln("usage: glon-odin [serve [port] | list | dump <objectId>]")

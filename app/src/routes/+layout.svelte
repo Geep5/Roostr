@@ -7,7 +7,7 @@
 	import { objectIcon } from "$lib/icons";
 	import { store, refreshAll, connectEvents } from "$lib/data.svelte";
 	import GraphIcon from "$lib/components/GraphIcon.svelte";
-	import { CREATABLE_TYPES, typeGlyph, createTyped, createCollection, createQuery } from "$lib/create";
+	import { creatableTypes, typeGlyph, createTyped, createCollection, createQuery } from "$lib/create";
 
 	let { children }: { children: import("svelte").Snippet } = $props();
 
@@ -128,7 +128,7 @@
 		if (!current) return [];
 		const pinnedSet = new Set(current.pinnedIds);
 		return store.summaries
-			.filter((s) => !pinnedSet.has(s.id) && (s.channelId === current.id || (s.channelId === "" && current.id === defaultChannelId)))
+			.filter((s) => !pinnedSet.has(s.id) && s.typeKey !== "type" && s.typeKey !== "template" && (s.channelId === current.id || (s.channelId === "" && current.id === defaultChannelId)))
 			.slice(0, 8);
 	});
 
@@ -215,9 +215,9 @@
 					<button class="create-btn" title="New object" aria-expanded={showCreate} onclick={() => (showCreate = !showCreate)}>＋</button>
 					{#if showCreate}
 						<div class="create-menu" role="menu">
-							{#each CREATABLE_TYPES as t (t)}
-								<button role="menuitem" onclick={() => void sidebarCreate(t)}>
-									<span class="obj-icon">{typeGlyph(t)}</span>{t[0].toUpperCase() + t.slice(1)}
+							{#each creatableTypes() as t (t.key)}
+								<button role="menuitem" onclick={() => void sidebarCreate(t.key)}>
+									<span class="obj-icon">{t.icon}</span>{t.name}
 								</button>
 							{/each}
 							<div class="create-sep"></div>
@@ -253,6 +253,15 @@
 				{#if recent.length === 0}
 					<span class="none">Nothing yet</span>
 				{/if}
+			</div>
+
+			<div class="section">
+				<div class="section-name">Types</div>
+				{#each store.types as t (t.id)}
+					<a class="item" class:current={page.url.pathname === `/object/${t.id}`} href="/object/{t.id}">
+						<span class="obj-icon">{t.icon || typeGlyph(t.key)}</span>{t.name || t.key}
+					</a>
+				{/each}
 			</div>
 
 			<a class="all" class:current-view={page.url.pathname === "/graph"} href="/graph"><GraphIcon /> Graph</a>

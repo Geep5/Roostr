@@ -151,7 +151,7 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 	}
 
 	if imported > 0 {
-		store_invalidate()
+		for object_id in touched do store_mark_dirty(object_id)
 		for object_id in touched do sse_broadcast(object_id)
 	}
 

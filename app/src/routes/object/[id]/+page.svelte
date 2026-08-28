@@ -4,7 +4,7 @@
 	import type { ObjectJSON } from "$lib/types";
 	import { fieldStr } from "$lib/types";
 	import { fetchObject, fetchQuery, note } from "$lib/api";
-	import { store, refreshAll, onObjectEvent } from "$lib/data.svelte";
+	import { store, refreshAll, onObjectEvent, layoutOf } from "$lib/data.svelte";
 	import Editor from "$lib/components/Editor.svelte";
 	import FeaturedProps from "$lib/components/FeaturedProps.svelte";
 	import Discussion from "$lib/components/Discussion.svelte";
@@ -12,6 +12,7 @@
 	import SetTable from "$lib/components/SetTable.svelte";
 	import QueryControls from "$lib/components/QueryControls.svelte";
 	import ChannelManage from "$lib/components/ChannelManage.svelte";
+	import TypePanel from "$lib/components/TypePanel.svelte";
 	import EmojiPicker from "$lib/components/EmojiPicker.svelte";
 	import { objectIcon } from "$lib/icons";
 
@@ -61,6 +62,29 @@
 	const isCollection = $derived(object?.typeKey === "collection");
 	const isChat = $derived(object?.typeKey === "chat");
 	const isAgent = $derived(object?.typeKey === "agent");
+	const isType = $derived(object?.typeKey === "type");
+	const isTemplate = $derived(object?.typeKey === "template");
+
+	/** A template renders with its TARGET type's layout (so a task template shows the checkbox). */
+	const effectiveTypeKey = $derived.by(() => {
+		const o = object;
+		if (!o) return "";
+		if (o.typeKey !== "template") return o.typeKey;
+		return store.types.find((t) => t.id === fieldStr(o.fields, "target_type"))?.key ?? "";
+	});
+	const isTaskLayout = $derived(!!object && layoutOf(effectiveTypeKey) === "task");
+	const done = $derived(object?.fields["done"]?.boolValue === true);
+	const templateTargetName = $derived.by(() => {
+		const o = object;
+		if (!o || o.typeKey !== "template") return "";
+		return store.types.find((t) => t.id === fieldStr(o.fields, "target_type"))?.name ?? "";
+	});
+
+	async function toggleDone() {
+		if (!object) return;
+		await note.setField(object.id, "done", { boolValue: !done });
+		await refresh();
+	}
 
 	/** The agent's holistic chat for this channel (created by the harness). */
 	async function openAgentChat() {
@@ -138,7 +162,7 @@
 	async function openPicker() {
 		if (!object) return;
 		const res = await fetchQuery({ limit: 200 });
-		const HIDDEN: Record<string, true> = { program: true, typescript: true, json: true, proto: true, relation: true, collection: true, query: true, set: true };
+		const HIDDEN: Record<string, true> = { program: true, typescript: true, json: true, proto: true, relation: true, collection: true, query: true, set: true, type: true, template: true };
 		const currentId = object.id;
 		candidates = res.records
 			.filter((r) => r.id !== currentId && !memberIds.includes(r.id) && !HIDDEN[r.typeKey])
@@ -176,30 +200,37 @@
 {#if object}
 	<article>
 		<div class="title-row">
-			<div class="icon-wrap">
-				<button
-					class="obj-emoji"
-					class:placeholder={!object.fields["iconEmoji"]?.stringValue}
-					title="Set icon"
-					onclick={() => (showEmoji = !showEmoji)}
-				>
-					{#if object.fields["iconImage"]?.stringValue}
-						<img class="obj-img" src={object.fields["iconImage"].stringValue} alt="icon" />
-					{:else}
-						{objectIcon(object.fields["iconEmoji"]?.stringValue, object.typeKey)}
-					{/if}
+			{#if isTaskLayout}
+				<!-- Anytype iconObject: task layout renders a Done checkbox, no icon. -->
+				<button class="done-check" class:done onclick={() => void toggleDone()} title={done ? "Done" : "Mark done"}>
+					{done ? "✓" : ""}
 				</button>
-				{#if showEmoji}
-					<EmojiPicker
-						withImage={true}
-						onpick={(e) => {
-							showEmoji = false;
-							void setEmoji(e);
-						}}
-						onclose={() => (showEmoji = false)}
-					/>
-				{/if}
-			</div>
+			{:else}
+				<div class="icon-wrap">
+					<button
+						class="obj-emoji"
+						class:placeholder={!object.fields["iconEmoji"]?.stringValue}
+						title="Set icon"
+						onclick={() => (showEmoji = !showEmoji)}
+					>
+						{#if object.fields["iconImage"]?.stringValue}
+							<img class="obj-img" src={object.fields["iconImage"].stringValue} alt="icon" />
+						{:else}
+							{objectIcon(object.fields["iconEmoji"]?.stringValue, object.typeKey)}
+						{/if}
+					</button>
+					{#if showEmoji}
+						<EmojiPicker
+							withImage={true}
+							onpick={(e) => {
+								showEmoji = false;
+								void setEmoji(e);
+							}}
+							onclose={() => (showEmoji = false)}
+						/>
+					{/if}
+				</div>
+			{/if}
 			<input
 				class="title"
 				placeholder="Untitled"
@@ -210,7 +241,10 @@
 				}}
 			/>
 		</div>
-		{#if !isChannel && !isChat}
+		{#if isTemplate}
+			<p class="tpl-note">Template{templateTargetName ? ` of ${templateTargetName}` : ""} — new objects copy these blocks.</p>
+		{/if}
+		{#if !isChannel && !isChat && !isType}
 			{#if object.typeKey === "agent"}
 				<AgentBar {object} />
 				<button class="open-chat" onclick={() => void openAgentChat()}>💬 Open chat →</button>
@@ -222,6 +256,8 @@
 			<ChannelManage {object} {channelInfo} relations={store.relations} onchanged={refresh} />
 		{:else if isChat}
 			<Discussion {object} full onchanged={refresh} />
+		{:else if isType}
+			<TypePanel {object} onchanged={refresh} />
 		{:else if isQuery || isCollection}
 			{#if isCollection}
 				<div class="collection-bar">
@@ -257,7 +293,7 @@
 			<Editor bind:this={editor} {object} onchanged={refresh} />
 		{/if}
 
-		{#if !isChannel && !isChat && !isAgent}
+		{#if !isChannel && !isChat && !isAgent && !isType && !isTemplate}
 			<Discussion {object} onchanged={refresh} />
 		{/if}
 
@@ -266,6 +302,31 @@
 	<p class="muted">Loading…</p>
 {/if}
 <style>
+	.done-check {
+		width: 28px;
+		height: 28px;
+		border: 2px solid var(--border);
+		border-radius: 6px;
+		background: none;
+		color: var(--bg);
+		font-size: 16px;
+		line-height: 1;
+		cursor: pointer;
+		flex: none;
+		align-self: center;
+	}
+	.done-check:hover {
+		border-color: var(--accent);
+	}
+	.done-check.done {
+		background: var(--accent);
+		border-color: var(--accent);
+	}
+	.tpl-note {
+		color: var(--muted);
+		font-size: 12px;
+		margin: 0 0 8px;
+	}
 	.open-chat {
 		align-self: flex-start;
 		background: none;

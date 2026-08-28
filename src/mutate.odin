@@ -806,6 +806,66 @@ bootstrap_relations :: proc() {
 	if created > 0 do fmt.printfln("[glon-odin] bootstrapped %d bundled relation(s)", created)
 }
 
+// ── Bundled types ────────────────────────────────────────────────────
+//
+// Type objects (Anytype's ObjectType analog): `key` is the typeKey objects
+// carry, `layout` drives rendering ("page" | "task" — task swaps the icon
+// for a checkbox bound to the bundled `done` relation; that pairing is
+// metadata, nothing enforces it), and `default_template_id` (set from the
+// UI) names the template new objects copy their blocks from.
+
+Bundled_Type :: struct {
+	key:    string,
+	name:   string,
+	emoji:  string,
+	layout: string,
+}
+
+BUNDLED_TYPES :: []Bundled_Type{
+	{"note", "Note", "📝", "page"},
+	{"task", "Task", "", "task"},
+	{"person", "Person", "👤", "page"},
+	{"project", "Project", "🗂️", "page"},
+	{"bookmark", "Bookmark", "🔖", "page"},
+	{"skill", "Skill", "🛠️", "page"},
+}
+
+/** Idempotent: creates any bundled type whose key is missing. */
+bootstrap_types :: proc() {
+	have := make(map[string]bool)
+	defer delete(have)
+	Ctx :: struct {
+		have: ^map[string]bool,
+	}
+	ctx := Ctx{&have}
+	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+		c := cast(^struct {
+			have: ^map[string]bool,
+		})user
+		for _, s in states {
+			if s.type_key != "type" || s.deleted do continue
+			if v, ok := fields_get(s.fields, "key"); ok && v.kind == .String do c.have^[v.str] = true
+		}
+	}, &ctx)
+
+	created := 0
+	for t in BUNDLED_TYPES {
+		if have[t.key] do continue
+		// Deterministic id — multi-device bootstraps converge (see relations).
+		id := fmt.tprintf("bundled-type-%s", t.key)
+		ops := []Operation{
+			{kind = .Object_Create, type_key = "type"},
+			{kind = .Field_Set, key = "key", value = string_value(t.key)},
+			{kind = .Field_Set, key = "name", value = string_value(t.name)},
+			{kind = .Field_Set, key = "iconEmoji", value = string_value(t.emoji)},
+			{kind = .Field_Set, key = "layout", value = string_value(t.layout)},
+			{kind = .Field_Set, key = "bundled", value = bool_value(true)},
+		}
+		if commit_ops(id, ops) do created += 1
+	}
+	if created > 0 do fmt.printfln("[glon-odin] bootstrapped %d bundled type(s)", created)
+}
+
 // -- Table helpers ------------------------------------------------
 
 Table_Shape :: struct {
