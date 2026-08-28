@@ -198,37 +198,40 @@
 
 {#if object}
 	<article>
-		<div class="title-row">
+		{#if !isTaskLayout}
+			<!-- Anytype: the object icon sits ABOVE the title, aligned with the
+			     content edge - not inline to its left. -->
+			<div class="icon-wrap">
+				<button
+					class="obj-emoji"
+					class:placeholder={!object.fields["iconEmoji"]?.stringValue}
+					title="Set icon"
+					onclick={() => (showEmoji = !showEmoji)}
+				>
+					{#if object.fields["iconImage"]?.stringValue}
+						<img class="obj-img" src={object.fields["iconImage"].stringValue} alt="icon" />
+					{:else}
+						{objectIcon(object.fields["iconEmoji"]?.stringValue, object.typeKey)}
+					{/if}
+				</button>
+				{#if showEmoji}
+					<EmojiPicker
+						withImage={true}
+						onpick={(e) => {
+							showEmoji = false;
+							void setEmoji(e);
+						}}
+						onclose={() => (showEmoji = false)}
+					/>
+				{/if}
+			</div>
+		{/if}
+		<div class="title-row" class:with-check={isTaskLayout}>
 			{#if isTaskLayout}
-				<!-- Anytype iconObject: task layout renders a Done checkbox, no icon. -->
+				<!-- Anytype task layout: the Done checkbox stays inline with the title. -->
 				<button class="done-check" class:done onclick={() => void toggleDone()} title={done ? "Done" : "Mark done"}>
 					{done ? "✓" : ""}
 				</button>
-			{:else}
-				<div class="icon-wrap">
-					<button
-						class="obj-emoji"
-						class:placeholder={!object.fields["iconEmoji"]?.stringValue}
-						title="Set icon"
-						onclick={() => (showEmoji = !showEmoji)}
-					>
-						{#if object.fields["iconImage"]?.stringValue}
-							<img class="obj-img" src={object.fields["iconImage"].stringValue} alt="icon" />
-						{:else}
-							{objectIcon(object.fields["iconEmoji"]?.stringValue, object.typeKey)}
-						{/if}
-					</button>
-					{#if showEmoji}
-						<EmojiPicker
-							withImage={true}
-							onpick={(e) => {
-								showEmoji = false;
-								void setEmoji(e);
-							}}
-							onclose={() => (showEmoji = false)}
-						/>
-					{/if}
-				</div>
 			{/if}
 			<input
 				class="title"
@@ -338,13 +341,11 @@
 		border-radius: 8px;
 		object-fit: cover;
 	}
-	/* The 48px rail every editor block shares: the icon lives IN the rail
-	   so the title text starts exactly where block text starts. */
+	/* Anytype: the icon sits ABOVE the title at the content edge (48px). */
 	.icon-wrap {
 		position: relative;
-		flex: 0 0 48px;
-		display: flex;
-		justify-content: flex-end;
+		margin: 12px 0 2px 44px;
+		width: fit-content;
 	}
 	.obj-emoji {
 		width: 40px;
@@ -370,8 +371,12 @@
 		display: flex;
 		align-items: center;
 		gap: 0;
+		padding-left: 48px;
 	}
-	/* Task checkbox replaces the icon in the rail. */
+	/* Task layout: the checkbox occupies the rail, inline with the title. */
+	.title-row.with-check {
+		padding-left: 0;
+	}
 	.title-row > .done-check {
 		margin-left: 14px;
 		margin-right: 6px;
