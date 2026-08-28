@@ -3,7 +3,7 @@
 	import { page } from "$app/state";
 	import { goto } from "$app/navigation";
 	import type { ObjectJSON } from "$lib/types";
-	import { fieldStr } from "$lib/types";
+	import { fieldStr, SYSTEM_TYPE_KEYS } from "$lib/types";
 	import { fetchObject, fetchQuery, note } from "$lib/api";
 	import { store, refreshAll, onObjectEvent, layoutOf } from "$lib/data.svelte";
 	import Editor from "$lib/components/Editor.svelte";
@@ -128,6 +128,13 @@
 				continue; // incomplete rule — don't filter on it yet
 			}
 			out.push({ key, condition, value });
+		}
+		// Unsourced query: Anytype-style system exclusion - the substrate's
+		// own objects (source files, programs, agent internals) never show
+		// unless a Source explicitly targets them.
+		const sources = object?.fields["setOf"]?.valuesValue?.items ?? [];
+		if (sources.length === 0) {
+			out.push({ key: "typeKey", condition: "notIn", value: [...SYSTEM_TYPE_KEYS] });
 		}
 		return out;
 	});

@@ -78,6 +78,30 @@ export interface RelationDefJSON {
 	options: Array<{ id: string; text: string; color: string; orderId: string }>;
 }
 
+/**
+ * The substrate's own object kinds - source files, programs, agent
+ * internals, infrastructure. Anytype never surfaces its system objects in
+ * sets; unsourced queries and pickers exclude these (a query can still
+ * target one explicitly via Source).
+ */
+export const SYSTEM_TYPE_KEYS = [
+	"typescript",
+	"program",
+	"json",
+	"proto",
+	"relation",
+	"type",
+	"template",
+	"agent",
+	"channel",
+	"chat",
+	"peer",
+	"pinned_fact",
+	"milestone",
+	"set",
+	"",
+] as const;
+
 /** glon.Position values. */
 export const Pos = {
 	NONE: 0,
