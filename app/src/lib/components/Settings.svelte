@@ -139,7 +139,7 @@
 <div class="overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) onclose(); }}>
 	<div class="modal" role="dialog" aria-label="Settings">
 		<header>
-			<h2>Settings</h2>
+			<h2><span class="cog">⚙️</span> Settings</h2>
 			<button class="x" onclick={onclose}>×</button>
 		</header>
 
@@ -152,14 +152,19 @@
 			{#if !revealed}
 				<button class="action" onclick={() => void reveal()}>Reveal private key</button>
 			{:else}
+				<!-- Both rows are the PRIVATE key - nsec is the bech32 form,
+				     hex the raw form. Keep either secret. -->
+				<div class="keylabel">Private key <span class="enc">nsec · bech32</span> <span class="secret">secret</span></div>
 				<div class="keyrow">
 					<code>{nsec}</code>
 					<button onclick={() => void copy(nsec, "nsec")}>{copied === "nsec" ? "Copied" : "Copy"}</button>
 				</div>
+				<div class="keylabel">Private key <span class="enc">raw hex</span> <span class="secret">secret</span></div>
 				<div class="keyrow">
 					<code>{hexKey}</code>
 					<button onclick={() => void copy(hexKey, "hex")}>{copied === "hex" ? "Copied" : "Copy"}</button>
 				</div>
+				<p class="hint">These are the same key in two encodings — there is no public key here. Use nsec to sign in elsewhere.</p>
 				<button class="action subtle" onclick={() => { revealed = false; nsec = ""; hexKey = ""; }}>Hide</button>
 			{/if}
 			{#if !importing}
@@ -361,7 +366,7 @@
 		z-index: 200;
 	}
 	.modal {
-		width: 560px;
+		width: 580px;
 		max-width: calc(100vw - 48px);
 		max-height: 80vh;
 		overflow-y: auto;
@@ -381,12 +386,47 @@
 		margin: 0;
 		font-size: 17px;
 	}
+	section {
+		background: var(--hl-light, rgba(255, 255, 255, 0.04));
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		padding: 14px 16px 16px;
+		margin-top: 14px;
+	}
+	.cog {
+		font-size: 15px;
+		margin-right: 2px;
+	}
 	h3 {
 		font-size: 11px;
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
 		color: var(--muted);
-		margin: 18px 0 6px;
+		margin: 0 0 6px;
+	}
+	.keylabel {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 12px;
+		font-weight: 500;
+		margin: 10px 0 4px;
+	}
+	.keylabel .enc {
+		color: var(--muted);
+		font-weight: 400;
+		font-family: ui-monospace, monospace;
+		font-size: 11px;
+	}
+	.keylabel .secret {
+		color: #e8524a;
+		border: 1px solid rgba(232, 82, 74, 0.45);
+		border-radius: 999px;
+		font-size: 10px;
+		line-height: 16px;
+		padding: 0 8px;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
 	}
 	.hint {
 		color: var(--muted);
