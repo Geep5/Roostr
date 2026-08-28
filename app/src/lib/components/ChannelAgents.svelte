@@ -8,6 +8,7 @@
 	 * harness roster.
 	 */
 	import { onMount } from "svelte";
+	import EmojiPicker from "./EmojiPicker.svelte";
 	import { goto } from "$app/navigation";
 	import { fetchQuery, note } from "$lib/api";
 	import { store } from "$lib/data.svelte";
@@ -20,6 +21,7 @@
 	interface AgentRow {
 		id: string;
 		name: string;
+		icon: string;
 		model: string;
 		seenAt: number;
 		host: string;
@@ -31,6 +33,13 @@
 	let roster = $state<string[] | null>(null); // null = no local daemon
 	let now = $state(Date.now());
 	let assigning = $state(""); // agent id whose responsibility editor is open
+	let avatarPick = $state(""); // agent id whose avatar picker is open
+
+	async function setAvatar(id: string, emoji: string) {
+		avatarPick = "";
+		await note.setField(id, "iconEmoji", { stringValue: emoji });
+		await load();
+	}
 
 	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
 
@@ -45,6 +54,7 @@
 			.map((r) => ({
 				id: r.id,
 				name: r.fields["name"]?.stringValue || "Agent",
+				icon: r.fields["iconEmoji"]?.stringValue ?? "",
 				model: r.fields["model"]?.stringValue ?? "",
 				seenAt: r.fields["harness_seen_at"]?.intValue ?? 0,
 				host: r.fields["harness_host"]?.stringValue ?? "",
@@ -184,6 +194,10 @@
 	<div class="agent-wrap">
 		<div class="agent">
 			<span class="dot" class:online></span>
+			<!-- The agent's avatar: shows in chat next to its messages. -->
+			<button class="avatar-btn" title="Set avatar" onclick={() => (avatarPick = avatarPick === a.id ? "" : a.id)}>
+				{#if a.icon}{a.icon}{:else}🤖{/if}
+			</button>
 			<span class="name">{a.name}</span>
 			<span class="meta">
 				{#if online}{a.host || "online"} · {ago(a.seenAt)}{:else if a.seenAt > 0}last seen {ago(a.seenAt)}{:else}never ran{/if}
@@ -201,6 +215,11 @@
 				{confirmRemove === a.id ? "Confirm remove" : "Remove"}
 			</button>
 		</div>
+		{#if avatarPick === a.id}
+			<div class="avatar-pop">
+				<EmojiPicker onpick={(e) => void setAvatar(a.id, e)} onclose={() => (avatarPick = "")} />
+			</div>
+		{/if}
 		{#if assigning === a.id}
 			{@const claimed = claimants(a.id)}
 			{@const restHolder = [...claimed.entries()].find(([k]) => k === "*")?.[1]}
@@ -343,5 +362,24 @@
 	}
 	.new-agent {
 		margin-top: 2px;
+	}
+	.avatar-btn {
+		background: var(--hl-light, rgba(255, 255, 255, 0.06));
+		border: 1px solid transparent;
+		border-radius: 50%;
+		width: 28px;
+		height: 28px;
+		font-size: 16px;
+		line-height: 1;
+		cursor: pointer;
+		padding: 0;
+		flex: none;
+	}
+	.avatar-btn:hover {
+		border-color: var(--accent);
+	}
+	.avatar-pop {
+		position: relative;
+		margin: 4px 0 8px 24px;
 	}
 </style>

@@ -96,6 +96,16 @@
 		return h;
 	}
 
+	/**
+	 * Emoji avatar for an author, when it has one: agents post as their
+	 * object id and carry iconEmoji (set from the channel's Agents
+	 * settings); the chat object itself covers agent-brain chats.
+	 */
+	function avatarEmoji(author: string): string {
+		if (author === object.id) return object.fields["iconEmoji"]?.stringValue ?? "";
+		return store.summaries.find((s) => s.id === author)?.icon ?? "";
+	}
+
 	function when(ts: number): string {
 		const d = new Date(ts);
 		const today = new Date().toDateString() === d.toDateString();
@@ -140,7 +150,11 @@
 		<div class="messages">
 			{#each messages as m (m.id)}
 				<div class="msg" id="msg-{m.id}">
-					<span class="avatar" style="background: hsl({hue(m.author)}, 45%, 35%)">{m.author.slice(0, 2)}</span>
+					{#if avatarEmoji(m.author)}
+						<span class="avatar emoji">{avatarEmoji(m.author)}</span>
+					{:else}
+						<span class="avatar" style="background: hsl({hue(m.author)}, 45%, 35%)">{m.author.slice(0, 2)}</span>
+					{/if}
 					<div class="body">
 						{#if m.replyTo && messageById.has(m.replyTo)}
 							{@const target = messageById.get(m.replyTo)!}
@@ -494,5 +508,9 @@
 	.empty {
 		color: var(--muted);
 		font-size: 13px;
+	}
+	.avatar.emoji {
+		background: var(--hl-light, rgba(255, 255, 255, 0.07));
+		font-size: 17px;
 	}
 </style>
