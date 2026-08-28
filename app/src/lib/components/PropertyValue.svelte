@@ -13,6 +13,7 @@
 	import { store } from "$lib/data.svelte";
 	import { objectIcon } from "$lib/icons";
 	import CalendarPicker from "./CalendarPicker.svelte";
+	import OptionPicker from "./OptionPicker.svelte";
 
 	let {
 		rel,
@@ -41,6 +42,9 @@
 	// ── Date ──────────────────────────────────────────────────────
 	let dateOpen = $state(false);
 	const dateLabel = $derived(num ? new Date(num).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "");
+
+	// Status values: list with maxCount 1 (legacy objects used stringValue).
+	const statusSelected = $derived(items.length ? items : text ? [text] : []);
 
 	// ── Tags ──────────────────────────────────────────────────────
 	async function toggleTag(tag: string) {
@@ -97,21 +101,15 @@
 		{/if}
 	</span>
 {:else if rel.format === "status"}
-	<select value={text} onchange={(e) => void onsave(sv(e.currentTarget.value))}>
-		<option value=""></option>
-		{#each rel.options as o (o.id)}
-			<option value={o.text}>{o.text}</option>
-		{/each}
-	</select>
+	<!-- Anytype option list: filter/create/edit options, pick one. -->
+	<OptionPicker
+		{rel}
+		selected={statusSelected}
+		multi={false}
+		onpick={(t) => void onsave(list(statusSelected.includes(t) ? [] : [t]))}
+	/>
 {:else if rel.format === "tag"}
-	<div class="pills">
-		{#each items as t (t)}
-			<button class="pill on" onclick={() => void toggleTag(t)}>{t} ×</button>
-		{/each}
-		{#each rel.options.filter((o) => !items.includes(o.text)) as o (o.id)}
-			<button class="pill" style="border-color:{o.color}" onclick={() => void toggleTag(o.text)}>{o.text}</button>
-		{/each}
-	</div>
+	<OptionPicker {rel} selected={items} multi={true} onpick={(t) => void toggleTag(t)} />
 {:else if rel.format === "url" || rel.format === "email" || rel.format === "phone"}
 	<span class="link-row">
 		<input
@@ -164,7 +162,6 @@
 	input[type="url"],
 	input[type="email"],
 	input[type="tel"],
-	select,
 	textarea {
 		background: var(--bg, #101216);
 		border: 1px solid var(--border);
@@ -198,7 +195,6 @@
 	.date-btn:hover {
 		border-color: var(--accent);
 	}
-	.pills,
 	.objects {
 		display: flex;
 		flex-wrap: wrap;
@@ -213,10 +209,6 @@
 		padding: 1px 8px;
 		font-size: 11px;
 		cursor: pointer;
-	}
-	.pill.on {
-		background: var(--hover);
-		border-color: var(--accent);
 	}
 	.link-row {
 		display: flex;
