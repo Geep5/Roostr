@@ -8,7 +8,7 @@
 	 * (hide column); click a header to sort.
 	 */
 	import PropertyFlow from "./PropertyFlow.svelte";
-	import OptionPicker from "./OptionPicker.svelte";
+	import PropertyValue from "./PropertyValue.svelte";
 	import { colorHex } from "$lib/options";
 	import { fetchQuery, note, type QueryResultRow } from "$lib/api";
 	import { store } from "$lib/data.svelte";
@@ -73,14 +73,16 @@
 		location.href = `/object/${id}`;
 	}
 
-	// ── Inline cell editing (Anytype dataview.tsx onCellClick: only the
-	// name cell opens the object; select/tag cells open the option menu
-	// anchored at the cell) ──────────────────────────────────────────
+	// ── Inline cell editing (Anytype dataview.tsx onCellClick + cell/*:
+	// only the name cell opens the object; every relation cell edits in
+	// place - checkbox toggles instantly, everything else anchors the
+	// per-format editor at the cell) ─────────────────────────────────
 	let cellEdit = $state<{ recordId: string; key: string; x: number; y: number } | null>(null);
 
-	function isOptionFormat(key: string): boolean {
-		const f = formatOf(key);
-		return f === "tag" || f === "status";
+	/** Any real relation column edits inline; specials stay read-only. */
+	function isEditable(key: string): boolean {
+		const rel = relations.find((r) => r.key === key);
+		return !!rel && !rel.readOnly;
 	}
 
 	function cellValues(recordId: string, key: string): string[] {
@@ -90,18 +92,28 @@
 		return v?.stringValue ? [v.stringValue] : [];
 	}
 
-	async function cellPick(text: string) {
+	function onCellClick(e: MouseEvent, recordId: string, key: string) {
+		e.stopPropagation();
+		if (formatOf(key) === "checkbox") {
+			// Anytype checkbox cells toggle on click, no menu.
+			const cur = rows.find((x) => x.id === recordId)?.fields[key]?.boolValue === true;
+			void (async () => {
+				await note.setField(recordId, key, { boolValue: !cur });
+				await reload();
+			})();
+			return;
+		}
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		cellEdit = cellEdit?.recordId === recordId && cellEdit.key === key ? null : { recordId, key, x: rect.left, y: rect.bottom + 4 };
+	}
+
+	async function cellSave(v: ValueJSON) {
 		if (!cellEdit) return;
 		const { recordId, key } = cellEdit;
-		const multi = formatOf(key) === "tag";
-		const cur = cellValues(recordId, key);
-		let next: string[];
-		if (multi) next = cur.includes(text) ? cur.filter((t) => t !== text) : [...cur, text];
-		else {
-			next = cur.includes(text) ? [] : [text];
-			cellEdit = null;
-		}
-		await note.setField(recordId, key, { valuesValue: { items: next.map((t) => ({ stringValue: t })) } });
+		const f = formatOf(key);
+		// Single-value editors close on save; tag/object stay open for more picks.
+		if (f !== "tag" && f !== "object") cellEdit = null;
+		await note.setField(recordId, key, v);
 		await reload();
 	}
 
@@ -329,20 +341,20 @@
 				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)}>
 					<td class="name"><span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || r.id.slice(0, 8)}</td>
 					{#each columns as c (c)}
-						{#if isOptionFormat(c)}
+						{#if isEditable(c)}
 							{@const rel = relations.find((x) => x.key === c)}
-							<td
-								class="editable"
-								onclick={(e) => {
-									e.stopPropagation();
-									const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-									cellEdit = cellEdit?.recordId === r.id && cellEdit.key === c ? null : { recordId: r.id, key: c, x: rect.left, y: rect.bottom + 4 };
-								}}
-							>
-								{#each cellValues(r.id, c) as t (t)}
-									{@const opt = rel?.options.find((o) => o.text === t)}
-									<span class="cell-tag" style={opt?.color ? `border-color:${colorHex(opt.color)}; color:${colorHex(opt.color)}` : ""}>{t}</span>
-								{/each}
+							{@const fmt = formatOf(c)}
+							<td class="editable" onclick={(e) => onCellClick(e, r.id, c)}>
+								{#if fmt === "tag" || fmt === "status"}
+									{#each cellValues(r.id, c) as t (t)}
+										{@const opt = rel?.options.find((o) => o.text === t)}
+										<span class="cell-tag" style={opt?.color ? `border-color:${colorHex(opt.color)}; color:${colorHex(opt.color)}` : ""}>{t}</span>
+									{/each}
+								{:else if fmt === "checkbox"}
+									<span class="cell-check" class:on={r.fields[c]?.boolValue === true}>{r.fields[c]?.boolValue === true ? "☑" : "☐"}</span>
+								{:else}
+									{cell(r, c)}
+								{/if}
 							</td>
 						{:else}
 							<td class:muted={c === "type" || c === "createdAt" || c === "updatedAt"}>{cell(r, c)}</td>
@@ -355,9 +367,10 @@
 	</table>
 	{#if cellEdit}
 		{@const rel = relations.find((x) => x.key === cellEdit!.key)}
-		{#if rel}
-			<div class="cell-pop" style="left:{Math.min(cellEdit.x, window.innerWidth - 300)}px; top:{cellEdit.y}px" role="dialog">
-				<OptionPicker {rel} selected={cellValues(cellEdit.recordId, cellEdit.key)} multi={formatOf(cellEdit.key) === "tag"} onpick={(t) => void cellPick(t)} />
+		{@const row = rows.find((x) => x.id === cellEdit!.recordId)}
+		{#if rel && row}
+			<div class="cell-pop" style="left:{Math.min(cellEdit.x, window.innerWidth - 320)}px; top:{cellEdit.y}px" role="dialog">
+				<PropertyValue {rel} value={row.fields[rel.key]} onsave={(v) => void cellSave(v)} />
 			</div>
 		{/if}
 	{/if}
@@ -516,6 +529,13 @@
 	}
 	td.editable:hover {
 		background: var(--hl-light);
+	}
+	.cell-check {
+		font-size: 15px;
+		color: var(--muted);
+	}
+	.cell-check.on {
+		color: var(--accent);
 	}
 	.cell-tag {
 		display: inline-block;
