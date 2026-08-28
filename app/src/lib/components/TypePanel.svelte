@@ -112,7 +112,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 24px;
-		margin-top: 16px;
+		margin: 16px 0 0 48px;
 	}
 	.sec-name {
 		font-size: 11px;

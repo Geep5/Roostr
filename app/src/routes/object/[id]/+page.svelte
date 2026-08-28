@@ -257,45 +257,48 @@
 		{:else if isType}
 			<TypePanel {object} onchanged={refresh} />
 		{:else if isQuery || isCollection}
-			{#if isCollection}
-				<div class="collection-bar">
-					<button onclick={() => void openPicker()}>+ Add object</button>
-					{#if memberIds.length > 0}
-						<span class="muted">{memberIds.length} object(s)</span>
-					{/if}
-				</div>
-				{#if picking}
-					<div class="picker">
-						{#each candidates as c (c.id)}
-							<button
-								onclick={() => {
-									picking = false;
-									void setMembers([...memberIds, c.id]);
-								}}>{c.name} <span class="muted">{c.typeKey}</span></button
-							>
-						{/each}
-						{#if candidates.length === 0}<span class="muted">Nothing to add.</span>{/if}
-						<button class="close" onclick={() => (picking = false)}>Close</button>
+			<!-- Dataview aligns with the title/featured edge (48px rail). -->
+			<div class="dataview">
+				{#if isCollection}
+					<div class="collection-bar">
+						<button onclick={() => void openPicker()}>+ Add object</button>
+						{#if memberIds.length > 0}
+							<span class="muted">{memberIds.length} object(s)</span>
+						{/if}
 					</div>
+					{#if picking}
+						<div class="picker">
+							{#each candidates as c (c.id)}
+								<button
+									onclick={() => {
+										picking = false;
+										void setMembers([...memberIds, c.id]);
+									}}>{c.name} <span class="muted">{c.typeKey}</span></button
+								>
+							{/each}
+							{#if candidates.length === 0}<span class="muted">Nothing to add.</span>{/if}
+							<button class="close" onclick={() => (picking = false)}>Close</button>
+						</div>
+					{/if}
 				{/if}
-			{/if}
-			{#if isQuery}
-				<QueryControls {object} relations={store.relations} onchanged={refresh} />
-			{/if}
-			{#if tableBody}
-				{@const viewType = object.fields["viewType"]?.stringValue || "table"}
-				{#if viewType === "gallery"}
-					<GalleryView body={tableBody} {object} relations={store.relations} />
-				{:else if viewType === "kanban"}
-					<KanbanView body={tableBody} {object} relations={store.relations} groupKey={object.fields["viewGroupKey"]?.stringValue || ""} onchanged={refresh} />
-				{:else if viewType === "calendar"}
-					<CalendarView body={tableBody} {object} dateKey={object.fields["viewDateKey"]?.stringValue || "createdDate"} />
+				{#if isQuery}
+					<QueryControls {object} relations={store.relations} onchanged={refresh} />
+				{/if}
+				{#if tableBody}
+					{@const viewType = object.fields["viewType"]?.stringValue || "table"}
+					{#if viewType === "gallery"}
+						<GalleryView body={tableBody} {object} relations={store.relations} />
+					{:else if viewType === "kanban"}
+						<KanbanView body={tableBody} {object} relations={store.relations} groupKey={object.fields["viewGroupKey"]?.stringValue || ""} onchanged={refresh} />
+					{:else if viewType === "calendar"}
+						<CalendarView body={tableBody} {object} dateKey={object.fields["viewDateKey"]?.stringValue || "createdDate"} />
+					{:else}
+						<SetTable bind:this={table} body={tableBody} {object} relations={store.relations} defaultSorts={viewSorts} onchanged={refresh} />
+					{/if}
 				{:else}
-					<SetTable bind:this={table} body={tableBody} {object} relations={store.relations} defaultSorts={viewSorts} onchanged={refresh} />
+					<p class="muted">Empty collection — add objects.</p>
 				{/if}
-			{:else}
-				<p class="muted">Empty collection — add objects.</p>
-			{/if}
+			</div>
 		{:else}
 			<Editor bind:this={editor} {object} onchanged={refresh} />
 		{/if}
@@ -329,6 +332,9 @@
 	.done-check.done {
 		background: var(--accent);
 		border-color: var(--accent);
+	}
+	.dataview {
+		margin-left: 48px;
 	}
 	.tpl-note {
 		color: var(--muted);
