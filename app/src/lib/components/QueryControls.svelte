@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { goto } from "$app/navigation";
 	import TypeSuggest from "./TypeSuggest.svelte";
 	import LayoutIcon from "./LayoutIcon.svelte";
 	import { createRelation } from "$lib/relations";
@@ -251,6 +252,36 @@
 		if (rel) await setDateKey(rel.key);
 	}
 
+	// ── New record (Anytype's accent New button, dataview.tsx recordCreate) ──
+	// Creates an object of the set's source type with details prefilled
+	// from the view filters (getDetails: equal/in/allIn conditions seed
+	// values); calendar views seed the date property with today.
+	let creating = $state(false);
+	async function newRecord() {
+		if (creating) return;
+		creating = true;
+		try {
+			const typeKey = sources[0] || "note";
+			const fields: Record<string, ValueJSON> = {};
+			for (const f of filters) {
+				if (!["equal", "in", "allIn"].includes(f.condition) || f.value.length === 0) continue;
+				const rel = relations.find((r) => r.key === f.key);
+				if (!rel) continue;
+				fields[f.key] = rel.format === "tag" || rel.format === "status"
+					? { valuesValue: { items: f.value.map((v) => ({ stringValue: v })) } }
+					: { stringValue: f.value[0] };
+			}
+			if (viewType === "calendar" && dateKey) {
+				fields[dateKey] = { intValue: Date.now() };
+			}
+			const { id } = await note.create("", typeKey, fields);
+			await onchanged();
+			await goto(`/object/${id}`);
+		} finally {
+			creating = false;
+		}
+	}
+
 	// ── View settings menu (Anytype dataviewViewSettings) ───────────
 	// The controls row carries a single settings button; Layout (and the
 	// board/calendar config rows) live in its two-pane popover menu.
@@ -406,6 +437,7 @@
 			</div>
 		{/if}
 	</span>
+	<button class="new-btn" disabled={creating} onclick={() => void newRecord()}>New</button>
 </div>
 
 {#if open === "source"}
@@ -873,5 +905,23 @@
 	}
 	.search-input:focus {
 		border-color: var(--accent);
+	}
+	.new-btn {
+		align-self: center;
+		background: var(--accent);
+		color: #101216;
+		border: none;
+		border-radius: 8px;
+		height: 28px;
+		padding: 0 12px;
+		font-size: 13px;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.new-btn:hover {
+		filter: brightness(1.1);
+	}
+	.new-btn:disabled {
+		opacity: 0.5;
 	}
 </style>

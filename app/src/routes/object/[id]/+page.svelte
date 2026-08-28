@@ -173,6 +173,14 @@
 		picking = true;
 	}
 
+	/** Anytype collection New: create an object and link it as a member. */
+	async function newInCollection() {
+		if (!object) return;
+		const { id } = await note.create("", "note");
+		await setMembers([...memberIds, id]);
+		await goto(`/object/${id}`);
+	}
+
 	async function setMembers(ids: string[]) {
 		if (!object) return;
 		await note.setField(object.id, "collectionIds", {
@@ -265,6 +273,9 @@
 			<div class="dataview">
 				{#if isCollection}
 					<div class="collection-bar">
+						<!-- Anytype's New on a collection: create + auto-link
+						     (recordCreate with createdInContext + collection add). -->
+						<button class="new-btn" onclick={() => void newInCollection()}>New</button>
 						<button onclick={() => void openPicker()}>+ Add object</button>
 						{#if memberIds.length > 0}
 							<span class="muted">{memberIds.length} object(s)</span>
@@ -449,5 +460,19 @@
 	.muted {
 		color: var(--muted);
 		font-size: 12px;
+	}
+	.new-btn {
+		background: var(--accent);
+		color: #101216;
+		border: none;
+		border-radius: 8px;
+		height: 28px;
+		padding: 0 12px;
+		font-size: 13px;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.new-btn:hover {
+		filter: brightness(1.1);
 	}
 </style>
