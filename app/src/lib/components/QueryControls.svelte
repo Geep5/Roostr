@@ -26,6 +26,8 @@
 	export interface SortRule {
 		key: string;
 		type: "asc" | "desc";
+		/** Where empty values sort (Anytype menuDataviewSortShowEmpty). */
+		empty?: "start" | "end";
 	}
 
 	// ── Parse stored view config ──────────────────────────────────
@@ -54,7 +56,11 @@
 		for (const item of items) {
 			const e = item.mapValue?.entries;
 			if (!e) continue;
-			out.push({ key: e["key"]?.stringValue ?? "", type: e["type"]?.stringValue === "desc" ? "desc" : "asc" });
+			out.push({
+				key: e["key"]?.stringValue ?? "",
+				type: e["type"]?.stringValue === "desc" ? "desc" : "asc",
+				empty: e["empty"]?.stringValue === "start" ? "start" : "end",
+			});
 		}
 		return out;
 	}
@@ -90,7 +96,7 @@
 		await note.setField(object.id, "viewSorts", {
 			valuesValue: {
 				items: next.map((s) => ({
-					mapValue: { entries: { key: { stringValue: s.key }, type: { stringValue: s.type } } },
+					mapValue: { entries: { key: { stringValue: s.key }, type: { stringValue: s.type }, empty: { stringValue: s.empty ?? "end" } } },
 				})),
 			},
 		});
@@ -241,6 +247,23 @@
 
 	// ── UI state ──────────────────────────────────────────────────
 	let open = $state<"" | "source" | "filter" | "sort">("");
+	/** Index of the sort row whose "Show empty" menu is open. */
+	let sortMore = $state(-1);
+	/** Drag-reorder state for sort rules (Anytype useSortable rows). */
+	let sortDragIdx = $state(-1);
+	let sortOverIdx = $state(-1);
+
+	async function sortReorder() {
+		if (sortDragIdx < 0 || sortOverIdx < 0 || sortDragIdx === sortOverIdx) {
+			sortDragIdx = sortOverIdx = -1;
+			return;
+		}
+		const next = [...sorts];
+		const [moved] = next.splice(sortDragIdx, 1);
+		next.splice(sortOverIdx, 0, moved);
+		sortDragIdx = sortOverIdx = -1;
+		await saveSorts(next);
+	}
 	$effect(() => {
 		if (sources.length === 0) open = "source";
 	});
@@ -406,22 +429,88 @@
 {/if}
 
 {#if open === "sort"}
-	<div class="panel">
+	<!-- Anytype dataviewSort menu: draggable rules; relation chip + a
+	     sort-arrow chip toggling Asc/Desc (arrow rotates 180deg for Desc);
+	     hover buttons: more (Show empty Top/Bottom) and delete; then the
+	     "Add sort" / "Delete sort" rows below a divider. -->
+	<div class="panel sort-panel">
+		{#if sorts.length === 0}
+			<span class="muted-row">No sorts applied</span>
+		{/if}
 		{#each sorts as s, i (i)}
-			<div class="rule">
-				<select value={s.key} onchange={(e) => void saveSorts(sorts.map((x, j) => (j === i ? { ...x, key: e.currentTarget.value } : x)))}>
-					{#each filterKeys as k (k)}
-						<option value={k}>{labelOf(k)}</option>
-					{/each}
-				</select>
-				<select value={s.type} onchange={(e) => void saveSorts(sorts.map((x, j) => (j === i ? { ...x, type: e.currentTarget.value === "desc" ? "desc" : "asc" } : x)))}>
-					<option value="asc">ascending</option>
-					<option value="desc">descending</option>
-				</select>
-				<button class="x" onclick={() => void saveSorts(sorts.filter((_, j) => j !== i))}>×</button>
+			<div
+				class="sort-item"
+				class:drag-over={sortOverIdx === i && sortDragIdx !== i}
+				class:dragging={sortDragIdx === i}
+				role="presentation"
+				draggable="true"
+				ondragstart={() => (sortDragIdx = i)}
+				ondragover={(e) => {
+					e.preventDefault();
+					sortOverIdx = i;
+				}}
+				ondrop={(e) => {
+					e.preventDefault();
+					void sortReorder();
+				}}
+				ondragend={() => (sortDragIdx = sortOverIdx = -1)}
+			>
+				<span class="dnd">⋮⋮</span>
+				<span class="chip relation">
+					<select value={s.key} onchange={(e) => void saveSorts(sorts.map((x, j) => (j === i ? { ...x, key: e.currentTarget.value } : x)))}>
+						{#each filterKeys as k (k)}
+							<option value={k}>{labelOf(k)}</option>
+						{/each}
+					</select>
+				</span>
+				<button
+					class="chip type"
+					title={s.type === "asc" ? "Ascending" : "Descending"}
+					onclick={() => void saveSorts(sorts.map((x, j) => (j === i ? { ...x, type: x.type === "asc" ? "desc" : "asc" } : x)))}
+				>
+					<svg class="sort-arrow" class:desc={s.type === "desc"} viewBox="0 0 20 20" width="16" height="16" fill="none">
+						<path d="M10 4v12M10 4l-4.5 4.5M10 4l4.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+					</svg>
+					{s.type === "asc" ? "Asc" : "Desc"}
+				</button>
+				<span class="row-btns">
+					<span class="more-anchor">
+						<button class="ibtn" title="Show empty" onclick={() => (sortMore = sortMore === i ? -1 : i)}>⋯</button>
+						{#if sortMore === i}
+							<div class="more-menu" role="menu">
+								<span class="more-title">Show empty</span>
+								<button
+									class="vrow"
+									onclick={() => {
+										sortMore = -1;
+										void saveSorts(sorts.map((x, j) => (j === i ? { ...x, empty: "start" } : x)));
+									}}
+								>
+									<span>At the top</span>
+									{#if s.empty === "start"}<span class="vcheck">✓</span>{/if}
+								</button>
+								<button
+									class="vrow"
+									onclick={() => {
+										sortMore = -1;
+										void saveSorts(sorts.map((x, j) => (j === i ? { ...x, empty: "end" } : x)));
+									}}
+								>
+									<span>At the bottom</span>
+									{#if s.empty !== "start"}<span class="vcheck">✓</span>{/if}
+								</button>
+							</div>
+						{/if}
+					</span>
+					<button class="ibtn" title="Remove sort" onclick={() => void saveSorts(sorts.filter((_, j) => j !== i))}>✕</button>
+				</span>
 			</div>
 		{/each}
-		<button class="add" onclick={() => void saveSorts([...sorts, { key: "name", type: "asc" }])}>+ Add sort</button>
+		<div class="sort-div"></div>
+		<button class="add" onclick={() => void saveSorts([...sorts, { key: "name", type: "asc", empty: "end" }])}>＋ Add sort</button>
+		{#if sorts.length}
+			<button class="add clear" onclick={() => void saveSorts([])}>Delete sort</button>
+		{/if}
 	</div>
 {/if}
 
@@ -591,5 +680,126 @@
 	}
 	.vback:hover {
 		color: var(--fg);
+	}
+	.sort-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.muted-row {
+		color: var(--muted);
+		font-size: 12px;
+		padding: 2px 4px;
+	}
+	.sort-item {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 3px 4px;
+		border-radius: 8px;
+	}
+	.sort-item.dragging {
+		opacity: 0.4;
+	}
+	.sort-item.drag-over {
+		box-shadow: 0 -2px 0 var(--accent);
+	}
+	.sort-item .dnd {
+		color: var(--muted);
+		font-size: 10px;
+		letter-spacing: -2px;
+		cursor: grab;
+		opacity: 0;
+		transition: opacity 0.1s;
+	}
+	.sort-item:hover .dnd {
+		opacity: 0.7;
+	}
+	.sort-item .chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: none;
+		color: var(--fg);
+		font-size: 13px;
+		padding: 3px 8px;
+	}
+	.sort-item .chip.type {
+		cursor: pointer;
+	}
+	.sort-item .chip.type:hover {
+		background: var(--hl-med);
+	}
+	.sort-item .chip select {
+		background: none;
+		border: none;
+		color: var(--fg);
+		font-size: 13px;
+		outline: none;
+	}
+	.sort-arrow {
+		transition: transform 0.15s;
+	}
+	.sort-arrow.desc {
+		transform: rotate(180deg);
+	}
+	.row-btns {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		margin-left: auto;
+		opacity: 0;
+		transition: opacity 0.1s;
+	}
+	.sort-item:hover .row-btns {
+		opacity: 1;
+	}
+	.ibtn {
+		background: none;
+		border: none;
+		color: var(--muted);
+		cursor: pointer;
+		border-radius: 6px;
+		padding: 2px 7px;
+		font-size: 13px;
+	}
+	.ibtn:hover {
+		background: var(--hl-med);
+		color: var(--fg);
+	}
+	.more-anchor {
+		position: relative;
+	}
+	.more-menu {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 4px);
+		z-index: 120;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 160px;
+		background: var(--panel, #1a1d23);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 6px;
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+	}
+	.more-title {
+		color: var(--muted);
+		font-size: 11px;
+		text-transform: uppercase;
+		letter-spacing: 0.4px;
+		padding: 2px 8px;
+	}
+	.sort-div {
+		height: 1px;
+		background: var(--border);
+		margin: 4px 0;
+	}
+	.add.clear {
+		color: var(--muted);
 	}
 </style>

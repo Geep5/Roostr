@@ -172,7 +172,11 @@
 	}
 
 	async function load() {
-		const sorts = override ? [{ key: override.key, type: override.dir }] : defaultSorts.length > 0 ? defaultSorts : [{ key: "updatedAt", type: "desc" }];
+		const sorts = (override ? [{ key: override.key, type: override.dir }] : defaultSorts.length > 0 ? defaultSorts : [{ key: "updatedAt", type: "desc" }]).map((s) => ({
+			key: s.key,
+			type: s.type,
+			emptyPlacement: ("empty" in s ? s.empty : undefined) ?? "end",
+		}));
 		const res = await fetchQuery({ ...body, sorts });
 		rows = res.records;
 	}
