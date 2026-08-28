@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { settings } from "$lib/api";
+	import { exportAll } from "$lib/export";
 
 	let { onclose }: { onclose: () => void } = $props();
 
@@ -141,6 +142,26 @@
 	}
 
 	const SUGGESTED = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.nostr.band"];
+
+	// ── Export (Anytype popup/export.tsx: Markdown | Any-Block) ─────
+	let exportFormat = $state<"markdown" | "json">("markdown");
+	let exporting = $state(false);
+	let exportNote = $state("");
+
+	async function runExport() {
+		exporting = true;
+		exportNote = "";
+		try {
+			const n = await exportAll(exportFormat, (done, total) => {
+				exportNote = `Preparing ${done}/${total}…`;
+			});
+			exportNote = `Exported ${n} objects.`;
+		} catch (err) {
+			exportNote = err instanceof Error ? err.message : String(err);
+		} finally {
+			exporting = false;
+		}
+	}
 </script>
 
 <div class="overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) onclose(); }}>
@@ -224,6 +245,24 @@
 					{/each}
 				</div>
 			{/if}
+		</section>
+
+		<section>
+			<h3>Export</h3>
+			<p class="hint">
+				Download everything as a zip — one file per object, grouped by type. Markdown for reading
+				and portability; JSON for a complete structural backup (fields, blocks, provenance).
+			</p>
+			<div class="export-row">
+				<select bind:value={exportFormat}>
+					<option value="markdown">Markdown</option>
+					<option value="json">JSON</option>
+				</select>
+				<button class="action" disabled={exporting} onclick={() => void runExport()}>
+					{exporting ? "Exporting…" : "Export everything"}
+				</button>
+				{#if exportNote}<span class="hint export-note">{exportNote}</span>{/if}
+			</div>
 		</section>
 
 		<section>
@@ -424,6 +463,22 @@
 		font-weight: 400;
 		font-family: ui-monospace, monospace;
 		font-size: 11px;
+	}
+	.export-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.export-row select {
+		background: var(--bg);
+		border: 1px solid var(--border);
+		color: var(--fg);
+		border-radius: 8px;
+		padding: 6px 10px;
+		font-size: 13px;
+	}
+	.export-note {
+		margin: 0;
 	}
 	.keylabel .share {
 		color: #35b57f;
