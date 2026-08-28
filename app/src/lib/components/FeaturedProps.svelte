@@ -11,7 +11,6 @@
 	import { store } from "$lib/data.svelte";
 	import { RESERVED_KEYS, emptyValueFor } from "$lib/relations";
 	import PropertyValue from "./PropertyValue.svelte";
-	import PropertyFlow from "./PropertyFlow.svelte";
 	import { fetchBacklinks, type Backlink } from "$lib/backlinks";
 
 	let {
@@ -31,7 +30,6 @@
 		const rank = new Map(featuredKeys.map((k, i) => [k, i]));
 		return present.toSorted((a, b) => (rank.get(a.key) ?? 999) - (rank.get(b.key) ?? 999));
 	});
-	const addable = $derived(relations.filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && !(r.key in object.fields)));
 
 	// ── Anytype's leading featured cells: object type + backlinks count ──
 	const typeDef = $derived(store.types.find((t) => t.key === object.typeKey));
@@ -48,7 +46,6 @@
 	});
 
 	let editing = $state<string | null>(null);
-	let adding = $state<{ x: number; y: number } | null>(null);
 
 	function plain(v: ValueJSON | undefined, format: string): string | number | boolean | string[] {
 		if (!v) return format === "checkbox" ? false : format === "tag" ? [] : "";
@@ -85,11 +82,6 @@
 	}
 
 	/** Initialize a property so it appears (empty per-format default). */
-	async function addProp(rel: RelationDefJSON) {
-		await saveValue(rel.key, emptyValueFor(rel.format));
-		editing = rel.key;
-	}
-
 	// ── New property (Anytype "create from scratch") ──────────────
 
 	async function removeProp(key: string) {
@@ -100,11 +92,10 @@
 
 	function closeAll() {
 		editing = null;
-		adding = null;
 	}
 </script>
 
-{#if shown.length > 0 || addable.length > 0 || typeName}
+{#if shown.length > 0 || typeName}
 	<div class="featured">
 		<span class="cell-wrap">
 			<button
@@ -116,7 +107,7 @@
 		</span>
 		{#if backlinks.length > 0}
 			<span class="cell-wrap">
-				<button class="cell" title="Backlinks" onclick={() => { editing = null; adding = null; showBacklinks = !showBacklinks; }}>
+				<button class="cell" title="Backlinks" onclick={() => { editing = null; showBacklinks = !showBacklinks; }}>
 					{backlinks.length} backlink{backlinks.length === 1 ? "" : "s"}
 				</button>
 				<span class="bullet">•</span>
@@ -141,7 +132,6 @@
 					class:empty={display(rel) === ""}
 					title={rel.name || rel.key}
 					onclick={() => {
-						adding = null;
 						editing = editing === rel.key ? null : rel.key;
 					}}
 				>
@@ -168,40 +158,7 @@
 				{/if}
 			</span>
 		{/each}
-		{#if true}
-			<span class="cell-wrap">
-				<button
-					class="cell add"
-					title="Add property"
-					onclick={(e) => {
-						editing = null;
-						const r = e.currentTarget.getBoundingClientRect();
-						adding = adding ? null : { x: r.left, y: r.bottom + 6 };
-					}}>+</button
-				>
-			</span>
-		{/if}
 	</div>
-	{#if adding}
-		<!-- Anytype's property flow: toggle current properties, Add property
-		     -> search all / create new -> name + type. -->
-		<PropertyFlow
-			x={adding.x}
-			y={adding.y}
-			items={[
-				...shown.map((r) => ({ key: r.key, name: r.name || r.key, format: r.format, on: true })),
-				...addable.map((r) => ({ key: r.key, name: r.name || r.key, format: r.format, on: false })),
-			]}
-			ontoggle={(key, on) => {
-				const rel = relations.find((r) => r.key === key);
-				if (!rel) return;
-				if (on) void addProp(rel);
-				else void removeProp(key);
-			}}
-			onadd={(rel) => void addProp(rel)}
-			onclose={() => (adding = null)}
-		/>
-	{/if}
 	{#if editing}
 		<button class="backdrop" aria-label="Close" onclick={closeAll}></button>
 	{/if}
@@ -266,10 +223,6 @@
 	}
 	.cell.empty {
 		opacity: 0.6;
-	}
-	.cell.add {
-		font-size: 14px;
-		padding: 0 8px;
 	}
 	.bullet {
 		color: var(--border);
