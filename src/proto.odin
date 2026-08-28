@@ -213,6 +213,7 @@ as_i64 :: proc(v: u64) -> i64 {
 // ── Message decoders ─────────────────────────────────────────────────
 
 decode_value :: proc(data: []byte, allocator := context.allocator) -> Value {
+	context.allocator = allocator // every append below must land in `allocator`, not the caller's heap
 	r := Reader{data = data}
 	v: Value
 	for r.pos < len(r.data) && !r.err {
@@ -330,6 +331,7 @@ decode_mark :: proc(data: []byte) -> Mark {
 }
 
 decode_block_content :: proc(data: []byte, allocator := context.allocator) -> Block_Content {
+	context.allocator = allocator
 	r := Reader{data = data}
 	c: Block_Content
 	for r.pos < len(r.data) && !r.err {
@@ -420,6 +422,7 @@ decode_block_content :: proc(data: []byte, allocator := context.allocator) -> Bl
 }
 
 decode_block :: proc(data: []byte, allocator := context.allocator) -> Block {
+	context.allocator = allocator
 	r := Reader{data = data}
 	b: Block
 	for r.pos < len(r.data) && !r.err {
@@ -467,6 +470,7 @@ decode_block :: proc(data: []byte, allocator := context.allocator) -> Block {
 }
 
 decode_operation :: proc(data: []byte, allocator := context.allocator) -> Operation {
+	context.allocator = allocator
 	r := Reader{data = data}
 	op: Operation
 	for r.pos < len(r.data) && !r.err {
@@ -613,6 +617,7 @@ decode_operation :: proc(data: []byte, allocator := context.allocator) -> Operat
 }
 
 decode_snapshot :: proc(data: []byte, allocator := context.allocator) -> Snapshot {
+	context.allocator = allocator
 	r := Reader{data = data}
 	s: Snapshot
 	for r.pos < len(r.data) && !r.err {
@@ -655,6 +660,7 @@ decode_snapshot :: proc(data: []byte, allocator := context.allocator) -> Snapsho
 }
 
 decode_change :: proc(data: []byte, allocator := context.allocator) -> (Change, bool) {
+	context.allocator = allocator
 	r := Reader{data = data}
 	c: Change
 	for r.pos < len(r.data) && !r.err {

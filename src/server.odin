@@ -81,8 +81,9 @@ serve :: proc(port: int) {
 	for {
 		client, _, aerr := net.accept_tcp(sock)
 		if aerr != nil do continue
-		t := thread.create_and_start_with_poly_data(client, handle_connection)
-		_ = t
+		// self_cleanup: the thread detaches and frees its own ^Thread on exit.
+		// Without it every connection leaks a pthread (stack region kept until join).
+		thread.run_with_poly_data(client, handle_connection)
 	}
 }
 
