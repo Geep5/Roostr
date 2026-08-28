@@ -1,4 +1,5 @@
 <script lang="ts">
+	import TypeSuggest from "./TypeSuggest.svelte";
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
 	import { note } from "$lib/api";
 
@@ -170,7 +171,9 @@
 
 	// ── UI state ──────────────────────────────────────────────────
 	let open = $state<"" | "source" | "filter" | "sort">("");
-	let newSource = $state("");
+	$effect(() => {
+		if (sources.length === 0) open = "source";
+	});
 
 	function updateFilter(idx: number, patch: Partial<FilterRule>) {
 		const next = filters.map((f, i) => (i === idx ? { ...f, ...patch } : f));
@@ -207,17 +210,12 @@
 				<button class="x" onclick={() => void saveSources(sources.filter((_, j) => j !== i))}>×</button>
 			</div>
 		{/each}
-		<form
-			class="rule"
-			onsubmit={(e) => {
-				e.preventDefault();
-				const v = newSource.trim().toLowerCase();
-				if (v && !sources.includes(v)) void saveSources([...sources, v]);
-				newSource = "";
-			}}
-		>
-			<input bind:value={newSource} placeholder="add type (note, task, …) or relation key" />
-		</form>
+		<TypeSuggest
+			exclude={sources}
+			placeholder="Search types… (e.g. p → Person, Project)"
+			onpick={(key) => void saveSources([...sources, key])}
+			onclose={() => (open = "")}
+		/>
 	</div>
 {/if}
 

@@ -36,9 +36,7 @@
 	}
 
 	async function createQuery() {
-		const source = prompt("Query objects of which type? (e.g. note, task)", "note");
-		if (!source) return;
-		await libCreateQuery(channelId, source);
+		await libCreateQuery(channelId);
 	}
 
 	const ICON_BY_TYPE = TYPE_GLYPHS;

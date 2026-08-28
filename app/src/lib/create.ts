@@ -73,10 +73,11 @@ export async function createCollection(channelId: string): Promise<string> {
 	return id;
 }
 
-export async function createQuery(channelId: string, source = "note"): Promise<string> {
-	const { id } = await note.create(`${source} query`, "query", {
+/** Create a sourceless query; the query page opens the type suggest (Anytype: a new set asks for its source). */
+export async function createQuery(channelId: string): Promise<string> {
+	const { id } = await note.create("New query", "query", {
 		...channelField(channelId),
-		setOf: { valuesValue: { items: [{ stringValue: source.trim().toLowerCase() }] } },
+		setOf: { valuesValue: { items: [] } },
 	});
 	await goto(`/object/${id}`);
 	return id;

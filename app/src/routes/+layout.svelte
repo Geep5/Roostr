@@ -53,11 +53,7 @@
 		showCreate = false;
 		const ch = activeChannel.id || defaultChannelId;
 		if (kind === "collection") return void (await createCollection(ch));
-		if (kind === "query") {
-			const source = prompt("Query objects of which type? (e.g. note, task)", "note");
-			if (!source) return;
-			return void (await createQuery(ch, source));
-		}
+		if (kind === "query") return void (await createQuery(ch));
 		await createTyped(kind, ch);
 	}
 
