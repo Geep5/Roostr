@@ -6,6 +6,7 @@
 	 * we have no file storage yet, Anytype's ObjectCover needs one.)
 	 */
 	import { goto } from "$app/navigation";
+	import { tagStyle } from "$lib/options";
 	import { fetchQuery, type QueryResultRow } from "$lib/api";
 	import type { ObjectJSON, RelationDefJSON } from "$lib/types";
 	import { objectIcon } from "$lib/icons";
@@ -70,7 +71,7 @@
 						{#if rel.format === "tag" || rel.format === "status"}
 							{#each t.split(", ") as tg (tg)}
 								{@const opt = rel.options.find((o) => o.text === tg)}
-								<span class="g-tag" style={opt?.color ? `border-color:${opt.color}` : ""}>{tg}</span>
+								<span class="g-tag" style={tagStyle(opt?.color ?? "")}>{tg}</span>
 							{/each}
 						{:else}
 							{t}
@@ -134,12 +135,14 @@
 		max-width: 100%;
 		overflow: hidden;
 	}
+	/* Anytype tagItem.isSmall: filled pill. */
 	.g-tag {
-		border: 1px solid var(--border);
-		border-radius: 6px;
+		display: inline-block;
+		border-radius: 10px;
 		padding: 0 6px;
 		font-size: 11px;
-		color: var(--fg);
+		line-height: 18px;
+		height: 18px;
 	}
 	.muted {
 		color: var(--muted);

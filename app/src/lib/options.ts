@@ -21,22 +21,35 @@ export interface TagOption {
 	orderId: string;
 }
 
-/** Anytype Constant.textColor palette, dark-theme values. */
-export const TAG_COLORS: Array<{ name: string; hex: string }> = [
-	{ name: "grey", hex: "#8c9ea5" },
-	{ name: "yellow", hex: "#b2a616" },
-	{ name: "orange", hex: "#d3720d" },
-	{ name: "red", hex: "#e2400c" },
-	{ name: "pink", hex: "#ca1b8e" },
-	{ name: "purple", hex: "#9e30c4" },
-	{ name: "blue", hex: "#6878ee" },
-	{ name: "ice", hex: "#1c8bca" },
-	{ name: "teal", hex: "#0caaa3" },
-	{ name: "lime", hex: "#64b90f" },
+/**
+ * Anytype Constant.textColor palette, dark-theme values. `hex` is the vivid
+ * tone (scss/_vars --color-tag-*, used for swatches); `bg`/`text` are the
+ * tagItem pill pair (theme/dark --color-light-* background with
+ * --color-dark-* text - filled pill, pale label).
+ */
+export const TAG_COLORS: Array<{ name: string; hex: string; bg: string; text: string }> = [
+	{ name: "grey", hex: "#8c9ea5", bg: "#414141", text: "#c8c8c8" },
+	{ name: "yellow", hex: "#b2a616", bg: "#6c630f", text: "#fbf29a" },
+	{ name: "orange", hex: "#d3720d", bg: "#5c2a06", text: "#fbcf7a" },
+	{ name: "red", hex: "#e2400c", bg: "#4a0a08", text: "#f5a090" },
+	{ name: "pink", hex: "#ca1b8e", bg: "#4a0828", text: "#f9a0c8" },
+	{ name: "purple", hex: "#9e30c4", bg: "#3d0e68", text: "#d090f0" },
+	{ name: "blue", hex: "#6878ee", bg: "#162060", text: "#a0b0f8" },
+	{ name: "ice", hex: "#1c8bca", bg: "#023a58", text: "#90deff" },
+	{ name: "teal", hex: "#0caaa3", bg: "#0b4f4a", text: "#7eeedd" },
+	{ name: "lime", hex: "#64b90f", bg: "#1a3a0a", text: "#80ee80" },
 ];
 
 export function colorHex(name: string): string {
 	return TAG_COLORS.find((c) => c.name === name)?.hex ?? (name || TAG_COLORS[0].hex);
+}
+
+/** Inline style for an Anytype tagItem pill (filled bg, pale text). */
+export function tagStyle(name: string): string {
+	const c = TAG_COLORS.find((x) => x.name === name);
+	// Unknown/default: their shape-tertiary pill with primary text.
+	if (!c) return "background: rgba(255, 255, 255, 0.09)";
+	return `background:${c.bg}; color:${c.text}`;
 }
 
 function serialize(options: TagOption[]): ValueJSON {

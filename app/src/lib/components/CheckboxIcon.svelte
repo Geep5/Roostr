@@ -1,0 +1,23 @@
+<script lang="ts">
+	/**
+	 * Anytype's checkbox icons verbatim (util/icons/common/checkbox0|1):
+	 * a 20x20 rounded-square outline; checked adds the checkmark path.
+	 * Colored via currentColor like theirs.
+	 */
+	let { checked = false, size = 20 }: { checked?: boolean; size?: number } = $props();
+</script>
+
+<svg viewBox="0 0 20 20" width={size} height={size} fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+	{#if checked}
+		<path fill-rule="evenodd" clip-rule="evenodd" d="M14.6104 6.43533L9.09576 14.1558L5.46973 10.5297L6.53039 9.46907L8.90435 11.843L13.3898 5.56348L14.6104 6.43533Z" fill="currentColor" />
+	{/if}
+	<path fill-rule="evenodd" clip-rule="evenodd" d="M14 3.49902H6C4.61929 3.49902 3.5 4.61831 3.5 5.99902V13.999C3.5 15.3797 4.61929 16.499 6 16.499H14C15.3807 16.499 16.5 15.3797 16.5 13.999V5.99902C16.5 4.61831 15.3807 3.49902 14 3.49902ZM6 1.99902C3.79086 1.99902 2 3.78988 2 5.99902V13.999C2 16.2082 3.79086 17.999 6 17.999H14C16.2091 17.999 18 16.2082 18 13.999V5.99902C18 3.78988 16.2091 1.99902 14 1.99902H6Z" fill="currentColor" />
+</svg>
+
+<style>
+	svg {
+		display: inline-block;
+		vertical-align: middle;
+		flex: none;
+	}
+</style>

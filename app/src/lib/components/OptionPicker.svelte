@@ -7,7 +7,7 @@
 	 * Delete option. Select (status) picks one; multi-select toggles.
 	 */
 	import type { RelationDefJSON } from "$lib/types";
-	import { TAG_COLORS, addOption, colorHex, deleteOption, renameOption, setOptionColor } from "$lib/options";
+	import { TAG_COLORS, addOption, deleteOption, renameOption, setOptionColor, tagStyle } from "$lib/options";
 
 	let {
 		rel,
@@ -67,7 +67,7 @@
 	{#each matches as o (o.id)}
 		<div class="row-wrap">
 			<button class="row" class:on={selected.includes(o.text)} onclick={() => onpick(o.text)}>
-				<span class="chip" style="color:{colorHex(o.color)}; border-color:{colorHex(o.color)}">{o.text}</span>
+				<span class="chip" style={tagStyle(o.color)}>{o.text}</span>
 				{#if selected.includes(o.text)}<span class="check">✓</span>{/if}
 			</button>
 			<button class="more" title="Edit option" onclick={() => openEdit(o.id, o.text)}>⋯</button>
@@ -161,12 +161,13 @@
 	.row.create {
 		color: var(--accent);
 	}
+	/* Anytype tagItem: filled pill, pale text. */
 	.chip {
-		border: 1px solid;
-		border-radius: 6px;
-		padding: 0 7px;
+		border-radius: 10px;
+		padding: 0 6px;
 		font-size: 12px;
 		line-height: 20px;
+		height: 20px;
 	}
 	.check {
 		margin-left: auto;

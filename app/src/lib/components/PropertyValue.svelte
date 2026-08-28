@@ -14,6 +14,7 @@
 	import { objectIcon } from "$lib/icons";
 	import CalendarPicker from "./CalendarPicker.svelte";
 	import OptionPicker from "./OptionPicker.svelte";
+	import CheckboxIcon from "./CheckboxIcon.svelte";
 
 	let {
 		rel,
@@ -81,7 +82,10 @@
 </script>
 
 {#if rel.format === "checkbox"}
-	<input type="checkbox" {checked} onchange={(e) => void onsave({ boolValue: e.currentTarget.checked })} />
+	<!-- Anytype checkbox cell: their 20px icon, toggles on click. -->
+	<button class="chk" class:on={checked} aria-checked={checked} role="checkbox" onclick={() => void onsave({ boolValue: !checked })}>
+		<CheckboxIcon {checked} />
+	</button>
 {:else if rel.format === "number"}
 	<input type="number" value={num ?? ""} placeholder="Empty" onchange={(e) => saveNumber(e.currentTarget.value)} />
 {:else if rel.format === "date"}
@@ -283,5 +287,19 @@
 	}
 	.pad {
 		padding: 4px 6px;
+	}
+	.chk {
+		background: none;
+		border: none;
+		padding: 0;
+		cursor: pointer;
+		color: var(--muted);
+		display: inline-flex;
+	}
+	.chk.on {
+		color: var(--fg);
+	}
+	.chk:hover {
+		color: var(--fg);
 	}
 </style>

@@ -9,7 +9,8 @@
 	 */
 	import PropertyFlow from "./PropertyFlow.svelte";
 	import PropertyValue from "./PropertyValue.svelte";
-	import { colorHex } from "$lib/options";
+	import { tagStyle } from "$lib/options";
+	import CheckboxIcon from "./CheckboxIcon.svelte";
 	import { fetchQuery, note, type QueryResultRow } from "$lib/api";
 	import { store } from "$lib/data.svelte";
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
@@ -348,10 +349,10 @@
 								{#if fmt === "tag" || fmt === "status"}
 									{#each cellValues(r.id, c) as t (t)}
 										{@const opt = rel?.options.find((o) => o.text === t)}
-										<span class="cell-tag" style={opt?.color ? `border-color:${colorHex(opt.color)}; color:${colorHex(opt.color)}` : ""}>{t}</span>
+										<span class="cell-tag" style={tagStyle(opt?.color ?? "")}>{t}</span>
 									{/each}
 								{:else if fmt === "checkbox"}
-									<span class="cell-check" class:on={r.fields[c]?.boolValue === true}>{r.fields[c]?.boolValue === true ? "☑" : "☐"}</span>
+									<span class="cell-check" class:on={r.fields[c]?.boolValue === true}><CheckboxIcon checked={r.fields[c]?.boolValue === true} size={20} /></span>
 								{:else}
 									{cell(r, c)}
 								{/if}
@@ -530,20 +531,26 @@
 	td.editable:hover {
 		background: var(--hl-light);
 	}
+	/* Anytype cellContent.c-checkbox: 20px icon, secondary until checked. */
 	.cell-check {
-		font-size: 15px;
+		display: inline-flex;
 		color: var(--muted);
 	}
 	.cell-check.on {
-		color: var(--accent);
+		color: var(--fg);
 	}
+	/* Anytype tagItem.isSmall: filled 20px pill, radius 10, pale text. */
 	.cell-tag {
 		display: inline-block;
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		padding: 0 7px;
+		border-radius: 10px;
+		padding: 0 6px;
 		font-size: 12px;
 		line-height: 20px;
+		height: 20px;
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 		margin-right: 4px;
 	}
 	.cell-pop {

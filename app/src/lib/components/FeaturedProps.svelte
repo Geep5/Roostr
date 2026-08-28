@@ -11,6 +11,7 @@
 	import { store } from "$lib/data.svelte";
 	import { RESERVED_KEYS, emptyValueFor } from "$lib/relations";
 	import PropertyValue from "./PropertyValue.svelte";
+	import { tagStyle } from "$lib/options";
 	import { fetchBacklinks, type Backlink } from "$lib/backlinks";
 
 	let {
@@ -138,7 +139,7 @@
 					{#if rel.format === "tag" && (plain(v, "tag") as string[]).length > 0}
 						{#each plain(v, "tag") as string[] as t (t)}
 							{@const opt = rel.options.find((o) => o.text === t)}
-							<span class="tag" style={opt?.color ? `border-color:${opt.color}` : ""}>{t}</span>
+							<span class="tag" style={tagStyle(opt?.color ?? "")}>{t}</span>
 						{/each}
 					{:else}
 						{display(rel) || rel.name || rel.key}
@@ -228,13 +229,15 @@
 		color: var(--border);
 		font-size: 10px;
 	}
+	/* Anytype tagItem.isSmall: filled pill, pale text, no border. */
 	.tag {
-		border: 1px solid var(--border);
-		border-radius: 999px;
-		padding: 1px 8px;
-		font-size: 11px;
-		background: none;
-		color: inherit;
+		display: inline-block;
+		border-radius: 10px;
+		padding: 0 6px;
+		font-size: 12px;
+		line-height: 20px;
+		height: 20px;
+		margin-right: 3px;
 	}
 	.pop {
 		position: absolute;
