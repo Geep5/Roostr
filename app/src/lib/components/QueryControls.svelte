@@ -169,6 +169,46 @@
 		return relations.find((r) => r.key === key)?.name || key;
 	}
 
+	// ── View layout (Anytype: menu/dataview/view/layout.tsx) ───────
+	// viewType: table | kanban | calendar. Kanban groups by a
+	// select/multi-select/checkbox relation; calendar by a date relation
+	// (createdDate / modifiedDate system timestamps, or e.g. dueDate).
+	const viewType = $derived(object.fields["viewType"]?.stringValue || "table");
+	const groupKey = $derived(object.fields["viewGroupKey"]?.stringValue || "");
+	const dateKey = $derived(object.fields["viewDateKey"]?.stringValue || "createdDate");
+
+	/** Anytype getGroupOptions ordering: select first, then multi, then checkbox. */
+	const groupOptions = $derived.by(() => {
+		const rank: Record<string, number> = { status: 0, tag: 1, checkbox: 2 };
+		return relations
+			.filter((r) => !r.hidden && r.format in rank)
+			.toSorted((a, b) => rank[a.format] - rank[b.format]);
+	});
+	const dateOptions = $derived.by(() => [
+		{ key: "createdDate", name: "Created date" },
+		{ key: "modifiedDate", name: "Modified date" },
+		...relations.filter((r) => !r.hidden && r.format === "date" && !["createdDate", "modifiedDate"].includes(r.key)).map((r) => ({ key: r.key, name: r.name || r.key })),
+	]);
+
+	async function setView(v: string) {
+		await note.setField(object.id, "viewType", { stringValue: v });
+		// Kanban needs a group relation: default to the first available.
+		if (v === "kanban" && !groupKey && groupOptions.length > 0) {
+			await note.setField(object.id, "viewGroupKey", { stringValue: groupOptions[0].key });
+		}
+		await onchanged();
+	}
+
+	async function setGroupKey(k: string) {
+		await note.setField(object.id, "viewGroupKey", { stringValue: k });
+		await onchanged();
+	}
+
+	async function setDateKey(k: string) {
+		await note.setField(object.id, "viewDateKey", { stringValue: k });
+		await onchanged();
+	}
+
 	// ── UI state ──────────────────────────────────────────────────
 	let open = $state<"" | "source" | "filter" | "sort">("");
 	$effect(() => {
@@ -200,6 +240,27 @@
 	<button class="pill" class:active={open === "sort"} onclick={() => (open = open === "sort" ? "" : "sort")}>
 		Sort{sorts.length ? ` · ${sorts.length}` : ""}
 	</button>
+	<span class="spacer"></span>
+	<span class="views">
+		{#each [["table", "▤"], ["kanban", "▥"], ["calendar", "▦"]] as [v, glyph] (v)}
+			<button class="pill view" class:active={viewType === v} title={v} onclick={() => void setView(v)}>{glyph} {v[0].toUpperCase() + v.slice(1)}</button>
+		{/each}
+	</span>
+	{#if viewType === "kanban"}
+		<select class="cfg" value={groupKey} onchange={(e) => void setGroupKey(e.currentTarget.value)}>
+			<option value="" disabled>Group by…</option>
+			{#each groupOptions as g (g.key)}
+				<option value={g.key}>{g.name || g.key}</option>
+			{/each}
+		</select>
+	{/if}
+	{#if viewType === "calendar"}
+		<select class="cfg" value={dateKey} onchange={(e) => void setDateKey(e.currentTarget.value)}>
+			{#each dateOptions as d (d.key)}
+				<option value={d.key}>{d.name}</option>
+			{/each}
+		</select>
+	{/if}
 </div>
 
 {#if open === "source"}
@@ -280,6 +341,21 @@
 {/if}
 
 <style>
+	.spacer {
+		flex: 1;
+	}
+	.views {
+		display: flex;
+		gap: 4px;
+	}
+	.cfg {
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		color: var(--fg);
+		font-size: 12px;
+		padding: 3px 8px;
+	}
 	.controls {
 		display: flex;
 		gap: 8px;

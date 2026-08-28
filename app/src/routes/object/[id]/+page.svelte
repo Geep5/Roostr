@@ -11,6 +11,8 @@
 	import Discussion from "$lib/components/Discussion.svelte";
 	import SetTable from "$lib/components/SetTable.svelte";
 	import QueryControls from "$lib/components/QueryControls.svelte";
+	import KanbanView from "$lib/components/KanbanView.svelte";
+	import CalendarView from "$lib/components/CalendarView.svelte";
 	import ChannelManage from "$lib/components/ChannelManage.svelte";
 	import TypePanel from "$lib/components/TypePanel.svelte";
 	import EmojiPicker from "$lib/components/EmojiPicker.svelte";
@@ -277,7 +279,14 @@
 				<QueryControls {object} relations={store.relations} onchanged={refresh} />
 			{/if}
 			{#if tableBody}
-				<SetTable bind:this={table} body={tableBody} {object} relations={store.relations} defaultSorts={viewSorts} onchanged={refresh} />
+				{@const viewType = object.fields["viewType"]?.stringValue || "table"}
+				{#if viewType === "kanban"}
+					<KanbanView body={tableBody} {object} relations={store.relations} groupKey={object.fields["viewGroupKey"]?.stringValue || ""} onchanged={refresh} />
+				{:else if viewType === "calendar"}
+					<CalendarView body={tableBody} {object} dateKey={object.fields["viewDateKey"]?.stringValue || "createdDate"} />
+				{:else}
+					<SetTable bind:this={table} body={tableBody} {object} relations={store.relations} defaultSorts={viewSorts} onchanged={refresh} />
+				{/if}
 			{:else}
 				<p class="muted">Empty collection — add objects.</p>
 			{/if}
