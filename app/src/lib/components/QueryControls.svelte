@@ -15,7 +15,24 @@
 		object,
 		relations,
 		onchanged,
-	}: { object: ObjectJSON; relations: RelationDefJSON[]; onchanged: () => Promise<void> } = $props();
+		onsearch,
+	}: { object: ObjectJSON; relations: RelationDefJSON[]; onchanged: () => Promise<void>; onsearch?: (q: string) => void } = $props();
+
+	// Anytype's dataview search (controls.tsx Filter): magnifier expands an
+	// inline input; text live-filters the records via textQuery.
+	let searchOpen = $state(false);
+	let searchValue = $state("");
+	let searchEl: HTMLInputElement | undefined = $state();
+	function toggleSearch() {
+		searchOpen = !searchOpen;
+		if (!searchOpen) {
+			searchValue = "";
+			onsearch?.("");
+		}
+	}
+	$effect(() => {
+		if (searchOpen) searchEl?.focus();
+	});
 
 	export interface FilterRule {
 		key: string;
@@ -289,16 +306,36 @@
 	<button class="pill" class:active={open === "source"} onclick={() => (open = open === "source" ? "" : "source")}>
 		Source{sources.length ? `: ${sources.join(", ")}` : ""}
 	</button>
-	<button class="pill" class:active={open === "filter"} onclick={() => (open = open === "filter" ? "" : "filter")}>
-		Filter{filters.length ? ` · ${filters.length}` : ""}
-	</button>
-	<button class="pill" class:active={open === "sort"} onclick={() => (open = open === "sort" ? "" : "sort")}>
-		Sort{sorts.length ? ` · ${sorts.length}` : ""}
-	</button>
 	<span class="spacer"></span>
 	<span class="view-chip"><LayoutIcon kind={viewType} size={16} /> {viewType[0].toUpperCase() + viewType.slice(1)}</span>
+	<!-- Anytype dataviewControlsSideRight: search, then the collapsible
+	     filter/sort buttons (accent "on" state when rules exist), then the
+	     persistent settings button; their exact 20x20 icons. -->
+	{#if searchOpen}
+		<input
+			class="search-input"
+			bind:this={searchEl}
+			bind:value={searchValue}
+			placeholder="Search"
+			oninput={() => onsearch?.(searchValue)}
+			onkeydown={(e) => {
+				if (e.key === "Escape") toggleSearch();
+			}}
+		/>
+	{/if}
+	<button class="cbtn" class:on={searchOpen} title="Search" onclick={toggleSearch}>
+		<svg viewBox="0 0 20 20" width="20" height="20" fill="none"><path d="M8.5 2.5C11.8137 2.5 14.5 5.18629 14.5 8.5C14.5 9.79977 14.0852 11.0019 13.3828 11.9844L17.2227 15.8242C17.6132 16.2147 17.6132 16.8478 17.2227 17.2383C16.8321 17.6288 16.1991 17.6288 15.8086 17.2383L11.9658 13.3955C10.9867 14.0899 9.79171 14.5 8.5 14.5C5.18629 14.5 2.5 11.8137 2.5 8.5C2.5 5.18629 5.18629 2.5 8.5 2.5ZM8.5 4C6.01472 4 4 6.01472 4 8.5C4 10.9853 6.01472 13 8.5 13C10.9853 13 13 10.9853 13 8.5C13 6.01472 10.9853 4 8.5 4Z" fill="currentColor" /></svg>
+	</button>
+	<button class="cbtn" class:on={filters.length > 0 || open === "filter"} title="Filters" onclick={() => (open = open === "filter" ? "" : "filter")}>
+		<svg viewBox="0 0 20 20" width="20" height="20" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M3 6C3 5.58579 3.29381 5.25 3.65625 5.25H16.3438C16.7062 5.25 17 5.58579 17 6C17 6.41421 16.7062 6.75 16.3438 6.75H3.65625C3.29381 6.75 3 6.41421 3 6ZM6 10C6 9.58579 6.26863 9.25 6.6 9.25H13.4C13.7314 9.25 14 9.58579 14 10C14 10.4142 13.7314 10.75 13.4 10.75H6.6C6.26863 10.75 6 10.4142 6 10ZM8.75 13.25C8.33579 13.25 8 13.5858 8 14C8 14.4142 8.33579 14.75 8.75 14.75H11.25C11.6642 14.75 12 14.4142 12 14C12 13.5858 11.6642 13.25 11.25 13.25H8.75Z" fill="currentColor" /></svg>
+	</button>
+	<button class="cbtn" class:on={sorts.length > 0 || open === "sort"} title="Sorts" onclick={() => (open = open === "sort" ? "" : "sort")}>
+		<svg viewBox="0 0 20 20" width="20" height="20" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M10.705 9.02168C10.9784 9.32611 11.4216 9.32611 11.695 9.02168L13.25 7.29001V15.75H14.75V7.29001L16.305 9.02168C16.5784 9.32611 17.0216 9.32611 17.295 9.02168C17.5683 8.71726 17.5683 8.2237 17.295 7.91928L14 4.25L10.705 7.91928C10.4317 8.2237 10.4317 8.71726 10.705 9.02168ZM9.29497 10.9803C9.02161 10.6758 8.57839 10.6758 8.30503 10.9803L6.75 12.7119L6.75 4.25195L5.25 4.25195L5.25 12.7119L3.69498 10.9803C3.42161 10.6758 2.97839 10.6758 2.70503 10.9803C2.43166 11.2847 2.43166 11.7783 2.70503 12.0827L6 15.752L9.29497 12.0827C9.56834 11.7783 9.56834 11.2847 9.29497 10.9803Z" fill="currentColor" /></svg>
+	</button>
 	<span class="settings-anchor">
-		<button class="pill" class:active={settingsOpen} title="View settings" onclick={toggleSettings}>⚙ Settings</button>
+		<button class="cbtn" class:on={settingsOpen} title="View settings" onclick={toggleSettings}>
+			<svg viewBox="0 0 20 20" width="20" height="20" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M13.75 6C13.75 6.69036 13.1903 7.25 12.5 7.25C11.8097 7.25 11.25 6.69036 11.25 6C11.25 5.30964 11.8097 4.75 12.5 4.75C13.1903 4.75 13.75 5.30964 13.75 6ZM14.8856 6.75C14.567 7.76428 13.6194 8.5 12.5 8.5C11.3806 8.5 10.433 7.76428 10.1144 6.75H3.58333C3.26117 6.75 3 6.41421 3 6C3 5.58579 3.26117 5.25 3.58333 5.25H10.1144C10.433 4.23572 11.3806 3.5 12.5 3.5C13.6194 3.5 14.567 4.23572 14.8856 5.25H16.4167C16.7388 5.25 17 5.58579 17 6C17 6.41421 16.7388 6.75 16.4167 6.75H14.8856ZM6.25 14C6.25 14.6903 6.80964 15.25 7.5 15.25C8.19036 15.25 8.75 14.6903 8.75 14C8.75 13.3097 8.19036 12.75 7.5 12.75C6.80964 12.75 6.25 13.3097 6.25 14ZM3.58333 13.25H5.11445C5.43301 12.2357 6.38059 11.5 7.5 11.5C8.61941 11.5 9.56699 12.2357 9.88555 13.25H16.4167C16.7388 13.25 17 13.5858 17 14C17 14.4142 16.7388 14.75 16.4167 14.75H9.88555C9.56699 15.7643 8.61941 16.5 7.5 16.5C6.38059 16.5 5.43301 15.7643 5.11445 14.75H3.58333C3.26117 14.75 3 14.4142 3 14C3 13.5858 3.26117 13.25 3.58333 13.25Z" fill="currentColor" /></svg>
+		</button>
 		{#if settingsOpen}
 			<!-- Anytype dataviewViewSettings: Layout row (caption = current
 			     layout) opening the dataviewViewLayout picker; board group
@@ -801,5 +838,40 @@
 	}
 	.add.clear {
 		color: var(--muted);
+	}
+	.cbtn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		background: none;
+		border: none;
+		border-radius: 6px;
+		color: var(--muted);
+		cursor: pointer;
+		padding: 0;
+		align-self: center;
+	}
+	.cbtn:hover {
+		background: var(--hl-med);
+		color: var(--fg);
+	}
+	.cbtn.on {
+		color: var(--accent);
+	}
+	.search-input {
+		background: var(--bg, #101216);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		color: var(--fg);
+		font-size: 13px;
+		padding: 4px 10px;
+		outline: none;
+		width: 180px;
+		align-self: center;
+	}
+	.search-input:focus {
+		border-color: var(--accent);
 	}
 </style>

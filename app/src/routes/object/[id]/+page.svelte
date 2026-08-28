@@ -144,12 +144,16 @@
 		return out;
 	});
 
+	/** Live search text from the controls row (Anytype's dataview Filter). */
+	let searchText = $state("");
+
 	const tableBody = $derived.by((): Record<string, unknown> | null => {
 		if (!object) return null;
-		if (isQuery) return { setId: object.id, filters: engineFilters };
+		const text = searchText.trim() ? { textQuery: searchText.trim() } : {};
+		if (isQuery) return { setId: object.id, filters: engineFilters, ...text };
 		if (isCollection) {
 			if (memberIds.length === 0) return null;
-			return { filters: [{ key: "id", condition: "in", value: memberIds }] };
+			return { filters: [{ key: "id", condition: "in", value: memberIds }], ...text };
 		}
 		return null;
 	});
@@ -282,7 +286,7 @@
 					{/if}
 				{/if}
 				{#if isQuery}
-					<QueryControls {object} relations={store.relations} onchanged={refresh} />
+					<QueryControls {object} relations={store.relations} onchanged={refresh} onsearch={(q) => (searchText = q)} />
 				{/if}
 				{#if tableBody}
 					{@const viewType = object.fields["viewType"]?.stringValue || "table"}
