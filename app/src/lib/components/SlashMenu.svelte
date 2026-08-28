@@ -12,7 +12,8 @@
 		| { kind: "style"; value: number }
 		| { kind: "table" }
 		| { kind: "relation"; key: string }
-		| { kind: "property_add" };
+		| { kind: "property_add" }
+		| { kind: "link_object" };
 	let {
 		filter,
 		x,
@@ -54,6 +55,8 @@
 		{ section: "Lists", label: "Toggle", desc: "Collapsible content", preview: "▸", cls: "pv-list", aliases: ["toggle", "collapse"], pick: { kind: "style", value: Style.TOGGLE } },
 		{ section: "Other", label: "Code", desc: "Monospaced snippet", preview: "</>", cls: "pv-code", aliases: ["code", "snippet"], pick: { kind: "style", value: Style.CODE } },
 		{ section: "Other", label: "Table", desc: "3×3 simple table", preview: "⊞", cls: "pv-table", aliases: ["table", "grid"], pick: { kind: "table" } },
+		// Anytype menuBlockAdd getBlockLink: "Link to existing page" (alias "link").
+		{ section: "Other", label: "Link to object", desc: "Embed a link to an existing object", preview: "🔗", cls: "pv-link", aliases: ["link", "object", "existing", "page"], pick: { kind: "link_object" } },
 	];
 
 	/** Anytype's slash "Relations" section (menu/block/add.tsx:111-131):

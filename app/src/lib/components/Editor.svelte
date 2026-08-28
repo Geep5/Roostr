@@ -9,6 +9,7 @@
 	import type { MenuAction } from "./BlockMenu.svelte";
 	import SlashMenu, { type SlashPick } from "./SlashMenu.svelte";
 	import PropertySuggest from "./PropertySuggest.svelte";
+	import LinkPicker from "./LinkPicker.svelte";
 	import { store } from "$lib/data.svelte";
 	import { RESERVED_KEYS, emptyValueFor } from "$lib/relations";
 	import type { RelationDefJSON } from "$lib/types";
@@ -208,6 +209,7 @@
 		// another block's unflushed typing.
 		for (const id of [...dirty]) await flushSave(id);
 		await onchanged();
+		void syncLinksField();
 		if (focusRequest) {
 			const req = focusRequest;
 			focusRequest = null;
@@ -219,6 +221,33 @@
 				}
 			});
 		}
+	}
+
+	// ── Object link blocks (Anytype BlockType.Link) ─────────────────
+	let linkPicker = $state<{ blockId: string; x: number; y: number } | null>(null);
+
+	/** Create the link block: replace the empty slash block, else below. */
+	async function insertLinkBlock(blockId: string, targetId: string) {
+		linkPicker = null;
+		const cur = byId.get(blockId)?.content.text;
+		const empty = (cur?.text ?? "") === "";
+		lastLocalEdit = Date.now();
+		const block = { id: crypto.randomUUID(), childrenIds: [], content: { custom: { contentType: "link", meta: { target: targetId } } } };
+		await note.blockAdd(object.id, block, blockId, empty ? Pos.REPLACE : Pos.BOTTOM);
+		await refresh();
+	}
+
+	/**
+	 * Anytype derives the `links` relation from link blocks (anytype-heart),
+	 * which feeds backlinks and the graph. Our analog: mirror the object's
+	 * link blocks into a hidden `links` field of linkValue items. Runs on
+	 * every refresh; writes only when the target set actually changed.
+	 */
+	async function syncLinksField() {
+		const targets = [...new Set(object.blocks.filter((b) => b.content.custom?.contentType === "link").map((b) => b.content.custom!.meta?.target ?? "").filter(Boolean))];
+		const current = (object.fields["links"]?.valuesValue?.items ?? []).map((i) => i.linkValue?.targetId ?? "").filter(Boolean);
+		if (targets.length === current.length && targets.every((t, i) => t === current[i])) return;
+		await note.setField(object.id, "links", { valuesValue: { items: targets.map((t) => ({ linkValue: { targetId: t, relationKey: "links" } })) } });
 	}
 
 	function readBlock(id: string): { text: string; marks: ReturnType<typeof fromDom>["marks"] } {
@@ -501,6 +530,9 @@
 			}
 		} else if (pick.kind === "relation") {
 			await insertRelationBlock(id, clean, marks, pick.key);
+		} else if (pick.kind === "link_object") {
+			// Anytype: "Link to existing page" opens the searchObject menu.
+			linkPicker = { blockId: id, x: slashPos.x, y: slashPos.y };
 		} else if (pick.kind === "property_add") {
 			// Anytype: "New relation" opens the relationSuggest menu.
 			propertySuggest = { blockId: id, x: slashPos.x, y: slashPos.y };
@@ -883,6 +915,10 @@
 		onaction={(a) => void onMenuAction(a)}
 		onclose={() => (blockMenu = null)}
 	/>
+{/if}
+
+{#if linkPicker}
+	<LinkPicker x={linkPicker.x} y={linkPicker.y} excludeId={object.id} onpick={(t) => void insertLinkBlock(linkPicker!.blockId, t)} onclose={() => (linkPicker = null)} />
 {/if}
 
 {#if propertySuggest}

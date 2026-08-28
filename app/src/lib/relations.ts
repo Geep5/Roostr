@@ -16,6 +16,7 @@ export const RESERVED_KEYS: Record<string, true> = {
 	setOf: true,
 	featuredRelations: true,
 	collectionIds: true,
+	links: true, // derived from link blocks (Anytype system relation)
 	viewFilters: true,
 	viewSorts: true,
 	viewRelations: true,

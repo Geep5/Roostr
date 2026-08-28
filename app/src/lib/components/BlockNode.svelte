@@ -6,6 +6,8 @@
 	import TableBlock from "./TableBlock.svelte";
 	import RelationBlock from "./RelationBlock.svelte";
 	import { isToggleOpen, setToggleOpen } from "$lib/toggles";
+	import { store } from "$lib/data.svelte";
+	import { objectIcon } from "$lib/icons";
 
 	let {
 		id,
@@ -406,6 +408,62 @@
 				</a>
 			{/if}
 		</div>
+	{:else if block.content.custom?.contentType === "link"}
+		<!-- Anytype BlockType.Link, text card style (block/link.tsx): 20px
+		     object icon + 500-weight name; ghost row when target deleted. -->
+		{@const target = store.summaries.find((s) => s.id === block.content.custom?.meta?.target)}
+		<div
+			class="block link-block zone-{zone} {draggingId === block.id ? 'dragging' : ''}"
+			class:selected={selectedIds.has(block.id)}
+			data-block={block.id}
+			role="presentation"
+			ondragover={(e) => {
+				if (!draggingId || draggingId === block.id) return;
+				e.preventDefault();
+				zone = computeZone(e);
+			}}
+			ondragleave={() => (zone = 0)}
+			ondrop={(e) => {
+				e.preventDefault();
+				const z = zone;
+				zone = 0;
+				ondrop(block.id, z || Pos.BOTTOM);
+			}}
+			oncontextmenu={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				onmenu(block.id, e.clientX, e.clientY);
+			}}
+		>
+			<div class="gutter">
+				<button
+					class="handle"
+					title="Click for actions; drag to move"
+					draggable="true"
+					ondragstart={(e) => {
+						e.dataTransfer?.setData("text/plain", block.id);
+						ondragbegin(block.id);
+					}}
+					onclick={(e) => {
+						const r = e.currentTarget.getBoundingClientRect();
+						onmenu(block.id, r.right + 8, r.top);
+					}}
+				>
+					<svg viewBox="0 0 2 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M0 1C0 0.447716 0.447715 0 1 0C1.55228 0 2 0.447716 2 1C2 1.55228 1.55228 2 1 2C0.447715 2 0 1.55228 0 1ZM0 6C0 5.44772 0.447715 5 1 5C1.55228 5 2 5.44772 2 6C2 6.55228 1.55228 7 1 7C0.447715 7 0 6.55228 0 6ZM1 10C0.447715 10 0 10.4477 0 11C0 11.5523 0.447715 12 1 12C1.55228 12 2 11.5523 2 11C2 10.4477 1.55228 10 1 10Z" fill="currentColor" /></svg>
+				</button>
+			</div>
+			{#if target}
+				<a class="link-body" href="/object/{target.id}">
+					<span class="link-icon">{objectIcon(target.icon, target.typeKey)}</span>
+					<span class="link-name">{target.name || "Untitled"}</span>
+				</a>
+			{:else}
+				<span class="link-body deleted">
+					<span class="link-icon">⌀</span>
+					<span class="link-name">Deleted object</span>
+				</span>
+			{/if}
+		</div>
 	{:else if block.content.custom}
 		<div class="block custom" class:selected={selectedIds.has(block.id)} data-block={block.id}>
 			<span class="chip">{block.content.custom.contentType}</span>
@@ -663,5 +721,39 @@
 		border-radius: 2px;
 		pointer-events: none;
 		z-index: 10;
+	}
+	/* Anytype block/link.tsx text style: icon + medium name, underline
+	   from a light border, brightening on hover. */
+	.link-block {
+		align-items: center;
+	}
+	.link-body {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		color: var(--fg);
+		text-decoration: none;
+		min-width: 0;
+	}
+	.link-icon {
+		font-size: 18px;
+		line-height: 20px;
+		flex: none;
+	}
+	.link-name {
+		font-weight: 500;
+		border-bottom: 1px solid var(--border);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.link-body:hover .link-name {
+		border-bottom-color: var(--fg);
+	}
+	.link-body.deleted {
+		color: var(--muted);
+	}
+	.link-body.deleted .link-name {
+		border-bottom: none;
 	}
 </style>
