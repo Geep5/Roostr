@@ -1,5 +1,6 @@
 <script lang="ts">
 	import TypeSuggest from "./TypeSuggest.svelte";
+	import LayoutIcon from "./LayoutIcon.svelte";
 	import { createRelation } from "$lib/relations";
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
 	import { note } from "$lib/api";
@@ -232,7 +233,6 @@
 	// board/calendar config rows) live in its two-pane popover menu.
 	let settingsOpen = $state(false);
 	let settingsPane = $state<"root" | "layout" | "group" | "date">("root");
-	const VIEW_GLYPHS: Record<string, string> = { table: "▤", gallery: "▧", kanban: "▥", calendar: "▦" };
 
 	function toggleSettings() {
 		settingsOpen = !settingsOpen;
@@ -273,7 +273,7 @@
 		Sort{sorts.length ? ` · ${sorts.length}` : ""}
 	</button>
 	<span class="spacer"></span>
-	<span class="view-chip">{VIEW_GLYPHS[viewType]} {viewType[0].toUpperCase() + viewType.slice(1)}</span>
+	<span class="view-chip"><LayoutIcon kind={viewType} size={16} /> {viewType[0].toUpperCase() + viewType.slice(1)}</span>
 	<span class="settings-anchor">
 		<button class="pill" class:active={settingsOpen} title="View settings" onclick={toggleSettings}>⚙ Settings</button>
 		{#if settingsOpen}
@@ -308,7 +308,7 @@
 								settingsPane = "root";
 							}}
 						>
-							<span>{VIEW_GLYPHS[v]} {label}</span>
+							<span class="vlabel"><LayoutIcon kind={v} size={22} /> {label}</span>
 							{#if viewType === v}<span class="vcheck">✓</span>{/if}
 						</button>
 					{/each}
@@ -525,9 +525,17 @@
 		color: var(--fg);
 	}
 	.view-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
 		color: var(--muted);
 		font-size: 12px;
 		align-self: center;
+	}
+	.vlabel {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
 	}
 	.settings-anchor {
 		position: relative;
