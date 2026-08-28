@@ -7,6 +7,7 @@
 	 * object itself, same as viewFilters/viewSorts. Hover a header for "×"
 	 * (hide column); click a header to sort.
 	 */
+	import PropertySuggest from "./PropertySuggest.svelte";
 	import { fetchQuery, note, type QueryResultRow } from "$lib/api";
 	import { store } from "$lib/data.svelte";
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
@@ -73,18 +74,10 @@
 	const cols = $derived(local ?? stored);
 	const columns = $derived(cols.map((c) => c.key));
 
-	const addable = $derived.by(() => {
-		const have = new Set(columns);
-		const rels = relations
-			.filter((r) => !r.hidden && !have.has(r.key))
-			.map((r) => ({ key: r.key, name: r.name || r.key }));
-		return [...SPECIALS.filter((s) => !have.has(s.key)), ...rels];
-	});
-
-	let adding = $state(false);
+	let adding = $state<{ x: number; y: number } | null>(null);
 
 	async function saveColumns(next: Col[]) {
-		adding = false;
+		adding = null;
 		local = next;
 		await note.setField(object.id, "viewRelations", {
 			valuesValue: {
@@ -235,15 +228,14 @@
 					</th>
 				{/each}
 				<th class="plus-col">
-					<button class="head plus" title="Add column" onclick={() => (adding = !adding)}>+</button>
-					{#if adding}
-						<div class="col-menu">
-							{#each addable as a (a.key)}
-								<button onclick={() => void saveColumns([...cols, { key: a.key, width: DEFAULT_WIDTH }])}>{a.name}</button>
-							{/each}
-							{#if addable.length === 0}<span class="muted">No more properties</span>{/if}
-						</div>
-					{/if}
+					<button
+						class="head plus"
+						title="Add column"
+						onclick={(e) => {
+							const r = e.currentTarget.getBoundingClientRect();
+							adding = adding ? null : { x: r.left, y: r.bottom + 4 };
+						}}>+</button
+					>
 				</th>
 			</tr>
 		</thead>
@@ -264,7 +256,18 @@
 	{/if}
 </div>
 {#if adding}
-	<button class="backdrop" aria-label="Close" onclick={() => (adding = false)}></button>
+	<!-- Anytype's relationSuggest: pick an existing property, a system
+	     column, or create a new property (name + format). Fixed-position,
+	     viewport-clamped - immune to the table's overflow clipping. -->
+	<PropertySuggest
+		x={adding.x}
+		y={adding.y}
+		exclude={columns}
+		extras={SPECIALS.filter((sp) => !columns.includes(sp.key))}
+		onpick={(rel) => void saveColumns([...cols, { key: rel.key, width: DEFAULT_WIDTH }])}
+		onextra={(key) => void saveColumns([...cols, { key, width: DEFAULT_WIDTH }])}
+		onclose={() => (adding = null)}
+	/>
 {/if}
 
 <style>
@@ -331,35 +334,6 @@
 	.plus-col {
 		width: 32px;
 	}
-	.col-menu {
-		position: absolute;
-		top: calc(100% + 4px);
-		right: 0;
-		z-index: 90;
-		min-width: 180px;
-		max-height: 280px;
-		overflow-y: auto;
-		background: var(--panel, #1a1d23);
-		border: 1px solid var(--border);
-		border-radius: 10px;
-		padding: 6px;
-		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-		display: flex;
-		flex-direction: column;
-	}
-	.col-menu button {
-		border: none;
-		background: none;
-		color: inherit;
-		text-align: left;
-		padding: 6px 8px;
-		border-radius: 6px;
-		cursor: pointer;
-		font-size: 13px;
-	}
-	.col-menu button:hover {
-		background: var(--hover);
-	}
 	td {
 		border-bottom: 1px solid var(--border);
 		padding: 7px 10px;
@@ -382,13 +356,5 @@
 	}
 	.empty {
 		padding: 16px 10px;
-	}
-	.backdrop {
-		position: fixed;
-		inset: 0;
-		z-index: 80;
-		background: none;
-		border: none;
-		cursor: default;
 	}
 </style>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import TypeSuggest from "./TypeSuggest.svelte";
+	import { createRelation } from "$lib/relations";
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
 	import { note } from "$lib/api";
 
@@ -209,6 +210,25 @@
 		await onchanged();
 	}
 
+	/** "＋ New … property" entries create the relation, then select it. */
+	async function onGroupPick(el: HTMLSelectElement) {
+		if (el.value !== "__new__") return void setGroupKey(el.value);
+		const name = prompt("New tag property name:");
+		el.value = groupKey; // restore until created
+		if (!name?.trim()) return;
+		const rel = await createRelation(name.trim(), "tag");
+		if (rel) await setGroupKey(rel.key);
+	}
+
+	async function onDatePick(el: HTMLSelectElement) {
+		if (el.value !== "__new__") return void setDateKey(el.value);
+		const name = prompt("New date property name:");
+		el.value = dateKey;
+		if (!name?.trim()) return;
+		const rel = await createRelation(name.trim(), "date");
+		if (rel) await setDateKey(rel.key);
+	}
+
 	// ── UI state ──────────────────────────────────────────────────
 	let open = $state<"" | "source" | "filter" | "sort">("");
 	$effect(() => {
@@ -247,19 +267,29 @@
 		{/each}
 	</span>
 	{#if viewType === "kanban"}
-		<select class="cfg" value={groupKey} onchange={(e) => void setGroupKey(e.currentTarget.value)}>
-			<option value="" disabled>Group by…</option>
-			{#each groupOptions as g (g.key)}
-				<option value={g.key}>{g.name || g.key}</option>
-			{/each}
-		</select>
+		<!-- Anytype board: pick WHICH select/tag property groups the board;
+		     columns follow the property's option order. -->
+		<label class="cfg-label">
+			Group by
+			<select class="cfg" value={groupKey} onchange={(e) => void onGroupPick(e.currentTarget)}>
+				<option value="" disabled>property…</option>
+				{#each groupOptions as g (g.key)}
+					<option value={g.key}>{g.name || g.key}</option>
+				{/each}
+				<option value="__new__">＋ New tag property…</option>
+			</select>
+		</label>
 	{/if}
 	{#if viewType === "calendar"}
-		<select class="cfg" value={dateKey} onchange={(e) => void setDateKey(e.currentTarget.value)}>
-			{#each dateOptions as d (d.key)}
-				<option value={d.key}>{d.name}</option>
-			{/each}
-		</select>
+		<label class="cfg-label">
+			Date
+			<select class="cfg" value={dateKey} onchange={(e) => void onDatePick(e.currentTarget)}>
+				{#each dateOptions as d (d.key)}
+					<option value={d.key}>{d.name}</option>
+				{/each}
+				<option value="__new__">＋ New date property…</option>
+			</select>
+		</label>
 	{/if}
 </div>
 
@@ -347,6 +377,13 @@
 	.views {
 		display: flex;
 		gap: 4px;
+	}
+	.cfg-label {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 12px;
+		color: var(--muted);
 	}
 	.cfg {
 		background: var(--bg);

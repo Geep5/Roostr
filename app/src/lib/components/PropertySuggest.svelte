@@ -12,12 +12,20 @@
 	let {
 		x,
 		y,
+		exclude = [],
+		extras = [],
 		onpick,
+		onextra,
 		onclose,
 	}: {
 		x: number;
 		y: number;
+		/** Relation keys to hide (already present as columns/props). */
+		exclude?: string[];
+		/** Non-relation options (system columns like Type/Created). */
+		extras?: Array<{ key: string; name: string }>;
 		onpick: (rel: RelationDefJSON) => void;
+		onextra?: (key: string) => void;
 		onclose: () => void;
 	} = $props();
 
@@ -31,11 +39,17 @@
 		inputEl?.focus();
 	});
 
-	const all = $derived(store.relations.filter((r) => !r.hidden && !RESERVED_KEYS[r.key]));
+	const all = $derived(store.relations.filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && !exclude.includes(r.key)));
 	const filtered = $derived.by(() => {
 		const q = query.trim().toLowerCase();
 		if (!q) return all;
 		return all.filter((r) => (r.name || r.key).toLowerCase().includes(q));
+	});
+	const filteredExtras = $derived.by(() => {
+		const q = query.trim().toLowerCase();
+		const pool = extras.filter((e) => !exclude.includes(e.key));
+		if (!q) return pool;
+		return pool.filter((e) => e.name.toLowerCase().includes(q));
 	});
 	const exactMatch = $derived(all.some((r) => (r.name || r.key).toLowerCase() === query.trim().toLowerCase()));
 	const canCreate = $derived(query.trim() !== "" && !exactMatch);
@@ -93,6 +107,16 @@
 			</div>
 		{/if}
 	{/if}
+	{#if filteredExtras.length > 0}
+		<div class="section">System</div>
+		<div class="list">
+			{#each filteredExtras as e (e.key)}
+				<button class="item" onclick={() => onextra?.(e.key)}>
+					<span>{e.name}</span>
+				</button>
+			{/each}
+		</div>
+	{/if}
 	{#if filtered.length > 0}
 		<div class="section">My properties</div>
 		<div class="list">
@@ -103,7 +127,7 @@
 				</button>
 			{/each}
 		</div>
-	{:else if !canCreate}
+	{:else if !canCreate && filteredExtras.length === 0}
 		<span class="none">No properties yet — type a name to create one.</span>
 	{/if}
 </div>
