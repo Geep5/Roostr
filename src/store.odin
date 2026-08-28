@@ -16,11 +16,19 @@ import "core:mem/virtual"
 import "core:encoding/hex"
 import "core:crypto"
 
-// Full rebuilds are expensive (every .pb decoded + replayed); they run only
-// at startup and every COMPACT_INTERVAL_MS to reclaim arena garbage left by
-// incremental reloads. Commits mark their object dirty; ensure_loaded
-// re-reads just those directories.
+// Full rebuilds are expensive (every .pb decoded + replayed); they run at
+// startup, every COMPACT_INTERVAL_MS, and whenever incremental reloads have
+// parked more than the byte budget below. Commits mark their object dirty;
+// ensure_loaded re-reads just those directories.
+//
+// The budget matters more than the timer: an incremental reload re-replays
+// the whole object, and the hot objects are the biggest ones (an agent's
+// chat is thousands of changes / megabytes), so one write can park tens of
+// megabytes of arena garbage. Time alone let the footprint reach 2 GB
+// between compactions under ordinary harness traffic.
 COMPACT_INTERVAL_MS :: 10 * 60 * 1000
+COMPACT_SLACK_FACTOR :: 3               // garbage tolerated as a multiple of the live set
+COMPACT_SLACK_BYTES :: 32 * 1024 * 1024 // …plus this, so small corpora still batch writes
 
 Store :: struct {
 	root:      string, // <data>/changes
@@ -29,6 +37,7 @@ Store :: struct {
 	arena:     virtual.Arena, // owns everything reachable from `states`
 	states:    map[string]^Object_State,
 	dirty:     map[string]bool, // object ids needing an incremental reload
+	live_used: uint, // arena.total_used right after the last full rebuild
 	loaded_at: i64,
 	valid:     bool,
 }
@@ -62,9 +71,11 @@ store_mark_dirty :: proc(object_id: string) {
 ensure_loaded :: proc() {
 	now := time.tick_now()._nsec / 1_000_000
 
-	// Incremental path: reload only dirty objects. Replaced states leak in
-	// the arena until the next periodic full rebuild compacts them.
-	if g_store.valid && now - g_store.loaded_at < COMPACT_INTERVAL_MS {
+	// Incremental path: reload only dirty objects. Replaced states are parked
+	// in the arena — taken only while the parked bytes stay inside the budget,
+	// so a hot object cannot balloon the footprint between timed compactions.
+	budget := g_store.live_used * COMPACT_SLACK_FACTOR + COMPACT_SLACK_BYTES
+	if g_store.valid && now - g_store.loaded_at < COMPACT_INTERVAL_MS && g_store.arena.total_used < budget {
 		if len(g_store.dirty) == 0 do return
 		alloc := virtual.arena_allocator(&g_store.arena)
 		for object_id in g_store.dirty {
@@ -101,6 +112,7 @@ ensure_loaded :: proc() {
 			}
 		}
 	}
+	g_store.live_used = g_store.arena.total_used
 	g_store.loaded_at = now
 	g_store.valid = true
 }
