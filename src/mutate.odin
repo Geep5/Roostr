@@ -502,6 +502,34 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		}
 		ok_response(sock)
 
+	// Real deletion: purge the change files and record it in the synced
+	// ledger so no device republishes the object and no relay copy is
+	// accepted back. `delete` only appends a tombstone.
+	case "vanish":
+		ids := make([dynamic]string, context.temp_allocator)
+		if object_id := json_str(parsed, "object_id"); object_id != "" do append(&ids, object_id)
+		if arr, ok := json_field(parsed, "object_ids"); ok {
+			if items, aok := arr.(json.Array); aok {
+				for item in items do if s, sok := item.(json.String); sok do append(&ids, string(s))
+			}
+		}
+		if len(ids) == 0 {
+			respond_error(sock, "object_id or object_ids required")
+			return
+		}
+		for id in ids do if id == VANISH_LOG_ID {
+			respond_error(sock, "the vanish ledger cannot be vanished")
+			return
+		}
+		vanished := vanish_objects(ids[:])
+		if vanished == 0 {
+			respond_error(sock, "vanish failed", "500 Internal Server Error")
+			return
+		}
+		extra := jobj()
+		extra["vanished"] = json.Integer(i64(vanished))
+		ok_response(sock, extra)
+
 	case "channel_create":
 		name := json_str(parsed, "name")
 		if name == "" {

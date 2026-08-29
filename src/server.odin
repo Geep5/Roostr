@@ -226,6 +226,8 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 		handle_changes_get(sock, req.path[len("/api/changes/"):])
 	case req.method == "POST" && req.path == "/api/changes":
 		handle_changes_import(sock, req.body)
+	case req.method == "GET" && req.path == "/api/vanished":
+		handle_vanished(sock)
 	case req.method == "GET" && req.path == "/api/settings":
 		handle_settings(sock)
 	case req.method == "GET" && req.path == "/api/relations":
@@ -241,7 +243,7 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 	}
 }
 
-HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "relation", "channel", "skill", "peer", "pinned_fact", "milestone"}
+HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "relation", "channel", "skill", "peer", "pinned_fact", "milestone", VANISH_LOG_TYPE}
 
 handle_list_objects :: proc(sock: net.TCP_Socket) {
 	Ctx :: struct {

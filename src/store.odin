@@ -78,13 +78,31 @@ ensure_loaded :: proc() {
 	if g_store.valid && now - g_store.loaded_at < COMPACT_INTERVAL_MS && g_store.arena.total_used < budget {
 		if len(g_store.dirty) == 0 do return
 		alloc := virtual.arena_allocator(&g_store.arena)
+		touched := make([dynamic]string, 0, len(g_store.dirty), context.temp_allocator)
 		for object_id in g_store.dirty {
 			dir_path, _ := filepath.join({g_store.root, object_id}, context.temp_allocator)
 			delete_key(&g_store.states, object_id)
 			load_object_dir(dir_path, object_id, alloc)
+			append(&touched, strings.clone(object_id, context.temp_allocator))
 		}
 		for k in g_store.dirty do delete(k)
 		clear(&g_store.dirty)
+		// A relay copy of a vanished object can race in ahead of the ledger,
+		// and a ledger reload can vanish objects that are already on disk.
+		// The ledger wins either way.
+		vanished := vanished_locked()
+		if len(vanished) > 0 {
+			ledger_reloaded := false
+			for id in touched do if id == VANISH_LOG_ID do ledger_reloaded = true
+			if ledger_reloaded {
+				enforce_vanished_locked()
+			} else {
+				for id in touched do if id in vanished {
+					purge_object_files(id)
+					delete_key(&g_store.states, id)
+				}
+			}
+		}
 		return
 	}
 
@@ -112,6 +130,7 @@ ensure_loaded :: proc() {
 			}
 		}
 	}
+	enforce_vanished_locked()
 	g_store.live_used = g_store.arena.total_used
 	g_store.loaded_at = now
 	g_store.valid = true

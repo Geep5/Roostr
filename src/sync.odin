@@ -22,6 +22,9 @@ import "core:strings"
 
 handle_changes_manifest :: proc(sock: net.TCP_Socket) {
 	out := jobj()
+	// Vanished objects are never offered for publication, even if a stray
+	// directory is still on disk waiting for the next compaction to reclaim it.
+	vanished := vanished_ids()
 	dir, derr := os.open(g_store.root)
 	if derr == nil {
 		defer os.close(dir)
@@ -29,6 +32,7 @@ handle_changes_manifest :: proc(sock: net.TCP_Socket) {
 		if eerr == nil {
 			for entry in entries {
 				if entry.type != .Directory || strings.has_prefix(entry.name, ".") do continue
+				if entry.name in vanished do continue
 				ids := make([dynamic]json.Value, context.temp_allocator)
 				odir, oerr := os.open(entry.fullpath)
 				if oerr != nil do continue
@@ -49,6 +53,14 @@ handle_changes_manifest :: proc(sock: net.TCP_Socket) {
 handle_changes_get :: proc(sock: net.TCP_Socket, object_id: string) {
 	if object_id == "" || strings.contains(object_id, "/") || strings.contains(object_id, "..") {
 		respond_error(sock, "bad object id")
+		return
+	}
+	if object_id in vanished_ids() {
+		// A peer must not be able to pull a vanished object back out of us.
+		out := jobj()
+		out["objectId"] = json.String(object_id)
+		out["changes"] = json.Array(make([dynamic]json.Value, context.temp_allocator))
+		respond_json(sock, json.Object(out))
 		return
 	}
 	dir_path, _ := filepath.join({g_store.root, object_id}, context.temp_allocator)
@@ -91,6 +103,10 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 	imported := 0
 	skipped := 0
 	rejected := 0
+	dropped := 0
+	// The ledger is authoritative: a vanished object never comes back, no
+	// matter how many relays or peers still hold its changes.
+	vanished := vanished_ids()
 	touched := make(map[string]bool, context.temp_allocator)
 	ids := make([dynamic]json.Value, context.temp_allocator)
 
@@ -131,6 +147,13 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 			rejected += 1
 			continue
 		}
+		if c.object_id in vanished {
+			// Never write it back. Reporting the id keeps the sync daemon from
+			// echoing the change at the relay that just handed it to us.
+			dropped += 1
+			append(&ids, json.String(string(hex.encode(c.id, context.temp_allocator))))
+			continue
+		}
 		hex_str := string(hex.encode(c.id, context.temp_allocator))
 		dir, _ := filepath.join({g_store.root, c.object_id}, context.temp_allocator)
 		append(&ids, json.String(string(hex.encode(c.id, context.temp_allocator))))
@@ -160,6 +183,7 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 	out["imported"] = json.Integer(i64(imported))
 	out["skipped"] = json.Integer(i64(skipped))
 	out["rejected"] = json.Integer(i64(rejected))
+	out["dropped"] = json.Integer(i64(dropped))
 	out["ids"] = json.Array(ids)
 	respond_json(sock, json.Object(out))
 }

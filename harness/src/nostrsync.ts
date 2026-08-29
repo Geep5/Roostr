@@ -23,6 +23,12 @@ import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 const CHANGE_KIND = 1078;
 const KEYRING_KIND = 30078;
 const KEYRING_D = "roostr-keyring";
+/** NIP-09 deletion request. Advisory: relays SHOULD honour it, MAY ignore it. */
+const DELETE_KIND = 5;
+/** `e` tags per deletion request — relays cap event size, so batch. */
+const DELETE_BATCH = 400;
+/** The synced vanish ledger (see src/vanish.odin); never published as data to delete. */
+const VANISH_LOG_ID = "__vanished__";
 
 function dataRoot(): string {
 	return process.env.GLON_DATA ?? `${process.env.HOME}/.glon`;
@@ -34,6 +40,8 @@ interface SyncState {
 	published: Record<string, true>;
 	/** newest relay event created_at we've processed, per subscription. */
 	cursor: number;
+	/** object ids we have already asked the relays to delete (NIP-09). */
+	vanishRequested: Record<string, true>;
 }
 
 function statePath(): string {
@@ -43,11 +51,11 @@ function statePath(): string {
 async function readState(): Promise<SyncState> {
 	try {
 		const parsed = (await Bun.file(statePath()).json()) as SyncState;
-		if (parsed?.version === 1) return parsed;
+		if (parsed?.version === 1) return { ...parsed, vanishRequested: parsed.vanishRequested ?? {} };
 	} catch {
 		/* fresh */
 	}
-	return { version: 1, published: {}, cursor: 0 };
+	return { version: 1, published: {}, cursor: 0, vanishRequested: {} };
 }
 
 function writeState(state: SyncState): void {
@@ -108,6 +116,81 @@ async function localImport(b64s: string[]): Promise<{ imported: number; rejected
 	return (await res.json()) as { imported: number; rejected: number; ids: string[] };
 }
 
+/** Object ids the local ledger says are vanished (src/vanish.odin). */
+async function localVanished(): Promise<Set<string>> {
+	try {
+		const res = await fetch(`${API}/api/vanished`);
+		const out = (await res.json()) as { vanished: Array<{ objectId: string }> };
+		return new Set(out.vanished.map((v) => v.objectId));
+	} catch {
+		return new Set();
+	}
+}
+
+// ── NIP-09: ask the relays to drop an object's events ────────────
+//
+// The event ids are not derivable locally: NIP-44 picks a fresh random
+// nonce per encryption, so the same change published twice has two
+// different ciphertexts and two different event ids, and we never stored
+// them. They have to be read back from the relays — which the blinded
+// "h" tags make exact, without revealing any object id.
+
+/** `#h` values per filter: one round trip covers this many objects. */
+const HTAG_BATCH = 100;
+
+async function collectEventIds(pool: SimplePool, id: Identity, objectIds: string[]): Promise<string[]> {
+	const found = new Set<string>();
+	for (let i = 0; i < objectIds.length; i += HTAG_BATCH) {
+		const tags = objectIds.slice(i, i + HTAG_BATCH).map((objectId) => blindObjectId(id, objectId));
+		await Promise.all(
+			id.relays.map(async (relay) => {
+				let until: number | undefined = undefined;
+				for (;;) {
+					let page: Event[];
+					try {
+						page = await pool.querySync([relay], { kinds: [CHANGE_KIND], authors: [id.pk], "#h": tags, until, limit: 500 });
+					} catch {
+						return; // relay down; the others still answer
+					}
+					if (page.length === 0) return;
+					for (const e of page) found.add(e.id);
+					const oldest = Math.min(...page.map((e) => e.created_at));
+					if (until !== undefined && oldest >= until) return; // no progress
+					until = oldest;
+				}
+			}),
+		);
+	}
+	return [...found];
+}
+
+/** Publish kind-5 requests for `eventIds`. Returns requests accepted somewhere. */
+async function publishDeleteRequests(pool: SimplePool, id: Identity, eventIds: string[], reason: string): Promise<number> {
+	let sent = 0;
+	for (let i = 0; i < eventIds.length; i += DELETE_BATCH) {
+		const batch = eventIds.slice(i, i + DELETE_BATCH);
+		const event = finalizeEvent(
+			{
+				kind: DELETE_KIND,
+				created_at: Math.floor(Date.now() / 1000),
+				tags: [...batch.map((eid) => ["e", eid]), ["k", String(CHANGE_KIND)]],
+				content: reason,
+			},
+			id.sk,
+		);
+		try {
+			await Promise.any(pool.publish(id.relays, event));
+			sent++;
+		} catch {
+			/* every relay refused this batch; the ledger still suppresses it locally */
+		}
+		const { promise, resolve } = Promise.withResolvers<void>();
+		setTimeout(resolve, 120);
+		await promise;
+	}
+	return sent;
+}
+
 // ── Sync engine ──────────────────────────────────────────────────
 
 export async function startNostrSync(): Promise<void> {
@@ -131,6 +214,11 @@ export async function startNostrSync(): Promise<void> {
 	};
 	setInterval(persist, 5000);
 
+	// Vanished objects (src/vanish.odin) are never published, and their
+	// relay copies are chased with NIP-09 requests. Refreshed whenever the
+	// ledger object commits.
+	let vanished = await localVanished();
+
 	// ── Paced publish queue ────────────────────────────────────────
 	//
 	// Public relays rate-limit bursts (a fresh node pushes its whole
@@ -150,9 +238,20 @@ export async function startNostrSync(): Promise<void> {
 	let failuresLogged = 0;
 
 	function enqueue(objectId: string, changeHex: string, b64: string): void {
-		if (state.published[changeHex] || queued.has(changeHex)) return;
+		if (state.published[changeHex] || queued.has(changeHex) || vanished.has(objectId)) return;
 		queued.add(changeHex);
 		queue.push({ objectId, changeHex, b64, attempts: 0, notBefore: 0 });
+	}
+
+	/** Ask the relays to drop the events of every newly vanished object, once. */
+	async function chaseVanished(): Promise<void> {
+		const pending = [...vanished].filter((objectId) => !state.vanishRequested[objectId]);
+		if (pending.length === 0) return;
+		const eventIds = await collectEventIds(pool, id!, pending);
+		const sent = eventIds.length > 0 ? await publishDeleteRequests(pool, id!, eventIds, "object vanished by its owner") : 0;
+		console.log(`[sync] vanish: ${pending.length} object(s), ${eventIds.length} relay event(s), ${sent} delete request(s)`);
+		for (const objectId of pending) state.vanishRequested[objectId] = true;
+		dirty = true;
 	}
 
 	/** Relay + NIP-44 limits: chunk big changes into ≤CHUNK_CHARS parts.
@@ -212,7 +311,8 @@ export async function startNostrSync(): Promise<void> {
 				continue;
 			}
 			const [item] = queue.splice(idx, 1);
-			if (state.published[item.changeHex]) {
+			// A vanish can land while the change is already queued (or mid-backoff).
+			if (state.published[item.changeHex] || vanished.has(item.objectId)) {
 				queued.delete(item.changeHex);
 				continue;
 			}
@@ -393,6 +493,11 @@ export async function startNostrSync(): Promise<void> {
 		await mergeKeyring(keyringEvents[0]);
 	}
 
+	// The backfill may have carried new vanish records from another device;
+	// re-read the ledger before deciding what to publish or chase.
+	vanished = await localVanished();
+	await chaseVanished();
+
 	// Publish local changes the relays don't have (published set carries
 	// both prior publishes and everything backfill just returned).
 	const manifest = await localManifest();
@@ -400,7 +505,7 @@ export async function startNostrSync(): Promise<void> {
 	for (const hexes of Object.values(manifest)) {
 		for (const hex of hexes) if (!state.published[hex]) toPublish++;
 	}
-	console.log(`[sync] ${toPublish} local change(s) to publish`);
+	console.log(`[sync] ${toPublish} local change(s) to publish${vanished.size > 0 ? `, ${vanished.size} object(s) vanished` : ""}`);
 	for (const objectId of Object.keys(manifest)) {
 		await publishObject(objectId);
 	}
@@ -408,7 +513,19 @@ export async function startNostrSync(): Promise<void> {
 	persist();
 
 	// ── Live: both directions ──────────────────────────────────────
-	subscribe((objectId) => void publishObject(objectId));
+	subscribe((objectId) => {
+		if (objectId === VANISH_LOG_ID) {
+			// A vanish happened here or arrived from a peer: re-read the ledger,
+			// publish the record itself, then chase the relay copies.
+			void (async () => {
+				vanished = await localVanished();
+				await publishObject(objectId);
+				await chaseVanished();
+			})();
+			return;
+		}
+		void publishObject(objectId);
+	});
 	pool.subscribeMany(id.relays, { kinds: [CHANGE_KIND], authors: [id.pk], since: state.cursor + 1 }, {
 		onevent: (event) => void onRelayEvent(event),
 	});
@@ -416,4 +533,29 @@ export async function startNostrSync(): Promise<void> {
 		onevent: (event) => void mergeKeyring(event),
 	});
 	console.log("[sync] live");
+}
+
+/**
+ * One-shot NIP-09 pass for objects already recorded in the local ledger —
+ * used by `vanish` on the command line, where no daemon is running. The
+ * local purge and the ledger write are the server's job; this only chases
+ * the relay copies.
+ */
+export async function vanishOnRelays(objectIds: string[]): Promise<{ events: number; requests: number }> {
+	const id = await loadIdentity();
+	if (!id || id.relays.length === 0) {
+		console.log("[vanish] no nostr key or no relays — nothing to ask (local purge already done)");
+		return { events: 0, requests: 0 };
+	}
+	const pool = new SimplePool();
+	const state = await readState();
+	try {
+		const eventIds = await collectEventIds(pool, id, objectIds);
+		const requests = eventIds.length > 0 ? await publishDeleteRequests(pool, id, eventIds, "object vanished by its owner") : 0;
+		for (const objectId of objectIds) state.vanishRequested[objectId] = true;
+		writeState(state);
+		return { events: eventIds.length, requests };
+	} finally {
+		pool.close(id.relays);
+	}
 }

@@ -11,14 +11,15 @@
  *   bun run src/index.ts setup --name Gracie [--model claude-…] [--channel id]
  *   bun run src/index.ts serve
  *   bun run src/index.ts ask <agentId> "message"
+ *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
-import { API, chatPost, fetchObject, list, query, setField, str, subscribe, sv, createObject } from "./api";
+import { API, chatPost, fetchObject, list, mutate, query, setField, str, subscribe, sv, createObject } from "./api";
 import { runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled, syncHeartbeats } from "./roster";
-import { startNostrSync } from "./nostrsync";
+import { startNostrSync, vanishOnRelays } from "./nostrsync";
 import { ensureChat, frameMessage, ingestIntoChat, pendingMessages, setMark } from "./surfaces";
 
 function argValue(flagName: string): string {
@@ -252,10 +253,55 @@ async function ask(): Promise<void> {
 	console.log(reply);
 }
 
+/**
+ * Real deletion. `delete` only tombstones: the change files stay on disk and
+ * on the relays, and the union reconcile keeps bringing them back. `vanish`
+ * purges the files, records the object in the synced ledger (so no device
+ * republishes it and no relay copy is accepted back), then asks the relays to
+ * drop the events with NIP-09.
+ */
+async function vanish(): Promise<void> {
+	const args = process.argv.slice(3).filter((a) => a !== "--yes");
+	const trash = args.includes("--trash");
+	let ids = args.filter((a) => !a.startsWith("--"));
+	if (trash) {
+		const rows = await query({ includeDeleted: true, filters: [{ key: "deleted", condition: "equal", value: true }], limit: 10_000 });
+		ids = rows.map((r) => r.id);
+	}
+	if (ids.length === 0) {
+		console.error("usage: vanish <objectId…> | --trash [--yes]\n  --trash vanishes every object already marked deleted");
+		process.exit(1);
+	}
+	if (!process.argv.includes("--yes")) {
+		console.log(`${ids.length} object(s) would be vanished — irreversible locally. Re-run with --yes:`);
+		for (const id of ids.slice(0, 10)) console.log(`  ${id}`);
+		if (ids.length > 10) console.log(`  … and ${ids.length - 10} more`);
+		return;
+	}
+	// One ledger change and one relay pass for the whole set: a per-object
+	// loop would mean a store rebuild and three relay round trips each.
+	const VANISH_CHUNK = 250;
+	let purged = 0;
+	for (let i = 0; i < ids.length; i += VANISH_CHUNK) {
+		const batch = ids.slice(i, i + VANISH_CHUNK);
+		try {
+			const res = (await mutate("vanish", { object_ids: batch })) as { vanished?: number };
+			purged += res.vanished ?? 0;
+		} catch (err) {
+			console.error(`[vanish] batch of ${batch.length} failed: ${err instanceof Error ? err.message : err}`);
+		}
+	}
+	console.log(`[vanish] purged ${purged}/${ids.length} object(s) locally; ledger updated`);
+	const { events, requests } = await vanishOnRelays(ids);
+	console.log(`[vanish] relays: ${events} event(s) found, ${requests} NIP-09 request(s) published`);
+	console.log("[vanish] note: kind 5 is advisory — relays SHOULD honour it, archival indexers may not.");
+}
+
 const cmd = process.argv[2];
 if (cmd === "setup") await setup();
 else if (cmd === "serve") await serve();
 else if (cmd === "ask") await ask();
+else if (cmd === "vanish") await vanish();
 else {
-	console.log("commands: setup --name X [--model m] [--channel id] | serve | ask <agentId> <msg>");
+	console.log("commands: setup --name X [--model m] [--channel id] | serve | ask <agentId> <msg> | vanish <objectId…>|--trash [--yes]");
 }
