@@ -1589,9 +1589,14 @@
 		display: flex;
 		align-items: center;
 		width: 100%;
+		background: none;
+		border: none;
 		color: var(--fg);
 		font-size: 15px;
 		font-weight: 600;
+		padding: 0;
+		cursor: pointer;
+		text-align: left;
 	}
 	.m-wcard-link {
 		flex: 1;
@@ -1602,6 +1607,9 @@
 		padding: 12px 6px 12px 14px;
 		color: var(--fg);
 		text-decoration: none;
+	}
+	button.m-wcard-head {
+		padding: 12px 14px;
 	}
 	.m-chev-btn {
 		flex: none;
