@@ -11,6 +11,7 @@
 	import { chat, settings } from "$lib/api";
 	import { store } from "$lib/data.svelte";
 	import EmojiPicker from "./EmojiPicker.svelte";
+	import { renderMarkdown } from "$lib/markdown";
 
 	let {
 		object,
@@ -62,7 +63,7 @@
 	const messageById = $derived(new Map(messages.map((m) => [m.id, m])));
 
 	let open = $state(false);
-	let composerEl = $state<HTMLInputElement>();
+	let composerEl = $state<HTMLTextAreaElement>();
 	const isOpen = $derived(full || open);
 	$effect(() => {
 		if (isOpen) composerEl?.focus();
@@ -170,7 +171,7 @@
 							{/if}
 							<span class="time">{when(m.ts)}</span>
 						</div>
-						<div class="text">{m.text}</div>
+						<div class="text md">{@html renderMarkdown(m.text)}</div>
 						{#if m.reactions.length > 0 || pickerFor === m.id}
 							<div class="reactions">
 								{#each m.reactions as r (r.emoji)}
@@ -212,10 +213,16 @@
 		<!-- Anytype commentForm: rounded highlight box, content area on top,
 		     toolbar row with the send control at the right. -->
 		<div class="composer">
-			<input
+			<textarea
 				bind:this={composerEl}
-				placeholder="Write a comment…"
+				placeholder="Write a comment… (markdown supported)"
 				bind:value={draft}
+				rows={1}
+				oninput={(e) => {
+					const el = e.currentTarget as HTMLTextAreaElement;
+					el.style.height = "auto";
+					el.style.height = `${el.scrollHeight}px`;
+				}}
 				onkeydown={(e) => {
 					if (e.key === "Enter" && !e.shiftKey) {
 						e.preventDefault();
@@ -223,7 +230,7 @@
 					}
 					if (e.key === "Escape") replyTo = "";
 				}}
-			/>
+			></textarea>
 			<div class="form-toolbar">
 				<span class="toolbar-side"></span>
 				<button class="send" disabled={!draft.trim()} aria-label="Send" onclick={() => void send()}>
@@ -387,8 +394,78 @@
 	.text {
 		font-size: 14px;
 		line-height: 1.45;
-		white-space: pre-wrap;
 		word-break: break-word;
+	}
+	/* Markdown render ({@html} content needs :global under scoped styles) */
+	.md :global(p) {
+		margin: 0 0 6px;
+	}
+	.md :global(p:last-child) {
+		margin-bottom: 0;
+	}
+	.md :global(code.ic) {
+		font-family: ui-monospace, monospace;
+		font-size: 12.5px;
+		background: var(--hover, #2a2a2a);
+		border-radius: 4px;
+		padding: 1px 5px;
+	}
+	.md :global(pre.cb) {
+		position: relative;
+		font-family: ui-monospace, monospace;
+		font-size: 12.5px;
+		line-height: 1.5;
+		background: var(--hover, #1d1d1d);
+		border: 1px solid var(--border, #2a2a2a);
+		border-radius: 8px;
+		padding: 8px 10px;
+		margin: 6px 0;
+		overflow-x: auto;
+		white-space: pre;
+	}
+	.md :global(pre.cb .cb-lang) {
+		display: block;
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--muted);
+		margin-bottom: 4px;
+	}
+	.md :global(pre.cb code) {
+		background: none;
+		padding: 0;
+	}
+	.md :global(ul),
+	.md :global(ol) {
+		margin: 4px 0;
+		padding-left: 20px;
+	}
+	.md :global(blockquote) {
+		margin: 4px 0;
+		padding: 2px 10px;
+		border-left: 2px solid var(--accent);
+		color: var(--muted);
+	}
+	.md :global(.md-h) {
+		font-weight: 700;
+		margin: 6px 0 2px;
+	}
+	.md :global(.md-h1) {
+		font-size: 17px;
+	}
+	.md :global(.md-h2) {
+		font-size: 15.5px;
+	}
+	.md :global(.md-h3) {
+		font-size: 14px;
+	}
+	.md :global(hr) {
+		border: none;
+		border-top: 1px solid var(--border, #2a2a2a);
+		margin: 8px 0;
+	}
+	.md :global(a) {
+		color: var(--accent);
 	}
 	.quote {
 		display: flex;
@@ -466,13 +543,17 @@
 		border-radius: 12px;
 		margin-top: 10px;
 	}
-	.composer input {
+	.composer textarea {
 		background: none;
 		border: none;
 		outline: none;
+		resize: none;
 		color: var(--fg);
+		font: inherit;
 		font-size: 14px;
+		line-height: 1.45;
 		padding: 12px 12px 4px;
+		max-height: 40vh;
 	}
 	.form-toolbar {
 		display: flex;
