@@ -72,6 +72,17 @@
 		return best;
 	}
 
+	/** Mobile object back: to the object's channel home (the pinned-cards
+	 * frame), not history.back — one more tap reaches the channels list. */
+	function mobileBackToChannel() {
+		if (objectSummary) {
+			const ch = owningChannelOf(objectSummary.channelId);
+			if (ch) selectChannel(ch.id);
+		}
+		mobileChannelOpen = true;
+		void goto("/");
+	}
+
 	function shortDate(ms: number): string {
 		const d = new Date(ms);
 		const now = new Date();
@@ -316,7 +327,7 @@
 	{#if objectId}
 		<!-- Object page: back / icon+name / star / more. -->
 		<header class="m-top">
-			<button class="m-btn" data-tip="Back" onclick={() => history.back()}>‹</button>
+			<button class="m-btn" data-tip="Channel home" onclick={() => mobileBackToChannel()}>‹</button>
 			<span class="m-obj">
 				{#if headerPath.icon === "graph"}
 					<span class="path-icon"><GraphIcon /></span>
