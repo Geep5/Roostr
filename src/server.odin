@@ -295,9 +295,6 @@ handle_list_objects :: proc(sock: net.TCP_Socket) {
 			emoji := ""
 			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do emoji = v.str
 			o["icon"] = json.String(emoji)
-			fav := false
-			if v, ok := fields_get(s.fields, "isFavorite"); ok && v.kind == .Bool do fav = v.b
-			o["isFavorite"] = json.Boolean(fav)
 			append(&arr, json.Object(o))
 		}
 		// Newest first.

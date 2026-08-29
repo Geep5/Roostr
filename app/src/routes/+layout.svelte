@@ -131,15 +131,6 @@
 		await refreshAll();
 	}
 
-	const favorites = $derived(store.summaries.filter((s) => s.isFavorite));
-	const isFavorite = $derived(objectSummary?.isFavorite ?? false);
-
-	async function toggleFavorite() {
-		if (!objectId) return;
-		await note.setField(objectId, "isFavorite", { boolValue: !isFavorite });
-		await refreshAll();
-	}
-
 	async function addToCollection(collectionId: string) {
 		if (!objectId) return;
 		const col = await fetchObject(collectionId);
@@ -340,7 +331,6 @@
 			</span>
 			{#if objectSummary}
 				<div class="m-actions">
-				<button class="m-btn" class:faved={isFavorite} data-tip={isFavorite ? "Remove from favorites" : "Add to favorites"} onclick={() => void toggleFavorite()}>{isFavorite ? "★" : "☆"}</button>
 				<div class="more-wrap">
 					<button class="m-btn" data-tip="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
 					{#if showMore}
@@ -556,27 +546,7 @@
 			<!-- Anytype widgets: each pinned object is its OWN widget card with
 			     a 600-weight header row (widget/common.scss .head .clickable);
 			     sets render their current view beneath. No "Pinned" label. -->
-			{#if favorites.length > 0}
-			<div class="section">
-				<div class="section-head">
-					<span class="section-name static">Favorites</span>
-				</div>
-				<div class="section-body">
-					{#each favorites as f (f.id)}
-						<a class="item" class:current={page.url.pathname === `/object/${f.id}`} href="/object/{f.id}">
-							{#if f.icon.startsWith("http")}
-								<img class="fav-img" src={f.icon} alt="" />
-							{:else}
-								<span class="obj-icon">{f.icon || typeGlyph(f.typeKey)}</span>
-							{/if}
-							{f.name || "Untitled"}
-						</a>
-					{/each}
-				</div>
-			</div>
-		{/if}
-
-		{#each pinned as p (p.id)}
+			{#each pinned as p (p.id)}
 				<div
 					class="widget"
 					class:current={page.url.pathname === `/object/${p.id}`}
@@ -702,14 +672,6 @@
 				<span class="path-name">{headerPath.name}</span>
 			</button>
 			<div class="header-side right">
-				{#if objectSummary}
-					<button
-						class="hbtn fav-star"
-						class:faved={isFavorite}
-						data-tip={isFavorite ? "Remove from favorites" : "Add to favorites"}
-						onclick={() => void toggleFavorite()}>{isFavorite ? "★" : "☆"}</button
-					>
-				{/if}
 				<a class="hbtn" data-tip="All objects" href="/">▦</a>
 				<a class="hbtn" data-tip="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}><GraphIcon size={16} /></a>
 				{#if objectSummary}
@@ -1107,9 +1069,6 @@
 		color: var(--fg);
 	}
 	/* Anytype nameWrap: 12px/18px medium, sentence case, secondary. */
-	.section-name.static {
-		cursor: default;
-	}
 	.section-name {
 		display: flex;
 		align-items: center;
@@ -1195,15 +1154,6 @@
 		font-size: 16px;
 		border-radius: 7px;
 		cursor: pointer;
-	}
-	.fav-img {
-		width: 16px;
-		height: 16px;
-		border-radius: 3px;
-		object-fit: cover;
-	}
-	.fav-star.faved {
-		color: var(--accent);
 	}
 	/* Anytype-style tooltip: delayed dark pill below the control. */
 	[data-tip] {
@@ -1509,9 +1459,6 @@
 		color: var(--fg);
 		font-size: 19px;
 		cursor: pointer;
-	}
-	.m-btn.faved {
-		color: var(--accent);
 	}
 	.m-actions {
 		display: flex;
