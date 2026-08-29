@@ -336,21 +336,45 @@ export async function startNostrSync(): Promise<void> {
 	state.published = {};
 	const backfill: Event[] = [];
 	const seenIds = new Set<string>();
-	let until: number | undefined = undefined;
-	for (;;) {
-		const page = await pool.querySync(id.relays, {
-			kinds: [CHANGE_KIND],
-			authors: [id.pk],
-			until,
-			limit: 500,
-		});
-		const fresh = page.filter((e) => !seenIds.has(e.id));
-		if (fresh.length === 0) break;
-		for (const e of fresh) seenIds.add(e.id);
-		backfill.push(...fresh);
-		until = Math.min(...fresh.map((e) => e.created_at));
-		if (page.length < 100) break; // relays exhausted
-	}
+	// Per-relay backwards pagination. Paging the MERGED pool with
+	// `until = min(page)` is a gap machine: each relay truncates its 500
+	// at a different timestamp, so the merged min (from the deepest
+	// relay) jumps past events the fuller relays still held - they were
+	// skipped forever (this is how duplicate republishes happened: the
+	// rebuilt published-set missed relay-held events). Each relay now
+	// walks its own timeline; ids dedupe across relays; a failing relay
+	// never aborts its siblings.
+	await Promise.all(
+		id.relays.map(async (relay) => {
+			let until: number | undefined = undefined;
+			for (;;) {
+				let page: Event[];
+				try {
+					page = await pool.querySync([relay], {
+						kinds: [CHANGE_KIND],
+						authors: [id.pk],
+						until,
+						limit: 500,
+					});
+				} catch {
+					return; // this relay is down; others continue
+				}
+				if (page.length === 0) break;
+				let freshCount = 0;
+				for (const e of page) {
+					if (!seenIds.has(e.id)) {
+						seenIds.add(e.id);
+						backfill.push(e);
+						freshCount++;
+					}
+				}
+				const oldest = Math.min(...page.map((e) => e.created_at));
+				if (freshCount === 0 && until !== undefined && oldest >= until) break;
+				if (until !== undefined && oldest >= until) break; // no progress
+				until = oldest;
+			}
+		}),
+	);
 	console.log(`[sync] backfill: ${backfill.length} event(s) from relays`);
 	// Route every event through the chunk-aware path (sorted so multi-part
 	// groups assemble in one pass); onRelayEvent advances the cursor.
