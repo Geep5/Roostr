@@ -85,7 +85,7 @@
 		await refreshAll();
 	}
 
-	const favorites = $derived(store.summaries.filter((s) => s.isFavorite).slice(0, 8));
+	const favorites = $derived(store.summaries.filter((s) => s.isFavorite));
 	const isFavorite = $derived(objectSummary?.isFavorite ?? false);
 
 	async function toggleFavorite() {
@@ -323,7 +323,27 @@
 			<!-- Anytype widgets: each pinned object is its OWN widget card with
 			     a 600-weight header row (widget/common.scss .head .clickable);
 			     sets render their current view beneath. No "Pinned" label. -->
-			{#each pinned as p (p.id)}
+			{#if favorites.length > 0}
+			<div class="section">
+				<div class="section-head">
+					<span class="section-name static">Favorites</span>
+				</div>
+				<div class="section-body">
+					{#each favorites as f (f.id)}
+						<a class="item" class:current={page.url.pathname === `/object/${f.id}`} href="/object/{f.id}">
+							{#if f.icon.startsWith("http")}
+								<img class="fav-img" src={f.icon} alt="" />
+							{:else}
+								<span class="obj-icon">{f.icon || typeGlyph(f.typeKey)}</span>
+							{/if}
+							{f.name || "Untitled"}
+						</a>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
+		{#each pinned as p (p.id)}
 				<div
 					class="widget"
 					class:current={page.url.pathname === `/object/${p.id}`}
@@ -449,20 +469,6 @@
 				<span class="path-name">{headerPath.name}</span>
 			</button>
 			<div class="header-side right">
-				{#if favorites.length > 0}
-					<div class="favorites">
-						{#each favorites as f (f.id)}
-							<a class="hbtn fav" data-tip={f.name || "Untitled"} href="/object/{f.id}">
-								{#if f.icon.startsWith("http")}
-									<img class="fav-img" src={f.icon} alt="" />
-								{:else}
-									{f.icon || typeGlyph(f.typeKey)}
-								{/if}
-							</a>
-						{/each}
-					</div>
-					<span class="hsep"></span>
-				{/if}
 				{#if objectSummary}
 					<button
 						class="hbtn fav-star"
@@ -867,6 +873,9 @@
 		color: var(--fg);
 	}
 	/* Anytype nameWrap: 12px/18px medium, sentence case, secondary. */
+	.section-name.static {
+		cursor: default;
+	}
 	.section-name {
 		display: flex;
 		align-items: center;
@@ -953,25 +962,11 @@
 		border-radius: 7px;
 		cursor: pointer;
 	}
-	.hbtn.fav {
-		font-size: 13px;
-	}
 	.fav-img {
 		width: 16px;
 		height: 16px;
 		border-radius: 3px;
 		object-fit: cover;
-	}
-	.favorites {
-		display: flex;
-		gap: 2px;
-		align-items: center;
-	}
-	.hsep {
-		width: 1px;
-		height: 16px;
-		background: var(--border);
-		margin: 0 4px;
 	}
 	.fav-star.faved {
 		color: var(--accent);
