@@ -1483,6 +1483,7 @@
 	header.m-top {
 		margin: 0;
 		max-width: none;
+		border-bottom: none;
 	}
 	.m-top {
 		position: relative;
@@ -1492,7 +1493,6 @@
 		gap: 8px;
 		padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px;
 		background: var(--bg);
-		border-bottom: 1px solid var(--border);
 		flex: none;
 		min-height: 56px;
 		z-index: 10;
