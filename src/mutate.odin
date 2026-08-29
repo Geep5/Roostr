@@ -824,8 +824,9 @@ Bundled_Type :: struct {
 // Anytype's default library (heart bundle/types.json), emoji equivalents
 // of their iconNames: page/document, note/create, task/checkbox,
 // profile("Human")/man, project/hammer, bookmark/bookmark. `person` keeps
-// its key so existing objects stay typed; `skill` is glon's own (agent
-// skills live on it).
+// its key so existing objects stay typed. Agent infrastructure (skills)
+// deliberately has NO type object - it lives outside the knowledge space
+// (harness reads typeKey "skill" through the raw query API).
 BUNDLED_TYPES :: []Bundled_Type{
 	{"page", "Page", "📄", "page"},
 	{"note", "Note", "📝", "page"},
@@ -833,7 +834,6 @@ BUNDLED_TYPES :: []Bundled_Type{
 	{"person", "Human", "👤", "page"},
 	{"project", "Project", "🔨", "page"},
 	{"bookmark", "Bookmark", "🔖", "page"},
-	{"skill", "Skill", "🛠️", "page"},
 }
 
 /** Idempotent: creates any bundled type whose key is missing. */

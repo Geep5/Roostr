@@ -98,6 +98,7 @@ export const SYSTEM_TYPE_KEYS = [
 	"peer",
 	"pinned_fact",
 	"milestone",
+	"skill",
 	"set",
 	"",
 ] as const;

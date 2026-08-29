@@ -11,7 +11,6 @@ export const TYPE_GLYPHS: Record<string, string> = {
 	query: "🔍",
 	set: "🔍",
 	collection: "🗂️",
-	skill: "🛠️",
 	peer: "◉",
 	agent: "◈",
 	channel: "◍",

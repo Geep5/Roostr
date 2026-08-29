@@ -63,7 +63,7 @@
 	// ── Object links ──────────────────────────────────────────────
 	let objectQuery = $state("");
 	let objectOpen = $state(false);
-	const HIDDEN_TYPES: Record<string, true> = { program: true, relation: true, channel: true, pinned_fact: true, milestone: true, type: true, template: true, agent: true };
+	const HIDDEN_TYPES: Record<string, true> = { program: true, relation: true, channel: true, pinned_fact: true, milestone: true, type: true, template: true, agent: true, skill: true };
 	const candidates = $derived.by(() => {
 		const q = objectQuery.trim().toLowerCase();
 		return store.summaries

@@ -172,7 +172,7 @@
 	async function openPicker() {
 		if (!object) return;
 		const res = await fetchQuery({ limit: 200 });
-		const HIDDEN: Record<string, true> = { program: true, typescript: true, json: true, proto: true, relation: true, collection: true, query: true, set: true, type: true, template: true, agent: true };
+		const HIDDEN: Record<string, true> = { program: true, typescript: true, json: true, proto: true, relation: true, collection: true, query: true, set: true, type: true, template: true, agent: true, skill: true };
 		const currentId = object.id;
 		candidates = res.records
 			.filter((r) => r.id !== currentId && !memberIds.includes(r.id) && !HIDDEN[r.typeKey])
