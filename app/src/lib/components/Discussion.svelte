@@ -136,7 +136,7 @@
 		<div class="counter-wrap">
 			<button class="opener" onclick={() => (open = true)}>
 				<span class="opener-icon">💬</span>
-				{messages.length > 0 ? `${messages.length} comment${messages.length === 1 ? "" : "s"}` : "Start a discussion"}
+				<span class="opener-label">{messages.length > 0 ? `${messages.length} comment${messages.length === 1 ? "" : "s"}` : "Start a discussion"}</span>
 			</button>
 		</div>
 	{:else}
@@ -301,6 +301,27 @@
 		cursor: pointer;
 		padding: 7px 12px 7px 10px;
 		border-radius: 18px;
+	}
+	/* Mobile: the opener collapses to a centered round chat button. */
+	@media (max-width: 720px) {
+		.counter-wrap {
+			display: flex;
+			justify-content: center;
+		}
+		.opener {
+			width: 48px;
+			height: 48px;
+			border-radius: 50%;
+			padding: 0;
+			justify-content: center;
+			font-size: 20px;
+		}
+		.opener .opener-icon {
+			margin: 0;
+		}
+		.opener .opener-label {
+			display: none;
+		}
 	}
 	.opener:hover {
 		background: var(--hover);
