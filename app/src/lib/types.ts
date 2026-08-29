@@ -94,7 +94,6 @@ export const SYSTEM_TYPE_KEYS = [
 	"template",
 	"agent",
 	"channel",
-	"chat",
 	"peer",
 	"pinned_fact",
 	"milestone",

@@ -834,6 +834,7 @@ BUNDLED_TYPES :: []Bundled_Type{
 	{"person", "Human", "👤", "page"},
 	{"project", "Project", "🔨", "page"},
 	{"bookmark", "Bookmark", "🔖", "page"},
+	{"chat", "Chat", "💬", "chat"},
 }
 
 /** Idempotent: creates any bundled type whose key is missing. */
