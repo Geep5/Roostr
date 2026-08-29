@@ -346,7 +346,7 @@
 					{#if showMore}
 						<div class="more-menu">
 							<button onclick={() => { showMore = false; void goto(objectId ? `/graph?focus=${objectId}` : "/graph"); }}>
-								⌘ Graph
+								Graph
 							</button>
 							<button onclick={() => { showMore = false; void togglePin(); }}>
 								{isPinned ? "★ Unpin from channel" : "☆ Pin to channel"}
