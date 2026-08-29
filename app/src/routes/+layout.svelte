@@ -340,6 +340,7 @@
 			</span>
 			{#if objectSummary}
 				<div class="m-actions">
+				<a class="m-btn m-link" data-tip="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}><GraphIcon size={17} /></a>
 				<button class="m-btn" class:faved={isFavorite} data-tip={isFavorite ? "Remove from favorites" : "Add to favorites"} onclick={() => void toggleFavorite()}>{isFavorite ? "★" : "☆"}</button>
 				<div class="more-wrap">
 					<button class="m-btn" data-tip="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
@@ -1515,6 +1516,12 @@
 		align-items: center;
 		gap: 8px;
 		flex: none;
+	}
+	.m-link {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		text-decoration: none;
 	}
 	.m-obj {
 		position: absolute;
