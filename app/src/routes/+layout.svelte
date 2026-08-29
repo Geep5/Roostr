@@ -339,6 +339,7 @@
 				<span class="m-obj-name">{headerPath.name}</span>
 			</span>
 			{#if objectSummary}
+				<div class="m-actions">
 				<button class="m-btn" class:faved={isFavorite} data-tip={isFavorite ? "Remove from favorites" : "Add to favorites"} onclick={() => void toggleFavorite()}>{isFavorite ? "★" : "☆"}</button>
 				<div class="more-wrap">
 					<button class="m-btn" data-tip="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
@@ -363,6 +364,7 @@
 							<button class="danger" onclick={() => { showMore = false; void moveToBin(); }}>🗑 Move to bin</button>
 						</div>
 					{/if}
+				</div>
 				</div>
 			{/if}
 		</header>
@@ -1475,34 +1477,54 @@
 		font-size: 22px;
 		cursor: pointer;
 	}
+	header.m-top {
+		margin: 0;
+		max-width: none;
+	}
 	.m-top {
+		position: relative;
 		display: flex;
 		align-items: center;
+		justify-content: space-between;
 		gap: 8px;
-		padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 8px;
+		padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px;
+		background: var(--bg);
+		border-bottom: 1px solid var(--border);
+		flex: none;
+		min-height: 56px;
+		z-index: 10;
 	}
 	.m-btn {
 		flex: none;
-		width: 36px;
-		height: 36px;
+		width: 40px;
+		height: 40px;
 		border-radius: 50%;
 		background: var(--panel);
 		border: none;
 		color: var(--fg);
-		font-size: 17px;
+		font-size: 19px;
 		cursor: pointer;
 	}
 	.m-btn.faved {
 		color: var(--accent);
 	}
-	.m-obj {
-		flex: 1;
-		min-width: 0;
+	.m-actions {
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		font-size: 15px;
+		flex: none;
+	}
+	.m-obj {
+		position: absolute;
+		left: 50%;
+		transform: translateX(-50%);
+		max-width: 46%;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 16px;
 		font-weight: 600;
+		pointer-events: none;
 	}
 	.m-obj-name {
 		white-space: nowrap;
