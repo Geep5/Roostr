@@ -821,11 +821,17 @@ Bundled_Type :: struct {
 	layout: string,
 }
 
+// Anytype's default library (heart bundle/types.json), emoji equivalents
+// of their iconNames: page/document, note/create, task/checkbox,
+// profile("Human")/man, project/hammer, bookmark/bookmark. `person` keeps
+// its key so existing objects stay typed; `skill` is glon's own (agent
+// skills live on it).
 BUNDLED_TYPES :: []Bundled_Type{
+	{"page", "Page", "📄", "page"},
 	{"note", "Note", "📝", "page"},
-	{"task", "Task", "", "task"},
-	{"person", "Person", "👤", "page"},
-	{"project", "Project", "🗂️", "page"},
+	{"task", "Task", "✅", "task"},
+	{"person", "Human", "👤", "page"},
+	{"project", "Project", "🔨", "page"},
 	{"bookmark", "Bookmark", "🔖", "page"},
 	{"skill", "Skill", "🛠️", "page"},
 }
@@ -847,6 +853,48 @@ bootstrap_types :: proc() {
 			if v, ok := fields_get(s.fields, "key"); ok && v.kind == .String do c.have^[v.str] = true
 		}
 	}, &ctx)
+
+	// Existing bundled types converge on the bundle's current name/emoji
+	// (bundled=true marks them system-managed; user-created types with
+	// colliding keys are never touched because they lack the flag).
+	Existing :: struct {
+		id:    string,
+		name:  string,
+		emoji: string,
+	}
+	existing := make(map[string]Existing)
+	defer delete(existing)
+	Ctx2 :: struct {
+		out: ^map[string]Existing,
+	}
+	ctx2 := Ctx2{&existing}
+	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+		c := cast(^struct {
+			out: ^map[string]Existing,
+		})user
+		for _, s in states {
+			if s.type_key != "type" || s.deleted do continue
+			bundled, bok := fields_get(s.fields, "bundled")
+			if !bok || bundled.kind != .Bool || !bundled.b do continue
+			key, kok := fields_get(s.fields, "key")
+			if !kok || key.kind != .String do continue
+			e := Existing{id = strings.clone(s.id, context.temp_allocator)}
+			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do e.name = strings.clone(v.str, context.temp_allocator)
+			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do e.emoji = strings.clone(v.str, context.temp_allocator)
+			c.out^[strings.clone(key.str, context.temp_allocator)] = e
+		}
+	}, &ctx2)
+
+	updated := 0
+	for t in BUNDLED_TYPES {
+		e, exists := existing[t.key]
+		if !exists do continue
+		ops := make([dynamic]Operation, context.temp_allocator)
+		if e.name != t.name do append(&ops, Operation{kind = .Field_Set, key = "name", value = string_value(t.name)})
+		if e.emoji != t.emoji do append(&ops, Operation{kind = .Field_Set, key = "iconEmoji", value = string_value(t.emoji)})
+		if len(ops) > 0 && commit_ops(e.id, ops[:]) do updated += 1
+	}
+	if updated > 0 do fmt.printfln("[glon-odin] converged %d bundled type(s) to the current bundle", updated)
 
 	created := 0
 	for t in BUNDLED_TYPES {

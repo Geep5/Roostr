@@ -1,12 +1,17 @@
 /** Object icon: the emoji when set, else the type glyph (Anytype's IconObject rule). */
 
 export const TYPE_GLYPHS: Record<string, string> = {
-	query: "▤",
-	set: "▤",
-	collection: "⛁",
-	note: "▨",
-	task: "☐",
-	person: "◉",
+	// Anytype bundle equivalents (heart types.json iconNames as emoji).
+	page: "📄",
+	note: "📝",
+	task: "✅",
+	person: "👤",
+	project: "🔨",
+	bookmark: "🔖",
+	query: "🔍",
+	set: "🔍",
+	collection: "🗂️",
+	skill: "🛠️",
 	peer: "◉",
 	agent: "◈",
 	channel: "◍",

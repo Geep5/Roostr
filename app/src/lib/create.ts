@@ -14,7 +14,7 @@ const channelField = (channelId: string): Record<string, ValueJSON> =>
 	channelId ? { channel: { stringValue: channelId } } : {};
 
 /** Legacy fallback until the type objects have loaded. */
-export const CREATABLE_TYPES = ["note", "task", "person", "project", "bookmark", "skill"] as const;
+export const CREATABLE_TYPES = ["page", "note", "task", "person", "project", "bookmark", "skill"] as const;
 
 /** Creatable types for the sidebar dropdown: the space's type objects. */
 export function creatableTypes(): Array<{ key: string; name: string; icon: string }> {
