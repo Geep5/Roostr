@@ -241,7 +241,7 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 	}
 }
 
-HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "relation", "channel", "skill"}
+HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "relation", "channel", "skill", "peer", "pinned_fact", "milestone"}
 
 handle_list_objects :: proc(sock: net.TCP_Socket) {
 	Ctx :: struct {
