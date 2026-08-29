@@ -426,11 +426,15 @@
 			<div class="m-cards-col">
 				{#each pinned as p (p.id)}
 					<div class="m-wcard">
-						<button class="m-wcard-head" onclick={() => (mCollapsed[p.id] = !mCollapsed[p.id])}>
-							<span class="obj-icon">{icon(p)}</span>
-							<span class="m-wcard-name">{p.name || "Untitled"}</span>
-							<span class="m-chev" class:open={!mCollapsed[p.id]}>⌄</span>
-						</button>
+						<div class="m-wcard-head">
+							<a class="m-wcard-link" href="/object/{p.id}">
+								<span class="obj-icon">{icon(p)}</span>
+								<span class="m-wcard-name">{p.name || "Untitled"}</span>
+							</a>
+							<button class="m-chev-btn" aria-label="Expand" onclick={() => (mCollapsed[p.id] = !mCollapsed[p.id])}>
+								<span class="m-chev" class:open={!mCollapsed[p.id]}>⌄</span>
+							</button>
+						</div>
 						{#if !mCollapsed[p.id]}
 							<div class="m-wcard-body"><PinnedWidget id={p.id} /></div>
 						{/if}
@@ -1584,16 +1588,28 @@
 	.m-wcard-head {
 		display: flex;
 		align-items: center;
-		gap: 8px;
 		width: 100%;
-		background: none;
-		border: none;
 		color: var(--fg);
 		font-size: 15px;
 		font-weight: 600;
+	}
+	.m-wcard-link {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 12px 6px 12px 14px;
+		color: var(--fg);
+		text-decoration: none;
+	}
+	.m-chev-btn {
+		flex: none;
+		background: none;
+		border: none;
+		color: var(--fg);
 		padding: 12px 14px;
 		cursor: pointer;
-		text-align: left;
 	}
 	.m-wcard-name {
 		flex: 1;
