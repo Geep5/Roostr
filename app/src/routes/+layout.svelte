@@ -1649,7 +1649,15 @@
 		text-align: left;
 	}
 	.m-section-body {
-		padding-bottom: 6px;
+		background: var(--panel);
+		border-radius: 14px;
+		padding: 4px 10px 8px;
+		margin-bottom: 6px;
+	}
+	/* Divider between rows inside the card, desktop-list style. */
+	.m-section-body .m-row + .m-row {
+		border-top: 1px solid var(--border);
+		border-radius: 0;
 	}
 	.m-row {
 		display: flex;
