@@ -74,6 +74,15 @@
 		await refreshAll();
 	}
 
+	const favorites = $derived(store.summaries.filter((s) => s.isFavorite).slice(0, 8));
+	const isFavorite = $derived(objectSummary?.isFavorite ?? false);
+
+	async function toggleFavorite() {
+		if (!objectId) return;
+		await note.setField(objectId, "isFavorite", { boolValue: !isFavorite });
+		await refreshAll();
+	}
+
 	async function addToCollection(collectionId: string) {
 		if (!objectId) return;
 		const col = await fetchObject(collectionId);
@@ -392,10 +401,10 @@
 	<div class="main-col">
 		<header>
 			<div class="header-side left">
-				<button class="hbtn" title="Back" onclick={() => history.back()}>‹</button>
-				<button class="hbtn" title="Forward" onclick={() => history.forward()}>›</button>
+				<button class="hbtn" data-tip="Back" onclick={() => history.back()}>‹</button>
+				<button class="hbtn" data-tip="Forward" onclick={() => history.forward()}>›</button>
 			</div>
-			<button class="path" title="Search (⌘K)" onclick={() => (showSearch = true)}>
+			<button class="path" data-tip="Search (⌘K)" onclick={() => (showSearch = true)}>
 				{#if headerPath.icon === "graph"}
 					<span class="path-icon"><GraphIcon /></span>
 				{:else if headerPath.icon.startsWith("http")}
@@ -406,11 +415,33 @@
 				<span class="path-name">{headerPath.name}</span>
 			</button>
 			<div class="header-side right">
-				<a class="hbtn" title="All objects" href="/">▦</a>
-				<a class="hbtn" title="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}><GraphIcon size={16} /></a>
+				{#if favorites.length > 0}
+					<div class="favorites">
+						{#each favorites as f (f.id)}
+							<a class="hbtn fav" data-tip={f.name || "Untitled"} href="/object/{f.id}">
+								{#if f.icon.startsWith("http")}
+									<img class="fav-img" src={f.icon} alt="" />
+								{:else}
+									{f.icon || typeGlyph(f.typeKey)}
+								{/if}
+							</a>
+						{/each}
+					</div>
+					<span class="hsep"></span>
+				{/if}
+				{#if objectSummary}
+					<button
+						class="hbtn fav-star"
+						class:faved={isFavorite}
+						data-tip={isFavorite ? "Remove from favorites" : "Add to favorites"}
+						onclick={() => void toggleFavorite()}>{isFavorite ? "★" : "☆"}</button
+					>
+				{/if}
+				<a class="hbtn" data-tip="All objects" href="/">▦</a>
+				<a class="hbtn" data-tip="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}><GraphIcon size={16} /></a>
 				{#if objectSummary}
 					<div class="more-wrap">
-						<button class="hbtn" title="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
+						<button class="hbtn" data-tip="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
 						{#if showMore}
 							<div class="more-menu">
 								<button onclick={() => { showMore = false; void togglePin(); }}>
@@ -853,6 +884,57 @@
 		font-size: 16px;
 		border-radius: 7px;
 		cursor: pointer;
+	}
+	.hbtn.fav {
+		font-size: 13px;
+	}
+	.fav-img {
+		width: 16px;
+		height: 16px;
+		border-radius: 3px;
+		object-fit: cover;
+	}
+	.favorites {
+		display: flex;
+		gap: 2px;
+		align-items: center;
+	}
+	.hsep {
+		width: 1px;
+		height: 16px;
+		background: var(--border);
+		margin: 0 4px;
+	}
+	.fav-star.faved {
+		color: var(--accent);
+	}
+	/* Anytype-style tooltip: delayed dark pill below the control. */
+	[data-tip] {
+		position: relative;
+	}
+	[data-tip]:hover::after {
+		content: attr(data-tip);
+		position: absolute;
+		top: calc(100% + 6px);
+		left: 50%;
+		transform: translateX(-50%);
+		background: var(--hover);
+		color: var(--fg);
+		border: 1px solid var(--border);
+		font-size: 11px;
+		font-weight: 400;
+		padding: 3px 8px;
+		border-radius: 6px;
+		white-space: nowrap;
+		z-index: 80;
+		pointer-events: none;
+		opacity: 0;
+		animation: tip-in 0.12s ease 0.4s forwards;
+	}
+	@keyframes tip-in {
+		to {
+			opacity: 1;
+		}
 	}
 	.hbtn:hover {
 		background: var(--hover);

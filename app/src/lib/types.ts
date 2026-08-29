@@ -56,6 +56,8 @@ export interface ObjectSummary {
 	channelId: string;
 	/** Object's emoji icon ("" = none, render the type glyph). */
 	icon: string;
+	/** Anytype's favorite flag; surfaces the object in the header's favorites. */
+	isFavorite?: boolean;
 }
 
 export interface ChannelJSON {
