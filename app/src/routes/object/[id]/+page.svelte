@@ -482,4 +482,29 @@
 	.new-btn:hover {
 		filter: brightness(1.1);
 	}
+
+	/* Mobile: drop the 48px rail, full-width content. */
+	@media (max-width: 720px) {
+		.dataview {
+			margin-left: 0;
+		}
+		.tpl-note {
+			margin-left: 0;
+		}
+		.icon-wrap {
+			margin-left: 0;
+		}
+		.title-row {
+			padding-left: 4px;
+		}
+		.obj-emoji {
+			width: 56px;
+			height: 56px;
+			font-size: 42px;
+		}
+		.obj-img {
+			width: 72px;
+			height: 72px;
+		}
+	}
 </style>

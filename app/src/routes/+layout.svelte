@@ -46,6 +46,41 @@
 	});
 
 	let showMore = $state(false);
+
+	// ── Mobile shell (Anytype iOS flow): Channels list -> channel home -> object.
+	let isMobile = $state(false);
+	/** Mobile only: true when a channel card has been tapped open. */
+	let mobileChannelOpen = $state(false);
+	let mCollapsed = $state<Record<string, boolean>>({});
+
+	/** Channel-home recents card: newest 6 objects in the open channel. */
+	const mobileRecents = $derived.by(() => {
+		if (!current) return [];
+		return store.summaries
+			.filter((x) => (x.channelId || defaultChannelId) === current.id)
+			.sort((a, b) => b.updatedAt - a.updatedAt)
+			.slice(0, 6);
+	});
+
+	/** Latest-touched object in a channel (channel card preview line). */
+	function latestInChannel(channelId: string) {
+		let best: (typeof store.summaries)[number] | null = null;
+		for (const s of store.summaries) {
+			if ((s.channelId || defaultChannelId) !== channelId) continue;
+			if (!best || s.updatedAt > best.updatedAt) best = s;
+		}
+		return best;
+	}
+
+	function shortDate(ms: number): string {
+		const d = new Date(ms);
+		const now = new Date();
+		if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+		const days = (now.getTime() - d.getTime()) / 86400000;
+		if (days < 7) return d.toLocaleDateString([], { weekday: "short" });
+		return d.toLocaleDateString([], { month: "short", day: "numeric" });
+	}
+
 	/** Per-type expansion in the Types widget (Anytype v0.50 Objects sections). */
 	let expandedTypes = $state<Record<string, boolean>>({});
 
@@ -261,11 +296,191 @@
 			}
 		});
 
+		// Mobile shell switch (viewport-driven flow, not just styling).
+		const mq = window.matchMedia("(max-width: 720px)");
+		const applyMq = () => (isMobile = mq.matches);
+		applyMq();
+		mq.addEventListener("change", applyMq);
+
 		// Live sidebar: the store debounce-refreshes on DAG activity.
-		return connectEvents();
+		const stopEvents = connectEvents();
+		return () => {
+			mq.removeEventListener("change", applyMq);
+			stopEvents();
+		};
 	});
 </script>
 
+{#if isMobile}
+<div class="m-shell">
+	{#if objectId}
+		<!-- Object page: back / icon+name / star / more. -->
+		<header class="m-top">
+			<button class="m-btn" data-tip="Back" onclick={() => history.back()}>‹</button>
+			<span class="m-obj">
+				{#if headerPath.icon === "graph"}
+					<span class="path-icon"><GraphIcon /></span>
+				{:else if headerPath.icon.startsWith("http")}
+					<img class="path-img" src={headerPath.icon} alt="" />
+				{:else}
+					<span class="path-icon">{headerPath.icon}</span>
+				{/if}
+				<span class="m-obj-name">{headerPath.name}</span>
+			</span>
+			{#if objectSummary}
+				<button class="m-btn" class:faved={isFavorite} data-tip={isFavorite ? "Remove from favorites" : "Add to favorites"} onclick={() => void toggleFavorite()}>{isFavorite ? "★" : "☆"}</button>
+				<div class="more-wrap">
+					<button class="m-btn" data-tip="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
+					{#if showMore}
+						<div class="more-menu">
+							<button onclick={() => { showMore = false; void togglePin(); }}>
+								{isPinned ? "★ Unpin from channel" : "☆ Pin to channel"}
+							</button>
+							<button onclick={() => (showCollections = !showCollections)}>⛁ Add to collection ▸</button>
+							{#if showCollections}
+								<div class="submenu">
+									{#each collections as c (c.id)}
+										<button onclick={() => { showMore = false; void addToCollection(c.id); }}>{objectIcon(c.icon, c.typeKey)} {c.name || "Untitled"}</button>
+									{/each}
+									{#if collections.length === 0}
+										<span class="menu-none">No collections in this channel</span>
+									{/if}
+								</div>
+							{/if}
+							<button onclick={() => { showMore = false; void duplicateObject(); }}>⧉ Duplicate</button>
+							<div class="menu-sep"></div>
+							<button class="danger" onclick={() => { showMore = false; void moveToBin(); }}>🗑 Move to bin</button>
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</header>
+		<main class="m-main">{@render children()}</main>
+	{:else if !mobileChannelOpen || !current}
+		<!-- Screen 1: Channels list. -->
+		<div class="m-screen">
+			<div class="m-head">
+				<span class="m-title">Channels</span>
+				<button class="m-avatar" data-tip="Settings" onclick={() => (showSettings = true)}>⚙</button>
+			</div>
+			<div class="m-cards">
+				{#each channels as c (c.id)}
+					{@const latest = latestInChannel(c.id)}
+					<button class="m-card" onclick={() => { selectChannel(c.id); mobileChannelOpen = true; }}>
+						<span class="m-card-icon">
+							{#if c.icon?.startsWith("http")}
+								<img class="m-card-img" src={c.icon} alt="" />
+							{:else}
+								{c.icon || c.name.slice(0, 1).toUpperCase() || "?"}
+							{/if}
+						</span>
+						<span class="m-card-text">
+							<span class="m-card-name">{c.name}</span>
+							{#if latest}
+								<span class="m-card-sub">{latest.icon ? latest.icon + " " : ""}{latest.name || "Untitled"}</span>
+							{/if}
+						</span>
+						{#if latest}<span class="m-card-side">{shortDate(latest.updatedAt)}</span>{/if}
+					</button>
+				{/each}
+				<button class="m-card add" onclick={() => void newChannel()}>＋ New channel</button>
+			</div>
+			<div class="m-bottom">
+				<button class="m-search" onclick={() => (showSearch = true)}>⌕ Search</button>
+				<button class="m-compose" data-tip="New object" onclick={() => (showCreate = !showCreate)}>＋</button>
+			</div>
+		</div>
+	{:else}
+		<!-- Screen 2: inside a channel — pinned objects as collapsible cards. -->
+		<div class="m-screen">
+			<div class="m-top">
+				<button class="m-btn" data-tip="Channels" onclick={() => (mobileChannelOpen = false)}>‹</button>
+				<button class="m-btn" data-tip="Channel settings" onclick={() => goto(`/object/${current.id}`)}>⋯</button>
+			</div>
+			<div class="m-ch-head">
+				<span class="m-ch-icon">
+					{#if current.icon?.startsWith("http")}
+						<img class="m-ch-img" src={current.icon} alt="" />
+					{:else}
+						{current.icon || current.name.slice(0, 1).toUpperCase() || "?"}
+					{/if}
+				</span>
+				<div class="m-ch-text">
+					<div class="m-ch-name">{current.name}</div>
+					<div class="m-ch-sub">{current.members.length > 0 ? "Shared channel" : "Private channel"}</div>
+				</div>
+			</div>
+			<div class="m-cards-col">
+				{#each pinned as p (p.id)}
+					<div class="m-wcard">
+						<button class="m-wcard-head" onclick={() => (mCollapsed[p.id] = !mCollapsed[p.id])}>
+							<span class="obj-icon">{icon(p)}</span>
+							<span class="m-wcard-name">{p.name || "Untitled"}</span>
+							<span class="m-chev" class:open={!mCollapsed[p.id]}>⌄</span>
+						</button>
+						{#if !mCollapsed[p.id]}
+							<div class="m-wcard-body"><PinnedWidget id={p.id} /></div>
+						{/if}
+					</div>
+				{/each}
+				<div class="m-wcard">
+					<button class="m-wcard-head" onclick={() => (mCollapsed["__recent"] = !mCollapsed["__recent"])}>
+						<span class="obj-icon">🕐</span>
+						<span class="m-wcard-name">Recently edited</span>
+						<span class="m-chev" class:open={!mCollapsed["__recent"]}>⌄</span>
+					</button>
+					{#if !mCollapsed["__recent"]}
+						<div class="m-wcard-body">
+							{#each mobileRecents as o (o.id)}
+								<a class="m-row" href="/object/{o.id}">
+									<span class="obj-icon">{o.icon || typeGlyph(o.typeKey)}</span>{o.name || "Untitled"}
+								</a>
+							{/each}
+						</div>
+					{/if}
+				</div>
+				<div class="m-wcard">
+					<button class="m-wcard-head" onclick={() => (mCollapsed["__types"] = !mCollapsed["__types"])}>
+						<span class="obj-icon">🧩</span>
+						<span class="m-wcard-name">Types</span>
+						<span class="m-chev" class:open={!mCollapsed["__types"]}>⌄</span>
+					</button>
+					{#if !mCollapsed["__types"]}
+						<div class="m-wcard-body">
+							{#each store.types as t (t.id)}
+								<a class="m-row" href="/object/{t.id}">
+									<span class="obj-icon">{t.icon || typeGlyph(t.key)}</span>{t.name || t.key}
+								</a>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			</div>
+			<div class="m-bottom">
+				<button class="m-search" onclick={() => (showSearch = true)}>⌕ Search</button>
+				<button class="m-compose" data-tip="New object" onclick={() => (showCreate = !showCreate)}>＋</button>
+			</div>
+		</div>
+	{/if}
+
+	{#if showCreate}
+		<div class="m-create-menu" role="menu">
+			{#each creatableTypes() as t (t.key)}
+				<button role="menuitem" onclick={() => void sidebarCreate(t.key)}>
+					<span class="obj-icon">{t.icon}</span>{t.name}
+				</button>
+			{/each}
+			<div class="create-sep"></div>
+			<button role="menuitem" onclick={() => void sidebarCreate("collection")}>
+				<span class="obj-icon">{typeGlyph("collection")}</span>Collection
+			</button>
+			<button role="menuitem" onclick={() => void sidebarCreate("query")}>
+				<span class="obj-icon">{typeGlyph("query")}</span>Query
+			</button>
+		</div>
+	{/if}
+</div>
+{:else}
 <div class="shell">
 	<nav class="vault">
 		{#each channels as c (c.id)}
@@ -514,6 +729,7 @@
 		<main>{@render children()}</main>
 	</div>
 </div>
+{/if}
 
 {#if showSettings}
 	{#await import("$lib/components/Settings.svelte") then { default: Settings }}
@@ -1113,5 +1329,310 @@
 		padding: 24px 0 80px;
 		max-width: 920px;
 		margin: 0 auto;
+	}
+
+	/* ── Mobile shell (<=720px): Channels list -> channel home -> object ── */
+	.m-shell {
+		display: flex;
+		flex-direction: column;
+		height: 100dvh;
+		background: var(--bg);
+		color: var(--fg);
+	}
+	.m-screen {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		min-height: 0;
+		padding: calc(env(safe-area-inset-top, 0px) + 12px) 14px 0;
+	}
+	.m-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 14px;
+	}
+	.m-title {
+		font-size: 28px;
+		font-weight: 700;
+		letter-spacing: -0.01em;
+	}
+	.m-avatar {
+		width: 36px;
+		height: 36px;
+		border-radius: 50%;
+		background: var(--hover);
+		border: none;
+		color: var(--fg);
+		font-size: 16px;
+		cursor: pointer;
+	}
+	.m-cards {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		overflow-y: auto;
+		flex: 1;
+		min-height: 0;
+		padding-bottom: 12px;
+	}
+	.m-card {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		background: var(--panel);
+		border: none;
+		border-radius: 14px;
+		padding: 14px;
+		color: var(--fg);
+		text-align: left;
+		cursor: pointer;
+		min-height: 64px;
+	}
+	.m-card.add {
+		justify-content: center;
+		color: var(--muted);
+		min-height: 0;
+		padding: 12px;
+	}
+	.m-card-icon {
+		flex: none;
+		width: 44px;
+		height: 44px;
+		border-radius: 10px;
+		background: var(--hover);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 22px;
+		overflow: hidden;
+	}
+	.m-card-img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+	.m-card-text {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+	.m-card-name {
+		font-size: 16px;
+		font-weight: 600;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.m-card-sub {
+		font-size: 13px;
+		color: var(--muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.m-card-side {
+		flex: none;
+		font-size: 12px;
+		color: var(--muted);
+	}
+	.m-bottom {
+		display: flex;
+		gap: 10px;
+		padding: 10px 0 calc(env(safe-area-inset-bottom, 0px) + 12px);
+	}
+	.m-search {
+		flex: 1;
+		background: var(--panel);
+		border: none;
+		border-radius: 999px;
+		color: var(--muted);
+		font-size: 15px;
+		padding: 12px 16px;
+		text-align: left;
+		cursor: pointer;
+	}
+	.m-compose {
+		width: 46px;
+		height: 46px;
+		border-radius: 50%;
+		background: var(--panel);
+		border: none;
+		color: var(--fg);
+		font-size: 22px;
+		cursor: pointer;
+	}
+	.m-top {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 8px;
+	}
+	.m-btn {
+		flex: none;
+		width: 36px;
+		height: 36px;
+		border-radius: 50%;
+		background: var(--panel);
+		border: none;
+		color: var(--fg);
+		font-size: 17px;
+		cursor: pointer;
+	}
+	.m-btn.faved {
+		color: var(--accent);
+	}
+	.m-obj {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 15px;
+		font-weight: 600;
+	}
+	.m-obj-name {
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.m-main {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+	}
+	.m-ch-head {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 8px 4px 16px;
+	}
+	.m-ch-icon {
+		width: 52px;
+		height: 52px;
+		border-radius: 12px;
+		background: var(--hover);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 26px;
+		overflow: hidden;
+		flex: none;
+	}
+	.m-ch-img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+	.m-ch-name {
+		font-size: 20px;
+		font-weight: 700;
+	}
+	.m-ch-sub {
+		font-size: 13px;
+		color: var(--muted);
+	}
+	.m-cards-col {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		overflow-y: auto;
+		flex: 1;
+		min-height: 0;
+		padding-bottom: 12px;
+	}
+	.m-wcard {
+		background: var(--panel);
+		border-radius: 14px;
+		overflow: hidden;
+	}
+	.m-wcard-head {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		background: none;
+		border: none;
+		color: var(--fg);
+		font-size: 15px;
+		font-weight: 600;
+		padding: 12px 14px;
+		cursor: pointer;
+		text-align: left;
+	}
+	.m-wcard-name {
+		flex: 1;
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.m-chev {
+		color: var(--muted);
+		font-size: 13px;
+		transition: transform 0.12s;
+	}
+	.m-chev.open {
+		transform: rotate(180deg);
+	}
+	.m-wcard-body {
+		padding: 0 10px 10px;
+	}
+	.m-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 9px 6px;
+		border-top: 1px solid var(--border);
+		color: var(--fg);
+		text-decoration: none;
+		font-size: 14px;
+	}
+	.m-create-menu {
+		position: fixed;
+		left: 14px;
+		right: 14px;
+		bottom: calc(env(safe-area-inset-bottom, 0px) + 72px);
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: 14px;
+		padding: 6px;
+		z-index: 70;
+		display: flex;
+		flex-direction: column;
+	}
+	.m-create-menu button {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		background: none;
+		border: none;
+		color: var(--fg);
+		font-size: 15px;
+		padding: 11px 10px;
+		border-radius: 8px;
+		cursor: pointer;
+		text-align: left;
+	}
+	.m-create-menu button:hover {
+		background: var(--hover);
+	}
+	.more-wrap {
+		position: relative;
+	}
+	/* Modals go full-screen on mobile. */
+	@media (max-width: 720px) {
+		:global(.overlay) {
+			padding: 0 !important;
+		}
+		:global(.overlay .modal) {
+			width: 100% !important;
+			max-width: none !important;
+			height: 100dvh !important;
+			max-height: none !important;
+			border-radius: 0 !important;
+		}
 	}
 </style>
