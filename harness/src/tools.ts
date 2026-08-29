@@ -303,6 +303,36 @@ const SPAWN_TOOL: ToolDef = {
 	},
 };
 
+const SHELL_TIMEOUT_MS = 5 * 60 * 1000;
+const SHELL_OUTPUT_CAP = 16_000;
+
+/**
+ * shell_exec — installer-template only (not in TOOLS): install agents must
+ * run brew/npm/etc. Principals and ordinary subagents never receive it.
+ */
+const SHELL_TOOL: RegisteredTool = {
+	def: {
+		name: "shell_exec",
+		description: "Run a shell command on this machine (sh -lc, cwd=home, 5min timeout). Use for installs and verification commands.",
+		input_schema: {
+			type: "object",
+			properties: { command: { type: "string", description: "the shell command to run" } },
+			required: ["command"],
+		},
+	},
+	handler: async (input) => {
+		const command = S(input.command);
+		if (!command) return "error: command required";
+		const proc = Bun.spawn(["sh", "-lc", command], { cwd: process.env.HOME, stdout: "pipe", stderr: "pipe" });
+		const timer = setTimeout(() => proc.kill(), SHELL_TIMEOUT_MS);
+		const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+		const code = await proc.exited;
+		clearTimeout(timer);
+		const body = (out + (err ? `\n[stderr]\n${err}` : "")).trim();
+		return `exit ${code}\n${body.slice(-SHELL_OUTPUT_CAP) || "(no output)"}`;
+	},
+};
+
 const SUBMIT_TOOL: ToolDef = {
 	name: "submit_result",
 	description: "Submit your final result to the parent agent. Call exactly once when done.",
@@ -315,6 +345,10 @@ export function toolDefs(template: string, depth: number): ToolDef[] {
 	let defs = TOOLS.map((t) => t.def);
 	if (template === "explore") defs = defs.filter((d) => READ_ONLY.has(d.name));
 	const out = [...defs];
+	if (template === "installer") {
+		// Least privilege: installs need only the shell and the result channel.
+		return [SHELL_TOOL.def, SUBMIT_TOOL];
+	}
 	if (template === "") out.push(SPAWN_TOOL);
 	else out.push(SUBMIT_TOOL);
 	if (template === "task" && depth < 2) out.push(SPAWN_TOOL);
@@ -333,7 +367,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>,
 			ctx.submitResult(S(input.content));
 			return { content: "result submitted", isError: false };
 		}
-		const tool = TOOLS.find((t) => t.def.name === name);
+		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : TOOLS.find((t) => t.def.name === name);
 		if (!tool) return { content: `unknown tool: ${name}`, isError: true };
 		const content = await tool.handler(input, ctx);
 		return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };

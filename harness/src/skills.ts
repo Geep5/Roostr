@@ -34,13 +34,32 @@ export interface SkillListing {
 	description: string;
 }
 
-export async function listSkills(): Promise<SkillListing[]> {
+/**
+ * List skills visible to `agentId`. Catalog-managed skills are device
+ * capabilities: enabled ones surface only to the coordinator agent (when
+ * one is set — otherwise to everyone); other agents get a prompt note
+ * telling them to ask the coordinator instead. Hand-made skill objects
+ * always list.
+ */
+export async function listSkills(agentId?: string): Promise<SkillListing[]> {
+	const { CATALOG, enabledCatalogKeys, getCoordinator } = await import("./skillmgr");
+	const enabled = await enabledCatalogKeys();
+	const coordinator = await getCoordinator();
+	const managed = new Set(CATALOG.map((c) => c.name.toLowerCase()));
+	const gated = coordinator !== "" && agentId !== undefined && agentId !== coordinator;
 	const rows = await query({ type: "skill", limit: 100 });
-	return rows.map((r) => ({
-		id: r.id,
-		name: str(r.fields, "name") || r.id.slice(0, 8),
-		description: str(r.fields, "description"),
-	}));
+	return rows
+		.map((r) => ({
+			id: r.id,
+			name: str(r.fields, "name") || r.id.slice(0, 8),
+			description: str(r.fields, "description"),
+		}))
+		.filter((s) => {
+			const key = s.name.toLowerCase();
+			if (!managed.has(key)) return true;
+			if (!enabled.has(key)) return false;
+			return !gated;
+		});
 }
 
 export async function readSkill(name: string): Promise<string> {

@@ -91,8 +91,11 @@ respond :: proc(sock: net.TCP_Socket, status: string, content_type: string, body
 		"HTTP/1.1 %s\r\n%sContent-Type: %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n",
 		status, CORS, content_type, len(body),
 	)
-	if !send_all(sock, transmute([]byte)head) do return
-	_ = send_all(sock, body)
+	hok := send_all(sock, transmute([]byte)head)
+	bok := hok && send_all(sock, body)
+	when #config(GLON_HTTP_TRACE, false) {
+		fmt.eprintfln("[trace] respond fd=%d status=%s head=%v body=%v len=%d", sock, status, hok, bok, len(body))
+	}
 }
 
 respond_json :: proc(sock: net.TCP_Socket, v: json.Value, status := "200 OK") {
@@ -121,6 +124,9 @@ serve :: proc(port: int) {
 	for {
 		client, _, aerr := net.accept_tcp(sock)
 		if aerr != nil do continue
+		when #config(GLON_HTTP_TRACE, false) {
+			fmt.eprintfln("[trace] accepted fd=%d", client)
+		}
 		// self_cleanup: the thread detaches and frees its own ^Thread on exit.
 		// Without it every connection leaks a pthread (stack region kept until join).
 		thread.run_with_poly_data(client, handle_connection)
@@ -134,6 +140,9 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 	defer mem.dynamic_arena_destroy(&arena)
 
 	req, ok := read_request(sock)
+	when #config(GLON_HTTP_TRACE, false) {
+		fmt.eprintfln("[trace] read fd=%d ok=%v", sock, ok)
+	}
 	if !ok {
 		net.close(sock)
 		return
@@ -153,6 +162,13 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 		head := fmt.tprintf("HTTP/1.1 200 OK\r\n%sContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\ndata: {{\"hello\":true}}\n\n", CORS)
 		if send_all(sock, transmute([]byte)head) {
 			sync.lock(&g_sse.mu)
+			// Bound zombie pileup: a client that stops reading but keeps the
+			// socket open (abandoned headless pages) is indistinguishable from
+			// a healthy idle one - evict the oldest past a sane cap.
+			if len(g_sse.clients) >= 64 {
+				net.close(g_sse.clients[0])
+				ordered_remove(&g_sse.clients, 0)
+			}
 			append(&g_sse.clients, sock)
 			sync.unlock(&g_sse.mu)
 		} else {
@@ -162,10 +178,13 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 	}
 
 	when #config(GLON_HTTP_TRACE, false) {
-		fmt.eprintfln("[trace] %s %s", req.method, req.path)
+		fmt.eprintfln("[trace] fd=%d %s %s", sock, req.method, req.path)
 	}
 	route(sock, req)
 	net.close(sock)
+	when #config(GLON_HTTP_TRACE, false) {
+		fmt.eprintfln("[trace] closed fd=%d", sock)
+	}
 }
 
 read_request :: proc(sock: net.TCP_Socket) -> (Request, bool) {

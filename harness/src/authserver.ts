@@ -9,6 +9,8 @@ import { getPublicKey, nip19 } from "nostr-tools";
 
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
 import { readRoster, setEnabled } from "./roster";
+import { disableSkill, enableSkill, getCoordinator, recheckSkill, setCoordinator, skillStatus, uninstallSkill } from "./skillmgr";
+import { fetchObject, str } from "./api";
 
 /** Public identity (npub + hex pubkey) derived from the local nostr key. */
 async function identity(): Promise<{ npub: string; pubkeyHex: string } | { error: string }> {
@@ -77,6 +79,37 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					const next = await setEnabled(body.id, body.enabled === true);
 					onRosterChange(next);
 					return json({ ok: true, roster: next });
+				}
+				if (req.method === "GET" && url.pathname === "/skills") {
+					const [skills, coordinator, roster] = await Promise.all([skillStatus(), getCoordinator(), readRoster()]);
+					const agents: { id: string; name: string }[] = [];
+					for (const id of roster) {
+						try {
+							const obj = await fetchObject(id);
+							agents.push({ id, name: str(obj.fields, "name") || id.slice(0, 8) });
+						} catch {
+							agents.push({ id, name: id.slice(0, 8) });
+						}
+					}
+					return json({ skills, coordinator, agents });
+				}
+				if (req.method === "POST" && url.pathname === "/skills/coordinator") {
+					const body = (await req.json()) as { id?: string };
+					await setCoordinator(body.id ?? "");
+					return json({ ok: true });
+				}
+				if (req.method === "POST" && url.pathname.startsWith("/skills/")) {
+					const body = (await req.json()) as { key?: string };
+					if (!body.key) return json({ error: "key required" }, 400);
+					const op = url.pathname.slice("/skills/".length);
+					if (op === "enable") return json({ phase: await enableSkill(body.key) });
+					if (op === "disable") {
+						await disableSkill(body.key);
+						return json({ phase: "off" });
+					}
+					if (op === "recheck") return json({ phase: await recheckSkill(body.key) });
+					if (op === "uninstall") return json({ phase: await uninstallSkill(body.key) });
+					return json({ error: "not found" }, 404);
 				}
 				return json({ error: "not found" }, 404);
 			} catch (err) {

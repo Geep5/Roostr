@@ -31,6 +31,11 @@ const TEMPLATES: Record<string, Template> = {
 		name: "quick_task",
 		systemSuffix: "You are a fast subagent for a small task. Do the minimum correct work, then call submit_result exactly once.",
 	},
+	installer: {
+		name: "installer",
+		systemSuffix:
+			"You install developer tooling on this Mac for the agent fleet. Use shell_exec for everything; verify with the check command named in the task. Do not attempt interactive sign-ins — if authentication is required, note exactly what the human must run. Call submit_result exactly once with what you installed and the check output.",
+	},
 };
 
 class Semaphore {

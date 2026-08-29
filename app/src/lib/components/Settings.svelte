@@ -47,6 +47,59 @@
 	let loginCode = $state("");
 	let loginError = $state("");
 
+	interface SkillRow {
+		key: string;
+		name: string;
+		description: string;
+		phase: "off" | "installing" | "needs-auth" | "on" | "failed" | "uninstalling";
+		installed: boolean;
+		log: string;
+		authHint?: string;
+	}
+	let skillRows = $state<SkillRow[] | null>(null);
+	let skillOpen = $state<string>("");
+	let skillConfirm = $state<string>("");
+	let skillPoll: ReturnType<typeof setInterval> | undefined;
+	let skillAgents = $state<{ id: string; name: string }[]>([]);
+	let coordinator = $state<string>("");
+
+	async function loadSkills() {
+		try {
+			const res = await fetch(`${HARNESS}/skills`);
+			const out = (await res.json()) as { skills: SkillRow[]; coordinator: string; agents: { id: string; name: string }[] };
+			skillRows = out.skills;
+			coordinator = out.coordinator;
+			skillAgents = out.agents;
+			const busy = skillRows.some((s) => s.phase === "installing" || s.phase === "uninstalling");
+			if (busy && !skillPoll) skillPoll = setInterval(() => void loadSkills(), 2000);
+			if (!busy && skillPoll) {
+				clearInterval(skillPoll);
+				skillPoll = undefined;
+			}
+		} catch {
+			skillRows = null;
+		}
+	}
+
+	async function skillOp(key: string, op: "enable" | "disable" | "recheck" | "uninstall") {
+		skillConfirm = "";
+		try {
+			await fetch(`${HARNESS}/skills/${op}`, { method: "POST", body: JSON.stringify({ key }) });
+		} catch {
+			/* daemon offline; reload shows it */
+		}
+		await loadSkills();
+	}
+
+	async function setSkillCoordinator(id: string) {
+		try {
+			await fetch(`${HARNESS}/skills/coordinator`, { method: "POST", body: JSON.stringify({ id }) });
+		} catch {
+			/* daemon offline */
+		}
+		await loadSkills();
+	}
+
 	async function loadAgentAuth() {
 		try {
 			const res = await fetch(`${HARNESS}/auth/status`);
@@ -60,6 +113,7 @@
 		const s = await settings.fetch();
 		relays = s.relays;
 		await loadAgentAuth();
+		await loadSkills();
 		// Public identity comes from the harness (the Odin server has no
 		// secp256k1); shareable, shown without a reveal step.
 		try {
@@ -73,6 +127,9 @@
 
 	onMount(() => {
 		void load();
+		return () => {
+			if (skillPoll) clearInterval(skillPoll);
+		};
 	});
 
 	function flashSaved(label: string) {
@@ -370,10 +427,220 @@
 				</div>
 			{/if}
 		</section>
+
+		<section>
+			<h3>Skills</h3>
+			{#if skillRows === null}
+				<p class="hint">Agent daemon is offline — skills are managed on the machine that runs it.</p>
+			{:else}
+				<p class="hint">
+					Device-local capabilities. Toggling one on runs a one-shot install agent; the coordinator
+					agent fronts them all — other agents are told to ask it in chat.
+				</p>
+				<div class="coord-row">
+					<span class="pname">Coordinator</span>
+					<select
+						value={coordinator}
+						onchange={(e) => void setSkillCoordinator((e.currentTarget as HTMLSelectElement).value)}
+					>
+						<option value="">Everyone (no coordinator)</option>
+						{#each skillAgents as a (a.id)}
+							<option value={a.id}>{a.name}</option>
+						{/each}
+					</select>
+				</div>
+				{#each skillRows as s (s.key)}
+					<div class="skill">
+						<div class="skill-row">
+							<button
+								class="skill-name"
+								onclick={() => {
+									skillOpen = skillOpen === s.key ? "" : s.key;
+									skillConfirm = "";
+								}}>{s.name}</button
+							>
+							<span class="chip {s.phase}">
+								{s.phase === "on"
+									? "on"
+									: s.phase === "installing"
+										? "installing…"
+										: s.phase === "uninstalling"
+											? "removing…"
+											: s.phase === "needs-auth"
+												? "auth needed"
+												: s.phase === "failed"
+													? "failed"
+													: "off"}
+							</span>
+							{#if s.phase === "needs-auth" || s.phase === "failed"}
+								<button class="subtle-btn" onclick={() => void skillOp(s.key, "recheck")}>Re-check</button>
+							{/if}
+							<label class="switch">
+								<input
+									type="checkbox"
+									checked={s.phase === "on" || s.phase === "installing"}
+									disabled={s.phase === "installing" || s.phase === "uninstalling"}
+									onchange={(e) =>
+										void skillOp(s.key, (e.currentTarget as HTMLInputElement).checked ? "enable" : "disable")}
+								/>
+								<span class="slider"></span>
+							</label>
+						</div>
+						{#if skillOpen === s.key}
+							<div class="skill-detail">
+								<p class="hint">{s.description}</p>
+								{#if s.phase === "needs-auth" && s.authHint}
+									<p class="hint auth-hint">{s.authHint}</p>
+								{/if}
+								{#if s.log}
+									<pre class="skill-log">{s.log.slice(-2000)}</pre>
+								{/if}
+								{#if s.installed && s.phase !== "installing" && s.phase !== "uninstalling"}
+									{#if skillConfirm === s.key}
+										<p class="hint">
+											Remove {s.name}? This uninstalls it from this device.
+											<button class="danger-btn" onclick={() => void skillOp(s.key, "uninstall")}>Remove</button>
+											<button class="subtle-btn" onclick={() => (skillConfirm = "")}>Cancel</button>
+										</p>
+									{:else}
+										<button class="remove-link" onclick={() => (skillConfirm = s.key)}>Remove from this device</button>
+									{/if}
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{/each}
+			{/if}
+		</section>
 	</div>
 </div>
 
 <style>
+	.coord-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 8px;
+	}
+	.skill {
+		border-top: 1px solid var(--border, #2a2a2a);
+		padding: 6px 0;
+	}
+	.skill:first-of-type {
+		border-top: none;
+	}
+	.skill-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.skill-name {
+		background: none;
+		border: none;
+		color: inherit;
+		font: inherit;
+		font-weight: 600;
+		cursor: pointer;
+		padding: 0;
+		flex: 1;
+		text-align: left;
+	}
+	.chip {
+		font-size: 11px;
+		padding: 2px 8px;
+		border-radius: 10px;
+		background: var(--hover, #2a2a2a);
+		color: var(--muted);
+	}
+	.chip.on {
+		background: rgba(80, 180, 100, 0.18);
+		color: #6fcf7f;
+	}
+	.chip.installing,
+	.chip.uninstalling {
+		background: rgba(120, 150, 240, 0.15);
+		color: #8ea8f0;
+	}
+	.chip.needs-auth {
+		background: rgba(240, 180, 60, 0.16);
+		color: #f0b43c;
+	}
+	.chip.failed {
+		background: rgba(232, 82, 74, 0.15);
+		color: #e8524a;
+	}
+	.switch {
+		position: relative;
+		width: 34px;
+		height: 18px;
+		flex: none;
+	}
+	.switch input {
+		opacity: 0;
+		width: 100%;
+		height: 100%;
+		margin: 0;
+		cursor: pointer;
+	}
+	.slider {
+		position: absolute;
+		inset: 0;
+		border-radius: 10px;
+		background: var(--hover, #333);
+		pointer-events: none;
+		transition: background 0.15s;
+	}
+	.slider::before {
+		content: "";
+		position: absolute;
+		top: 2px;
+		left: 2px;
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		background: var(--muted, #999);
+		transition: transform 0.15s;
+	}
+	.switch input:checked + .slider {
+		background: rgba(80, 180, 100, 0.4);
+	}
+	.switch input:checked + .slider::before {
+		transform: translateX(16px);
+		background: #6fcf7f;
+	}
+	.switch input:disabled {
+		cursor: default;
+	}
+	.skill-detail {
+		padding: 4px 0 4px 2px;
+	}
+	.auth-hint {
+		color: #f0b43c;
+	}
+	.skill-log {
+		max-height: 140px;
+		overflow: auto;
+		font-size: 11px;
+		background: var(--hover, #1d1d1d);
+		border-radius: 6px;
+		padding: 8px;
+		white-space: pre-wrap;
+	}
+	.remove-link {
+		background: none;
+		border: none;
+		color: var(--muted);
+		font-size: 11px;
+		text-decoration: underline;
+		cursor: pointer;
+		padding: 0;
+	}
+	.remove-link:hover {
+		color: #e8524a;
+	}
+	.danger-btn {
+		color: #e8524a;
+	}
 	.import-form {
 		display: flex;
 		gap: 8px;

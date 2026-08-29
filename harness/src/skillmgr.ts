@@ -1,0 +1,367 @@
+/**
+ * Installable skills — a curated catalog of device-local capabilities
+ * (CLIs the agents can shell out to). Toggling one on in Settings runs a
+ * one-shot installer subagent (the harness's own spawn machinery, holdfast
+ * lineage) gated by a deterministic check
+ * command. State is device-local (~/.glon/skills.json — installs don't
+ * sync); the agent-facing skill body is a DAG `skill` object created on
+ * success, so every agent picks it up through the normal skills listing.
+ *
+ * Auth handoff: when a skill installs fine but needs a human to finish
+ * OAuth (gws), the row goes `needs-auth` and the installer posts to the
+ * shared "Setup" chat object — the coordinator-channel pattern, on-DAG.
+ */
+
+import { createObject, chatPost, fetchObject, mutate, query, str } from "./api";
+import { objectText } from "./skills";
+
+export interface CatalogEntry {
+	key: string;
+	name: string;
+	description: string;
+	/** One-shot OMP prompt that performs the install. */
+	installPrompt: string;
+	/** Uninstall prompt for the rare toggle-off-and-remove path. */
+	uninstallPrompt: string;
+	/** Deterministic gate: exit 0 = installed. */
+	checkCmd: string;
+	/** Optional second gate: exit 0 = authenticated. Failing => needs-auth. */
+	authCheckCmd?: string;
+	/** Human instruction shown in Settings + posted to the Setup chat. */
+	authHint?: string;
+	/** Agent-facing skill body written to the DAG on successful install. */
+	skillBody: string;
+}
+
+export const CATALOG: CatalogEntry[] = [
+	{
+		key: "browserless",
+		name: "browserless",
+		description: "Drive a headless Chrome from the shell — fetch rendered pages, screenshots, and PDFs of JS-heavy sites.",
+		installPrompt:
+			"Install browserless headless-Chrome tooling on this Mac for shell use by agents. " +
+			"Prefer `npm install -g browserless` (the npm package exposing a simple headless-Chrome API); " +
+			"if that package is unsuitable, install puppeteer-core plus a small `browserless` wrapper script on PATH that " +
+			"takes a URL and prints the rendered HTML. Do not start any long-running service. " +
+			"Finish only when `command -v browserless` succeeds.",
+		uninstallPrompt:
+			"Uninstall the browserless CLI from this Mac: `npm uninstall -g browserless` and remove any `browserless` " +
+			"wrapper script you find on PATH. Finish when `command -v browserless` fails.",
+		checkCmd: "command -v browserless",
+		skillBody:
+			"Headless Chrome from the shell via the `browserless` CLI.\n" +
+			"Use it when a page needs JavaScript to render (SPAs, dashboards) and plain curl returns an empty shell.\n" +
+			"Typical use: `browserless <url>` prints rendered HTML. Check `browserless --help` for screenshot/PDF flags.\n" +
+			"Prefer plain curl for static pages — this is the heavyweight option.",
+	},
+	{
+		key: "google",
+		name: "google",
+		description: "Google Workspace from the shell via the gws CLI — Gmail, Calendar, Drive under the signed-in account.",
+		installPrompt:
+			"Install the `gws` Google Workspace CLI on this Mac (Homebrew or npm, whichever the project documents). " +
+			"Do NOT attempt the OAuth login — a human completes that separately. " +
+			"Finish only when `command -v gws` succeeds.",
+		uninstallPrompt:
+			"Uninstall the `gws` Google Workspace CLI from this Mac (reverse however it was installed — brew or npm). " +
+			"Finish when `command -v gws` fails.",
+		checkCmd: "command -v gws",
+		authCheckCmd: "gws auth status",
+		authHint: "Run `gws auth` in a terminal and sign in with your Google account, then hit Re-check.",
+		skillBody:
+			"Google Workspace access through the `gws` CLI (already authenticated on this device).\n" +
+			"Gmail, Calendar, and Drive operations run under the signed-in account — see `gws --help` for subcommands.\n" +
+			"Read before you write: list/search first, and never send mail or modify events unless the task explicitly asks.",
+	},
+];
+
+// -- Device-local state -------------------------------------------
+
+export type SkillPhase = "off" | "installing" | "needs-auth" | "on" | "failed" | "uninstalling";
+
+interface SkillState {
+	enabled: boolean;
+	installed: boolean;
+	log?: string;
+	updatedAt: number;
+}
+
+const STATE_PATH = `${process.env.GLON_DATA ?? `${process.env.HOME}/.glon`}/skills.json`;
+
+interface StateFile {
+	skills: Record<string, SkillState>;
+	/** Agent id that fronts all device skills; others ask it in chat. */
+	coordinator?: string;
+}
+
+async function readState(): Promise<StateFile> {
+	try {
+		const j = (await Bun.file(STATE_PATH).json()) as Record<string, unknown>;
+		if (j && typeof j === "object" && "skills" in j) return j as unknown as StateFile;
+		if (j && typeof j === "object") return { skills: j as unknown as Record<string, SkillState> };
+	} catch {
+		/* fresh */
+	}
+	return { skills: {} };
+}
+
+async function writeState(state: StateFile): Promise<void> {
+	await Bun.write(STATE_PATH, JSON.stringify(state, null, "\t"));
+}
+
+export async function getCoordinator(): Promise<string> {
+	return (await readState()).coordinator ?? "";
+}
+
+export async function setCoordinator(agentId: string): Promise<void> {
+	const state = await readState();
+	state.coordinator = agentId || undefined;
+	await writeState(state);
+}
+
+/** Catalog skills enabled on this device. */
+export async function enabledCatalogKeys(): Promise<Set<string>> {
+	const state = await readState();
+	return new Set(CATALOG.filter((c) => state.skills[c.key]?.enabled).map((c) => c.key));
+}
+
+/**
+ * Prompt note for a non-coordinator agent: device skills exist, but they
+ * flow through the coordinator — ask in its chat instead of wielding them.
+ */
+export async function coordinatorNote(agentId: string): Promise<string> {
+	const state = await readState();
+	if (!state.coordinator || state.coordinator === agentId) return "";
+	const enabled = CATALOG.filter((c) => state.skills[c.key]?.enabled);
+	if (enabled.length === 0) return "";
+	let coordinatorName = "the coordinator";
+	try {
+		const obj = await fetchObject(state.coordinator);
+		coordinatorName = str(obj.fields, "name") || coordinatorName;
+	} catch {
+		/* coordinator object unreachable; generic name */
+	}
+	const lines = enabled.map((c) => `- ${c.name}: ${c.description}`);
+	return (
+		`<device-skills>\nThis machine has capabilities that are handled by the coordinator agent "${coordinatorName}", not by you:\n` +
+		`${lines.join("\n")}\n` +
+		`When a task needs one, ask ${coordinatorName} by posting the request in their chat (chat_reply_on on their chat object) and wait for their reply. Do not attempt these tools yourself.\n</device-skills>`
+	);
+}
+
+// -- Live jobs ----------------------------------------------------
+
+interface Job {
+	phase: "installing" | "uninstalling";
+	log: string[];
+}
+
+const jobs = new Map<string, Job>();
+
+// -- Helpers ------------------------------------------------------
+
+async function sh(cmd: string): Promise<{ ok: boolean; out: string }> {
+	const proc = Bun.spawn(["sh", "-lc", cmd], { stdout: "pipe", stderr: "pipe" });
+	const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+	const code = await proc.exited;
+	return { ok: code === 0, out: (out + err).trim() };
+}
+
+/** Find-or-create the shared "Setup" coordinator chat; post a line to it. */
+async function postToSetupChat(text: string): Promise<void> {
+	try {
+		const rows = await query({ type: "chat", limit: 50 });
+		let id = rows.find((r) => str(r.fields, "name") === "Setup")?.id;
+		if (!id) {
+			id = (await createObject("Setup", "chat", { iconEmoji: { stringValue: "\u2699\uFE0F" } })).id;
+		}
+		await chatPost(id, text, "Installer");
+	} catch (err) {
+		console.error("[skills] setup-chat post failed:", err);
+	}
+}
+
+/** Upsert the agent-facing skill object in the DAG. */
+async function upsertSkillObject(entry: CatalogEntry): Promise<void> {
+	const rows = await query({ type: "skill", limit: 100 });
+	const hit = rows.find((r) => str(r.fields, "name") === entry.name);
+	if (hit) {
+		const obj = await fetchObject(hit.id);
+		if (objectText(obj).trim() === entry.skillBody.trim()) return;
+		await mutate("delete", { object_id: hit.id });
+	}
+	const { id } = await createObject(entry.name, "skill", {
+		description: { stringValue: entry.description },
+	});
+	await mutate("block_add", { object_id: id, block: { content: { text: { text: entry.skillBody, style: 0 } } } });
+}
+
+// -- Status -------------------------------------------------------
+
+export interface SkillStatus {
+	key: string;
+	name: string;
+	description: string;
+	phase: SkillPhase;
+	installed: boolean;
+	log: string;
+	authHint?: string;
+}
+
+export async function skillStatus(): Promise<SkillStatus[]> {
+	const state = await readState();
+	return CATALOG.map((c) => {
+		const job = jobs.get(c.key);
+		const s = state.skills[c.key];
+		let phase: SkillPhase = "off";
+		if (job) phase = job.phase;
+		else if (s?.enabled) phase = "on";
+		else if (s?.log?.startsWith("[needs-auth]")) phase = "needs-auth";
+		else if (s?.log?.startsWith("[failed]")) phase = "failed";
+		return {
+			key: c.key,
+			name: c.name,
+			description: c.description,
+			phase,
+			installed: s?.installed ?? false,
+			log: job ? job.log.join("") : (s?.log ?? ""),
+			authHint: c.authHint,
+		};
+	});
+}
+
+// -- Gates --------------------------------------------------------
+
+/**
+ * Run the install/auth gates for an already-installed skill and settle
+ * state accordingly. Returns the resulting phase.
+ */
+export async function recheckSkill(key: string): Promise<SkillPhase> {
+	const entry = CATALOG.find((c) => c.key === key);
+	if (!entry) throw new Error(`unknown skill: ${key}`);
+	const state = await readState();
+	const check = await sh(entry.checkCmd);
+	if (!check.ok) {
+		state.skills[key] = { enabled: false, installed: false, log: `[failed] check "${entry.checkCmd}" failed:\n${check.out}`, updatedAt: Date.now() };
+		await writeState(state);
+		return "failed";
+	}
+	if (entry.authCheckCmd) {
+		const auth = await sh(entry.authCheckCmd);
+		if (!auth.ok) {
+			state.skills[key] = { enabled: false, installed: true, log: `[needs-auth] ${entry.authHint ?? "authentication required"}\n${auth.out}`, updatedAt: Date.now() };
+			await writeState(state);
+			return "needs-auth";
+		}
+	}
+	state.skills[key] = { enabled: true, installed: true, log: "", updatedAt: Date.now() };
+	await writeState(state);
+	await upsertSkillObject(entry);
+	return "on";
+}
+
+// -- Enable / disable / uninstall ---------------------------------
+
+const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
+
+/** Which agent the installer runs as a subagent of: coordinator, else any served agent. */
+async function installerParentId(): Promise<string> {
+	const state = await readState();
+	if (state.coordinator) return state.coordinator;
+	const { readRoster } = await import("./roster");
+	const roster = await readRoster();
+	if (roster.length > 0) return roster[0];
+	throw new Error("no served agent — enable one (or set a coordinator) so installs can run as its subagent");
+}
+
+/** Run the (un)install as a one-shot installer subagent of the harness itself. */
+function runInstaller(key: string, phase: "installing" | "uninstalling", prompt: string, onExit: () => Promise<void>): void {
+	const job: Job = { phase, log: [] };
+	jobs.set(key, job);
+	void (async () => {
+		try {
+			const parentId = await installerParentId();
+			const { spawnSubagent } = await import("./spawn");
+			const result = await Promise.race([
+				spawnSubagent(prompt, "installer", { agentId: parentId, channelId: "", depth: 0, touched: new Set() }),
+				new Promise<string>((_, reject) => setTimeout(() => reject(new Error("install timed out")), INSTALL_TIMEOUT_MS)),
+			]);
+			job.log.push(result);
+		} catch (err) {
+			job.log.push(`\n[installer error] ${err instanceof Error ? err.message : String(err)}`);
+		} finally {
+			try {
+				await onExit();
+			} finally {
+				jobs.delete(key);
+			}
+		}
+	})();
+}
+
+export async function enableSkill(key: string): Promise<SkillPhase> {
+	const entry = CATALOG.find((c) => c.key === key);
+	if (!entry) throw new Error(`unknown skill: ${key}`);
+	if (jobs.has(key)) return jobs.get(key)!.phase;
+
+	// Already installed (or present on the machine anyway)? Just gate.
+	const state = await readState();
+	if (state.skills[key]?.installed || (await sh(entry.checkCmd)).ok) {
+		return recheckSkill(key);
+	}
+
+	runInstaller(key, "installing", entry.installPrompt, async () => {
+		const phase = await recheckSkill(key);
+		if (phase === "needs-auth") {
+			await postToSetupChat(
+				`\u2699\uFE0F **${entry.name}** installed, but needs you to finish sign-in: ${entry.authHint ?? "authenticate, then hit Re-check in Settings."}`,
+			);
+		} else if (phase === "failed") {
+			const st = await readState();
+			const job = st.skills[key];
+			await postToSetupChat(`\u26A0\uFE0F **${entry.name}** install failed — see the log in Settings \u2192 Skills.`);
+			if (job) {
+				job.log = `[failed] install did not pass "${entry.checkCmd}"\n${jobLogTail(key)}`;
+				await writeState(st);
+			}
+		}
+	});
+	return "installing";
+}
+
+function jobLogTail(key: string): string {
+	const job = jobs.get(key);
+	if (!job) return "";
+	return job.log.join("").slice(-4000);
+}
+
+export async function disableSkill(key: string): Promise<void> {
+	const state = await readState();
+	const s = state.skills[key];
+	if (s) {
+		s.enabled = false;
+		s.log = "";
+		s.updatedAt = Date.now();
+		await writeState(state);
+	}
+	// Skill object stays in the DAG but stops being listed (device filter).
+}
+
+export async function uninstallSkill(key: string): Promise<SkillPhase> {
+	const entry = CATALOG.find((c) => c.key === key);
+	if (!entry) throw new Error(`unknown skill: ${key}`);
+	if (jobs.has(key)) return jobs.get(key)!.phase;
+	await disableSkill(key);
+	runInstaller(key, "uninstalling", entry.uninstallPrompt, async () => {
+		const state = await readState();
+		const gone = !(await sh(entry.checkCmd)).ok;
+		state.skills[key] = {
+			enabled: false,
+			installed: !gone,
+			log: gone ? "" : `[failed] uninstall left "${entry.checkCmd}" passing\n${jobLogTail(key)}`,
+			updatedAt: Date.now(),
+		};
+		await writeState(state);
+	});
+	return "uninstalling";
+}

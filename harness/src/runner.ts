@@ -87,9 +87,12 @@ async function buildEffectiveSystem(agent: ObjectJSON, view: ConversationView, o
 		const d = await digest(agent.id);
 		if (d) parts.push(d);
 	}
-	const skills = await listSkills();
+	const skills = await listSkills(agent.id);
 	const skillsSection = skillsPromptSection(skills);
 	if (skillsSection) parts.push(skillsSection);
+	const { coordinatorNote } = await import("./skillmgr");
+	const deviceNote = await coordinatorNote(agent.id);
+	if (deviceNote) parts.push(deviceNote);
 	const instructions = await channelInstructions(str(agent.fields, "channel"));
 	if (instructions) parts.push(instructions);
 	return parts.join("\n\n");
