@@ -440,14 +440,13 @@
 						{/if}
 					</div>
 				{/each}
-				<div class="m-wcard">
-					<button class="m-wcard-head" onclick={() => (mCollapsed["__recent"] = !mCollapsed["__recent"])}>
-						<span class="obj-icon">🕐</span>
-						<span class="m-wcard-name">Recently edited</span>
+				<div class="m-section">
+					<button class="m-section-label" onclick={() => (mCollapsed["__recent"] = !mCollapsed["__recent"])}>
+						Recently edited
 						<span class="m-chev" class:open={!mCollapsed["__recent"]}>⌄</span>
 					</button>
 					{#if !mCollapsed["__recent"]}
-						<div class="m-wcard-body">
+						<div class="m-section-body">
 							{#each mobileRecents as o (o.id)}
 								<a class="m-row" href="/object/{o.id}">
 									<span class="obj-icon">{o.icon || typeGlyph(o.typeKey)}</span>{o.name || "Untitled"}
@@ -456,14 +455,13 @@
 						</div>
 					{/if}
 				</div>
-				<div class="m-wcard">
-					<button class="m-wcard-head" onclick={() => (mCollapsed["__types"] = !mCollapsed["__types"])}>
-						<span class="obj-icon">🧩</span>
-						<span class="m-wcard-name">Types</span>
+				<div class="m-section">
+					<button class="m-section-label" onclick={() => (mCollapsed["__types"] = !mCollapsed["__types"])}>
+						Types
 						<span class="m-chev" class:open={!mCollapsed["__types"]}>⌄</span>
 					</button>
 					{#if !mCollapsed["__types"]}
-						<div class="m-wcard-body">
+						<div class="m-section-body">
 							{#each store.types as t (t.id)}
 								<a class="m-row" href="/object/{t.id}">
 									<span class="obj-icon">{t.icon || typeGlyph(t.key)}</span>{t.name || t.key}
@@ -1608,9 +1606,6 @@
 		color: var(--fg);
 		text-decoration: none;
 	}
-	button.m-wcard-head {
-		padding: 12px 14px;
-	}
 	.m-chev-btn {
 		flex: none;
 		background: none;
@@ -1637,15 +1632,37 @@
 	.m-wcard-body {
 		padding: 0 10px 10px;
 	}
+	.m-section-label {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		background: none;
+		border: none;
+		color: var(--muted);
+		font-size: 13px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		padding: 10px 4px 6px;
+		cursor: pointer;
+		text-align: left;
+	}
+	.m-section-body {
+		padding-bottom: 6px;
+	}
 	.m-row {
 		display: flex;
 		align-items: center;
 		gap: 8px;
 		padding: 9px 6px;
-		border-top: 1px solid var(--border);
 		color: var(--fg);
 		text-decoration: none;
 		font-size: 14px;
+		border-radius: 8px;
+	}
+	.m-row:active {
+		background: var(--hover);
 	}
 	.m-create-menu {
 		position: fixed;
