@@ -485,6 +485,7 @@ handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
 			o["fields"] = fields_to_json(s.fields)
 			o["createdAt"] = json.Integer(s.created_at)
 			o["updatedAt"] = json.Integer(s.updated_at)
+			if s.deleted do o["deleted"] = json.Boolean(true)
 			if text != "" {
 				snippet := text_snippet(s, text)
 				if snippet != "" do o["snippet"] = json.String(snippet)

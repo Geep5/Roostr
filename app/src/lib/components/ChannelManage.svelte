@@ -1,6 +1,42 @@
 <script lang="ts">
 	import type { ObjectJSON, ChannelJSON } from "$lib/types";
-	import { channel as channelApi } from "$lib/api";
+	import { channel as channelApi, fetchQuery, note } from "$lib/api";
+	import { objectIcon } from "$lib/icons";
+	import { onMount } from "svelte";
+
+	interface BinRow {
+		id: string;
+		name: string;
+		typeKey: string;
+		icon: string;
+	}
+	let bin = $state<BinRow[] | null>(null);
+	let binBusy = $state("");
+
+	async function loadBin() {
+		// Deleted objects of this channel (query rows now carry `deleted`).
+		const res = await fetchQuery({ includeDeleted: true, limit: 500 });
+		bin = res.records
+			.filter((r) => (r as { deleted?: boolean }).deleted && (r.fields["channel"]?.stringValue ?? "") === object.id)
+			.map((r) => ({
+				id: r.id,
+				name: r.fields["name"]?.stringValue || "Untitled",
+				typeKey: r.typeKey,
+				icon: r.fields["iconEmoji"]?.stringValue ?? "",
+			}));
+	}
+
+	onMount(() => {
+		void loadBin();
+	});
+
+	async function vanishObject(id: string, name: string) {
+		if (!confirm(`Permanently delete "${name}"? This cannot be undone — on any device.`)) return;
+		binBusy = id;
+		await note.vanish(id);
+		await loadBin();
+		binBusy = "";
+	}
 	import { invalidateAll } from "$app/navigation";
 	import SetTable from "./SetTable.svelte";
 	import ChannelAgents from "./ChannelAgents.svelte";
@@ -115,6 +151,23 @@
 		{relations}
 		{onchanged}
 	/>
+
+	<h3>Bin</h3>
+	{#if bin === null}
+		<p class="hint">Loading…</p>
+	{:else if bin.length === 0}
+		<p class="hint">Nothing in the bin.</p>
+	{:else}
+		<div class="bin">
+			{#each bin as b (b.id)}
+				<div class="bin-row">
+					<span class="obj-icon">{objectIcon(b.icon, b.typeKey)}</span>
+					<span class="bin-name">{b.name}</span>
+					<button class="danger" disabled={binBusy === b.id} onclick={() => void vanishObject(b.id, b.name)}>Delete forever</button>
+				</div>
+			{/each}
+		</div>
+	{/if}
 </section>
 
 <style>
@@ -122,6 +175,23 @@
 		display: flex;
 		flex-direction: column;
 		gap: 10px;
+	}
+	.bin-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 4px 0;
+		font-size: 13px;
+	}
+	.bin-row .bin-name {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.bin-row button {
+		font-size: 11px;
 	}
 	h3 {
 		font-size: 11px;
