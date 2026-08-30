@@ -9,6 +9,12 @@
 
 	let confirmDelete = $state(false);
 	let deleting = $state(false);
+	let deleteDraft = $state("");
+	let deleteInputEl = $state<HTMLInputElement>();
+	const deleteArmed = $derived(deleteDraft.trim().toLowerCase() === "delete");
+	$effect(() => {
+		if (confirmDelete) deleteInputEl?.focus();
+	});
 
 	/** Vanish the space and every object in it. The ledger entry rides sync,
 	 * so the deletion propagates to every device and can't resurrect. */
@@ -177,16 +183,7 @@
 
 	{#if store.channels.length > 1}
 		<h3>Danger zone</h3>
-		{#if confirmDelete}
-			<p class="hint">
-				Permanently delete <b>{object.fields["name"]?.stringValue || "this space"}</b> and every object in it —
-				on every device, forever.
-				<button class="danger" disabled={deleting} onclick={() => void deleteSpace()}>{deleting ? "Deleting…" : "Yes, delete this space"}</button>
-				<button class="subtle-btn" disabled={deleting} onclick={() => (confirmDelete = false)}>Cancel</button>
-			</p>
-		{:else}
-			<button class="danger" onclick={() => (confirmDelete = true)}>Delete this space…</button>
-		{/if}
+		<button class="danger" onclick={() => { confirmDelete = true; deleteDraft = ""; }}>Delete this space…</button>
 	{/if}
 
 	<h3>Bin</h3>
@@ -205,6 +202,25 @@
 			{/each}
 		</div>
 	{/if}
+	{#if confirmDelete}
+		<div class="del-overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget && !deleting) confirmDelete = false; }}>
+			<div class="del-modal" role="dialog" aria-label="Delete space">
+				<h3 class="del-title">Delete {object.fields["name"]?.stringValue || "this space"}?</h3>
+				<p class="hint">
+					This permanently deletes the space and every object in it — on every device, forever.
+					This cannot be undone.
+				</p>
+				<p class="hint">Type <b>delete</b> to confirm.</p>
+				<input class="del-input" bind:value={deleteDraft} placeholder="delete" autocomplete="off" bind:this={deleteInputEl} />
+				<div class="del-actions">
+					<button class="subtle-btn" disabled={deleting} onclick={() => (confirmDelete = false)}>Cancel</button>
+					<button class="del-btn" disabled={!deleteArmed || deleting} onclick={() => void deleteSpace()}>
+						{deleting ? "Deleting…" : "Delete forever"}
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </section>
 
 <style>
@@ -212,6 +228,65 @@
 		display: flex;
 		flex-direction: column;
 		gap: 10px;
+	}
+	.del-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgb(0 0 0 / 0.55);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 300;
+	}
+	.del-modal {
+		width: 380px;
+		max-width: calc(100vw - 48px);
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		padding: 18px;
+		box-shadow: 0 24px 80px rgb(0 0 0 / 0.6);
+	}
+	.del-title {
+		margin: 0 0 6px;
+		font-size: 15px;
+		text-transform: none;
+		letter-spacing: 0;
+		color: var(--fg);
+	}
+	.del-input {
+		width: 100%;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		color: var(--fg);
+		padding: 7px 10px;
+		font-size: 14px;
+		outline: none;
+		margin: 8px 0 14px;
+	}
+	.del-input:focus {
+		border-color: var(--red);
+		box-shadow: 0 0 0 3px rgb(255 69 58 / 0.25);
+	}
+	.del-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+	}
+	.del-btn {
+		background: var(--red);
+		color: #fff;
+		border: none;
+		border-radius: 6px;
+		padding: 7px 14px;
+		font-size: 13px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.del-btn:disabled {
+		opacity: 0.35;
+		cursor: default;
 	}
 	.bin-row {
 		display: flex;
