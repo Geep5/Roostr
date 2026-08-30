@@ -194,11 +194,6 @@
 		{onchanged}
 	/>
 
-	{#if store.channels.length > 1}
-		<h3>Danger zone</h3>
-		<button class="danger" onclick={() => { confirmDelete = true; deleteDraft = ""; }}>Delete this space…</button>
-	{/if}
-
 	<div class="bin-head">
 		<h3>Bin</h3>
 		{#if bin && bin.length > 0}
@@ -220,6 +215,11 @@
 			{/each}
 		</div>
 	{/if}
+	{#if store.channels.length > 1}
+		<h3>Danger zone</h3>
+		<button class="danger" onclick={() => { confirmDelete = true; deleteDraft = ""; }}>Delete this space…</button>
+	{/if}
+
 	{#if confirmEmpty}
 		<div class="del-overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) confirmEmpty = false; }}>
 			<div class="del-modal" role="dialog" aria-label="Empty bin">
