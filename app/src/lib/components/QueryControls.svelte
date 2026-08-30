@@ -909,7 +909,7 @@
 	.new-btn {
 		align-self: center;
 		background: var(--accent);
-		color: #101216;
+		color: #fff;
 		border: none;
 		border-radius: 8px;
 		height: 28px;
