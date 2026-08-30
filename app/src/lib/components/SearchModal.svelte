@@ -2,7 +2,7 @@
 	import { goto } from "$app/navigation";
 	import { fetchQuery, type QueryResultRow } from "$lib/api";
 	import { store } from "$lib/data.svelte";
-	import { activeChannel } from "$lib/channel.svelte";
+	import { activeSpace } from "$lib/space.svelte";
 	import { objectIcon } from "$lib/icons";
 	import { createTyped } from "$lib/create";
 
@@ -18,18 +18,18 @@
 	let typeChip = $state("");
 	let inputEl = $state<HTMLInputElement>();
 
-	const channelId = $derived(activeChannel.id || store.channels[0]?.id || "");
+	const channelId = $derived(activeSpace.id || store.channels[0]?.id || "");
 	const isDefault = $derived(channelId === (store.channels[0]?.id ?? ""));
-	const channelName = $derived(store.channels.find((c) => c.id === channelId)?.name ?? "");
+	const spaceName = $derived(store.channels.find((c) => c.id === channelId)?.name ?? "");
 
 	$effect(() => {
 		inputEl?.focus();
 	});
 
-	/** Kernel/internal types never appear in search (they're channel-less). */
+	/** Kernel/internal types never appear in search (they're space-less). */
 	const TYPE_EXCLUDE = { key: "type", condition: "notIn", value: ["program", "typescript", "json", "proto", "relation", "channel", "type", "template", "agent", "skill", "peer", "pinned_fact", "milestone", "vanish_log"] };
 
-	/** Channel scope filter: unassigned objects live in the default channel. */
+	/** Space scope filter: unassigned objects live in the default space. */
 	function scopeFilters(chip = typeChip): Array<Record<string, unknown>> {
 		const scope = isDefault
 			? {
@@ -120,7 +120,7 @@
 	<div class="modal" role="dialog" aria-label="Search">
 		<div class="sheet-handle"></div>
 		<div class="input-row">
-			<span class="scope">{channelName}</span>
+			<span class="scope">{spaceName}</span>
 			<span class="m-search-icon">⌕</span>
 			<input bind:this={inputEl} bind:value={query} placeholder="Search objects and content…" />
 			{#if query !== ""}

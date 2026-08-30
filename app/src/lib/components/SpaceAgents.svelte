@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
-	 * Agents section of channel settings. Agents are channel infrastructure
-	 * (like members), not objects OF the channel — they're hidden from every
+	 * Agents section of space settings. Agents are space infrastructure
+	 * (like members), not objects OF the space — they're hidden from every
 	 * object surface and managed only here. You TALK to an agent through its
 	 * chat or any object's discussion; you MANAGE it here. Presence comes
 	 * from the synced heartbeat fields; "runs here" is this machine's
@@ -101,7 +101,7 @@
 
 	// ── Responsibility (one owner per type; one "everything else") ──
 	//
-	// A type key is claimable by exactly ONE agent in the channel, and only
+	// A type key is claimable by exactly ONE agent in the space, and only
 	// one agent may hold "*" (whatever isn't explicitly claimed). The
 	// checkboxes below enforce it: claimed elsewhere = disabled, with the
 	// claimant named.

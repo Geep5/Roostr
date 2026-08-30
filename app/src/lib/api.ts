@@ -1,6 +1,6 @@
 /** Client API helpers: reads via GET, mutations via POST {API}/api/mutate. */
 
-import type { ObjectJSON, ObjectSummary, ChannelJSON, RelationDefJSON, BlockJSON, ValueJSON } from "$lib/types";
+import type { ObjectJSON, ObjectSummary, SpaceJSON, RelationDefJSON, BlockJSON, ValueJSON } from "$lib/types";
 
 export const API = import.meta.env.VITE_GLON_API ?? "http://127.0.0.1:7333";
 
@@ -12,7 +12,7 @@ async function getJSON<T>(path: string): Promise<T> {
 
 export const fetchObject = (id: string) => getJSON<ObjectJSON>(`/api/objects/${id}`);
 export const fetchObjects = () => getJSON<ObjectSummary[]>("/api/objects");
-export const fetchChannels = () => getJSON<ChannelJSON[]>("/api/channels");
+export const fetchChannels = () => getJSON<SpaceJSON[]>("/api/channels");
 export const fetchRelations = () => getJSON<RelationDefJSON[]>("/api/relations");
 
 export interface QueryResultRow {
@@ -80,7 +80,7 @@ export const table = {
 		mutate("table_col_remove", { object_id: objectId, table_id: tableId, column_id: columnId }),
 };
 
-export const channel = {
+export const space = {
 	create: (name: string, icon?: string) =>
 		mutate("channel_create", { name, icon }) as Promise<{ id: string; key_id: number }>,
 	memberAdd: (channelId: string, npub: string, role?: string) =>

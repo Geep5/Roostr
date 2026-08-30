@@ -1,14 +1,17 @@
 <script lang="ts">
-	import type { ObjectJSON, ChannelJSON } from "$lib/types";
-	import { channel as channelApi, fetchQuery, note } from "$lib/api";
+	import type { ObjectJSON, SpaceJSON } from "$lib/types";
+	import { space as spaceApi, fetchQuery, note } from "$lib/api";
 	import { objectIcon } from "$lib/icons";
 	import { onMount } from "svelte";
 	import { goto } from "$app/navigation";
 	import { store, refreshAll } from "$lib/data.svelte";
-	import { activeChannel } from "$lib/channel.svelte";
+	import { activeSpace } from "$lib/space.svelte";
 
 	let confirmDelete = $state(false);
 	let deleting = $state(false);
+	let confirmEmpty = $state(false);
+	let emptyDraft = $state("");
+	const emptyArmed = $derived(emptyDraft.trim().toLowerCase() === "delete");
 	let deleteDraft = $state("");
 	let deleteInputEl = $state<HTMLInputElement>();
 	const deleteArmed = $derived(deleteDraft.trim().toLowerCase() === "delete");
@@ -26,7 +29,7 @@
 			await note.vanish(ids);
 			await refreshAll();
 			const next = store.channels[0]?.id ?? "";
-			activeChannel.id = next;
+			activeSpace.id = next;
 			await goto("/");
 		} finally {
 			deleting = false;
@@ -43,7 +46,7 @@
 	let binBusy = $state("");
 
 	async function loadBin() {
-		// Deleted objects of this channel (query rows now carry `deleted`).
+		// Deleted objects of this space (query rows now carry `deleted`).
 		const res = await fetchQuery({ includeDeleted: true, limit: 500 });
 		bin = res.records
 			.filter((r) => (r as { deleted?: boolean }).deleted && (r.fields["channel"]?.stringValue ?? "") === object.id)
@@ -59,6 +62,16 @@
 		void loadBin();
 	});
 
+	/** Empty bin: vanish every deleted object in this space at once. */
+	async function emptyBin() {
+		if (!bin || bin.length === 0) return;
+		binBusy = "__all__";
+		await note.vanish(bin.map((b) => b.id));
+		bin = [];
+		confirmEmpty = false;
+		binBusy = "";
+	}
+
 	async function vanishObject(id: string, name: string) {
 		if (!confirm(`Permanently delete "${name}"? This cannot be undone — on any device.`)) return;
 		binBusy = id;
@@ -68,22 +81,22 @@
 	}
 	import { invalidateAll } from "$app/navigation";
 	import SetTable from "./SetTable.svelte";
-	import ChannelAgents from "./ChannelAgents.svelte";
+	import SpaceAgents from "./SpaceAgents.svelte";
 	import type { RelationDefJSON } from "$lib/types";
 
 	let {
 		object,
-		channelInfo,
+		spaceInfo,
 		relations,
 		onchanged,
 	}: {
 		object: ObjectJSON;
-		channelInfo: ChannelJSON | undefined;
+		spaceInfo: SpaceJSON | undefined;
 		relations: RelationDefJSON[];
 		onchanged: () => Promise<void>;
 	} = $props();
 
-	const members = $derived(channelInfo?.members ?? []);
+	const members = $derived(spaceInfo?.members ?? []);
 	let npubDraft = $state("");
 	let invite = $state<string>("");
 	let confirmRemove = $state("");
@@ -91,7 +104,7 @@
 	async function addMember() {
 		const npub = npubDraft.trim();
 		if (!npub) return;
-		await channelApi.memberAdd(object.id, npub);
+		await spaceApi.memberAdd(object.id, npub);
 		npubDraft = "";
 		await onchanged();
 		await invalidateAll();
@@ -103,24 +116,24 @@
 			return;
 		}
 		confirmRemove = "";
-		await channelApi.memberRemove(object.id, npub);
+		await spaceApi.memberRemove(object.id, npub);
 		await onchanged();
 		await invalidateAll();
 	}
 
 	async function showInvite(npub: string) {
-		const payload = await channelApi.invitePayload(object.id, npub);
+		const payload = await spaceApi.invitePayload(object.id, npub);
 		invite = JSON.stringify(payload, null, 2);
 	}
 </script>
 
 <section class="manage">
-	<ChannelAgents channelId={object.id} />
+	<SpaceAgents channelId={object.id} />
 
 	<h3>Members</h3>
 	<p class="hint">
 		Everyone holding this space's key can read and write every object in it. Invites are delivered as a
-		NIP-59 gift wrap of the channel key to the member's npub (ships with /nostr-sync); removing a member
+		NIP-59 gift wrap of the space key to the member's npub (ships with /nostr-sync); removing a member
 		rotates the key.
 	</p>
 
@@ -158,10 +171,10 @@
 	{/if}
 
 	<div class="keyrow">
-		<span class="hint">Channel key #{channelInfo?.keyId ?? "?"}</span>
+		<span class="hint">Space key #{spaceInfo?.keyId ?? "?"}</span>
 		<button
 			onclick={async () => {
-				await channelApi.keyRotate(object.id);
+				await spaceApi.keyRotate(object.id);
 				await onchanged();
 				await invalidateAll();
 			}}>Rotate key</button
@@ -186,7 +199,12 @@
 		<button class="danger" onclick={() => { confirmDelete = true; deleteDraft = ""; }}>Delete this space…</button>
 	{/if}
 
-	<h3>Bin</h3>
+	<div class="bin-head">
+		<h3>Bin</h3>
+		{#if bin && bin.length > 0}
+			<button class="danger" onclick={() => { confirmEmpty = true; emptyDraft = ""; }}>Empty bin…</button>
+		{/if}
+	</div>
 	{#if bin === null}
 		<p class="hint">Loading…</p>
 	{:else if bin.length === 0}
@@ -202,6 +220,26 @@
 			{/each}
 		</div>
 	{/if}
+	{#if confirmEmpty}
+		<div class="del-overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) confirmEmpty = false; }}>
+			<div class="del-modal" role="dialog" aria-label="Empty bin">
+				<h3 class="del-title">Empty the bin?</h3>
+				<p class="hint">
+					Permanently deletes {bin?.length ?? 0} object{(bin?.length ?? 0) === 1 ? "" : "s"} — on every device, forever.
+					This cannot be undone.
+				</p>
+				<p class="hint">Type <b>delete</b> to confirm.</p>
+				<input class="del-input" bind:value={emptyDraft} placeholder="delete" autocomplete="off" />
+				<div class="del-actions">
+					<button class="subtle-btn" onclick={() => (confirmEmpty = false)}>Cancel</button>
+					<button class="del-btn" disabled={!emptyArmed || binBusy !== ""} onclick={() => void emptyBin()}>
+						{binBusy === "__all__" ? "Deleting…" : "Delete forever"}
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	{#if confirmDelete}
 		<div class="del-overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget && !deleting) confirmDelete = false; }}>
 			<div class="del-modal" role="dialog" aria-label="Delete space">
@@ -288,6 +326,14 @@
 	.del-btn:disabled {
 		opacity: 0.35;
 		cursor: default;
+	}
+	.bin-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+	.bin-head h3 {
+		margin-bottom: 0;
 	}
 	.bin-row {
 		display: flex;

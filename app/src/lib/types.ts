@@ -52,13 +52,13 @@ export interface ObjectSummary {
 	typeKey: string;
 	name: string;
 	updatedAt: number;
-	/** Scoping channel object id ("" = personal/unassigned). */
+	/** Scoping space object id ("" = personal/unassigned). */
 	channelId: string;
 	/** Object's emoji icon ("" = none, render the type glyph). */
 	icon: string;
 }
 
-export interface ChannelJSON {
+export interface SpaceJSON {
 	id: string;
 	name: string;
 	icon: string;

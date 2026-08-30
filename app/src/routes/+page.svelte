@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { activeChannel } from "$lib/channel.svelte";
+	import { activeSpace } from "$lib/space.svelte";
 	import { objectIcon, TYPE_GLYPHS } from "$lib/icons";
 	import { store, refreshAll } from "$lib/data.svelte";
 	import { createTyped, createCollection as libCreateCollection, createQuery as libCreateQuery } from "$lib/create";
 
 	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
-	const channelId = $derived(activeChannel.id || defaultChannelId);
+	const channelId = $derived(activeSpace.id || defaultChannelId);
 
 	/** Objects in the active channel (unassigned objects live in the default channel). */
 	const objects = $derived(

@@ -99,7 +99,7 @@
 
 	/**
 	 * Emoji avatar for an author, when it has one: agents post as their
-	 * object id and carry iconEmoji (set from the channel's Agents
+	 * object id and carry iconEmoji (set from the space's Agents
 	 * settings); the chat object itself covers agent-brain chats.
 	 */
 	function avatarEmoji(author: string): string {

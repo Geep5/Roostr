@@ -14,7 +14,7 @@
 	import KanbanView from "$lib/components/KanbanView.svelte";
 	import CalendarView from "$lib/components/CalendarView.svelte";
 	import GalleryView from "$lib/components/GalleryView.svelte";
-	import ChannelManage from "$lib/components/ChannelManage.svelte";
+	import SpaceManage from "$lib/components/SpaceManage.svelte";
 	import TypePanel from "$lib/components/TypePanel.svelte";
 	import EmojiPicker from "$lib/components/EmojiPicker.svelte";
 	import { objectIcon } from "$lib/icons";
@@ -199,7 +199,7 @@
 
 	// ── Channel + pinning ─────────────────────────────────────────
 	const isChannel = $derived(object?.typeKey === "channel");
-	const channelInfo = $derived(store.channels.find((c) => c.id === object?.id));
+	const spaceInfo = $derived(store.channels.find((c) => c.id === object?.id));
 
 
 	onMount(() =>
@@ -270,7 +270,7 @@
 		{/if}
 
 		{#if isChannel}
-			<ChannelManage {object} {channelInfo} relations={store.relations} onchanged={refresh} />
+			<SpaceManage {object} {spaceInfo} relations={store.relations} onchanged={refresh} />
 		{:else if isChat}
 			<Discussion {object} full onchanged={refresh} />
 		{:else if isType}

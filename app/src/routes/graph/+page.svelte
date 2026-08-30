@@ -2,7 +2,7 @@
 	import { goto } from "$app/navigation";
 	import { page } from "$app/state";
 	import { buildGraph, simStep, type ObjectGraph } from "$lib/graph";
-	import { activeChannel } from "$lib/channel.svelte";
+	import { activeSpace } from "$lib/space.svelte";
 	import { store, refreshAll } from "$lib/data.svelte";
 	import { createRenderer, createProgram } from "brometal";
 	import nodeShader from "$lib/shaders/graph-node.shader.gen";
@@ -16,8 +16,8 @@
 
 	// Each channel gets its own graph (Anytype: one graph per space).
 	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
-	const channelId = $derived(activeChannel.id || defaultChannelId);
-	const channelName = $derived(store.channels.find((c) => c.id === channelId)?.name ?? "");
+	const channelId = $derived(activeSpace.id || defaultChannelId);
+	const spaceName = $derived(store.channels.find((c) => c.id === channelId)?.name ?? "");
 	// ?focus=<objectId>: highlight + center that object (Anytype's
 	// "show in graph" from an open object).
 	const focusId = $derived(page.url.searchParams.get("focus") ?? "");
