@@ -3,6 +3,29 @@
 	import { channel as channelApi, fetchQuery, note } from "$lib/api";
 	import { objectIcon } from "$lib/icons";
 	import { onMount } from "svelte";
+	import { goto } from "$app/navigation";
+	import { store, refreshAll } from "$lib/data.svelte";
+	import { activeChannel } from "$lib/channel.svelte";
+
+	let confirmDelete = $state(false);
+	let deleting = $state(false);
+
+	/** Vanish the space and every object in it. The ledger entry rides sync,
+	 * so the deletion propagates to every device and can't resurrect. */
+	async function deleteSpace() {
+		deleting = true;
+		try {
+			const res = await fetchQuery({ filters: [{ key: "channel", condition: "equal", value: object.id }], limit: 1000 });
+			const ids = [object.id, ...res.records.map((r) => r.id)];
+			await note.vanish(ids);
+			await refreshAll();
+			const next = store.channels[0]?.id ?? "";
+			activeChannel.id = next;
+			await goto("/");
+		} finally {
+			deleting = false;
+		}
+	}
 
 	interface BinRow {
 		id: string;
@@ -90,7 +113,7 @@
 
 	<h3>Members</h3>
 	<p class="hint">
-		Everyone holding this channel's key can read and write every object in it. Invites are delivered as a
+		Everyone holding this space's key can read and write every object in it. Invites are delivered as a
 		NIP-59 gift wrap of the channel key to the member's npub (ships with /nostr-sync); removing a member
 		rotates the key.
 	</p>
@@ -139,7 +162,7 @@
 		>
 	</div>
 
-	<h3>Objects in this channel</h3>
+	<h3>Objects in this space</h3>
 	<SetTable
 		body={{
 			filters: [
@@ -151,6 +174,20 @@
 		{relations}
 		{onchanged}
 	/>
+
+	{#if store.channels.length > 1}
+		<h3>Danger zone</h3>
+		{#if confirmDelete}
+			<p class="hint">
+				Permanently delete <b>{object.fields["name"]?.stringValue || "this space"}</b> and every object in it —
+				on every device, forever.
+				<button class="danger" disabled={deleting} onclick={() => void deleteSpace()}>{deleting ? "Deleting…" : "Yes, delete this space"}</button>
+				<button class="subtle-btn" disabled={deleting} onclick={() => (confirmDelete = false)}>Cancel</button>
+			</p>
+		{:else}
+			<button class="danger" onclick={() => (confirmDelete = true)}>Delete this space…</button>
+		{/if}
+	{/if}
 
 	<h3>Bin</h3>
 	{#if bin === null}

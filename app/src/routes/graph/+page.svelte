@@ -37,7 +37,7 @@
 
 		void (async () => {
 			const graph: ObjectGraph = await buildGraph(id, isDefault);
-			status = graph.nodes.length === 0 ? "Nothing in this channel yet." : "";
+			status = graph.nodes.length === 0 ? "Nothing in this space yet." : "";
 			if (!canvasEl || cancelled || graph.nodes.length === 0) return;
 
 			const renderer = await createRenderer(canvasEl, { clearColor: [0.047, 0.055, 0.066, 1] });

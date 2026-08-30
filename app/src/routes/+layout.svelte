@@ -47,7 +47,7 @@
 
 	let showMore = $state(false);
 
-	// ── Mobile shell (Anytype iOS flow): Channels list -> channel home -> object.
+	// ── Mobile shell (Anytype iOS flow): Spaces list -> channel home -> object.
 	let isMobile = $state(false);
 	/** Mobile only: true when a channel card has been tapped open. */
 	let mobileChannelOpen = $state(false);
@@ -222,7 +222,7 @@
 	}
 
 	async function newChannel() {
-		const name = prompt("Channel name:");
+		const name = prompt("Space name:");
 		if (!name) return;
 		const { id } = await channelApi.create(name);
 		await refreshAll();
@@ -318,7 +318,7 @@
 	{#if objectId}
 		<!-- Object page: back / icon+name / star / more. -->
 		<header class="m-top">
-			<button class="m-btn" data-tip="Channel home" onclick={() => mobileBackToChannel()}>‹</button>
+			<button class="m-btn" data-tip="Space home" onclick={() => mobileBackToChannel()}>‹</button>
 			<span class="m-obj">
 				{#if headerPath.icon === "graph"}
 					<span class="path-icon"><GraphIcon /></span>
@@ -340,7 +340,7 @@
 								Graph
 							</button>
 							<button onclick={() => { showMore = false; void togglePin(); }}>
-								{isPinned ? "★ Unpin from channel" : "☆ Pin to channel"}
+								{isPinned ? "★ Unpin from space" : "☆ Pin to space"}
 							</button>
 							<button onclick={() => (showCollections = !showCollections)}>⛁ Add to collection ▸</button>
 							{#if showCollections}
@@ -349,7 +349,7 @@
 										<button onclick={() => { showMore = false; void addToCollection(c.id); }}>{objectIcon(c.icon, c.typeKey)} {c.name || "Untitled"}</button>
 									{/each}
 									{#if collections.length === 0}
-										<span class="menu-none">No collections in this channel</span>
+										<span class="menu-none">No collections in this space</span>
 									{/if}
 								</div>
 							{/if}
@@ -364,10 +364,10 @@
 		</header>
 		<main class="m-main">{@render children()}</main>
 	{:else if !mobileChannelOpen || !current}
-		<!-- Screen 1: Channels list. -->
+		<!-- Screen 1: Spaces list. -->
 		<div class="m-screen">
 			<div class="m-head">
-				<span class="m-title">Channels</span>
+				<span class="m-title">Spaces</span>
 				<button class="m-avatar" data-tip="Settings" onclick={() => (showSettings = true)}>⚙</button>
 			</div>
 			<div class="m-cards">
@@ -390,7 +390,7 @@
 						{#if latest}<span class="m-card-side">{shortDate(latest.updatedAt)}</span>{/if}
 					</button>
 				{/each}
-				<button class="m-card add" onclick={() => void newChannel()}>＋ New channel</button>
+				<button class="m-card add" onclick={() => void newChannel()}>＋ New space</button>
 			</div>
 			<div class="m-bottom">
 				<button class="m-search" onclick={() => (showSearch = true)}>⌕ Search</button>
@@ -401,9 +401,9 @@
 		<!-- Screen 2: inside a channel — pinned objects as collapsible cards. -->
 		<div class="m-screen">
 			<div class="m-top">
-				<button class="m-btn" data-tip="Channels" onclick={() => (mobileChannelOpen = false)}>‹</button>
+				<button class="m-btn" data-tip="Spaces" onclick={() => (mobileChannelOpen = false)}>‹</button>
 				<span class="m-sync" class:ok={store.connected} data-tip={store.connected ? "Local daemon live" : "Daemon offline"}><span class="m-sync-dot"></span></span>
-				<button class="m-btn" data-tip="Channel settings" onclick={() => goto(`/object/${current.id}`)}>⋯</button>
+				<button class="m-btn" data-tip="Space settings" onclick={() => goto(`/object/${current.id}`)}>⋯</button>
 			</div>
 			<div class="m-ch-head">
 				<span class="m-ch-icon">
@@ -415,7 +415,7 @@
 				</span>
 				<div class="m-ch-text">
 					<div class="m-ch-name">{current.name}</div>
-					<div class="m-ch-sub">{current.members.length > 0 ? "Shared channel" : "Private channel"}</div>
+					<div class="m-ch-sub">{current.members.length > 0 ? "Shared space" : "Private space"}</div>
 				</div>
 			</div>
 			<div class="m-cards-col">
@@ -507,14 +507,14 @@
 				{/if}
 			</button>
 		{/each}
-		<button class="space add" title="New channel" onclick={() => void newChannel()}>+</button>
+		<button class="space add" title="New space" onclick={() => void newChannel()}>+</button>
 		<div class="rail-spacer"></div>
 		<button class="space settings" title="Settings" onclick={() => (showSettings = true)}>⚙</button>
 	</nav>
 
 	<aside class="widgets">
 		{#if current}
-			<a class="channel-head" href="/object/{current.id}" title="Channel settings">
+			<a class="channel-head" href="/object/{current.id}" title="Space settings">
 				<span class="channel-name">{current.name}</span>
 				<span class="gear">⚙</span>
 			</a>
@@ -682,7 +682,7 @@
 						{#if showMore}
 							<div class="more-menu">
 								<button onclick={() => { showMore = false; void togglePin(); }}>
-									{isPinned ? "★ Unpin from channel" : "☆ Pin to channel"}
+									{isPinned ? "★ Unpin from space" : "☆ Pin to space"}
 								</button>
 								<button onclick={() => (showCollections = !showCollections)}>⛁ Add to collection ▸</button>
 								{#if showCollections}
@@ -691,7 +691,7 @@
 											<button onclick={() => { showMore = false; void addToCollection(c.id); }}>{objectIcon(c.icon, c.typeKey)} {c.name || "Untitled"}</button>
 										{/each}
 										{#if collections.length === 0}
-											<span class="menu-none">No collections in this channel</span>
+											<span class="menu-none">No collections in this space</span>
 										{/if}
 									</div>
 								{/if}
@@ -1312,7 +1312,7 @@
 		margin: 0 auto;
 	}
 
-	/* ── Mobile shell (<=720px): Channels list -> channel home -> object ── */
+	/* ── Mobile shell (<=720px): Spaces list -> channel home -> object ── */
 	.m-shell {
 		display: flex;
 		flex-direction: column;

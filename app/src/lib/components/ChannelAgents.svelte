@@ -225,7 +225,7 @@
 
 <h3>Agents</h3>
 <p class="hint">
-	Agents serve this channel: one holistic chat each, reachable from any object's discussion. Enable an
+	Agents serve this space: one holistic chat each, reachable from any object's discussion. Enable an
 	agent on the machine whose harness should run it.
 </p>
 
@@ -289,7 +289,7 @@
 	</div>
 {/each}
 {#if agents.length === 0}
-	<p class="hint">No agents in this channel yet.</p>
+	<p class="hint">No agents in this space yet.</p>
 {/if}
 
 <button class="new-agent" onclick={() => void newAgent()}>＋ New agent</button>
