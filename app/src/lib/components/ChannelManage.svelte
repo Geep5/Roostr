@@ -255,6 +255,7 @@
 		color: var(--fg);
 	}
 	.del-input {
+		box-sizing: border-box;
 		width: 100%;
 		background: var(--bg);
 		border: 1px solid var(--border);
