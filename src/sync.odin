@@ -19,6 +19,7 @@ import "core:net"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:slice"
 
 handle_changes_manifest :: proc(sock: net.TCP_Socket) {
 	out := jobj()
@@ -47,6 +48,68 @@ handle_changes_manifest :: proc(sock: net.TCP_Socket) {
 			}
 		}
 	}
+	respond_json(sock, json.Object(out))
+}
+
+/**
+ * State fingerprint for cross-device verification:
+ * sha256 over the canonical manifest — for each object id (sorted), the line
+ * "<objectId>:<sorted change hex ids joined by ,>\n". Vanished objects are
+ * excluded (same rule as publication). Two devices with equal digests hold
+ * identical change sets, order-independent.
+ */
+handle_sync_digest :: proc(sock: net.TCP_Socket) {
+	vanished := vanished_ids()
+	objects := make([dynamic]string, context.temp_allocator)
+	per_obj := make(map[string][dynamic]string, context.temp_allocator)
+	change_count := 0
+
+	dir, derr := os.open(g_store.root)
+	if derr == nil {
+		defer os.close(dir)
+		entries, eerr := os.read_dir(dir, -1, context.temp_allocator)
+		if eerr == nil {
+			for entry in entries {
+				if entry.type != .Directory || strings.has_prefix(entry.name, ".") do continue
+				if entry.name in vanished do continue
+				ids := make([dynamic]string, context.temp_allocator)
+				odir, oerr := os.open(entry.fullpath)
+				if oerr != nil do continue
+				files, ferr := os.read_dir(odir, -1, context.temp_allocator)
+				os.close(odir)
+				if ferr != nil do continue
+				for f in files {
+					if !strings.has_suffix(f.name, ".pb") do continue
+					append(&ids, strings.clone(f.name[:len(f.name) - 3], context.temp_allocator))
+				}
+				if len(ids) == 0 do continue
+				slice.sort(ids[:])
+				oid := strings.clone(entry.name, context.temp_allocator)
+				per_obj[oid] = ids
+				append(&objects, oid)
+				change_count += len(ids)
+			}
+		}
+	}
+	slice.sort(objects[:])
+
+	buf := make([dynamic]byte, context.temp_allocator)
+	for oid in objects {
+		append(&buf, ..transmute([]byte)oid)
+		append(&buf, u8(':'))
+		for cid, i in per_obj[oid] {
+			if i > 0 do append(&buf, u8(','))
+			append(&buf, ..transmute([]byte)cid)
+		}
+		append(&buf, u8('\n'))
+	}
+	digest := sha256(buf[:])
+
+	out := jobj()
+	out["digest"] = json.String(string(hex.encode(digest[:], context.temp_allocator)))
+	out["objects"] = json.Integer(i64(len(objects)))
+	out["changes"] = json.Integer(i64(change_count))
+	out["computedAt"] = json.Integer(unix_ms())
 	respond_json(sock, json.Object(out))
 }
 

@@ -331,6 +331,7 @@
 			</span>
 			{#if objectSummary}
 				<div class="m-actions">
+				<span class="m-sync" class:ok={store.connected} data-tip={store.connected ? "Local daemon live" : "Daemon offline"}><span class="m-sync-dot"></span></span>
 				<div class="more-wrap">
 					<button class="m-btn" data-tip="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
 					{#if showMore}
@@ -401,6 +402,7 @@
 		<div class="m-screen">
 			<div class="m-top">
 				<button class="m-btn" data-tip="Channels" onclick={() => (mobileChannelOpen = false)}>‹</button>
+				<span class="m-sync" class:ok={store.connected} data-tip={store.connected ? "Local daemon live" : "Daemon offline"}><span class="m-sync-dot"></span></span>
 				<button class="m-btn" data-tip="Channel settings" onclick={() => goto(`/object/${current.id}`)}>⋯</button>
 			</div>
 			<div class="m-ch-head">
@@ -1459,6 +1461,25 @@
 		color: var(--fg);
 		font-size: 19px;
 		cursor: pointer;
+	}
+	.m-sync {
+		width: 40px;
+		height: 40px;
+		border-radius: 50%;
+		background: var(--panel);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex: none;
+	}
+	.m-sync-dot {
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		background: var(--muted);
+	}
+	.m-sync.ok .m-sync-dot {
+		background: #6fcf7f;
 	}
 	.m-actions {
 		display: flex;

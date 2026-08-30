@@ -20,6 +20,8 @@ export interface TypeDef {
 export const store = $state({
 	channels: [] as ChannelJSON[],
 	summaries: [] as ObjectSummary[],
+	/** SSE link to the local daemon (drives the mobile sync dot). */
+	connected: false,
 	relations: [] as RelationDefJSON[],
 	types: [] as TypeDef[],
 	loaded: false,
@@ -89,6 +91,12 @@ export function connectEvents(): () => void {
 		}
 	});
 	let timer: number | undefined;
+	source.onopen = () => {
+		store.connected = true;
+	};
+	source.onerror = () => {
+		store.connected = source.readyState === EventSource.OPEN;
+	};
 	source.onmessage = (ev) => {
 		clearTimeout(timer);
 		timer = setTimeout(() => void refreshAll(), 1500);
