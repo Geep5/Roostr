@@ -198,7 +198,7 @@
 		line-height: 14px;
 	}
 	.mini:hover:not(:disabled) {
-		color: #e8524a;
+		color: var(--red);
 	}
 	.mini:disabled {
 		opacity: 0.3;

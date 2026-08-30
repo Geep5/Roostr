@@ -336,13 +336,13 @@
 {/if}
 <style>
 	.done-check {
-		width: 28px;
-		height: 28px;
-		border: 2px solid var(--border);
-		border-radius: 6px;
-		background: none;
-		color: var(--bg);
-		font-size: 16px;
+		width: 20px;
+		height: 20px;
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		background: var(--panel);
+		color: #fff;
+		font-size: 12px;
 		line-height: 1;
 		cursor: pointer;
 		flex: none;

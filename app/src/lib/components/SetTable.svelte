@@ -466,7 +466,7 @@
 		opacity: 1;
 	}
 	th .hide:hover {
-		color: #e8524a;
+		color: var(--red);
 	}
 	.plus-col {
 		width: 32px;

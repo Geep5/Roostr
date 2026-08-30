@@ -426,7 +426,7 @@
 		background: var(--accent);
 		border: none;
 		border-radius: 8px;
-		color: #14161a;
+		color: #fff;
 		font-size: 13px;
 		font-weight: 600;
 		padding: 7px 0;

@@ -276,7 +276,7 @@
 		cursor: pointer;
 	}
 	.pop-rm:hover {
-		color: #e8524a;
+		color: var(--red);
 	}
 	.backdrop {
 		position: fixed;

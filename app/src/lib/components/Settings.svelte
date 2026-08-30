@@ -553,26 +553,26 @@
 		color: var(--muted);
 	}
 	.chip.on {
-		background: rgba(80, 180, 100, 0.18);
-		color: #6fcf7f;
+		background: rgb(48 209 88 / 0.16);
+		color: var(--green);
 	}
 	.chip.installing,
 	.chip.uninstalling {
-		background: rgba(120, 150, 240, 0.15);
-		color: #8ea8f0;
+		background: rgb(125 122 255 / 0.16);
+		color: var(--indigo);
 	}
 	.chip.needs-auth {
-		background: rgba(240, 180, 60, 0.16);
-		color: #f0b43c;
+		background: rgb(255 159 10 / 0.16);
+		color: var(--orange);
 	}
 	.chip.failed {
-		background: rgba(232, 82, 74, 0.15);
-		color: #e8524a;
+		background: rgb(255 69 58 / 0.16);
+		color: var(--red);
 	}
 	.switch {
 		position: relative;
-		width: 34px;
-		height: 18px;
+		width: 38px;
+		height: 22px;
 		flex: none;
 	}
 	.switch input {
@@ -585,8 +585,8 @@
 	.slider {
 		position: absolute;
 		inset: 0;
-		border-radius: 10px;
-		background: var(--hover, #333);
+		border-radius: 999px;
+		background: var(--hover);
 		pointer-events: none;
 		transition: background 0.15s;
 	}
@@ -595,18 +595,18 @@
 		position: absolute;
 		top: 2px;
 		left: 2px;
-		width: 14px;
-		height: 14px;
+		width: 18px;
+		height: 18px;
 		border-radius: 50%;
-		background: var(--muted, #999);
+		background: #fff;
+		box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
 		transition: transform 0.15s;
 	}
 	.switch input:checked + .slider {
-		background: rgba(80, 180, 100, 0.4);
+		background: var(--accent);
 	}
 	.switch input:checked + .slider::before {
 		transform: translateX(16px);
-		background: #6fcf7f;
 	}
 	.switch input:disabled {
 		cursor: default;
@@ -615,7 +615,7 @@
 		padding: 4px 0 4px 2px;
 	}
 	.auth-hint {
-		color: #f0b43c;
+		color: var(--orange);
 	}
 	.skill-log {
 		max-height: 140px;
@@ -636,10 +636,10 @@
 		padding: 0;
 	}
 	.remove-link:hover {
-		color: #e8524a;
+		color: var(--red);
 	}
 	.danger-btn {
-		color: #e8524a;
+		color: var(--red);
 	}
 	.import-form {
 		display: flex;
@@ -649,12 +649,25 @@
 	.import-form input {
 		flex: 1;
 	}
+	.modal input {
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		color: var(--fg);
+		padding: 6px 9px;
+		font-size: 13px;
+		outline: none;
+	}
+	.modal input:focus {
+		border-color: var(--accent);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent);
+	}
 	.fallback {
 		color: var(--muted);
 		font-size: 11px;
 	}
 	.error {
-		color: #e8524a;
+		color: var(--red);
 	}
 	.code-form,
 	.keyrow-form {
@@ -725,9 +738,9 @@
 		font-size: 17px;
 	}
 	section {
-		background: var(--hl-light, rgba(255, 255, 255, 0.04));
+		background: var(--panel);
 		border: 1px solid var(--border);
-		border-radius: 12px;
+		border-radius: 10px;
 		padding: 14px 16px 16px;
 		margin-top: 14px;
 	}
@@ -799,7 +812,7 @@
 		letter-spacing: 0.06em;
 	}
 	.keylabel .secret {
-		color: #e8524a;
+		color: var(--red);
 		border: 1px solid rgba(232, 82, 74, 0.45);
 		border-radius: 999px;
 		font-size: 10px;

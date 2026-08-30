@@ -472,29 +472,29 @@
 		color: var(--muted);
 	}
 	.chip.on {
-		background: rgba(80, 180, 100, 0.18);
-		color: #6fcf7f;
+		background: rgb(48 209 88 / 0.16);
+		color: var(--green);
 	}
 	.chip.installing,
 	.chip.uninstalling {
-		background: rgba(120, 150, 240, 0.15);
-		color: #8ea8f0;
+		background: rgb(125 122 255 / 0.16);
+		color: var(--indigo);
 	}
 	.chip.needs-auth {
-		background: rgba(240, 180, 60, 0.16);
-		color: #f0b43c;
+		background: rgb(255 159 10 / 0.16);
+		color: var(--orange);
 	}
 	.chip.failed {
-		background: rgba(232, 82, 74, 0.15);
-		color: #e8524a;
+		background: rgb(255 69 58 / 0.16);
+		color: var(--red);
 	}
 	.recheck {
 		font-size: 11px;
 	}
 	.switch {
 		position: relative;
-		width: 34px;
-		height: 18px;
+		width: 38px;
+		height: 22px;
 		flex: none;
 	}
 	.switch input {
@@ -507,7 +507,7 @@
 	.slider {
 		position: absolute;
 		inset: 0;
-		border-radius: 10px;
+		border-radius: 999px;
 		background: var(--hover, #333);
 		pointer-events: none;
 		transition: background 0.15s;
@@ -517,18 +517,18 @@
 		position: absolute;
 		top: 2px;
 		left: 2px;
-		width: 14px;
-		height: 14px;
+		width: 18px;
+		height: 18px;
 		border-radius: 50%;
-		background: var(--muted, #999);
+		background: #fff;
+		box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
 		transition: transform 0.15s;
 	}
 	.switch input:checked + .slider {
-		background: rgba(80, 180, 100, 0.4);
+		background: var(--accent);
 	}
 	.switch input:checked + .slider::before {
 		transform: translateX(16px);
-		background: #6fcf7f;
 	}
 	.switch input:disabled {
 		cursor: default;

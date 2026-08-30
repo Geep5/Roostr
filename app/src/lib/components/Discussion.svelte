@@ -529,7 +529,7 @@
 	}
 	.chip.mine {
 		border-color: var(--accent);
-		background: var(--hover);
+		background: rgb(10 132 255 / 0.12);
 	}
 	.picker-wrap {
 		position: absolute;
@@ -560,8 +560,9 @@
 	.composer {
 		display: flex;
 		flex-direction: column;
-		background: var(--hl-light);
-		border-radius: 12px;
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: 10px;
 		margin-top: 10px;
 	}
 	.composer textarea {
@@ -584,12 +585,12 @@
 		min-height: 36px;
 	}
 	.send {
-		width: 28px;
-		height: 28px;
+		width: 24px;
+		height: 24px;
 		border-radius: 50%;
 		border: none;
 		background: var(--accent);
-		color: #14161a;
+		color: #fff;
 		cursor: pointer;
 		display: flex;
 		align-items: center;

@@ -215,7 +215,8 @@
 		border: none;
 		outline: none;
 		color: var(--fg);
-		font-size: 15px;
+		font-size: 19px;
+		font-weight: 300;
 	}
 	.results {
 		max-height: 46vh;
@@ -243,7 +244,13 @@
 		cursor: pointer;
 	}
 	.row.selected {
-		background: var(--hover);
+		background: var(--accent);
+		color: #fff;
+	}
+	.row.selected .snippet,
+	.row.selected .kind,
+	.row.selected .icon {
+		color: rgb(255 255 255 / 0.72);
 	}
 	.icon {
 		color: var(--accent);
@@ -274,6 +281,10 @@
 	mark {
 		background: none;
 		color: var(--accent);
+		font-weight: 600;
+	}
+	.row.selected mark {
+		color: #fff;
 	}
 	.kind {
 		flex: none;
@@ -340,9 +351,11 @@
 		}
 		input {
 			background: var(--hover);
+			border: 1px solid var(--border);
 			border-radius: 12px;
 			padding: 10px 12px;
 			font-size: 16px;
+			font-weight: 400;
 		}
 		.clear-btn {
 			display: flex;
@@ -379,8 +392,8 @@
 			cursor: pointer;
 		}
 		.chips .chip.on {
-			background: var(--fg);
-			color: var(--bg);
+			background: var(--accent);
+			color: #fff;
 		}
 		.row {
 			padding: 12px 14px;
