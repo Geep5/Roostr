@@ -14,6 +14,8 @@
 	let selected = $state(0);
 	let results = $state<Array<QueryResultRow & { snippet?: string }>>([]);
 	let searching = $state(false);
+	/** Anytype mobile search chips: "" = All, else a type key. */
+	let typeChip = $state("");
 	let inputEl = $state<HTMLInputElement>();
 
 	const channelId = $derived(activeChannel.id || store.channels[0]?.id || "");
@@ -28,7 +30,7 @@
 	const TYPE_EXCLUDE = { key: "type", condition: "notIn", value: ["program", "typescript", "json", "proto", "relation", "channel", "type", "template", "agent", "skill", "peer", "pinned_fact", "milestone", "vanish_log"] };
 
 	/** Channel scope filter: unassigned objects live in the default channel. */
-	function scopeFilters(): Array<Record<string, unknown>> {
+	function scopeFilters(chip = typeChip): Array<Record<string, unknown>> {
 		const scope = isDefault
 			? {
 					operator: "or",
@@ -38,14 +40,17 @@
 					],
 				}
 			: { key: "channel", condition: "equal", value: channelId };
-		return [scope, TYPE_EXCLUDE];
+		return chip === "" ? [scope, TYPE_EXCLUDE] : [scope, TYPE_EXCLUDE, { key: "type", condition: "equal", value: chip }];
 	}
 
 	let seq = 0;
 	let debounce: ReturnType<typeof setTimeout> | undefined;
 
 	$effect(() => {
+		// Read all reactive inputs synchronously: $effect only tracks reads in
+		// this frame, not inside the debounce callback.
 		const q = query.trim();
+		const chip = typeChip;
 		const mine = ++seq;
 		clearTimeout(debounce);
 		debounce = setTimeout(async () => {
@@ -53,8 +58,8 @@
 			try {
 				const res = await fetchQuery(
 					q === ""
-						? { filters: scopeFilters(), sorts: [{ key: "updatedAt", type: "desc" }], limit: RECENT_LIMIT }
-						: { textQuery: q, filters: scopeFilters(), limit: 50 },
+						? { filters: scopeFilters(chip), sorts: [{ key: "updatedAt", type: "desc" }], limit: RECENT_LIMIT }
+						: { textQuery: q, filters: scopeFilters(chip), limit: 50 },
 				);
 				if (mine !== seq) return; // stale response
 				results = res.records as typeof results;
@@ -79,7 +84,8 @@
 		const name = query.trim();
 		if (!name) return;
 		onclose();
-		await createTyped("note", channelId, name);
+		// Anytype: the create row targets the selected chip's type.
+		await createTyped(typeChip || "note", channelId, name);
 	}
 
 	function onKeydown(e: KeyboardEvent) {
@@ -112,9 +118,21 @@
 
 <div class="overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) onclose(); }}>
 	<div class="modal" role="dialog" aria-label="Search">
+		<div class="sheet-handle"></div>
 		<div class="input-row">
 			<span class="scope">{channelName}</span>
+			<span class="m-search-icon">⌕</span>
 			<input bind:this={inputEl} bind:value={query} placeholder="Search objects and content…" />
+			{#if query !== ""}
+				<button class="clear-btn" aria-label="Clear" onclick={() => { query = ""; inputEl?.focus(); }}>×</button>
+			{/if}
+		</div>
+
+		<div class="chips">
+			<button class="chip" class:on={typeChip === ""} onclick={() => (typeChip = "")}>All</button>
+			{#each store.types as t (t.id)}
+				<button class="chip" class:on={typeChip === t.key} onclick={() => (typeChip = typeChip === t.key ? "" : t.key)}>{t.icon} {t.name || t.key}</button>
+			{/each}
 		</div>
 
 		<div class="results">
@@ -140,7 +158,7 @@
 				<button class="row create" class:selected={selected === results.length} onclick={() => void createFromQuery()} onmouseenter={() => (selected = results.length)}>
 					<span class="icon">＋</span>
 					<span class="texts"><span class="name">Create object "{query.trim()}"</span></span>
-					<span class="kind">note</span>
+					<span class="kind">{typeChip || "note"}</span>
 				</button>
 			{/if}
 			{#if results.length === 0 && !searching && !canCreate}
@@ -277,5 +295,118 @@
 		padding: 8px 14px;
 		font-size: 11px;
 		color: var(--muted);
+	}
+
+	/* ── Mobile sheet (Anytype iOS): handle, rounded field, chips, stacked rows ── */
+	.sheet-handle {
+		display: none;
+	}
+	.m-search-icon,
+	.clear-btn {
+		display: none;
+	}
+	.chips {
+		display: none;
+	}
+	@media (max-width: 720px) {
+		.overlay {
+			padding-top: 0 !important;
+			align-items: flex-end;
+		}
+		.modal {
+			border-radius: 18px 18px 0 0 !important;
+			height: calc(100dvh - 40px) !important;
+		}
+		.sheet-handle {
+			display: block;
+			width: 40px;
+			height: 5px;
+			border-radius: 3px;
+			background: var(--border);
+			margin: 10px auto 4px;
+			flex: none;
+		}
+		.input-row {
+			border-bottom: none;
+			padding: 8px 14px;
+		}
+		.scope {
+			display: none;
+		}
+		.m-search-icon {
+			display: block;
+			color: var(--muted);
+			font-size: 16px;
+		}
+		input {
+			background: var(--hover);
+			border-radius: 12px;
+			padding: 10px 12px;
+			font-size: 16px;
+		}
+		.clear-btn {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 28px;
+			height: 28px;
+			border-radius: 50%;
+			border: none;
+			background: var(--hover);
+			color: var(--muted);
+			font-size: 15px;
+			cursor: pointer;
+			flex: none;
+			margin-left: -36px;
+			z-index: 1;
+		}
+		.chips {
+			display: flex;
+			gap: 8px;
+			overflow-x: auto;
+			padding: 4px 14px 10px;
+			scrollbar-width: none;
+			flex: none;
+		}
+		.chips .chip {
+			flex: none;
+			border: none;
+			background: var(--hover);
+			color: var(--fg);
+			border-radius: 999px;
+			padding: 7px 14px;
+			font-size: 14px;
+			cursor: pointer;
+		}
+		.chips .chip.on {
+			background: var(--fg);
+			color: var(--bg);
+		}
+		.row {
+			padding: 12px 14px;
+			align-items: flex-start;
+		}
+		.row .texts {
+			flex: 1;
+		}
+		/* Type label under the name, snippet above it (their stacking). */
+		.row {
+			flex-wrap: wrap;
+		}
+		.row .kind {
+			order: 3;
+			flex-basis: 100%;
+			margin-left: 42px;
+			font-size: 12px;
+			text-transform: capitalize;
+		}
+		.hints {
+			display: none;
+		}
+		mark {
+			background: rgb(80 140 255 / 0.35);
+			color: inherit;
+			border-radius: 2px;
+		}
 	}
 </style>
