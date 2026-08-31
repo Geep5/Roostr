@@ -515,6 +515,34 @@
 		justify-content: flex-end;
 	}
 	/* Markdown render ({@html} content needs :global under scoped styles) */
+	.md :global(ul.md-tasks) {
+		list-style: none;
+		padding-left: 2px;
+		margin: 2px 0;
+	}
+	.md :global(li.md-task) {
+		display: flex;
+		align-items: baseline;
+		gap: 7px;
+	}
+	.md :global(.md-cb) {
+		flex: none;
+		width: 13px;
+		height: 13px;
+		border: 1.5px solid currentColor;
+		opacity: 0.7;
+		border-radius: 4px;
+		transform: translateY(2px);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 10px;
+		line-height: 1;
+	}
+	.md :global(li.md-task.md-done > span:last-child) {
+		opacity: 0.6;
+		text-decoration: line-through;
+	}
 	.md :global(p) {
 		margin: 0 0 6px;
 	}

@@ -53,7 +53,7 @@ export function renderMarkdown(src: string): string {
 	const lines = text.split("\n");
 	const out: string[] = [];
 	let para: string[] = [];
-	let list: { tag: "ul" | "ol"; items: string[] } | null = null;
+	let list: { tag: "ul" | "ol"; items: Array<{ text: string; check: "" | "todo" | "done" }> } | null = null;
 	let quote: string[] = [];
 	const flushPara = () => {
 		if (para.length) {
@@ -63,7 +63,13 @@ export function renderMarkdown(src: string): string {
 	};
 	const flushList = () => {
 		if (list) {
-			out.push(`<${list.tag}>${list.items.map((i) => `<li>${inline(i)}</li>`).join("")}</${list.tag}>`);
+			const tasky = list.items.some((i) => i.check);
+			const cls = tasky ? ' class="md-tasks"' : "";
+			const li = (i: { text: string; check: string }) =>
+				i.check
+					? `<li class="md-task${i.check === "done" ? " md-done" : ""}"><span class="md-cb">${i.check === "done" ? "\u2713" : ""}</span><span>${inline(i.text)}</span></li>`
+					: `<li>${inline(i.text)}</li>`;
+			out.push(`<${list.tag}${cls}>${list.items.map(li).join("")}</${list.tag}>`);
 			list = null;
 		}
 	};
@@ -104,7 +110,14 @@ export function renderMarkdown(src: string): string {
 			flushQuote();
 			const tag = ul ? "ul" : "ol";
 			if (!list || list.tag !== tag) flushList(), (list = { tag, items: [] });
-			list!.items.push((ul ?? ol)![1]);
+			let item = (ul ?? ol)![1];
+			let check: "" | "todo" | "done" = "";
+			const task = ul && item.match(/^\[( |x|X)\]\s+(.*)$/);
+			if (task) {
+				check = task[1] === " " ? "todo" : "done";
+				item = task[2];
+			}
+			list!.items.push({ text: item, check });
 			continue;
 		}
 		const q = line.match(/^>\s?(.*)$/);
