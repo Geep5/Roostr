@@ -2,7 +2,14 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+		<style>
+			/* App-like touch: no double-tap zoom, no orientation text inflation. */
+			html {
+				touch-action: manipulation;
+				-webkit-text-size-adjust: 100%;
+			}
+		</style>
 		<link rel="icon" href="%sveltekit.assets%/roostr.png" type="image/png" />
 		<meta name="text-scale" content="scale" />
 		%sveltekit.head%
