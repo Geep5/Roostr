@@ -125,6 +125,78 @@
 		}
 	}
 
+
+	// ── Profile picture (kind 0 via the harness, which owns the key) ──
+	const HARNESS_URL = "http://127.0.0.1:7334";
+	let profilePicture = $state("");
+	let avatarBusy = $state(false);
+	let avatarState = $state("");
+	let avatarFileEl = $state<HTMLInputElement>();
+
+	async function loadProfile() {
+		try {
+			profilePicture = ((JSON.parse(localStorage.getItem("roostr-profile") ?? "{}") as { picture?: string }).picture ?? "");
+		} catch {
+			/* no cache */
+		}
+		try {
+			const p = (await (await fetch(`${HARNESS_URL}/profile`)).json()) as { picture?: string };
+			profilePicture = p.picture ?? "";
+			localStorage.setItem("roostr-profile", JSON.stringify(p));
+		} catch {
+			/* harness offline - cache stands */
+		}
+	}
+	void loadProfile();
+
+	async function shrinkAvatar(file: File, size = 256): Promise<string> {
+		const url = URL.createObjectURL(file);
+		try {
+			const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+				const el = new Image();
+				el.onload = () => resolve(el);
+				el.onerror = () => reject(new Error("unreadable image"));
+				el.src = url;
+			});
+			const side = Math.min(img.width, img.height);
+			const canvas = document.createElement("canvas");
+			canvas.width = size;
+			canvas.height = size;
+			canvas.getContext("2d")!.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+			return canvas.toDataURL("image/jpeg", 0.85);
+		} finally {
+			URL.revokeObjectURL(url);
+		}
+	}
+
+	async function pushProfile(picture: string) {
+		avatarBusy = true;
+		avatarState = "saving…";
+		try {
+			const p = (await (
+				await fetch(`${HARNESS_URL}/profile`, { method: "POST", body: JSON.stringify({ picture }) })
+			).json()) as { picture?: string };
+			profilePicture = p.picture ?? "";
+			localStorage.setItem("roostr-profile", JSON.stringify(p));
+			avatarState = "saved";
+		} catch {
+			avatarState = "failed - is the harness running?";
+		} finally {
+			avatarBusy = false;
+			setTimeout(() => (avatarState = ""), 2000);
+		}
+	}
+
+	async function pickAvatar(e: Event) {
+		const file = (e.currentTarget as HTMLInputElement).files?.[0];
+		if (!file) return;
+		await pushProfile(await shrinkAvatar(file));
+	}
+
+	async function removeAvatar() {
+		await pushProfile("");
+	}
+
 	onMount(() => {
 		void load();
 		return () => {
@@ -239,6 +311,23 @@
 			<button class="x" onclick={onclose}>×</button>
 		</header>
 
+		<section>
+			<h3>Profile</h3>
+			<p class="hint">Your avatar - shown on the Spaces screen and synced to every device holding this key.</p>
+			<div class="profile-row">
+				{#if profilePicture}
+					<img class="profile-avatar" src={profilePicture} alt="" />
+				{:else}
+					<span class="profile-avatar placeholder">⚙</span>
+				{/if}
+				<input type="file" accept="image/*" bind:this={avatarFileEl} onchange={(e) => void pickAvatar(e)} hidden />
+				<button class="action" disabled={avatarBusy} onclick={() => avatarFileEl?.click()}>{profilePicture ? "Change picture" : "Upload picture"}</button>
+				{#if profilePicture}
+					<button disabled={avatarBusy} onclick={() => void removeAvatar()}>Remove</button>
+				{/if}
+				{#if avatarState}<span class="hint">{avatarState}</span>{/if}
+			</div>
+		</section>
 		<section>
 			<h3>Nostr identity</h3>
 			<p class="hint">
@@ -935,5 +1024,25 @@
 	.chip:hover {
 		color: var(--fg);
 		border-color: var(--accent);
+	}
+	.profile-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+	.profile-avatar {
+		width: 56px;
+		height: 56px;
+		border-radius: 50%;
+		object-fit: cover;
+		flex: none;
+	}
+	.profile-avatar.placeholder {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--hover);
+		border: 1px solid var(--border);
+		font-size: 22px;
 	}
 </style>

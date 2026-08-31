@@ -50,6 +50,24 @@
 
 	// ── Mobile shell (Anytype iOS flow): Spaces list -> channel home -> object.
 	let isMobile = $state(false);
+
+	// Profile avatar for the Spaces header (cache-first, harness refresh).
+	let profilePic = $state("");
+	$effect(() => {
+		try {
+			profilePic = ((JSON.parse(localStorage.getItem("roostr-profile") ?? "{}") as { picture?: string }).picture ?? "");
+		} catch {
+			/* no cache */
+		}
+		void fetch("http://127.0.0.1:7334/profile")
+			.then((r) => r.json())
+			.then((p: { picture?: string }) => {
+				profilePic = p.picture ?? "";
+				localStorage.setItem("roostr-profile", JSON.stringify(p));
+			})
+			.catch(() => {});
+	});
+
 	/** Mobile only: true when a channel card has been tapped open. */
 	let mobileSpaceOpen = $state(false);
 	let mCollapsed = $state<Record<string, boolean>>({});
@@ -403,7 +421,9 @@
 		<div class="m-screen">
 			<div class="m-head">
 				<span class="m-title">Spaces</span>
-				<button class="m-avatar" data-tip="Settings" onclick={() => (showSettings = true)}>⚙</button>
+				<button class="m-avatar" data-tip="Settings" aria-label="Settings" onclick={() => (showSettings = true)}>
+					{#if profilePic}<img class="m-avatar-img" src={profilePic} alt="" />{:else}⚙{/if}
+				</button>
 			</div>
 			<div class="m-cards">
 				{#each channels as c (c.id)}
@@ -1376,6 +1396,8 @@
 		letter-spacing: -0.01em;
 	}
 	.m-avatar {
+		padding: 0;
+		overflow: hidden;
 		width: 36px;
 		height: 36px;
 		border-radius: 50%;
@@ -1747,5 +1769,12 @@
 			max-height: none !important;
 			border-radius: 0 !important;
 		}
+	}
+	.m-avatar-img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		border-radius: 50%;
+		display: block;
 	}
 </style>
