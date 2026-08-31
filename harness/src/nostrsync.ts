@@ -16,7 +16,7 @@
  * unpublished) then live (SSE commit → publish; relay event → import).
  */
 
-import { SimplePool, finalizeEvent, getPublicKey, nip44, type Event } from "nostr-tools";
+import { SimplePool, finalizeEvent, getPublicKey, nip19, nip44, type Event } from "nostr-tools";
 import { API, subscribe } from "./api";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 
@@ -42,6 +42,10 @@ interface SyncState {
 	cursor: number;
 	/** object ids we have already asked the relays to delete (NIP-09). */
 	vanishRequested: Record<string, true>;
+	/** "spaceId/keyId/changeHex" published under space-key encryption. */
+	publishedSpace?: Record<string, true>;
+	/** spaceId -> keyId whose full history has been (re)queued shared. */
+	sharedQueued?: Record<string, number>;
 }
 
 function statePath(): string {
@@ -51,11 +55,11 @@ function statePath(): string {
 async function readState(): Promise<SyncState> {
 	try {
 		const parsed = (await Bun.file(statePath()).json()) as SyncState;
-		if (parsed?.version === 1) return { ...parsed, vanishRequested: parsed.vanishRequested ?? {} };
+		if (parsed?.version === 1) return { ...parsed, vanishRequested: parsed.vanishRequested ?? {}, publishedSpace: parsed.publishedSpace ?? {}, sharedQueued: parsed.sharedQueued ?? {} };
 	} catch {
 		/* fresh */
 	}
-	return { version: 1, published: {}, cursor: 0, vanishRequested: {} };
+	return { version: 1, published: {}, cursor: 0, vanishRequested: {}, publishedSpace: {}, sharedQueued: {} };
 }
 
 function writeState(state: SyncState): void {
@@ -96,6 +100,106 @@ function blindObjectId(id: Identity, objectId: string): string {
 	h.update(id.sk);
 	h.update(objectId);
 	return h.digest("hex").slice(0, 16);
+}
+
+// ── Shared spaces ────────────────────────────────────────────────
+//
+// A space with a key AND (members OR an imported owner) syncs under the
+// SPACE key instead of self-encryption: content = nip44 with the raw
+// 32-byte space key as conversation key; tags = blinded (spaceKey,
+// objectId) plus a space-stream tag blinded (spaceKey, "space:"+id) so
+// a joiner can pull the whole space with one #h filter and no object
+// enumeration. Writers = owner + members with a non-viewer role;
+// events from anyone else are ignored on receipt and refused by the
+// relay via the kind-30100 allowlist the owner publishes.
+
+const ALLOWLIST_KIND = 30100;
+const ALLOWLIST_D = "roostr-allowlist";
+
+interface SharedSpace {
+	spaceId: string;
+	keyHex: string;
+	keyId: number;
+	convKey: Uint8Array;
+	spaceTag: string;
+	/** hex pubkeys allowed to author events for this space. */
+	writers: Set<string>;
+	/** set on imported entries: the admin's hex pubkey. */
+	owner?: string;
+}
+
+function blindShared(keyHex: string, id: string): string {
+	const h = new Bun.CryptoHasher("sha256");
+	h.update(keyHex);
+	h.update(id);
+	return h.digest("hex").slice(0, 16);
+}
+
+function npubToHex(npub: string): string | null {
+	try {
+		const d = nip19.decode(npub.trim());
+		if (d.type === "npub") return d.data as string;
+	} catch {
+		/* bad npub */
+	}
+	const t = npub.trim().toLowerCase();
+	return /^[0-9a-f]{64}$/.test(t) ? t : null;
+}
+
+async function loadSharedSpaces(myPk: string): Promise<Map<string, SharedSpace>> {
+	const out = new Map<string, SharedSpace>();
+	let keyring: { channels?: Record<string, { key?: string; keyId?: number; owner?: string }> } = {};
+	try {
+		keyring = (await Bun.file(`${dataRoot()}/channel-keys.json`).json()) as typeof keyring;
+	} catch {
+		return out;
+	}
+	for (const [spaceId, entry] of Object.entries(keyring.channels ?? {})) {
+		if (!entry.key || entry.key.length !== 64) continue;
+		const writers = new Set<string>([entry.owner ?? myPk]);
+		let memberCount = 0;
+		try {
+			const obj = (await (await fetch(`${API}/api/objects/${spaceId}`)).json()) as {
+				fields?: Record<string, { valuesValue?: { items?: Array<{ mapValue?: { entries?: Record<string, { stringValue?: string }> } }> } }>;
+			};
+			const items = obj.fields?.["members"]?.valuesValue?.items ?? [];
+			for (const item of items) {
+				const entries = item.mapValue?.entries ?? {};
+				const npub = entries["npub"]?.stringValue ?? "";
+				const role = entries["role"]?.stringValue ?? "writer";
+				const hex = npubToHex(npub);
+				if (hex) {
+					memberCount++;
+					if (role !== "viewer") writers.add(hex);
+				}
+			}
+		} catch {
+			/* space object not local (yet) - imported spaces start this way */
+		}
+		if (memberCount === 0 && !entry.owner) continue; // personal space - self path
+		out.set(spaceId, {
+			spaceId,
+			keyHex: entry.key,
+			keyId: entry.keyId ?? 1,
+			convKey: Uint8Array.from(Buffer.from(entry.key, "hex")),
+			spaceTag: blindShared(entry.key, `space:${spaceId}`),
+			writers,
+			owner: entry.owner,
+		});
+	}
+	return out;
+}
+
+/** objectId -> owning space id ("" when unassigned). Channels own themselves. */
+async function loadSpaceMap(): Promise<Map<string, string>> {
+	const out = new Map<string, string>();
+	try {
+		const objs = (await (await fetch(`${API}/api/objects`)).json()) as Array<{ id: string; typeKey?: string; channelId?: string }>;
+		for (const o of objs) out.set(o.id, o.typeKey === "channel" ? o.id : (o.channelId ?? ""));
+	} catch {
+		/* daemon down; publish falls back to self path */
+	}
+	return out;
 }
 
 // ── Local server I/O ─────────────────────────────────────────────
@@ -232,15 +336,29 @@ export async function startNostrSync(): Promise<void> {
 		b64: string;
 		attempts: number;
 		notBefore: number;
+		/** present = publish under this space's key instead of self. */
+		space?: SharedSpace;
 	}
 	const queue: QueueItem[] = [];
 	const queued = new Set<string>();
 	let failuresLogged = 0;
 
+	/** Live shared-space view; refreshed on startup and space commits. */
+	let sharedSpaces = new Map<string, SharedSpace>();
+	let spaceMap = new Map<string, string>();
+
+	function spaceKeyFor(item: QueueItem): string {
+		return item.space ? `${item.space.spaceId}/${item.space.keyId}/${item.changeHex}` : item.changeHex;
+	}
+
 	function enqueue(objectId: string, changeHex: string, b64: string): void {
-		if (state.published[changeHex] || queued.has(changeHex) || vanished.has(objectId)) return;
-		queued.add(changeHex);
-		queue.push({ objectId, changeHex, b64, attempts: 0, notBefore: 0 });
+		if (vanished.has(objectId)) return;
+		const space = sharedSpaces.get(spaceMap.get(objectId) ?? "");
+		const doneKey = space ? `${space.spaceId}/${space.keyId}/${changeHex}` : changeHex;
+		const done = space ? state.publishedSpace![doneKey] : state.published[changeHex];
+		if (done || queued.has(doneKey)) return;
+		queued.add(doneKey);
+		queue.push({ objectId, changeHex, b64, attempts: 0, notBefore: 0, space });
 	}
 
 	/** Ask the relays to drop the events of every newly vanished object, once. */
@@ -271,14 +389,16 @@ export async function startNostrSync(): Promise<void> {
 		const gid = parts.length > 1 ? chunkGroupId(item.b64) : "";
 		try {
 			for (let i = 0; i < parts.length; i++) {
-				const tags: string[][] = [["h", blindObjectId(id!, item.objectId)]];
+				const tags: string[][] = item.space
+					? [["h", blindShared(item.space.keyHex, item.objectId)], ["h", item.space.spaceTag]]
+					: [["h", blindObjectId(id!, item.objectId)]];
 				if (gid) tags.push(["c", gid, String(i), String(parts.length)]);
 				const event = finalizeEvent(
 					{
 						kind: CHANGE_KIND,
 						created_at: Math.floor(Date.now() / 1000),
 						tags,
-						content: nip44.encrypt(parts[i], id!.conversationKey),
+						content: nip44.encrypt(parts[i], item.space ? item.space.convKey : id!.conversationKey),
 					},
 					id!.sk,
 				);
@@ -311,14 +431,17 @@ export async function startNostrSync(): Promise<void> {
 				continue;
 			}
 			const [item] = queue.splice(idx, 1);
+			const doneKey = spaceKeyFor(item);
 			// A vanish can land while the change is already queued (or mid-backoff).
-			if (state.published[item.changeHex] || vanished.has(item.objectId)) {
-				queued.delete(item.changeHex);
+			const already = item.space ? state.publishedSpace![doneKey] : state.published[item.changeHex];
+			if (already || vanished.has(item.objectId)) {
+				queued.delete(doneKey);
 				continue;
 			}
 			if (await publishOnce(item)) {
-				state.published[item.changeHex] = true;
-				queued.delete(item.changeHex);
+				if (item.space) state.publishedSpace![doneKey] = true;
+				else state.published[item.changeHex] = true;
+				queued.delete(doneKey);
 				dirty = true;
 			} else {
 				item.attempts++;
@@ -343,23 +466,50 @@ export async function startNostrSync(): Promise<void> {
 	/** Reassembly buffer for chunked changes: gid → parts. */
 	const chunkGroups = new Map<string, { total: number; parts: Map<number, string> }>();
 
-	async function importB64(b64: string): Promise<void> {
+	async function importB64(b64: string, space: SharedSpace | null): Promise<void> {
 		const res = await localImport([b64]);
 		// Anything the relay already holds must never be echoed back.
-		for (const hex of res.ids) state.published[hex] = true;
+		for (const hex of res.ids) {
+			if (space) state.publishedSpace![`${space.spaceId}/${space.keyId}/${hex}`] = true;
+			else state.published[hex] = true;
+		}
 		dirty = true;
+	}
+
+	/** Try self key, then every shared-space key. */
+	function decryptEvent(event: Event): { part: string; space: SharedSpace | null } | null {
+		try {
+			return { part: nip44.decrypt(event.content, id!.conversationKey), space: null };
+		} catch {
+			/* not self-encrypted */
+		}
+		for (const space of sharedSpaces.values()) {
+			try {
+				const part = nip44.decrypt(event.content, space.convKey);
+				// Writer gate: a viewer (or stranger holding a leaked key)
+				// can encrypt valid events - drop anything not authored by
+				// an allowed writer of this space.
+				if (!space.writers.has(event.pubkey)) return null;
+				return { part, space };
+			} catch {
+				/* next key */
+			}
+		}
+		return null;
 	}
 
 	async function onRelayEvent(event: Event): Promise<void> {
 		try {
-			const part = nip44.decrypt(event.content, id!.conversationKey);
+			const dec = decryptEvent(event);
+			if (!dec) return;
+			const { part, space } = dec;
 			const chunkTag = event.tags.find((t) => t[0] === "c");
 			if (event.created_at > state.cursor) {
 				state.cursor = event.created_at;
 				dirty = true;
 			}
 			if (!chunkTag) {
-				await importB64(part);
+				await importB64(part, space);
 				return;
 			}
 			const [, gid, idxStr, totalStr] = chunkTag;
@@ -375,7 +525,7 @@ export async function startNostrSync(): Promise<void> {
 				chunkGroups.delete(gid);
 				let full = "";
 				for (let i = 0; i < group.total; i++) full += group.parts.get(i) ?? "";
-				await importB64(full);
+				await importB64(full, space);
 			}
 		} catch {
 			/* not ours / garbled — ignore */
@@ -425,8 +575,69 @@ export async function startNostrSync(): Promise<void> {
 		}
 	}
 
+	// ── Shared-space reconcile ─────────────────────────────────────
+
+	async function refreshShared(): Promise<void> {
+		spaceMap = await loadSpaceMap();
+		sharedSpaces = await loadSharedSpaces(id!.pk);
+		// Channel objects are filtered out of /api/objects - map every
+		// shared space to itself so its own changes (name, members) ride
+		// the space stream too; a joiner needs them.
+		for (const spaceId of sharedSpaces.keys()) spaceMap.set(spaceId, spaceId);
+	}
+
+	/** Owner duty: publish the relay write-allowlist (writers of every owned shared space). */
+	async function publishAllowlist(): Promise<void> {
+		const writers = new Set<string>();
+		let owned = 0;
+		for (const space of sharedSpaces.values()) {
+			if (space.owner && space.owner !== id!.pk) continue; // not mine to administer
+			owned++;
+			for (const w of space.writers) writers.add(w);
+		}
+		if (owned === 0) return;
+		writers.delete(id!.pk);
+		try {
+			const event = finalizeEvent(
+				{
+					kind: ALLOWLIST_KIND,
+					created_at: Math.floor(Date.now() / 1000),
+					tags: [["d", ALLOWLIST_D], ...[...writers].map((w) => ["p", w])],
+					content: "",
+				},
+				id!.sk,
+			);
+			await Promise.any(pool.publish(id!.relays, event));
+		} catch {
+			/* retried on next reconcile */
+		}
+	}
+
+	/** A space that just became shared (or rotated) republishes its whole
+	 * history under the space key - that is what makes joiners see it. */
+	async function queueSharedHistories(): Promise<void> {
+		for (const space of sharedSpaces.values()) {
+			if (state.sharedQueued![space.spaceId] === space.keyId) continue;
+			state.sharedQueued![space.spaceId] = space.keyId;
+			dirty = true;
+			let objects = 0;
+			for (const [objectId, spaceId] of spaceMap) {
+				if (spaceId !== space.spaceId) continue;
+				objects++;
+				await publishObject(objectId);
+			}
+			if (!spaceMap.has(space.spaceId)) {
+				objects++;
+				await publishObject(space.spaceId);
+			}
+			console.log(`[sync] space ${space.spaceId.slice(0, 8)} shared (key #${space.keyId}): queued ${objects} object(s)`);
+		}
+	}
+
 	// ── Startup: backfill both directions ─────────────────────────
 	console.log(`[sync] identity ${id.pk.slice(0, 8)}… relays: ${id.relays.join(", ")}`);
+	await refreshShared();
+	if (sharedSpaces.size > 0) console.log(`[sync] shared spaces: ${[...sharedSpaces.keys()].map((k) => k.slice(0, 8)).join(", ")}`);
 
 	// Full reconcile on every startup: page back through EVERYTHING the
 	// relays hold (no since — relays drop events silently, so the persisted
@@ -444,18 +655,20 @@ export async function startNostrSync(): Promise<void> {
 	// rebuilt published-set missed relay-held events). Each relay now
 	// walks its own timeline; ids dedupe across relays; a failing relay
 	// never aborts its siblings.
+	const spaceTags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
 	await Promise.all(
 		id.relays.map(async (relay) => {
 			let until: number | undefined = undefined;
 			for (;;) {
 				let page: Event[];
 				try {
-					page = await pool.querySync([relay], {
-						kinds: [CHANGE_KIND],
-						authors: [id.pk],
-						until,
-						limit: 500,
-					});
+					const pages = await Promise.all([
+						pool.querySync([relay], { kinds: [CHANGE_KIND], authors: [id.pk], until, limit: 500 }),
+						spaceTags.length > 0
+							? pool.querySync([relay], { kinds: [CHANGE_KIND], "#h": spaceTags, until, limit: 500 })
+							: Promise.resolve([] as Event[]),
+					]);
+					page = [...pages[0], ...pages[1]];
 				} catch {
 					return; // this relay is down; others continue
 				}
@@ -510,10 +723,31 @@ export async function startNostrSync(): Promise<void> {
 		await publishObject(objectId);
 	}
 	await publishKeyring();
+	await queueSharedHistories();
+	await publishAllowlist();
 	persist();
 
 	// ── Live: both directions ──────────────────────────────────────
 	subscribe((objectId) => {
+		// A commit on a space object can change members/keys: refresh the
+		// shared view, then reconcile allowlist + history publication.
+		if (spaceMap.get(objectId) === objectId || sharedSpaces.has(objectId)) {
+			void (async () => {
+				await refreshShared();
+				await queueSharedHistories();
+				await publishAllowlist();
+				void publishObject(objectId);
+			})();
+			return;
+		}
+		// New objects are absent from the cached map - refresh lazily.
+		if (!spaceMap.has(objectId)) {
+			void (async () => {
+				await refreshShared();
+				void publishObject(objectId);
+			})();
+			return;
+		}
 		if (objectId === VANISH_LOG_ID) {
 			// A vanish happened here or arrived from a peer: re-read the ledger,
 			// publish the record itself, then chase the relay copies.
@@ -529,6 +763,12 @@ export async function startNostrSync(): Promise<void> {
 	pool.subscribeMany(id.relays, { kinds: [CHANGE_KIND], authors: [id.pk], since: state.cursor + 1 }, {
 		onevent: (event) => void onRelayEvent(event),
 	});
+	if (spaceTags.length > 0) {
+		console.log(`[sync] live space sub: ${spaceTags.length} tag(s) since ${state.cursor + 1}`);
+		pool.subscribeMany(id.relays, { kinds: [CHANGE_KIND], "#h": spaceTags, since: state.cursor + 1 }, {
+			onevent: (event) => void onRelayEvent(event),
+		});
+	}
 	pool.subscribeMany(id.relays, { kinds: [KEYRING_KIND], authors: [id.pk], "#d": [KEYRING_D], since: Math.floor(Date.now() / 1000) }, {
 		onevent: (event) => void mergeKeyring(event),
 	});

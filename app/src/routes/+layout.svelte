@@ -4,6 +4,7 @@
 	import { page } from "$app/state";
 	import { activeSpace } from "$lib/space.svelte";
 	import { space as spaceApi, note, fetchObject } from "$lib/api";
+	import { inviteUrl } from "$lib/invite";
 	import { objectIcon } from "$lib/icons";
 	import { store, refreshAll, connectEvents } from "$lib/data.svelte";
 	import GraphIcon from "$lib/components/GraphIcon.svelte";
@@ -168,6 +169,34 @@
 		await note.del(objectId);
 		await refreshAll();
 		await goto("/");
+	}
+
+	/** Copy a universal invite link deep-linking to this object; the
+	 * space key rides in the URL fragment, so the link grants access. */
+	async function copyObjectLink() {
+		const ch = objectSummary ? owningSpaceOf(objectSummary.channelId) : undefined;
+		if (!objectSummary || !ch) return;
+		const payload = await spaceApi.invitePayload(ch.id, "");
+		let owner = "";
+		try {
+			const res = await fetch("http://127.0.0.1:7334/identity");
+			if (res.ok) owner = ((await res.json()) as { npub?: string }).npub ?? "";
+		} catch {
+			// Identity unavailable — the link still carries the key.
+		}
+		await navigator.clipboard.writeText(
+			inviteUrl({
+				v: 1,
+				t: "space-invite",
+				space: ch.id,
+				name: (typeof payload.name === "string" && payload.name) || ch.name || undefined,
+				owner,
+				relays: ["wss://roostr-relay.fly.dev"],
+				key: typeof payload.key === "string" ? payload.key : "",
+				keyId: typeof payload.key_id === "number" ? payload.key_id : 1,
+				object: objectSummary.id,
+			}),
+		);
 	}
 
 	/** Pinned objects of the current channel, in pinned order. */
@@ -354,6 +383,9 @@
 								</div>
 							{/if}
 							<button onclick={() => { showMore = false; void duplicateObject(); }}>⧉ Duplicate</button>
+							{#if owningSpaceOf(objectSummary.channelId)}
+								<button onclick={() => { showMore = false; void copyObjectLink(); }}>🔗 Copy link</button>
+							{/if}
 							<div class="menu-sep"></div>
 							<button class="danger" onclick={() => { showMore = false; void moveToBin(); }}>🗑 Move to bin</button>
 						</div>
@@ -695,6 +727,9 @@
 									</div>
 								{/if}
 								<button onclick={() => { showMore = false; void duplicateObject(); }}>⧉ Duplicate</button>
+								{#if owningSpaceOf(objectSummary.channelId)}
+									<button onclick={() => { showMore = false; void copyObjectLink(); }}>🔗 Copy link</button>
+								{/if}
 								<div class="menu-sep"></div>
 								<button class="danger" onclick={() => { showMore = false; void moveToBin(); }}>🗑 Move to bin</button>
 							</div>
