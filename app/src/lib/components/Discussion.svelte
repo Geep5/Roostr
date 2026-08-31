@@ -77,6 +77,47 @@
 		void settings.fetch().then((s) => (me = s.authorId));
 	});
 
+	// ── Agent presence ─────────────────────────────────────────────
+	// The harness reports live turn state on its localhost surface;
+	// while the discussion is open we poll it so the user sees the
+	// agent composing (typing dots) or failing (warning row).
+	const HARNESS = "http://127.0.0.1:7334";
+	interface AgentPresence {
+		id: string;
+		name: string;
+		icon: string;
+		state: "idle" | "working" | "error";
+		surface: string;
+		detail: string;
+		ts: number;
+	}
+	let presence = $state<AgentPresence[]>([]);
+	$effect(() => {
+		if (!isOpen) {
+			presence = [];
+			return;
+		}
+		let gone = false;
+		const tick = async () => {
+			try {
+				const res = await fetch(`${HARNESS}/agent/status`);
+				const body = (await res.json()) as { agents?: AgentPresence[] };
+				if (!gone) presence = body.agents ?? [];
+			} catch {
+				if (!gone) presence = [];
+			}
+		};
+		void tick();
+		const timer = setInterval(tick, 2500);
+		return () => {
+			gone = true;
+			clearInterval(timer);
+		};
+	});
+	const agentWorking = $derived(presence.find((p) => p.state === "working"));
+	const agentError = $derived(presence.find((p) => p.state === "error" && Date.now() - p.ts < 15 * 60_000));
+	const errorHint = $derived(agentError && /auth|key|401|credential/i.test(agentError.detail) ? "Fix in Settings → Agent." : "");
+
 	function who(author: string): string {
 		if (author === me) return "You";
 		// The agent posts as its own object id; on its chat, the agent field.
@@ -200,6 +241,23 @@
 			{/each}
 			{#if messages.length === 0}
 				<p class="empty">No messages yet.</p>
+			{/if}
+			{#if agentWorking}
+				<div class="presence working" title="The agent is composing a reply">
+					{#if agentWorking.icon}
+						<span class="avatar emoji">{agentWorking.icon}</span>
+					{:else}
+						<span class="avatar" style="background: hsl({hue(agentWorking.id)}, 45%, 35%)">{agentWorking.name.slice(0, 2)}</span>
+					{/if}
+					<span class="p-name">{agentWorking.name}</span>
+					<span class="dots"><i></i><i></i><i></i></span>
+				</div>
+			{/if}
+			{#if agentError && !agentWorking}
+				<div class="presence error">
+					<span class="p-glyph">⚠︎</span>
+					<span class="p-text">{agentError.name} hit a problem: {agentError.detail}{errorHint ? ` — ${errorHint}` : ""}</span>
+				</div>
 			{/if}
 		</div>
 		{#if replyTo && messageById.has(replyTo)}
@@ -615,5 +673,47 @@
 	.avatar.emoji {
 		background: var(--hl-light, rgba(255, 255, 255, 0.07));
 		font-size: 17px;
+	}
+	.presence {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 2px 0 6px;
+		font-size: 12px;
+		color: var(--muted);
+	}
+	.presence .p-name {
+		font-weight: 500;
+	}
+	.dots {
+		display: inline-flex;
+		gap: 3px;
+		align-items: center;
+	}
+	.dots i {
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		background: var(--muted);
+		animation: dot-pulse 1.2s infinite ease-in-out;
+	}
+	.dots i:nth-child(2) {
+		animation-delay: 0.2s;
+	}
+	.dots i:nth-child(3) {
+		animation-delay: 0.4s;
+	}
+	@keyframes dot-pulse {
+		0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+		30% { opacity: 1; transform: translateY(-2px); }
+	}
+	.presence.error {
+		color: var(--orange, #ff9f0a);
+	}
+	.presence .p-glyph {
+		font-size: 13px;
+	}
+	.presence .p-text {
+		line-height: 1.4;
 	}
 </style>

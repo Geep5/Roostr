@@ -8,6 +8,7 @@
 import { getPublicKey, nip19 } from "nostr-tools";
 
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
+import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
 import { disableSkill, enableSkill, getCoordinator, recheckSkill, setCoordinator, skillStatus, uninstallSkill } from "./skillmgr";
 import { fetchObject, str } from "./api";
@@ -69,6 +70,9 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					if (body.provider !== "anthropic" && body.provider !== "kimi") return json({ error: "provider must be anthropic or kimi" }, 400);
 					await setApiKey(body.provider, (body.key ?? "").trim());
 					return json({ ok: true });
+				}
+				if (req.method === "GET" && url.pathname === "/agent/status") {
+					return json({ agents: [...agentTurnStatus.values()] });
 				}
 				if (req.method === "GET" && url.pathname === "/agents") {
 					return json({ roster: await readRoster(), serving: [...served] });

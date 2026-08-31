@@ -59,7 +59,24 @@ interface Served {
 	channelId: string;
 	/** Type keys this agent is responsible for; "*" = everything else. */
 	types: string[];
+	name: string;
+	icon: string;
 }
+
+/** Live per-agent turn state, served to the discussion UI via /agent/status. */
+export interface AgentTurnStatus {
+	id: string;
+	name: string;
+	icon: string;
+	state: "idle" | "working" | "error";
+	/** Surface of the in-flight (or failed) turn. */
+	surface: string;
+	/** Error detail, present when state === "error". */
+	detail: string;
+	ts: number;
+}
+
+export const agentTurnStatus = new Map<string, AgentTurnStatus>();
 
 /** Unassigned (pre-channel) objects live in the default channel — UI rule. */
 let defaultChannelId = "";
@@ -83,7 +100,14 @@ async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
 				if (channelId) await setField(agentId, "channel", sv(channelId));
 			}
 			const chatId = await ensureChat(agent, channelId);
-			out.set(agentId, { agentId, chatId, channelId, types: list(agent.fields, "responsible_types") });
+			out.set(agentId, {
+				agentId,
+				chatId,
+				channelId,
+				types: list(agent.fields, "responsible_types"),
+				name: str(agent.fields, "name") || agentId.slice(0, 8),
+				icon: str(agent.fields, "iconEmoji"),
+			});
 		} catch (err) {
 			console.error(`[harness] failed to prepare agent ${agentId.slice(0, 8)}:`, err);
 		}
@@ -153,10 +177,26 @@ async function serve(): Promise<void> {
 		}
 		busy.add(s.agentId);
 		active.set(s.agentId, surfaceId);
+		const report = (state: "idle" | "working" | "error", detail = "") =>
+			agentTurnStatus.set(s.agentId, { id: s.agentId, name: s.name, icon: s.icon, state, surface: surfaceId, detail, ts: Date.now() });
+		report("working");
 		try {
 			await handleSurface(s, surfaceId);
+			report("idle");
 		} catch (err) {
 			console.error(`[harness] turn failed for ${s.agentId.slice(0, 8)}:`, err);
+			let msg = (err instanceof Error ? err.message : String(err)).split("\n")[0];
+			// API errors carry a JSON body - surface the human message, not the payload.
+			const jsonStart = msg.indexOf("{");
+			if (jsonStart > 0) {
+				try {
+					const inner = (JSON.parse(msg.slice(jsonStart)) as { error?: { message?: string } }).error?.message;
+					if (inner) msg = msg.slice(0, jsonStart) + inner;
+				} catch {
+					/* keep raw */
+				}
+			}
+			report("error", msg.slice(0, 200));
 		} finally {
 			busy.delete(s.agentId);
 			active.delete(s.agentId);
