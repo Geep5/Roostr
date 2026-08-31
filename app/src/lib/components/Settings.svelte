@@ -1091,7 +1091,7 @@
 			width: 100%;
 			max-width: none;
 			max-height: calc(100vh - 48px);
-			max-height: calc(100dvh - 48px);
+			max-height: calc(100dvh - max(48px, env(safe-area-inset-top) + 32px));
 			border-radius: 18px 18px 0 0;
 			border-bottom: none;
 			padding-top: 0;

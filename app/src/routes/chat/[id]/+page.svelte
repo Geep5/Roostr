@@ -84,6 +84,7 @@
 	.chat-shell {
 		position: fixed;
 		inset: 0;
+		padding-top: env(safe-area-inset-top);
 		z-index: 50;
 		height: 100dvh;
 		display: flex;

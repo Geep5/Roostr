@@ -1381,6 +1381,10 @@
 
 	/* ── Mobile shell (<=720px): Spaces list -> channel home -> object ── */
 	.m-shell {
+		/* viewport-fit=cover extends the page under the notch - without
+		   this the header buttons sit inside the status bar where iOS
+		   does not deliver taps. */
+		padding-top: env(safe-area-inset-top);
 		display: flex;
 		flex-direction: column;
 		height: 100dvh;

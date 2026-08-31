@@ -113,25 +113,72 @@
 		return [text.slice(0, idx), text.slice(idx, idx + q.length), text.slice(idx + q.length)];
 	}
 
-	// ── Mobile sheet drag-to-close (same idiom as Settings) ──────────
+	// ── Mobile sheet drag-to-close ───────────────────────────────────
+	// Attached with non-passive listeners on the WHOLE sheet: a downward
+	// pull anywhere (results at scroll-top) drags the sheet, drops the
+	// keyboard, and dismisses past the threshold. Scrolled results keep
+	// native scrolling; horizontal chip swipes are ignored.
 	let sheetY = $state(0);
 	let sheetDragging = $state(false);
-	let sheetStartY = 0;
+	let modalEl = $state<HTMLDivElement>();
+	let resultsEl = $state<HTMLDivElement>();
 
-	function sheetStart(e: TouchEvent) {
-		sheetStartY = e.touches[0].clientY;
-		sheetDragging = true;
-	}
-	function sheetMove(e: TouchEvent) {
-		if (!sheetDragging) return;
-		sheetY = Math.max(0, e.touches[0].clientY - sheetStartY);
-	}
-	function sheetEnd() {
-		if (!sheetDragging) return;
-		sheetDragging = false;
-		if (sheetY > 110) onclose();
-		else sheetY = 0;
-	}
+	$effect(() => {
+		const el = modalEl;
+		if (!el) return;
+		let startY = 0;
+		let startX = 0;
+		let armed = false;
+		let dragging = false;
+		const onStart = (e: TouchEvent) => {
+			startY = e.touches[0].clientY;
+			startX = e.touches[0].clientX;
+			armed = true;
+			dragging = false;
+		};
+		const onMove = (e: TouchEvent) => {
+			if (!armed) return;
+			const dy = e.touches[0].clientY - startY;
+			const dx = e.touches[0].clientX - startX;
+			if (!dragging) {
+				if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
+					armed = false; // horizontal (chips) - not ours
+					return;
+				}
+				if (dy < -10) {
+					armed = false; // upward - let it scroll
+					return;
+				}
+				if (dy > 10 && (!resultsEl || resultsEl.scrollTop <= 0)) {
+					dragging = true;
+					sheetDragging = true;
+					(document.activeElement as HTMLElement | null)?.blur();
+				} else {
+					return;
+				}
+			}
+			sheetY = Math.max(0, dy);
+			e.preventDefault();
+		};
+		const onEnd = () => {
+			armed = false;
+			if (!dragging) return;
+			dragging = false;
+			sheetDragging = false;
+			if (sheetY > 110) onclose();
+			else sheetY = 0;
+		};
+		el.addEventListener("touchstart", onStart, { passive: true });
+		el.addEventListener("touchmove", onMove, { passive: false });
+		el.addEventListener("touchend", onEnd);
+		el.addEventListener("touchcancel", onEnd);
+		return () => {
+			el.removeEventListener("touchstart", onStart);
+			el.removeEventListener("touchmove", onMove);
+			el.removeEventListener("touchend", onEnd);
+			el.removeEventListener("touchcancel", onEnd);
+		};
+	});
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -142,8 +189,9 @@
 		role="dialog"
 		aria-label="Search"
 		style={sheetY ? `transform: translateY(${sheetY}px); transition: ${sheetDragging ? "none" : "transform 0.18s ease"}` : ""}
+		bind:this={modalEl}
 	>
-		<div class="grab-zone" role="presentation" ontouchstart={sheetStart} ontouchmove={sheetMove} ontouchend={sheetEnd} ontouchcancel={sheetEnd}>
+		<div class="grab-zone" role="presentation">
 			<div class="sheet-handle"></div>
 		</div>
 		<div class="input-row">
@@ -162,7 +210,7 @@
 			{/each}
 		</div>
 
-		<div class="results">
+		<div class="results" bind:this={resultsEl}>
 			{#if query.trim() === "" && results.length > 0}
 				<div class="section-name">Recently edited</div>
 			{/if}
@@ -356,7 +404,7 @@
 			border-radius: 18px 18px 0 0 !important;
 			/* Leave the top strip free: a full-height sheet parks the grab
 			   handle inside the iPhone's system-gesture edge. */
-			height: calc(100dvh - 56px) !important;
+			height: calc(100dvh - max(56px, env(safe-area-inset-top) + 32px)) !important;
 		}
 		.grab-zone {
 			display: flex;
