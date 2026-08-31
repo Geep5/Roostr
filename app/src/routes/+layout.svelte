@@ -1550,6 +1550,14 @@
 		color: var(--fg);
 		font-size: 19px;
 		cursor: pointer;
+		/* Inline SVGs ride the text baseline - flex-center them dead-on. */
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+	}
+	.m-btn :global(svg) {
+		display: block;
 	}
 	.m-top-spacer {
 		flex: 1;
