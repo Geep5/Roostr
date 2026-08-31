@@ -435,8 +435,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 14px;
-		max-height: 420px;
-		overflow-y: auto;
 		padding: 4px 0;
 	}
 	.msg {
@@ -815,6 +813,7 @@
 		flex: 1;
 		min-height: 0;
 		max-height: none;
+		overflow-y: auto;
 	}
 	.pagemode .composer {
 		flex: none;
