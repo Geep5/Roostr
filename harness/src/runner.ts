@@ -174,9 +174,14 @@ export async function runTurn(agentId: string, convId: string, opts: RunOptions 
 		if (res.toolUses.length === 0) return lastText;
 
 		for (const use of res.toolUses) {
-			await persistToolUse(agentId, use);
+			// Persist to the CONVERSATION object - the same one the next
+			// iteration's view is built from. Writing these to the agent
+			// object instead once made every turn amnesiac about its own
+			// tool calls: the model re-ran the same action until the
+			// iteration cap (14 grocery lists on one page).
+			await persistToolUse(convId, use);
 			const out = await dispatchTool(use.name, use.input, ctx);
-			await persistToolResult(agentId, use.id, out.content, out.isError);
+			await persistToolResult(convId, use.id, out.content, out.isError);
 		}
 	}
 	await setField(agentId, "last_run_iterations", iv(MAX_TOOL_ITERATIONS));

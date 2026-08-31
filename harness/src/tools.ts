@@ -20,6 +20,55 @@ import { objectText, readSkill } from "./skills";
 import * as memory from "./memory";
 import { TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
 
+/** proto TextStyle values the editor renders. */
+const STYLE = { paragraph: 0, h1: 1, h2: 2, h3: 3, quote: 4, bullet: 6, numbered: 7, checkbox: 8 } as const;
+
+/**
+ * Markdown lines -> body blocks, mirroring what the editor produces:
+ * checkboxes, bullets, numbered items, headings, quotes; anything else
+ * is a paragraph. One block per line - a pasted list must never end up
+ * as a single paragraph blob.
+ */
+function mdToBlocks(text: string): Array<Record<string, unknown>> {
+	const blocks: Array<Record<string, unknown>> = [];
+	for (const raw of text.split("\n")) {
+		const line = raw.trimEnd();
+		if (!line.trim()) continue;
+		let style: number = STYLE.paragraph;
+		let checked = false;
+		let body = line.trim();
+		let m: RegExpMatchArray | null;
+		if ((m = body.match(/^[-*] \[([ xX])\] (.*)$/))) {
+			style = STYLE.checkbox;
+			checked = m[1] !== " ";
+			body = m[2];
+		} else if ((m = body.match(/^[-*] (.*)$/))) {
+			style = STYLE.bullet;
+			body = m[1];
+		} else if ((m = body.match(/^\d+[.)] (.*)$/))) {
+			style = STYLE.numbered;
+			body = m[1];
+		} else if ((m = body.match(/^(#{1,3}) (.*)$/))) {
+			style = m[1].length;
+			body = m[2];
+		} else if ((m = body.match(/^> (.*)$/))) {
+			style = STYLE.quote;
+			body = m[1];
+		}
+		const content: Record<string, unknown> = { text: { text: body, style, ...(style === STYLE.checkbox ? { checked } : {}) } };
+		blocks.push({ id: crypto.randomUUID(), childrenIds: [], content });
+	}
+	return blocks;
+}
+
+async function appendBody(objectId: string, text: string): Promise<number> {
+	const blocks = mdToBlocks(text);
+	for (const block of blocks) {
+		await mutate("block_add", { object_id: objectId, block });
+	}
+	return blocks.length;
+}
+
 export interface ToolContext {
 	agentId: string;
 	channelId: string;
@@ -99,7 +148,7 @@ const TOOLS: RegisteredTool[] = [
 			const { id } = await createObject(S(input.name), S(input.type_key) || "note", ctx.channelId ? { channel: sv(ctx.channelId) } : undefined);
 			ctx.touched.add(id);
 			if (S(input.text)) {
-				await mutate("block_add", { object_id: id, block: { id: crypto.randomUUID(), childrenIds: [], content: { text: { text: S(input.text), style: 0 } } } });
+				await appendBody(id, S(input.text));
 			}
 			return JSON.stringify({ id });
 		},
@@ -119,13 +168,14 @@ const TOOLS: RegisteredTool[] = [
 	{
 		def: {
 			name: "object_add_text",
-			description: "Append a paragraph of text to an object's body.",
+			description:
+				"Append text to an object's body. Markdown lines become real blocks: '- [ ] x' checkboxes, '- x' bullets, '1. x' numbered, '# x' headings, '> x' quotes; plain lines become paragraphs.",
 			input_schema: { type: "object", properties: { id: { type: "string" }, text: { type: "string" } }, required: ["id", "text"] },
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
-			await mutate("block_add", { object_id: S(input.id), block: { id: crypto.randomUUID(), childrenIds: [], content: { text: { text: S(input.text), style: 0 } } } });
-			return "ok";
+			const n = await appendBody(S(input.id), S(input.text));
+			return `ok: ${n} block(s) added`;
 		},
 	},
 	{
