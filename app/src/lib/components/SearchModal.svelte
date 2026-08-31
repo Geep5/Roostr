@@ -112,13 +112,40 @@
 		if (q === "" || idx < 0) return [text, "", ""];
 		return [text.slice(0, idx), text.slice(idx, idx + q.length), text.slice(idx + q.length)];
 	}
+
+	// ── Mobile sheet drag-to-close (same idiom as Settings) ──────────
+	let sheetY = $state(0);
+	let sheetDragging = $state(false);
+	let sheetStartY = 0;
+
+	function sheetStart(e: TouchEvent) {
+		sheetStartY = e.touches[0].clientY;
+		sheetDragging = true;
+	}
+	function sheetMove(e: TouchEvent) {
+		if (!sheetDragging) return;
+		sheetY = Math.max(0, e.touches[0].clientY - sheetStartY);
+	}
+	function sheetEnd() {
+		if (!sheetDragging) return;
+		sheetDragging = false;
+		if (sheetY > 110) onclose();
+		else sheetY = 0;
+	}
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
 <div class="overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) onclose(); }}>
-	<div class="modal" role="dialog" aria-label="Search">
-		<div class="sheet-handle"></div>
+	<div
+		class="modal"
+		role="dialog"
+		aria-label="Search"
+		style={sheetY ? `transform: translateY(${sheetY}px); transition: ${sheetDragging ? "none" : "transform 0.18s ease"}` : ""}
+	>
+		<div class="grab-zone" role="presentation" ontouchstart={sheetStart} ontouchmove={sheetMove} ontouchend={sheetEnd} ontouchcancel={sheetEnd}>
+			<div class="sheet-handle"></div>
+		</div>
 		<div class="input-row">
 			<span class="scope">{spaceName}</span>
 			<span class="m-search-icon">⌕</span>
@@ -309,6 +336,7 @@
 	}
 
 	/* ── Mobile sheet (Anytype iOS): handle, rounded field, chips, stacked rows ── */
+	.grab-zone,
 	.sheet-handle {
 		display: none;
 	}
@@ -328,13 +356,19 @@
 			border-radius: 18px 18px 0 0 !important;
 			height: calc(100dvh - 40px) !important;
 		}
+		.grab-zone {
+			display: flex;
+			justify-content: center;
+			padding: 8px 0 2px;
+			flex: none;
+			touch-action: none;
+		}
 		.sheet-handle {
 			display: block;
 			width: 40px;
 			height: 5px;
 			border-radius: 3px;
 			background: var(--border);
-			margin: 10px auto 4px;
 			flex: none;
 		}
 		.input-row {
