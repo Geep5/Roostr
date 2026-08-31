@@ -195,6 +195,14 @@ export function frameMessage(surface: ObjectJSON, pending: PendingMessage[]): st
 		parts.push(`--- this ${kind} is empty ---`);
 	}
 
+	const thread = surface.blocks.find((b) => b.id === "__discussion__");
+	const chatCount = (thread?.childrenIds ?? []).filter((cid) => {
+		const c = surface.blocks.find((b) => b.id === cid)?.content.custom;
+		return c?.contentType === "chat" && (c.meta?.["text"] ?? "").trim();
+	}).length;
+	const earlier = chatCount - pending.length;
+	if (earlier > 0) parts.push(`[this ${kind} has ${earlier} earlier discussion message(s) \u2014 discussion_read ${surface.id} to see them]`);
+
 	for (const p of pending) if (p.text.trim()) parts.push(p.text);
 	return parts.join("\n");
 }

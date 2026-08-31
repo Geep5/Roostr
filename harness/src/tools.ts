@@ -157,6 +157,49 @@ const TOOLS: RegisteredTool[] = [
 	},
 	{
 		def: {
+			name: "discussion_read",
+			description:
+				"Read the discussion thread under an object (object_get shows only the body). Returns the last messages oldest-first with author names and timestamps. Use it when the current message refers to earlier conversation on that object.",
+			input_schema: {
+				type: "object",
+				properties: {
+					id: { type: "string" },
+					limit: { type: "number", description: "max messages, default 30" },
+				},
+				required: ["id"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const obj = await fetchObject(S(input.id));
+			ctx.touched.add(obj.id);
+			const byId = new Map(obj.blocks.map((b) => [b.id, b]));
+			const root = byId.get("__discussion__");
+			const msgs: Array<{ author: string; text: string; ts: number }> = [];
+			for (const cid of root?.childrenIds ?? []) {
+				const c = byId.get(cid)?.content.custom;
+				if (c?.contentType !== "chat") continue;
+				const meta = c.meta ?? {};
+				if (!(meta["text"] ?? "").trim()) continue;
+				msgs.push({ author: meta["author"] ?? "", text: meta["text"] ?? "", ts: Number(meta["ts"] ?? 0) });
+			}
+			if (msgs.length === 0) return "(no discussion on this object)";
+			const limit = Math.max(1, Math.min(200, Number(input.limit) || 30));
+			const tail = msgs.slice(-limit);
+			const names = new Map<string, string>();
+			for (const m of tail) {
+				if (names.has(m.author)) continue;
+				if (m.author === ctx.agentId) names.set(m.author, "you");
+				else if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(m.author)) {
+					const o = await fetchObject(m.author).catch(() => null);
+					names.set(m.author, (o && str(o.fields, "name")) || m.author.slice(0, 8));
+				} else names.set(m.author, "user");
+			}
+			const lines = tail.map((m) => `${names.get(m.author)} \u00b7 ${new Date(m.ts).toISOString().slice(0, 16)}: ${m.text}`);
+			return `${msgs.length} message(s) total, last ${tail.length}:\n${lines.join("\n")}`;
+		},
+	},
+	{
+		def: {
 			name: "object_create",
 			description: "Create an object (default type note). Returns its id.",
 			input_schema: {
