@@ -420,10 +420,13 @@
 		<!-- Screen 1: Spaces list. -->
 		<div class="m-screen">
 			<div class="m-head">
+				<!-- Anytype: the avatar sits alone on top; the title gets its own line below. -->
+				<div class="m-head-top">
+					<button class="m-avatar" data-tip="Settings" aria-label="Settings" onclick={() => (showSettings = true)}>
+						{#if profilePic}<img class="m-avatar-img" src={profilePic} alt="" />{:else}⚙{/if}
+					</button>
+				</div>
 				<span class="m-title">Spaces</span>
-				<button class="m-avatar" data-tip="Settings" aria-label="Settings" onclick={() => (showSettings = true)}>
-					{#if profilePic}<img class="m-avatar-img" src={profilePic} alt="" />{:else}⚙{/if}
-				</button>
 			</div>
 			<div class="m-cards">
 				{#each channels as c (c.id)}
@@ -1386,14 +1389,19 @@
 	}
 	.m-head {
 		display: flex;
-		align-items: center;
-		justify-content: space-between;
+		flex-direction: column;
+		align-items: stretch;
 		margin-bottom: 14px;
 	}
 	.m-title {
-		font-size: 28px;
+		font-size: 32px;
 		font-weight: 700;
 		letter-spacing: -0.01em;
+	}
+	.m-head-top {
+		display: flex;
+		justify-content: flex-end;
+		padding-bottom: 10px;
 	}
 	.m-avatar {
 		padding: 0;
