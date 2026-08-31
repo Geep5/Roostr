@@ -8,6 +8,7 @@
 	 * mutate.odin chat_post/chat_react.
 	 */
 	import type { ObjectJSON } from "$lib/types";
+	import { goto } from "$app/navigation";
 	import { chat, settings } from "$lib/api";
 	import { store } from "$lib/data.svelte";
 	import EmojiPicker from "./EmojiPicker.svelte";
@@ -16,8 +17,9 @@
 	let {
 		object,
 		full = false,
+		pagemode = false,
 		onchanged,
-	}: { object: ObjectJSON; full?: boolean; onchanged: () => Promise<void> } = $props();
+	}: { object: ObjectJSON; full?: boolean; pagemode?: boolean; onchanged: () => Promise<void> } = $props();
 
 	interface Message {
 		id: string;
@@ -64,7 +66,25 @@
 
 	let open = $state(false);
 	let composerEl = $state<HTMLTextAreaElement>();
-	const isOpen = $derived(full || open);
+	const isOpen = $derived(full || pagemode || open);
+
+	/** Anytype's phone idiom: the discussion opens as its own page. */
+	function openDiscussion() {
+		if (matchMedia("(max-width: 720px)").matches) {
+			const prefix = location.pathname.startsWith("/app") ? "/app" : "";
+			void goto(`${prefix}/chat/${object.id}`);
+			return;
+		}
+		open = true;
+	}
+
+	// Page mode: keep the newest message in view like a chat app.
+	let messagesEl = $state<HTMLDivElement>();
+	$effect(() => {
+		if (!pagemode || !messagesEl) return;
+		void messages.length;
+		messagesEl.scrollTop = messagesEl.scrollHeight;
+	});
 	$effect(() => {
 		if (isOpen) composerEl?.focus();
 	});
@@ -171,11 +191,11 @@
 	}
 </script>
 
-<section class="discussion" class:full>
+<section class="discussion" class:full class:pagemode>
 	{#if !isOpen}
 		<!-- Anytype commentCounter: a centered floating pill, not a full-width bar. -->
 		<div class="counter-wrap">
-			<button class="opener" onclick={() => (open = true)}>
+			<button class="opener" onclick={openDiscussion}>
 				<span class="opener-icon">💬</span>
 				<span class="opener-label">{messages.length > 0 ? `${messages.length} comment${messages.length === 1 ? "" : "s"}` : "Start a discussion"}</span>
 			</button>
@@ -189,7 +209,7 @@
 				<button class="collapse" title="Collapse" onclick={() => (open = false)}>×</button>
 			</div>
 		{/if}
-		<div class="messages">
+		<div class="messages" bind:this={messagesEl}>
 			{#each messages as m (m.id)}
 				<div class="msg" class:own={m.author === me} id="msg-{m.id}">
 					{#if m.author !== me}
@@ -782,5 +802,21 @@
 	}
 	.presence .p-text {
 		line-height: 1.4;
+	}
+	/* Full-page chat (mobile route): fill the shell, composer at the
+	   bottom, messages take the rest. */
+	.discussion.pagemode {
+		height: 100%;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+	.pagemode .messages {
+		flex: 1;
+		min-height: 0;
+		max-height: none;
+	}
+	.pagemode .composer {
+		flex: none;
 	}
 </style>

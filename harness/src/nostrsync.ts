@@ -308,7 +308,7 @@ export async function startNostrSync(): Promise<void> {
 		return;
 	}
 
-	const pool = new SimplePool();
+	let pool = new SimplePool();
 	const state = await readState();
 	let dirty = false;
 	const persist = () => {
@@ -760,18 +760,107 @@ export async function startNostrSync(): Promise<void> {
 		}
 		void publishObject(objectId);
 	});
-	pool.subscribeMany(id.relays, { kinds: [CHANGE_KIND], authors: [id.pk], since: state.cursor + 1 }, {
-		onevent: (event) => void onRelayEvent(event),
-	});
-	if (spaceTags.length > 0) {
-		console.log(`[sync] live space sub: ${spaceTags.length} tag(s) since ${state.cursor + 1}`);
-		pool.subscribeMany(id.relays, { kinds: [CHANGE_KIND], "#h": spaceTags, since: state.cursor + 1 }, {
-			onevent: (event) => void onRelayEvent(event),
-		});
+	// ── Live subscriptions + deafness watchdog ─────────────────────
+	//
+	// nostr-tools does not resurrect subscriptions after a socket drop
+	// (relay deploys, laptop sleep, proxy resets) - the pool keeps
+	// "working" while receiving nothing and timing out publishes. The
+	// watchdog asks the relay for its head every WATCHDOG_MS; a head
+	// newer than our cursor (or a dead query) means we are deaf:
+	// rebuild the pool, catch up since the cursor, resubscribe.
+
+	let liveSubs: Array<{ close(): void }> = [];
+
+	function subscribeLive(): void {
+		for (const sub of liveSubs) {
+			try {
+				sub.close();
+			} catch {
+				/* already gone */
+			}
+		}
+		liveSubs = [];
+		liveSubs.push(
+			pool.subscribeMany(id!.relays, { kinds: [CHANGE_KIND], authors: [id!.pk], since: state.cursor + 1 }, {
+				onevent: (event) => void onRelayEvent(event),
+			}),
+		);
+		const tags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
+		if (tags.length > 0) {
+			liveSubs.push(
+				pool.subscribeMany(id!.relays, { kinds: [CHANGE_KIND], "#h": tags, since: state.cursor + 1 }, {
+					onevent: (event) => void onRelayEvent(event),
+				}),
+			);
+		}
+		liveSubs.push(
+			pool.subscribeMany(id!.relays, { kinds: [KEYRING_KIND], authors: [id!.pk], "#d": [KEYRING_D], since: Math.floor(Date.now() / 1000) }, {
+				onevent: (event) => void mergeKeyring(event),
+			}),
+		);
 	}
-	pool.subscribeMany(id.relays, { kinds: [KEYRING_KIND], authors: [id.pk], "#d": [KEYRING_D], since: Math.floor(Date.now() / 1000) }, {
-		onevent: (event) => void mergeKeyring(event),
-	});
+
+	const WATCHDOG_MS = 60_000;
+
+	async function relayHead(): Promise<number | null> {
+		const tags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
+		const query = Promise.all([
+			pool.querySync(id!.relays, { kinds: [CHANGE_KIND], authors: [id!.pk], limit: 1 }),
+			tags.length > 0 ? pool.querySync(id!.relays, { kinds: [CHANGE_KIND], "#h": tags, limit: 1 }) : Promise.resolve([] as Event[]),
+		]);
+		const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000));
+		const res = await Promise.race([query, timeout]);
+		if (res === null) return null;
+		return [...res[0], ...res[1]].reduce((max, e) => Math.max(max, e.created_at), 0);
+	}
+
+	async function catchup(): Promise<void> {
+		const tags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
+		const since = state.cursor + 1;
+		const byId = new Map<string, Event>();
+		const filters: Array<Record<string, unknown>> = [{ kinds: [CHANGE_KIND], authors: [id!.pk], since }];
+		if (tags.length > 0) filters.push({ kinds: [CHANGE_KIND], "#h": tags, since });
+		for (const filter of filters) {
+			try {
+				for (const e of await pool.querySync(id!.relays, filter as never)) byId.set(e.id, e);
+			} catch {
+				/* relay unreachable; the watchdog fires again */
+			}
+		}
+		const events = [...byId.values()].sort((a, b) => a.created_at - b.created_at);
+		for (const event of events) await onRelayEvent(event);
+		if (events.length > 0) console.log(`[sync] watchdog caught up ${events.length} event(s)`);
+	}
+
+	let watchdogBusy = false;
+	setInterval(() => {
+		if (watchdogBusy) return;
+		watchdogBusy = true;
+		void (async () => {
+			try {
+				const head = await relayHead();
+				if (head === null) {
+					console.log("[sync] watchdog: relay unresponsive - rebuilding pool");
+					try {
+						pool.close(id!.relays);
+					} catch {
+						/* already closed */
+					}
+					pool = new SimplePool();
+					await catchup();
+					subscribeLive();
+				} else if (head > state.cursor) {
+					console.log(`[sync] watchdog: relay head ${head} > cursor ${state.cursor} - catching up`);
+					await catchup();
+					subscribeLive();
+				}
+			} finally {
+				watchdogBusy = false;
+			}
+		})();
+	}, WATCHDOG_MS);
+
+	subscribeLive();
 	console.log("[sync] live");
 }
 

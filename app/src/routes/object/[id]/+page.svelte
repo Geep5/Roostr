@@ -40,6 +40,12 @@
 					return;
 				}
 			}
+			// Anytype's phone idiom: a chat object IS its discussion -
+			// open the full-screen chat page on mobile.
+			if (o.typeKey === "chat" && matchMedia("(max-width: 720px)").matches) {
+				void goto(`/chat/${o.id}`, { replaceState: true });
+				return;
+			}
 			object = o;
 		});
 	});
