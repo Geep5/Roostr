@@ -61,7 +61,7 @@ nostr_write :: proc(s: Nostr_Settings) {
 	_ = os.write_entire_file(nostr_settings_path(), marshal(json.Object(root)), perm = {.Read_User, .Write_User})
 }
 /** Battle-tested public relays seeded on fresh installs (Settings can edit). */
-DEFAULT_RELAYS :: []string{"wss://relay.damus.io", "wss://nos.lol", "wss://relay.nostr.band"}
+DEFAULT_RELAYS :: []string{"wss://roostr-relay.fly.dev"}
 
 /** Settings with a key, generating one on first access. */
 nostr_ensure :: proc(allocator := context.temp_allocator) -> Nostr_Settings {
