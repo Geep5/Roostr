@@ -492,10 +492,19 @@
 		}
 		.row .kind {
 			order: 3;
-			flex-basis: 100%;
+			/* basis 100% + a left margin overflowed every row 42px past the
+			   sheet - keep the indent inside the basis instead. */
+			flex-basis: calc(100% - 42px);
 			margin-left: 42px;
 			font-size: 12px;
 			text-transform: capitalize;
+		}
+		/* The sheet is a fixed-height flex column: results fill the rest
+		   (the desktop 46vh dropdown cap left the bottom half dead). */
+		.results {
+			flex: 1;
+			max-height: none;
+			overflow-x: hidden;
 		}
 		.hints {
 			display: none;
