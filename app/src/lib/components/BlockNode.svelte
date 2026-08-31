@@ -864,5 +864,10 @@
 		.block {
 			padding-right: 16px;
 		}
+		.handle {
+			/* right: 6px in a 16px gutter pushed the 12px handle to
+			   x = -2 - clipped at the screen edge. */
+			right: 2px;
+		}
 	}
 </style>

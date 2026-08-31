@@ -386,6 +386,12 @@
 	}
 	/* Mobile: the opener collapses to a centered round chat button. */
 	@media (max-width: 720px) {
+		.discussion {
+			/* The desktop 48px rail margin skewed the centered opener
+			   24px right of the true viewport middle. */
+			margin-left: 0;
+			padding: 0 16px;
+		}
 		.counter-wrap {
 			display: flex;
 			justify-content: center;
