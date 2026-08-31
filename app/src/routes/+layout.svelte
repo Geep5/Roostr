@@ -1598,6 +1598,10 @@
 		padding-bottom: 12px;
 	}
 	.m-wcard {
+		/* flex: none is load-bearing - overflow:hidden gives a flex item
+		   an automatic min-height of 0, so the scroll column was crushing
+		   these cards to their borders when content overflowed. */
+		flex: none;
 		background: var(--panel);
 		border: 1px solid var(--border);
 		border-radius: 10px;
