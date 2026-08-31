@@ -142,4 +142,10 @@
 		flex-direction: column;
 		padding: 0 12px calc(8px + env(safe-area-inset-bottom));
 	}
+	.chat-body :global(.messages) {
+		scrollbar-width: none;
+	}
+	.chat-body :global(.messages)::-webkit-scrollbar {
+		display: none;
+	}
 </style>

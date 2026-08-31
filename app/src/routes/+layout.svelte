@@ -1787,4 +1787,16 @@
 		border-radius: 50%;
 		display: block;
 	}
+	/* App-like mobile scrolling: no overlay scrollbar riding on top of
+	   card content (iOS draws it over the rounded cards). */
+	.m-cards,
+	.m-main,
+	.m-cards-col {
+		scrollbar-width: none;
+	}
+	.m-cards::-webkit-scrollbar,
+	.m-main::-webkit-scrollbar,
+	.m-cards-col::-webkit-scrollbar {
+		display: none;
+	}
 </style>
