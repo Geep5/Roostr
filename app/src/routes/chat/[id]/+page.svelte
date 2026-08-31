@@ -67,7 +67,7 @@
 <div class="chat-shell" bind:this={shell}>
 	{#if object}
 		<header>
-			<a class="back" href="{prefix}/object/{object.id}" aria-label="Back">‹</a>
+			<a class="back" href="{prefix}/object/{object.id}" aria-label="Back"><svg style="width:20px;height:20px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 6L9 12l5.5 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
 			<div class="head-text">
 				<div class="head-name"><span class="head-icon">{objectIcon(object.fields["iconEmoji"]?.stringValue, object.typeKey)}</span> {fieldStr(object.fields, "name") || "Untitled"}</div>
 				<div class="head-sub">{comments} comment{comments === 1 ? "" : "s"}</div>
