@@ -1661,10 +1661,22 @@
 		min-width: 0;
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 12px 6px 12px 14px;
+		gap: 10px;
+		padding: 12px 6px 12px 16px;
 		color: var(--fg);
 		text-decoration: none;
+	}
+	/* Fixed icon box: emoji widths vary wildly, which staggered every
+	   card's text start and made rows read as off-center. */
+	.m-wcard-link :global(.obj-icon),
+	.m-wcard-link .obj-icon {
+		flex: none;
+		width: 22px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 16px;
+		line-height: 1;
 	}
 	.m-chev-btn {
 		flex: none;
