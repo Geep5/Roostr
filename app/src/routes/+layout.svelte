@@ -468,7 +468,7 @@
 			<div class="m-top">
 				<button class="m-btn" data-tip="Spaces" aria-label="Spaces" onclick={() => (mobileSpaceOpen = false)}><svg style="width:20px;height:20px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 6L9 12l5.5 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
 				<span class="m-top-spacer"></span>
-				<button class="m-btn" data-tip="Space settings" onclick={() => goto(`/object/${current.id}`)}>⋯</button>
+				<button class="m-btn" data-tip="Space settings" aria-label="Space settings" onclick={() => goto(`/object/${current.id}`)}><svg style="width:18px;height:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
 			</div>
 			<div class="m-ch-head">
 				<span class="m-ch-icon">
@@ -1602,7 +1602,14 @@
 	.m-main {
 		flex: 1;
 		min-height: 0;
+		width: 100%;
+		max-width: 100%;
+		/* min-width 0 is load-bearing: as a flex item, min-width:auto let
+		   one wide row (e.g. an unbreakable code/npub line) blow the whole
+		   page out to its min-content and create a horizontal scrollbar. */
+		min-width: 0;
 		overflow-y: auto;
+		overflow-x: hidden;
 	}
 	.m-ch-head {
 		display: flex;
