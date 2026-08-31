@@ -330,7 +330,7 @@
 
 <div class="overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) onclose(); }}>
 	<div
-		class="modal"
+		class="modal sheet"
 		role="dialog"
 		aria-label="Settings"
 		style={sheetY ? `transform: translateY(${sheetY}px); transition: ${sheetDragging ? "none" : "transform 0.18s ease"}` : ""}
@@ -838,6 +838,7 @@
 		z-index: 200;
 	}
 	.modal {
+		box-sizing: border-box;
 		width: 580px;
 		max-width: calc(100vw - 48px);
 		max-height: 80vh;
@@ -1089,15 +1090,23 @@
 		.modal {
 			width: 100%;
 			max-width: none;
-			max-height: 92dvh;
+			max-height: calc(100vh - 48px);
+			max-height: calc(100dvh - 48px);
 			border-radius: 18px 18px 0 0;
 			border-bottom: none;
 			padding-top: 0;
 		}
 		.grab-zone {
+			/* Sticky: the grabber must never scroll away with the content -
+			   it IS the close affordance. */
+			position: sticky;
+			top: 0;
+			z-index: 5;
+			background: var(--panel);
 			display: flex;
 			justify-content: center;
-			padding: 10px 0 4px;
+			padding: 10px 0 6px;
+			margin: 0 -22px;
 			touch-action: none;
 		}
 		.grabber {

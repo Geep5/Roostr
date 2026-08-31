@@ -1770,7 +1770,9 @@
 		:global(.overlay) {
 			padding: 0 !important;
 		}
-		:global(.overlay .modal) {
+		/* .sheet modals (Settings) opt out: they are bottom sheets with
+		   their own height/drag behavior. */
+		:global(.overlay .modal:not(.sheet)) {
 			width: 100% !important;
 			max-width: none !important;
 			height: 100dvh !important;
