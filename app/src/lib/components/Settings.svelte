@@ -302,13 +302,45 @@
 			exporting = false;
 		}
 	}
+
+	// ── Mobile bottom-sheet drag-to-close ────────────────────────────
+	// Anytype's sheet idiom: grab anywhere in the header/grabber zone
+	// and pull down past the threshold to dismiss; otherwise it springs
+	// back. Content scrolling is untouched (drag starts only from the
+	// grabber/header, which has touch-action: none).
+	let sheetY = $state(0);
+	let sheetDragging = $state(false);
+	let sheetStartY = 0;
+
+	function sheetStart(e: TouchEvent) {
+		sheetStartY = e.touches[0].clientY;
+		sheetDragging = true;
+	}
+	function sheetMove(e: TouchEvent) {
+		if (!sheetDragging) return;
+		sheetY = Math.max(0, e.touches[0].clientY - sheetStartY);
+	}
+	function sheetEnd() {
+		if (!sheetDragging) return;
+		sheetDragging = false;
+		if (sheetY > 110) onclose();
+		else sheetY = 0;
+	}
 </script>
 
 <div class="overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) onclose(); }}>
-	<div class="modal" role="dialog" aria-label="Settings">
-		<header>
+	<div
+		class="modal"
+		role="dialog"
+		aria-label="Settings"
+		style={sheetY ? `transform: translateY(${sheetY}px); transition: ${sheetDragging ? "none" : "transform 0.18s ease"}` : ""}
+	>
+		<div class="grab-zone" role="presentation" ontouchstart={sheetStart} ontouchmove={sheetMove} ontouchend={sheetEnd} ontouchcancel={sheetEnd}>
+			<div class="grabber"></div>
+		</div>
+		<header role="presentation" ontouchstart={sheetStart} ontouchmove={sheetMove} ontouchend={sheetEnd} ontouchcancel={sheetEnd}>
 			<h2><span class="cog">⚙️</span> Settings</h2>
-			<button class="x" onclick={onclose}>×</button>
+			<button class="x close-x" onclick={onclose}>×</button>
 		</header>
 
 		<section>
@@ -1044,5 +1076,41 @@
 		background: var(--hover);
 		border: 1px solid var(--border);
 		font-size: 22px;
+	}
+	.grab-zone {
+		display: none;
+	}
+	@media (max-width: 720px) {
+		/* Bottom sheet: pinned to the bottom edge, rounded top, grabber
+		   bar, drag-to-close; the × hides (the sheet IS the affordance). */
+		.overlay {
+			align-items: flex-end;
+		}
+		.modal {
+			width: 100%;
+			max-width: none;
+			max-height: 92dvh;
+			border-radius: 18px 18px 0 0;
+			border-bottom: none;
+			padding-top: 0;
+		}
+		.grab-zone {
+			display: flex;
+			justify-content: center;
+			padding: 10px 0 4px;
+			touch-action: none;
+		}
+		.grabber {
+			width: 40px;
+			height: 4px;
+			border-radius: 2px;
+			background: var(--border);
+		}
+		header {
+			touch-action: none;
+		}
+		.close-x {
+			display: none;
+		}
 	}
 </style>
