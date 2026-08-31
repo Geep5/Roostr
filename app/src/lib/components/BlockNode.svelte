@@ -591,11 +591,13 @@
 			opacity: 1;
 		}
 	}
-	/* Touch can't hover: handles are simply always visible (a static
-	   style triggers no iOS first-tap hover emulation). */
+	/* Touch can't hover: show the handle only on the ACTIVE block (the
+	   one whose text is focused). Static pseudo-classes trigger no iOS
+	   first-tap hover emulation. :has(> .text:focus) keeps ancestor
+	   toggles from also sprouting handles for a focused child. */
 	@media (hover: none) {
-		.handle {
-			opacity: 0.6;
+		.block:has(> .text:focus) > .gutter .handle {
+			opacity: 0.7;
 		}
 	}
 	.handle:hover {
