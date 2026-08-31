@@ -40,6 +40,14 @@
 			status = graph.nodes.length === 0 ? "Nothing in this space yet." : "";
 			if (!canvasEl || cancelled || graph.nodes.length === 0) return;
 
+			// iOS Safari sizes the WebGPU swapchain when the context is
+			// configured and does NOT track later canvas resizes (Chrome
+			// does, per spec) - so the one configure() call must see the
+			// real dimensions, not the default 300x150 attribute size.
+			// Symptom without this: the graph paints a letterboxed sub-rect.
+			const dpr = window.devicePixelRatio || 1;
+			canvasEl.width = Math.max(1, Math.floor(canvasEl.clientWidth * dpr));
+			canvasEl.height = Math.max(1, Math.floor(canvasEl.clientHeight * dpr));
 			const renderer = await createRenderer(canvasEl, { clearColor: [0.047, 0.055, 0.066, 1] });
 			if (cancelled) {
 				renderer.destroy();
