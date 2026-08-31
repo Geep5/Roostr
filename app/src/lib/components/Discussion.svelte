@@ -191,11 +191,13 @@
 		{/if}
 		<div class="messages">
 			{#each messages as m (m.id)}
-				<div class="msg" id="msg-{m.id}">
-					{#if avatarEmoji(m.author)}
-						<span class="avatar emoji">{avatarEmoji(m.author)}</span>
-					{:else}
-						<span class="avatar" style="background: hsl({hue(m.author)}, 45%, 35%)">{m.author.slice(0, 2)}</span>
+				<div class="msg" class:own={m.author === me} id="msg-{m.id}">
+					{#if m.author !== me}
+						{#if avatarEmoji(m.author)}
+							<span class="avatar emoji">{avatarEmoji(m.author)}</span>
+						{:else}
+							<span class="avatar" style="background: hsl({hue(m.author)}, 45%, 35%)">{m.author.slice(0, 2)}</span>
+						{/if}
 					{/if}
 					<div class="body">
 						{#if m.replyTo && messageById.has(m.replyTo)}
@@ -206,7 +208,9 @@
 							</a>
 						{/if}
 						<div class="meta-row">
-							<span class="author">{who(m.author)}</span>
+							{#if m.author !== me}
+								<span class="author">{who(m.author)}</span>
+							{/if}
 							{#if m.origin}
 								<a class="origin" href="/object/{m.origin}" title="Asked from this object">↳ {originName(m.origin)}</a>
 							{/if}
@@ -419,6 +423,12 @@
 		display: flex;
 		gap: 10px;
 		position: relative;
+		align-items: flex-end;
+	}
+	/* Own messages ride the right edge, iMessage style: no avatar, no
+	   name, accent bubble; everyone else keeps the left column. */
+	.msg.own {
+		flex-direction: row-reverse;
 	}
 	.msg .actions {
 		opacity: 0;
@@ -454,8 +464,14 @@
 		color: #fff;
 	}
 	.body {
-		flex: 1;
 		min-width: 0;
+		max-width: 78%;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+	}
+	.msg.own .body {
+		align-items: flex-end;
 	}
 	.meta-row {
 		display: flex;
@@ -474,6 +490,29 @@
 		font-size: 14px;
 		line-height: 1.45;
 		word-break: break-word;
+		background: var(--hover, #2a2a2e);
+		padding: 7px 12px;
+		border-radius: 16px;
+		border-bottom-left-radius: 5px;
+	}
+	.msg.own .text {
+		background: var(--accent, #0a84ff);
+		color: #fff;
+		border-radius: 16px;
+		border-bottom-right-radius: 5px;
+	}
+	.msg.own .md :global(a) {
+		color: #fff;
+		text-decoration: underline;
+	}
+	.msg.own .md :global(code.ic) {
+		background: rgba(255, 255, 255, 0.18);
+	}
+	.msg.own .meta-row {
+		justify-content: flex-end;
+	}
+	.msg.own .reactions {
+		justify-content: flex-end;
 	}
 	/* Markdown render ({@html} content needs :global under scoped styles) */
 	.md :global(p) {
