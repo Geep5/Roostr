@@ -591,6 +591,13 @@
 			opacity: 1;
 		}
 	}
+	/* Touch can't hover: handles are simply always visible (a static
+	   style triggers no iOS first-tap hover emulation). */
+	@media (hover: none) {
+		.handle {
+			opacity: 0.6;
+		}
+	}
 	.handle:hover {
 		background: var(--hover);
 		border-color: var(--hover);
