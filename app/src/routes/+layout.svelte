@@ -1704,6 +1704,11 @@
 	.m-wcard-body {
 		padding: 0 10px 10px;
 	}
+	/* A pinned object with no preview (notes, pages) renders an empty
+	   body - its bottom padding pushed the header row visually high. */
+	.m-wcard-body:empty {
+		display: none;
+	}
 	.m-section-label {
 		display: flex;
 		align-items: center;
