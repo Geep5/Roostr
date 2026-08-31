@@ -365,6 +365,13 @@
 	{#if page.url.pathname.startsWith("/chat/")}
 		<!-- Full-screen chat page: brings its own header and keyboard fit. -->
 		{@render children()}
+	{:else if page.url.pathname === "/graph"}
+		<header class="m-top">
+			<button class="m-btn" data-tip="Back" aria-label="Back" onclick={() => history.back()}><svg style="width:20px;height:20px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 6L9 12l5.5 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+			<span class="m-obj"><span class="path-icon"><GraphIcon /></span><span class="m-obj-name">Graph</span></span>
+			<span class="m-top-spacer"></span>
+		</header>
+		<main class="m-main">{@render children()}</main>
 	{:else if objectId}
 		<!-- Object page: back / icon+name / star / more. -->
 		<header class="m-top">
@@ -387,7 +394,7 @@
 					{#if showMore}
 						<div class="more-menu">
 							<button onclick={() => { showMore = false; void goto(objectId ? `/graph?focus=${objectId}` : "/graph"); }}>
-								Graph
+								<span class="menu-graph-icon"><GraphIcon size={14} /></span> Graph
 							</button>
 							<button onclick={() => { showMore = false; void togglePin(); }}>
 								{isPinned ? "★ Unpin from space" : "☆ Pin to space"}
@@ -1815,5 +1822,10 @@
 	.m-main::-webkit-scrollbar,
 	.m-cards-col::-webkit-scrollbar {
 		display: none;
+	}
+	.menu-graph-icon {
+		display: inline-flex;
+		vertical-align: -2px;
+		margin-right: 2px;
 	}
 </style>
