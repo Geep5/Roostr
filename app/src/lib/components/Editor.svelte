@@ -1148,4 +1148,9 @@
 	.sm-close {
 		color: var(--muted);
 	}
+	@media (max-width: 720px) {
+		.empty-hint {
+			margin-left: 16px;
+		}
+	}
 </style>

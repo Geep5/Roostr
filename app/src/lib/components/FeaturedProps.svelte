@@ -286,4 +286,9 @@
 		border: none;
 		cursor: default;
 	}
+	@media (max-width: 720px) {
+		.featured {
+			margin: 0 16px 10px;
+		}
+	}
 </style>

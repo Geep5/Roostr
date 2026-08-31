@@ -483,19 +483,24 @@
 		filter: brightness(1.1);
 	}
 
-	/* Mobile: drop the 48px rail, full-width content. */
+	/* Mobile: drop the 48px rail; ONE 16px gutter for icon, title, meta,
+	   and block text (Anytype's phone layout), tighter vertical rhythm. */
 	@media (max-width: 720px) {
 		.dataview {
 			margin-left: 0;
 		}
 		.tpl-note {
-			margin-left: 0;
+			margin: 0 0 8px 16px;
 		}
 		.icon-wrap {
-			margin-left: 0;
+			margin: 8px 0 2px 16px;
 		}
 		.title-row {
-			padding-left: 4px;
+			padding-left: 16px;
+		}
+		.title {
+			font-size: 32px;
+			padding: 4px 0 6px;
 		}
 		.obj-emoji {
 			width: 56px;

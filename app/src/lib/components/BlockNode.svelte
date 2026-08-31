@@ -65,6 +65,8 @@
 		setToggleOpen(object.id, id, toggleOpen);
 	}
 
+	// iOS: autocorrect/autocapitalize paint red squiggles inside contenteditables.
+	const IOS_KEYBOARD_OFF: Record<string, string> = { autocapitalize: "off", autocorrect: "off" };
 	const STYLE_CLASS: Record<number, string> = {
 		[Style.PARAGRAPH]: "p",
 		[Style.HEADER1]: "h1",
@@ -299,6 +301,7 @@
 					if (e.shiftKey || e.key.startsWith("Arrow")) onselect(block.id);
 				}}
 				spellcheck="false"
+				{...IOS_KEYBOARD_OFF}
 				data-placeholder={t.style === Style.TITLE ? "Untitled" : "Type / for commands"}
 			></div>
 			{#if block.childrenIds.length > 0 && (!isToggle || toggleOpen)}
@@ -850,5 +853,16 @@
 	/* Anytype .dropTarget.targetBot.isOver.bottom: 2px accent line inset. */
 	.bot-strip.over {
 		box-shadow: 0 2px 0 var(--accent) inset;
+	}
+	/* Mobile: the 48px drag rail collapses to the shared 16px gutter -
+	   handles are hover-only and meaningless on touch. */
+	@media (max-width: 720px) {
+		.gutter {
+			width: 16px;
+			flex: 0 0 16px;
+		}
+		.block {
+			padding-right: 16px;
+		}
 	}
 </style>
