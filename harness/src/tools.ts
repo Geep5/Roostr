@@ -61,12 +61,33 @@ function mdToBlocks(text: string): Array<Record<string, unknown>> {
 	return blocks;
 }
 
-async function appendBody(objectId: string, text: string): Promise<number> {
+const POSITION_INNER = 5; // glon.Position.Inner - append as the target's last child
+
+/**
+ * Append blocks, optionally nested under an existing block matched by
+ * its text (case-insensitive). "under" is how the model joins an
+ * existing list (e.g. under: "Walmart") instead of dumping new blocks
+ * at the page root.
+ */
+async function appendBody(objectId: string, text: string, under = ""): Promise<string> {
+	let targetId = "";
+	if (under.trim()) {
+		const obj = await fetchObject(objectId);
+		const needle = under.trim().toLowerCase();
+		const hit = obj.blocks.find((b) => (b.content.text?.text ?? "").trim().toLowerCase() === needle)
+			?? obj.blocks.find((b) => (b.content.text?.text ?? "").trim().toLowerCase().startsWith(needle));
+		if (!hit) return `error: no block matching "${under.trim()}" - blocks were NOT added; re-check the text or omit "under"`;
+		targetId = hit.id;
+	}
 	const blocks = mdToBlocks(text);
 	for (const block of blocks) {
-		await mutate("block_add", { object_id: objectId, block });
+		await mutate("block_add", {
+			object_id: objectId,
+			block,
+			...(targetId ? { target_id: targetId, position: POSITION_INNER } : {}),
+		});
 	}
-	return blocks.length;
+	return `ok: ${blocks.length} block(s) added${targetId ? ` under "${under.trim()}"` : ""}`;
 }
 
 export interface ToolContext {
@@ -169,13 +190,20 @@ const TOOLS: RegisteredTool[] = [
 		def: {
 			name: "object_add_text",
 			description:
-				"Append text to an object's body. Markdown lines become real blocks: '- [ ] x' checkboxes, '- x' bullets, '1. x' numbered, '# x' headings, '> x' quotes; plain lines become paragraphs.",
-			input_schema: { type: "object", properties: { id: { type: "string" }, text: { type: "string" } }, required: ["id", "text"] },
+				"Append text to an object's body. Markdown lines become real blocks: '- [ ] x' checkboxes, '- x' bullets, '1. x' numbered, '# x' headings, '> x' quotes; plain lines become paragraphs. When the object already has a matching list or section, pass 'under' with that block's text (e.g. under: \"Walmart\") so new items join it as children instead of landing at the page root.",
+			input_schema: {
+				type: "object",
+				properties: {
+					id: { type: "string" },
+					text: { type: "string" },
+					under: { type: "string", description: "text of an existing block to nest the new blocks under" },
+				},
+				required: ["id", "text"],
+			},
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
-			const n = await appendBody(S(input.id), S(input.text));
-			return `ok: ${n} block(s) added`;
+			return await appendBody(S(input.id), S(input.text), S(input.under));
 		},
 	},
 	{

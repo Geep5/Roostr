@@ -135,6 +135,10 @@
 			else toggleSelect(id);
 			return;
 		}
+		// The drag handle is interactive but must NOT clear the selection:
+		// dragging a selected block drags the whole selection, and the
+		// clearing here used to collapse the group before dragstart fired.
+		if (t.closest(".handle")) return;
 		if (t.closest("[contenteditable], input, textarea, select, button, a")) {
 			if (blockDiv) lastFocused = blockDiv.getAttribute("data-block")!;
 			selectedIds = [];
