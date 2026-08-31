@@ -583,8 +583,13 @@
 		width: 2px;
 		height: 12px;
 	}
-	.block:hover > .gutter .handle {
-		opacity: 1;
+	/* Hover-only: on touch, a :hover rule that reveals content makes iOS
+	   spend the FIRST tap emulating hover (handle appears) and only the
+	   second tap clicks - toggles felt like they needed two taps. */
+	@media (hover: hover) {
+		.block:hover > .gutter .handle {
+			opacity: 1;
+		}
 	}
 	.handle:hover {
 		background: var(--hover);
