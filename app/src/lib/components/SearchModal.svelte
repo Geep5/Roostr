@@ -401,6 +401,8 @@
 			align-items: flex-end;
 		}
 		.modal {
+			width: 100%;
+			max-width: 100%;
 			border-radius: 18px 18px 0 0 !important;
 			/* Leave the top strip free: a full-height sheet parks the grab
 			   handle inside the iPhone's system-gesture edge. */
