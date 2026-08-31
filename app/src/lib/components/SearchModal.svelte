@@ -138,7 +138,7 @@
 
 <div class="overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) onclose(); }}>
 	<div
-		class="modal"
+		class="modal sheet"
 		role="dialog"
 		aria-label="Search"
 		style={sheetY ? `transform: translateY(${sheetY}px); transition: ${sheetDragging ? "none" : "transform 0.18s ease"}` : ""}
@@ -354,12 +354,14 @@
 		}
 		.modal {
 			border-radius: 18px 18px 0 0 !important;
-			height: calc(100dvh - 40px) !important;
+			/* Leave the top strip free: a full-height sheet parks the grab
+			   handle inside the iPhone's system-gesture edge. */
+			height: calc(100dvh - 56px) !important;
 		}
 		.grab-zone {
 			display: flex;
 			justify-content: center;
-			padding: 8px 0 2px;
+			padding: 12px 0 8px;
 			flex: none;
 			touch-action: none;
 		}
