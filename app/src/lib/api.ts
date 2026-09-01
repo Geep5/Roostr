@@ -108,6 +108,7 @@ export const settings = {
 	},
 	importKey: (key: string) => mutate("nostr_key_import", { key }),
 	exportKey: () => mutate("nostr_key_export", {}) as Promise<{ nsec: string; hex: string }>,
+	logout: () => mutate("identity_logout", {}) as Promise<{ archived: string }>,
 	setRelays: (relays: string[]) => mutate("nostr_relays_set", { relays }) as Promise<{ relays: string[] }>,
 };
 

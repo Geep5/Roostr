@@ -14,8 +14,14 @@
 	let copied = $state("");
 	let saveState = $state("");
 	let importing = $state(false);
+	let confirmLogout = $state(false);
 	let importDraft = $state("");
 	let importError = $state("");
+
+	async function doLogout() {
+		await settings.logout();
+		location.reload();
+	}
 
 	async function importKey() {
 		importError = "";
@@ -386,6 +392,24 @@
 			{/if}
 			{#if !importing}
 				<button class="action subtle" onclick={() => (importing = true)}>Sign in with existing key…</button>
+				<button
+					class="action subtle"
+					class:danger={confirmLogout}
+					onclick={() => {
+						if (!confirmLogout) {
+							confirmLogout = true;
+							return;
+						}
+						void doLogout();
+					}}>{confirmLogout ? "Archive local data & log out?" : "Log out on this device"}</button
+				>
+				{#if confirmLogout}
+					<p class="hint">
+						Parks this device's key and local objects in an archive folder and starts a fresh identity.
+						Your encrypted history stays on your relays — sign in with any nsec afterwards, then
+						relaunch Roostr so sync reconnects under the new key.
+					</p>
+				{/if}
 			{:else}
 				<p class="hint">
 					<b>Replaces this device's identity.</b> Paste the nsec from your other device — after the
@@ -1129,5 +1153,9 @@
 		.modal::-webkit-scrollbar {
 			display: none;
 		}
+	}
+	.action.danger {
+		color: #f55522;
+		border-color: rgb(245 85 34 / 0.4);
 	}
 </style>

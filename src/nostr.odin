@@ -217,6 +217,32 @@ mutate_key_import :: proc(sock: net.TCP_Socket, parsed: json.Value) {
 	respond_json(sock, json.Object(o))
 }
 
+/**
+ * mutate action: identity_logout — park the identity and every
+ * identity-bound artifact in <data>/logout-<ms>/, then invalidate the
+ * store. The next access generates a fresh key over an empty vault;
+ * the relays still hold the old identity's encrypted history.
+ */
+mutate_identity_logout :: proc(sock: net.TCP_Socket) {
+	sync.lock(&g_nostr_mu)
+	defer sync.unlock(&g_nostr_mu)
+	root := g_store.data_root
+	arch := fmt.tprintf("%s/logout-%d", root, unix_ms())
+	os.make_directory(arch)
+	names := []string{"changes", "nostr.json", "sync-state.json", "channel-keys.json"}
+	for n in names {
+		from := fmt.tprintf("%s/%s", root, n)
+		to := fmt.tprintf("%s/%s", arch, n)
+		os.rename(from, to) // absent files are a no-op
+	}
+	os.make_directory(fmt.tprintf("%s/changes", root))
+	store_invalidate()
+	o := jobj()
+	o["ok"] = json.Boolean(true)
+	o["archived"] = json.String(strings.clone(arch, context.temp_allocator))
+	respond_json(sock, json.Object(o))
+}
+
 // ── HTTP handlers ────────────────────────────────────────────────────
 
 handle_settings :: proc(sock: net.TCP_Socket) {
