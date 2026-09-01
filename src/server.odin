@@ -398,6 +398,7 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 				sock: net.TCP_Socket,
 			})user).sock
 		arr := make([dynamic]json.Value, context.temp_allocator)
+		keys := make([dynamic]i64, context.temp_allocator)
 		for _, s in states {
 			if s.type_key != "channel" || s.deleted do continue
 			o := jobj()
@@ -431,13 +432,20 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 			key_id: i64 = 0
 			if v, ok := fields_get(s.fields, "keyId"); ok && v.kind == .Int do key_id = v.i
 			o["keyId"] = json.Integer(key_id)
+			o["createdAt"] = json.Integer(s.created_at)
 			append(&arr, json.Object(o))
+			append(&keys, s.created_at)
 		}
-		// Deterministic order: name ascending (map iteration is random).
+		// Deterministic order: creation time ascending. The oldest channel
+		// is the stable default space that owns unassigned legacy objects -
+		// name ordering let any new early-alphabet space steal them.
 		for i in 1 ..< len(arr) {
 			j := i
-			for j > 0 && strings.compare(json_str(arr[j - 1], "name"), json_str(arr[j], "name")) > 0 {
+			for j > 0 &&
+			    (keys[j - 1] > keys[j] ||
+					    (keys[j - 1] == keys[j] && strings.compare(json_str(arr[j - 1], "id"), json_str(arr[j], "id")) > 0)) {
 				arr[j - 1], arr[j] = arr[j], arr[j - 1]
+				keys[j - 1], keys[j] = keys[j], keys[j - 1]
 				j -= 1
 			}
 		}
