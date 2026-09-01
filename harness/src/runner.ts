@@ -11,11 +11,12 @@
  * instructions.
  */
 
-import { addBlock, chatPost, fetchObject, flag, fv, iv, num, setField, str, type ObjectJSON } from "./api";
+import { addBlock, chatPost, fetchObject, flag, fv, iv, num, setField, str, sv, type ObjectJSON } from "./api";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
-import { buildConversationView, estimateAskTokens, type ConversationView } from "./conversation";
+import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
 import { callLLM, isContextOverflowError } from "./llm";
 import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
+import { coordinatorNote } from "./skillmgr";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { digest } from "./memory";
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
@@ -79,23 +80,50 @@ export interface RunOptions {
 	systemSuffix?: string;
 }
 
-async function buildEffectiveSystem(agent: ObjectJSON, view: ConversationView, opts: RunOptions): Promise<string> {
-	const parts: string[] = [str(agent.fields, "system") || DEFAULT_SYSTEM];
-	if (opts.systemSuffix) parts.push(opts.systemSuffix);
-	if (view.systemExtension) parts.push(view.systemExtension);
+/**
+ * The system prompt, in labelled sections. Kept as parts (not a joined
+ * string) so the exact text the model receives can be published for remote
+ * inspection without a second implementation drifting from this one.
+ */
+export interface SystemPart {
+	label: string;
+	text: string;
+}
+
+async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts: RunOptions): Promise<SystemPart[]> {
+	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || DEFAULT_SYSTEM }];
+	if (opts.systemSuffix) parts.push({ label: "Subagent template", text: opts.systemSuffix });
+	if (view.systemExtension) parts.push({ label: "Conversation summary", text: view.systemExtension });
 	if (flag(agent.fields, "memory_digest_enabled")) {
 		const d = await digest(agent.id);
-		if (d) parts.push(d);
+		if (d) parts.push({ label: "Memory digest", text: d });
 	}
 	const skills = await listSkills(agent.id);
 	const skillsSection = skillsPromptSection(skills);
-	if (skillsSection) parts.push(skillsSection);
-	const { coordinatorNote } = await import("./skillmgr");
+	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
 	const deviceNote = await coordinatorNote(agent.id);
-	if (deviceNote) parts.push(deviceNote);
+	if (deviceNote) parts.push({ label: "Device note", text: deviceNote });
 	const instructions = await channelInstructions(str(agent.fields, "channel"));
-	if (instructions) parts.push(instructions);
-	return parts.join("\n\n");
+	if (instructions) parts.push({ label: "Space instructions", text: instructions });
+	return parts;
+}
+
+/**
+ * Publish the assembled prompt so a remote client can read exactly what the
+ * model receives — including the sections it could never derive itself (the
+ * device note depends on which machine has which skills installed).
+ *
+ * Written only when the text changes, which in practice means when someone
+ * edits the prompt, installs a skill, edits space instructions, or a
+ * compaction lands. Steady state costs nothing.
+ */
+async function publishSystemParts(agentId: string, parts: SystemPart[], ratio: number): Promise<void> {
+	const payload = JSON.stringify(parts.map((p) => ({ ...p, tokens: estimateTokens(p.text, ratio) })));
+	const hash = Bun.hash(payload).toString(16);
+	const agent = await fetchObject(agentId);
+	if (str(agent.fields, "system_effective_hash") === hash) return;
+	await setField(agentId, "system_effective", sv(payload));
+	await setField(agentId, "system_effective_hash", sv(hash));
 }
 
 /**
@@ -130,7 +158,11 @@ export async function runTurn(agentId: string, convId: string, opts: RunOptions 
 		const tools = toolDefs(opts.template ?? "", ctx.depth);
 
 		let view = buildConversationView(conv, agentId, ratio);
-		const system = await buildEffectiveSystem(agent, view, opts);
+		const systemParts = await buildSystemParts(agent, view, opts);
+		const system = systemParts.map((p) => p.text).join("\n\n");
+		// Subagent prompts are per-spawn and ephemeral; only a top-level
+		// served agent's prompt is worth publishing for remote inspection.
+		if (ctx.depth === 0) await publishSystemParts(agentId, systemParts, ratio);
 
 		// Pre-flight auto-compaction (agent-runner.ts:369-374).
 		if (shouldAutoCompact(system, view, tools, cfg, ratio)) {

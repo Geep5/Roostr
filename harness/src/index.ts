@@ -177,8 +177,16 @@ async function serve(): Promise<void> {
 		}
 		busy.add(s.agentId);
 		active.set(s.agentId, surfaceId);
-		const report = (state: "idle" | "working" | "error", detail = "") =>
+		// Local status drives /agent/status; the same transition is written to
+		// the agent object so remote clients (which cannot reach this
+		// machine's harness) can tell a turn is in flight — e.g. to disable
+		// prompt editing while the agent is mid-run.
+		const report = (state: "idle" | "working" | "error", detail = "") => {
 			agentTurnStatus.set(s.agentId, { id: s.agentId, name: s.name, icon: s.icon, state, surface: surfaceId, detail, ts: Date.now() });
+			void setField(s.agentId, "turn_state", sv(state)).catch(() => {
+				/* server down; the next transition re-reports */
+			});
+		};
 		report("working");
 		try {
 			await handleSurface(s, surfaceId);
