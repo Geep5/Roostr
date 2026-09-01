@@ -61,8 +61,12 @@
 		installed: boolean;
 		log: string;
 		authHint?: string;
+		/** Live prompt body from the skill object - what agents actually read. */
+		prompt: string;
 	}
 	let skillRows = $state<SkillRow[] | null>(null);
+	let skillPromptDraft = $state<Record<string, string>>({});
+	let skillPromptSaved = $state<string>("");
 	let skillOpen = $state<string>("");
 	let skillConfirm = $state<string>("");
 	let skillPoll: ReturnType<typeof setInterval> | undefined;
@@ -85,6 +89,14 @@
 		} catch {
 			skillRows = null;
 		}
+	}
+
+	async function saveSkillPrompt(key: string) {
+		const text = (skillPromptDraft[key] ?? "").trim();
+		await fetch(`${HARNESS}/skills/prompt`, { method: "POST", body: JSON.stringify({ key, text }) });
+		skillPromptSaved = key;
+		setTimeout(() => (skillPromptSaved = ""), 1500);
+		await loadSkills();
 	}
 
 	async function skillOp(key: string, op: "enable" | "disable" | "recheck" | "uninstall") {
@@ -634,9 +646,30 @@
 						{#if skillOpen === s.key}
 							<div class="skill-detail">
 								<p class="hint">{s.description}</p>
+								<p class="skill-install">Installation: {s.installed ? "done ✓" : s.phase === "installing" ? "running…" : "not installed"}</p>
 								{#if s.phase === "needs-auth" && s.authHint}
 									<p class="hint auth-hint">{s.authHint}</p>
 								{/if}
+								<div class="skill-prompt">
+									<div class="pname">
+										Prompt <span class="hint-inline">what the agent reads via skill_read</span>
+									</div>
+									<textarea
+										rows="6"
+										value={skillPromptDraft[s.key] ?? s.prompt}
+										oninput={(e) => (skillPromptDraft[s.key] = (e.currentTarget as HTMLTextAreaElement).value)}
+									></textarea>
+									<div class="skill-prompt-actions">
+										<button
+											class="subtle-btn"
+											disabled={(skillPromptDraft[s.key] ?? s.prompt) === s.prompt}
+											onclick={() => void saveSkillPrompt(s.key)}
+										>{skillPromptSaved === s.key ? "Saved" : "Save prompt"}</button>
+										{#if (skillPromptDraft[s.key] ?? s.prompt) !== s.prompt}
+											<button class="subtle-btn" onclick={() => { delete skillPromptDraft[s.key]; }}>Revert</button>
+										{/if}
+									</div>
+								</div>
 								{#if s.log}
 									<pre class="skill-log">{s.log.slice(-2000)}</pre>
 								{/if}
@@ -1157,5 +1190,41 @@
 	.action.danger {
 		color: #f55522;
 		border-color: rgb(245 85 34 / 0.4);
+	}
+	.skill-install {
+		font-size: 12px;
+		color: var(--muted);
+		margin: 0 0 6px;
+	}
+	.skill-prompt {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		margin: 8px 0;
+	}
+	.skill-prompt .pname {
+		font-size: 12px;
+		color: var(--fg);
+	}
+	.hint-inline {
+		color: var(--muted);
+		font-weight: 400;
+	}
+	.skill-prompt textarea {
+		width: 100%;
+		box-sizing: border-box;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		color: var(--fg);
+		font: inherit;
+		font-size: 12.5px;
+		line-height: 1.45;
+		padding: 8px 10px;
+		resize: vertical;
+	}
+	.skill-prompt-actions {
+		display: flex;
+		gap: 8px;
 	}
 </style>

@@ -10,7 +10,7 @@ import { SimplePool, finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
 import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
-import { disableSkill, enableSkill, getCoordinator, recheckSkill, setCoordinator, skillStatus, uninstallSkill } from "./skillmgr";
+import { disableSkill, enableSkill, getCoordinator, recheckSkill, setCoordinator, skillStatus, uninstallSkill, setSkillPrompt } from "./skillmgr";
 import { fetchObject, str } from "./api";
 
 /** Public identity (npub + hex pubkey) derived from the local nostr key. */
@@ -176,9 +176,13 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					return json({ ok: true });
 				}
 				if (req.method === "POST" && url.pathname.startsWith("/skills/")) {
-					const body = (await req.json()) as { key?: string };
+					const body = (await req.json()) as { key?: string; text?: string };
 					if (!body.key) return json({ error: "key required" }, 400);
 					const op = url.pathname.slice("/skills/".length);
+					if (op === "prompt") {
+						await setSkillPrompt(body.key, body.text ?? "");
+						return json({ ok: true });
+					}
 					if (op === "enable") return json({ phase: await enableSkill(body.key) });
 					if (op === "disable") {
 						await disableSkill(body.key);

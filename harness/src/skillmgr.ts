@@ -181,19 +181,48 @@ async function postToSetupChat(text: string): Promise<void> {
 	}
 }
 
-/** Upsert the agent-facing skill object in the DAG. */
-async function upsertSkillObject(entry: CatalogEntry): Promise<void> {
+/** The catalog entry's skill object, if it exists. */
+async function findSkillObject(entry: CatalogEntry): Promise<string | null> {
 	const rows = await query({ type: "skill", limit: 100 });
-	const hit = rows.find((r) => str(r.fields, "name") === entry.name);
-	if (hit) {
-		const obj = await fetchObject(hit.id);
-		if (objectText(obj).trim() === entry.skillBody.trim()) return;
-		await mutate("delete", { object_id: hit.id });
+	return rows.find((r) => str(r.fields, "name") === entry.name)?.id ?? null;
+}
+
+/**
+ * Seed the agent-facing skill object in the DAG. An existing body is the
+ * user's to edit (Settings exposes it) - only an empty shell is reseeded
+ * with the catalog default.
+ */
+async function upsertSkillObject(entry: CatalogEntry): Promise<void> {
+	const hitId = await findSkillObject(entry);
+	if (hitId) {
+		const obj = await fetchObject(hitId);
+		if (objectText(obj).trim() !== "") return;
+		await mutate("delete", { object_id: hitId });
 	}
 	const { id } = await createObject(entry.name, "skill", {
 		description: { stringValue: entry.description },
 	});
 	await mutate("block_add", { object_id: id, block: { content: { text: { text: entry.skillBody, style: 0 } } } });
+}
+
+/** Replace a skill's prompt body (Settings editor). Creates the object if missing. */
+export async function setSkillPrompt(key: string, text: string): Promise<void> {
+	const entry = CATALOG.find((c) => c.key === key);
+	if (!entry) throw new Error(`unknown skill "${key}"`);
+	let id = await findSkillObject(entry);
+	if (!id) {
+		id = (await createObject(entry.name, "skill", { description: { stringValue: entry.description } })).id;
+	} else {
+		// Drop the existing body blocks (everything except the discussion subtree).
+		const obj = await fetchObject(id);
+		const referenced = new Set<string>();
+		for (const b of obj.blocks) for (const c of b.childrenIds) referenced.add(c);
+		for (const b of obj.blocks) {
+			if (referenced.has(b.id) || b.id === "__discussion__") continue;
+			await mutate("block_remove", { object_id: id, block_id: b.id });
+		}
+	}
+	await mutate("block_add", { object_id: id, block: { content: { text: { text, style: 0 } } } });
 }
 
 // -- Status -------------------------------------------------------
@@ -206,10 +235,21 @@ export interface SkillStatus {
 	installed: boolean;
 	log: string;
 	authHint?: string;
+	/** The live prompt body from the skill object (empty until seeded). */
+	prompt: string;
 }
 
 export async function skillStatus(): Promise<SkillStatus[]> {
 	const state = await readState();
+	const prompts = new Map<string, string>();
+	for (const c of CATALOG) {
+		try {
+			const id = await findSkillObject(c);
+			prompts.set(c.key, id ? objectText(await fetchObject(id)) : "");
+		} catch {
+			prompts.set(c.key, "");
+		}
+	}
 	return CATALOG.map((c) => {
 		const job = jobs.get(c.key);
 		const s = state.skills[c.key];
@@ -226,6 +266,7 @@ export async function skillStatus(): Promise<SkillStatus[]> {
 			installed: s?.installed ?? false,
 			log: job ? job.log.join("") : (s?.log ?? ""),
 			authHint: c.authHint,
+			prompt: prompts.get(c.key) ?? "",
 		};
 	});
 }
