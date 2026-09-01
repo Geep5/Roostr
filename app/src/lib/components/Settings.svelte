@@ -271,7 +271,7 @@
 		newRelay = "";
 	}
 
-	const SUGGESTED = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.nostr.band"];
+	const SUGGESTED = ["wss://roostr-relay.fly.dev"];
 
 	// ── Spellcheck ignore list ──────────────────────────────────────
 	let ignored = $state<string[]>([]);
