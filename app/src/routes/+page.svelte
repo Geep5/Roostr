@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { activeSpace } from "$lib/space.svelte";
-	import { objectIcon, TYPE_GLYPHS } from "$lib/icons";
+	import { objectIcon } from "$lib/icons";
 	import { store, refreshAll } from "$lib/data.svelte";
-	import { createTyped, createCollection as libCreateCollection, createQuery as libCreateQuery } from "$lib/create";
+	import { createTyped, creatableTypes, createCollection as libCreateCollection, createQuery as libCreateQuery } from "$lib/create";
 
 	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
 	const channelId = $derived(activeSpace.id || defaultChannelId);
@@ -12,23 +12,11 @@
 		store.summaries.filter((o) => !["type", "template", "agent", "pinned_fact", "milestone"].includes(o.typeKey) && (o.channelId === channelId || (o.channelId === "" && channelId === defaultChannelId))),
 	);
 
-	const DEFAULT_TYPES = ["note", "task", "person", "project", "bookmark"];
-	const knownTypes = $derived.by(() => {
-		const t = new Set(DEFAULT_TYPES);
-		for (const o of store.summaries) {
-			if (o.typeKey !== "collection" && o.typeKey !== "query" && o.typeKey !== "set") t.add(o.typeKey);
-		}
-		return [...t].sort();
-	});
-
 	let picking = $state(false);
-	let customType = $state("");
 
 	async function createObject(typeKey: string) {
 		picking = false;
-		const clean = typeKey.trim().toLowerCase();
-		if (!clean) return;
-		await createTyped(clean, channelId);
+		await createTyped(typeKey, channelId);
 	}
 
 	async function createCollection() {
@@ -38,26 +26,16 @@
 	async function createQuery() {
 		await libCreateQuery(channelId);
 	}
-
-	const ICON_BY_TYPE = TYPE_GLYPHS;
 </script>
 
 <div class="actions">
 	<div class="picker-wrap">
 		<button onclick={() => (picking = !picking)}>+ New object</button>
 		{#if picking}
-			<div class="picker">
-				{#each knownTypes as t (t)}
-					<button class="type" onclick={() => void createObject(t)}>{ICON_BY_TYPE[t] ?? "•"} {t}</button>
+			<div class="picker" role="menu">
+				{#each creatableTypes() as t (t.key)}
+					<button class="type" role="menuitem" onclick={() => void createObject(t.key)}>{t.icon} {t.name}</button>
 				{/each}
-				<form
-					onsubmit={(e) => {
-						e.preventDefault();
-						void createObject(customType);
-					}}
-				>
-					<input bind:value={customType} placeholder="custom type…" />
-				</form>
 			</div>
 		{/if}
 	</div>
@@ -132,16 +110,8 @@
 	.picker .type:hover {
 		background: var(--hover);
 	}
-	.picker input {
-		background: var(--bg);
-		border: 1px solid var(--border);
-		color: var(--fg);
-		border-radius: 6px;
-		padding: 6px 8px;
-		font-size: 13px;
-		margin-top: 4px;
-		width: 100%;
-		box-sizing: border-box;
+	.picker .type:focus-visible {
+		background: var(--hover);
 	}
 	.objects {
 		list-style: none;
