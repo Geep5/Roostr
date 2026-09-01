@@ -149,10 +149,55 @@
 		}
 	}
 
+	// ── Provider readiness ───────────────────────────────────────────
+	//
+	// "Run here" only means anything if this machine can actually
+	// authenticate the agent's model, so the button reflects the harness's
+	// credential state rather than letting the first turn discover it.
+	interface ProviderStatus {
+		mode: string;
+		ready: boolean;
+		expires?: number;
+	}
+	let auth = $state<{ anthropic: ProviderStatus; kimi: ProviderStatus } | null>(null);
+
+	async function loadAuth() {
+		try {
+			const res = await fetch(`${HARNESS}/auth/status`);
+			auth = (await res.json()) as { anthropic: ProviderStatus; kimi: ProviderStatus };
+		} catch {
+			auth = null;
+		}
+	}
+
+	/** Which credential a model needs — mirrors callLLM's dispatch. */
+	function provider(model: string): "anthropic" | "kimi" | "none" {
+		if (model === "mock") return "none";
+		return model.startsWith("kimi") ? "kimi" : "anthropic";
+	}
+
+	/** Empty when the agent can run here; otherwise why it can't. */
+	function authBlock(model: string): string {
+		const need = provider(model);
+		if (need === "none" || auth === null) return "";
+		const p = auth[need];
+		if (p.ready) return "";
+		const label = need === "anthropic" ? "Claude" : "Kimi";
+		if (p.mode === "none") return `No ${label} credentials on this machine`;
+		if (p.mode === "claude_code") return "Claude Code login expired";
+		return `${label} credentials expired`;
+	}
+
 	onMount(() => {
 		void loadRoster();
 		void loadSkills();
-		const t = setInterval(() => (now = Date.now()), 15_000);
+		void loadAuth();
+		// The same tick that ages the presence labels re-checks credentials,
+		// so an expiry that lands while this page is open shows up.
+		const t = setInterval(() => {
+			now = Date.now();
+			void loadAuth();
+		}, 15_000);
 		return () => {
 			clearInterval(t);
 			if (skillPoll) clearInterval(skillPoll);
@@ -232,6 +277,7 @@
 {#each agents as a (a.id)}
 	{@const online = a.seenAt > 0 && now - a.seenAt < ONLINE_MS}
 	{@const runsHere = roster?.includes(a.id) ?? false}
+	{@const blocked = roster === null ? "" : authBlock(a.model)}
 	<div class="agent-wrap">
 		<div class="agent">
 			<span class="dot" class:online></span>
@@ -248,14 +294,26 @@
 			</button>
 			<button onclick={() => void openChat(a.id)}>💬 Chat</button>
 			{#if roster !== null}
-				<button class:active={runsHere} onclick={() => void toggle(a.id, !runsHere)}>
-					{runsHere ? "Runs here" : "Run here"}
+				<button
+					class:active={runsHere}
+					class:warn={blocked !== ""}
+					title={blocked ? `${blocked} — this agent's turns will fail until you sign in` : ""}
+					onclick={() => void toggle(a.id, !runsHere)}
+				>
+					{blocked ? "⚠ " : ""}{runsHere ? "Runs here" : "Run here"}
 				</button>
 			{/if}
 			<button class="danger" onclick={() => void removeAgent(a)}>
 				{confirmRemove === a.id ? "Confirm remove" : "Remove"}
 			</button>
 		</div>
+		{#if blocked}
+			<p class="auth-warn">
+				⚠ {blocked}. {runsHere
+					? "This agent runs here but its turns will fail"
+					: "Running it here will fail"} until you sign in under Settings → Agent.
+			</p>
+		{/if}
 		{#if avatarPick === a.id}
 			<div class="avatar-pop">
 				<EmojiPicker onpick={(e) => void setAvatar(a.id, e)} onclose={() => (avatarPick = "")} />
@@ -445,6 +503,18 @@
 	button.active {
 		border-color: var(--accent);
 		color: var(--accent);
+	}
+	/* After .active so a warned agent that already runs here reads as a
+	   warning, not as healthy. */
+	button.warn {
+		border-color: var(--orange);
+		color: var(--orange);
+		background: rgb(255 159 10 / 0.12);
+	}
+	.auth-warn {
+		color: var(--orange);
+		font-size: 11.5px;
+		margin: 2px 0 8px 30px;
 	}
 	.skill-list {
 		margin-bottom: 8px;
