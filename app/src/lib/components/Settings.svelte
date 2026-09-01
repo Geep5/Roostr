@@ -63,6 +63,8 @@
 		authHint?: string;
 		/** Live prompt body from the skill object - what agents actually read. */
 		prompt: string;
+		/** Catalog stock prompt - the reset target. */
+		defaultPrompt: string;
 	}
 	let skillRows = $state<SkillRow[] | null>(null);
 	let skillPromptDraft = $state<Record<string, string>>({});
@@ -89,6 +91,15 @@
 		} catch {
 			skillRows = null;
 		}
+	}
+
+	let skillResetConfirm = $state<string>("");
+
+	async function resetSkillPrompt(key: string) {
+		skillResetConfirm = "";
+		await fetch(`${HARNESS}/skills/prompt-reset`, { method: "POST", body: JSON.stringify({ key }) });
+		delete skillPromptDraft[key];
+		await loadSkills();
 	}
 
 	async function saveSkillPrompt(key: string) {
@@ -668,6 +679,15 @@
 										{#if (skillPromptDraft[s.key] ?? s.prompt) !== s.prompt}
 											<button class="subtle-btn" onclick={() => { delete skillPromptDraft[s.key]; }}>Revert</button>
 										{/if}
+										{#if s.prompt.trim() !== s.defaultPrompt.trim()}
+											{#if skillResetConfirm === s.key}
+												<span class="hint-inline">Replace with the stock prompt?</span>
+												<button class="danger-btn" onclick={() => void resetSkillPrompt(s.key)}>Reset</button>
+												<button class="subtle-btn" onclick={() => (skillResetConfirm = "")}>Cancel</button>
+											{:else}
+												<button class="subtle-btn reset-right" onclick={() => (skillResetConfirm = s.key)}>Reset to default</button>
+											{/if}
+										{/if}
 									</div>
 								</div>
 								{#if s.log}
@@ -1226,5 +1246,11 @@
 	.skill-prompt-actions {
 		display: flex;
 		gap: 8px;
+	}
+	.reset-right {
+		margin-left: auto;
+	}
+	.skill-prompt-actions {
+		align-items: center;
 	}
 </style>

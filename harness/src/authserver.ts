@@ -10,7 +10,7 @@ import { SimplePool, finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
 import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
-import { disableSkill, enableSkill, getCoordinator, recheckSkill, setCoordinator, skillStatus, uninstallSkill, setSkillPrompt } from "./skillmgr";
+import { disableSkill, enableSkill, getCoordinator, recheckSkill, setCoordinator, skillStatus, uninstallSkill, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { fetchObject, str } from "./api";
 
 /** Public identity (npub + hex pubkey) derived from the local nostr key. */
@@ -182,6 +182,9 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					if (op === "prompt") {
 						await setSkillPrompt(body.key, body.text ?? "");
 						return json({ ok: true });
+					}
+					if (op === "prompt-reset") {
+						return json({ ok: true, prompt: await resetSkillPrompt(body.key) });
 					}
 					if (op === "enable") return json({ phase: await enableSkill(body.key) });
 					if (op === "disable") {

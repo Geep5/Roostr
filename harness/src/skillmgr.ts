@@ -205,6 +205,14 @@ async function upsertSkillObject(entry: CatalogEntry): Promise<void> {
 	await mutate("block_add", { object_id: id, block: { content: { text: { text: entry.skillBody, style: 0 } } } });
 }
 
+/** Restore a skill's prompt to the catalog default (the "reinstall" button). */
+export async function resetSkillPrompt(key: string): Promise<string> {
+	const entry = CATALOG.find((c) => c.key === key);
+	if (!entry) throw new Error(`unknown skill "${key}"`);
+	await setSkillPrompt(key, entry.skillBody);
+	return entry.skillBody;
+}
+
 /** Replace a skill's prompt body (Settings editor). Creates the object if missing. */
 export async function setSkillPrompt(key: string, text: string): Promise<void> {
 	const entry = CATALOG.find((c) => c.key === key);
@@ -237,6 +245,8 @@ export interface SkillStatus {
 	authHint?: string;
 	/** The live prompt body from the skill object (empty until seeded). */
 	prompt: string;
+	/** The catalog's stock prompt - the "reinstall" target. */
+	defaultPrompt: string;
 }
 
 export async function skillStatus(): Promise<SkillStatus[]> {
@@ -267,6 +277,7 @@ export async function skillStatus(): Promise<SkillStatus[]> {
 			log: job ? job.log.join("") : (s?.log ?? ""),
 			authHint: c.authHint,
 			prompt: prompts.get(c.key) ?? "",
+			defaultPrompt: c.skillBody,
 		};
 	});
 }
