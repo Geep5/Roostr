@@ -516,10 +516,15 @@
 					{/if}
 				</div>
 				<div class="m-section">
-					<button class="m-section-label" onclick={() => (mCollapsed["__types"] = !mCollapsed["__types"])}>
-						Types
-						<span class="m-chev" class:open={!mCollapsed["__types"]}>⌄</span>
-					</button>
+					<div class="m-section-head">
+						<button class="m-section-label" onclick={() => (mCollapsed["__types"] = !mCollapsed["__types"])}>
+							Types
+							<span class="m-chev" class:open={!mCollapsed["__types"]}>⌄</span>
+						</button>
+						<!-- Types are only creatable from here on mobile: the bottom ＋
+						     composes objects, not types. -->
+						<button class="m-section-add" aria-label="New type" onclick={() => void newType()}>＋</button>
+					</div>
 					{#if !mCollapsed["__types"]}
 						<div class="m-section-body">
 							{#each store.types as t (t.id)}
@@ -1750,6 +1755,29 @@
 		padding: 10px 4px 6px;
 		cursor: pointer;
 		text-align: left;
+	}
+	.m-section-head {
+		display: flex;
+		align-items: center;
+	}
+	.m-section-head .m-section-label {
+		flex: 1;
+	}
+	.m-section-add {
+		flex: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		/* 44px: the minimum comfortable touch target. */
+		min-width: 44px;
+		min-height: 44px;
+		padding: 0;
+		background: none;
+		border: none;
+		color: var(--muted);
+		font-size: 17px;
+		line-height: 1;
+		cursor: pointer;
 	}
 	.m-section-body {
 		background: var(--panel);
