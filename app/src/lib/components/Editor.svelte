@@ -907,6 +907,14 @@
 				}
 				break;
 			}
+			case "clear_style": {
+				// Anytype's Clear style: back to default color, background, align.
+				const cur = byId.get(id)?.content.text;
+				if (cur) await setTextColor(id, "");
+				await note.blockSetAttrs(object.id, id, { background_color: "", align: 0 });
+				await refresh();
+				break;
+			}
 			case "delete":
 				await removeBlockById(id);
 				break;
