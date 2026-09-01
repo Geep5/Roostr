@@ -162,6 +162,11 @@
 	}
 </script>
 
+<!-- Escape cancels the typed-confirmation modals, matching every other
+     overlay. Mirrors each modal's Cancel affordance: the delete flow stays
+     put once the vanish is in flight. -->
+<svelte:window onkeydown={(e) => { if (e.key !== "Escape") return; if (confirmEmpty) confirmEmpty = false; else if (confirmDelete && !deleting) confirmDelete = false; }} />
+
 <section class="manage">
 	<SpaceAgents channelId={object.id} />
 
