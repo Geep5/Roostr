@@ -55,7 +55,7 @@ async function applyTemplate(objectId: string, templateId: string): Promise<void
 	}
 }
 
-export async function createTyped(typeKey: string, channelId: string, name = "Untitled"): Promise<string> {
+export async function createTyped(typeKey: string, channelId: string, name = ""): Promise<string> {
 	const key = typeKey.trim().toLowerCase();
 	const { id } = await note.create(name, key, channelField(channelId));
 	const tplId = store.types.find((t) => t.key === key)?.defaultTemplateId;

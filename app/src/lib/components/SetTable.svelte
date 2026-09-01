@@ -340,7 +340,7 @@
 		<tbody>
 			{#each rows as r (r.id)}
 				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)}>
-					<td class="name"><span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || r.id.slice(0, 8)}</td>
+					<td class="name"><span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || "Untitled"}</td>
 					{#each columns as c (c)}
 						{#if isEditable(c)}
 							{@const rel = relations.find((x) => x.key === c)}

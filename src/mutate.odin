@@ -79,7 +79,8 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		ops := make([dynamic]Operation, context.temp_allocator)
 		append(&ops, Operation{kind = .Object_Create, type_key = type_key})
 		name := json_str(parsed, "name")
-		if name == "" do name = "Untitled"
+		// An empty name stays empty: the title input shows an "Untitled"
+		// placeholder instead, so typing needs no delete-first.
 		append(&ops, Operation{kind = .Field_Set, key = "name", value = string_value(name)})
 		if fields, ok := json_field(parsed, "fields"); ok {
 			for e in fields_from_json(fields, context.temp_allocator) {
