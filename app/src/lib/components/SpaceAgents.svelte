@@ -18,6 +18,12 @@
 	const HARNESS = "http://127.0.0.1:7334";
 	const ONLINE_MS = 300_000; // two missed 120s heartbeats
 
+	interface SystemPart {
+		label: string;
+		text: string;
+		tokens: number;
+	}
+
 	interface AgentRow {
 		id: string;
 		name: string;
@@ -27,6 +33,12 @@
 		host: string;
 		/** Responsible type keys; "*" = everything else. */
 		types: string[];
+		/** The editable base prompt (agent field `system`). */
+		system: string;
+		/** "working" while a turn is in flight, published by the serving harness. */
+		turnState: string;
+		/** What the harness last actually assembled and sent, section by section. */
+		effective: SystemPart[];
 	}
 
 	let agents = $state<AgentRow[]>([]);
@@ -96,7 +108,39 @@
 				seenAt: r.fields["harness_seen_at"]?.intValue ?? 0,
 				host: r.fields["harness_host"]?.stringValue ?? "",
 				types: (r.fields["responsible_types"]?.valuesValue?.items ?? []).map((i) => i.stringValue ?? "").filter(Boolean),
+				system: r.fields["system"]?.stringValue ?? "",
+				turnState: r.fields["turn_state"]?.stringValue ?? "",
+				effective: parseEffective(r.fields["system_effective"]?.stringValue ?? ""),
 			}));
+	}
+
+	/** The harness publishes this as a JSON string field; a stale shape must
+	 * never break the panel. */
+	function parseEffective(raw: string): SystemPart[] {
+		if (!raw) return [];
+		try {
+			const parsed = JSON.parse(raw) as SystemPart[];
+			return Array.isArray(parsed) ? parsed : [];
+		} catch {
+			return [];
+		}
+	}
+
+	// ── System prompt ───────────────────────────────────────────────
+	//
+	// The agent re-reads its own object every tool iteration, so an edit here
+	// lands on the next iteration with no restart. The editor is disabled
+	// mid-turn as a courtesy, not a lock.
+	let promptOpen = $state("");
+	let promptDraft = $state<Record<string, string>>({});
+	let promptSaved = $state("");
+
+	async function savePrompt(a: AgentRow) {
+		const next = promptDraft[a.id] ?? a.system;
+		await note.setField(a.id, "system", { stringValue: next });
+		promptSaved = a.id;
+		setTimeout(() => (promptSaved = promptSaved === a.id ? "" : promptSaved), 1500);
+		await load();
 	}
 
 	// ── Responsibility (one owner per type; one "everything else") ──
@@ -293,6 +337,7 @@
 				{describe(a)}
 			</button>
 			<button onclick={() => void openChat(a.id)}>💬 Chat</button>
+			<button class:active={promptOpen === a.id} onclick={() => (promptOpen = promptOpen === a.id ? "" : a.id)}>Prompt</button>
 			{#if roster !== null}
 				<button
 					class:active={runsHere}
@@ -313,6 +358,48 @@
 					? "This agent runs here but its turns will fail"
 					: "Running it here will fail"} until you sign in under Settings → Agent.
 			</p>
+		{/if}
+		{#if promptOpen === a.id}
+			{@const working = a.turnState === "working"}
+			{@const draft = promptDraft[a.id] ?? a.system}
+			<div class="prompt">
+				<p class="hint">
+					The agent rebuilds its prompt from this object every tool iteration, so an edit lands on
+					its next iteration — nothing to restart.
+				</p>
+				<textarea
+					rows="8"
+					disabled={working}
+					placeholder="Empty — the agent uses the built-in default prompt."
+					value={draft}
+					oninput={(e) => (promptDraft[a.id] = (e.currentTarget as HTMLTextAreaElement).value)}
+				></textarea>
+				<div class="prompt-actions">
+					{#if working}<span class="hint-inline">Mid-turn — editing paused</span>{/if}
+					<button disabled={working || draft === a.system} onclick={() => void savePrompt(a)}>
+						{promptSaved === a.id ? "Saved" : "Save prompt"}
+					</button>
+					{#if draft !== a.system}
+						<button class="subtle" onclick={() => (promptDraft[a.id] = a.system)}>Discard</button>
+					{/if}
+				</div>
+				{#if a.effective.length > 0}
+					{@const total = a.effective.reduce((n, p) => n + p.tokens, 0)}
+					<p class="hint">
+						What the serving harness last actually sent — {total} tokens across {a.effective.length}
+						sections. Read-only: only the base prompt above is yours to edit; the rest is assembled
+						from skills, memory, and space instructions.
+					</p>
+					{#each a.effective as part (part.label)}
+						<details class="part">
+							<summary><span class="plabel">{part.label}</span><span class="ptok">{part.tokens} tok</span></summary>
+							<pre>{part.text}</pre>
+						</details>
+					{/each}
+				{:else}
+					<p class="hint">No prompt published yet — it appears after this agent's next turn.</p>
+				{/if}
+			</div>
 		{/if}
 		{#if avatarPick === a.id}
 			<div class="avatar-pop">
@@ -515,6 +602,65 @@
 		color: var(--orange);
 		font-size: 11.5px;
 		margin: 2px 0 8px 30px;
+	}
+	.prompt {
+		padding: 2px 10px 10px 30px;
+	}
+	.prompt textarea {
+		width: 100%;
+		box-sizing: border-box;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		color: var(--fg);
+		font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+		padding: 8px 10px;
+		resize: vertical;
+	}
+	.prompt textarea:disabled {
+		opacity: 0.55;
+	}
+	.prompt-actions {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin: 6px 0 10px;
+	}
+	.hint-inline {
+		color: var(--orange);
+		font-size: 11.5px;
+		margin-right: auto;
+	}
+	.prompt .subtle {
+		border-color: transparent;
+		color: var(--muted);
+	}
+	.part {
+		border-top: 1px solid var(--border);
+		padding: 5px 0;
+	}
+	.part summary {
+		display: flex;
+		gap: 10px;
+		cursor: pointer;
+		font-size: 12px;
+	}
+	.plabel {
+		flex: 1;
+	}
+	.ptok {
+		color: var(--muted);
+		font-size: 11px;
+	}
+	.part pre {
+		white-space: pre-wrap;
+		word-break: break-word;
+		background: var(--bg);
+		border-radius: 6px;
+		padding: 8px 10px;
+		margin: 6px 0 2px;
+		font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+		color: var(--muted);
 	}
 	.skill-list {
 		margin-bottom: 8px;
