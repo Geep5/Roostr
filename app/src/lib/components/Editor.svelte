@@ -907,6 +907,27 @@
 				}
 				break;
 			}
+			case "turn_into_object": {
+				// Anytype's Turn into object: the block's text becomes a new
+				// object's name, its children become that object's content,
+				// and a link block takes its place.
+				const src = byId.get(id);
+				if (!src) break;
+				const name = (src.content.text?.text ?? "").trim().slice(0, 120) || "Untitled";
+				const ch = object.fields["channel"]?.stringValue ?? "";
+				const { id: newId } = await note.create(name, a.value as string, ch ? { channel: { stringValue: ch } } : {});
+				const moveInto = async (srcId: string, targetId: string, position: number) => {
+					const s = byId.get(srcId);
+					if (!s) return;
+					const nid = crypto.randomUUID();
+					await note.blockAdd(newId, { ...s, id: nid, childrenIds: [] }, targetId, position);
+					for (const cid of s.childrenIds) await moveInto(cid, nid, Pos.INNER);
+				};
+				for (const cid of src.childrenIds) await moveInto(cid, "", 0);
+				await note.blockAdd(object.id, { id: crypto.randomUUID(), childrenIds: [], content: { custom: { contentType: "link", meta: { target: newId } } } }, id, Pos.BOTTOM);
+				await removeBlockById(id);
+				break;
+			}
 			case "clear_style": {
 				// Anytype's Clear style: back to default color, background, align.
 				const cur = byId.get(id)?.content.text;

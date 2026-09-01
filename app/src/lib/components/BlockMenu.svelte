@@ -1,9 +1,10 @@
 <script lang="ts">
 	import type { BlockJSON } from "$lib/types";
 	import { Style } from "$lib/types";
+	import { creatableTypes } from "$lib/create";
 
 	export interface MenuAction {
-		kind: "style" | "align" | "color" | "background" | "duplicate" | "delete" | "link_style" | "clear_style";
+		kind: "style" | "align" | "color" | "background" | "duplicate" | "delete" | "link_style" | "clear_style" | "turn_into_object";
 		value?: number | string;
 	}
 
@@ -85,7 +86,10 @@
 	const curBg = $derived(COLORS.find((c) => c.bg === (block.backgroundColor ?? "")) ?? COLORS[0]);
 
 	// ── Submenu flyout (Anytype-style) ───────────────────────────────
-	type SubKind = "style" | "align" | "color" | "background";
+	type SubKind = "style" | "align" | "color" | "background" | "turn";
+
+	/** The space's creatable types (same list as the sidebar + button). */
+	const TURN_TYPES = creatableTypes();
 	let sub = $state<{ kind: SubKind; top: number } | null>(null);
 
 	function toggleSub(kind: SubKind, e: MouseEvent) {
@@ -160,6 +164,7 @@
 			for (const c of COLORS) out.push({ section: "Color", label: c.name, action: { kind: "color", value: c.text }, active: (t.color ?? "") === c.text, swatch: c.text || "var(--fg)" });
 		}
 		for (const c of COLORS) out.push({ section: "Background", label: c.name, action: { kind: "background", value: c.bg }, active: (block.backgroundColor ?? "") === c.bg, swatch: c.bg || "transparent" });
+		for (const ty of TURN_TYPES) out.push({ section: "Turn into object", label: ty.name, action: { kind: "turn_into_object", value: ty.key } });
 		out.push({ section: "Actions", label: "Duplicate", action: { kind: "duplicate" } });
 		out.push({ section: "Actions", label: "Delete", action: { kind: "delete" } });
 		const f = filter.trim().toLowerCase();
@@ -263,6 +268,10 @@
 				<button onpointerenter={hoverPlain} onclick={() => fire({ kind: "clear_style" })}>Clear style</button>
 			{/if}
 			<div class="sep"></div>
+			<button class="sub-row" class:open={sub?.kind === "turn"} onclick={(e) => toggleSub("turn", e)} onpointerenter={(e) => hoverSub("turn", e)}>
+				Turn into object
+				<span class="trail"><span class="chev">›</span></span>
+			</button>
 			<button onpointerenter={hoverPlain} onclick={() => fire({ kind: "duplicate" })}>Duplicate</button>
 			<button class="danger" onpointerenter={hoverPlain} onclick={() => fire({ kind: "delete" })}>Delete block</button>
 		</div>
@@ -295,6 +304,13 @@
 					<span class="dot" style="background:{c.text || 'var(--fg)'}"></span>
 					{c.name}
 					{#if (t.color ?? "") === c.text}<span class="check">✓</span>{/if}
+				</button>
+			{/each}
+		{:else if sub.kind === "turn"}
+			{#each TURN_TYPES as ty (ty.key)}
+				<button onclick={() => fire({ kind: "turn_into_object", value: ty.key })}>
+					<span class="glyph">{ty.icon}</span>
+					{ty.name}
 				</button>
 			{/each}
 		{:else if sub.kind === "background"}
@@ -408,6 +424,11 @@
 	.dot.ring,
 	.trail .dot {
 		border: 1px solid var(--border);
+	}
+	.glyph {
+		width: 18px;
+		text-align: center;
+		flex: none;
 	}
 	.swatch {
 		width: 14px;
