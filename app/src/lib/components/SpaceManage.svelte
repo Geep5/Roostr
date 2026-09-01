@@ -308,6 +308,13 @@
 		display: flex;
 		flex-direction: column;
 		gap: 10px;
+		/* Align with the page header's content edge (icon at 44, title at 48). */
+		margin: 8px 24px 24px 48px;
+	}
+	@media (max-width: 720px) {
+		.manage {
+			margin: 8px 16px 24px;
+		}
 	}
 	.del-overlay {
 		position: fixed;

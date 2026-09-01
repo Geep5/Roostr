@@ -114,6 +114,11 @@
 		gap: 24px;
 		margin: 16px 0 0 48px;
 	}
+	@media (max-width: 720px) {
+		.type-panel {
+			margin: 16px 16px 0;
+		}
+	}
 	.sec-name {
 		font-size: 11px;
 		text-transform: uppercase;
