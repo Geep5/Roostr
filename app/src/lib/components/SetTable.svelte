@@ -56,6 +56,38 @@
 		selectedRows = rows.slice(Math.min(a, b), Math.max(a, b) + 1).map((r) => r.id);
 	}
 
+	// ── Drag across rows paints the selection ───────────────────────
+	// A bare drag over a table highlights cell TEXT by default, which is
+	// meaningless here — records are the unit. tbody opts out of text
+	// selection in CSS, freeing the drag to mean "select these records"
+	// the way Anytype (and the block editor's marquee) behaves.
+	let dragFrom = "";
+	let dragMoved = false;
+	let dragging = false;
+
+	function onRowMouseDown(e: MouseEvent, id: string) {
+		// Modifier clicks are the existing toggle/range gestures, and
+		// editable cells own their own mouse handling.
+		if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+		if ((e.target as HTMLElement).closest("td.editable, a, button, input")) return;
+		dragFrom = id;
+		dragMoved = false;
+		dragging = true;
+	}
+
+	/** Extend the painted range as the cursor crosses into another row. */
+	function onRowEnter(id: string) {
+		if (!dragging || id === dragFrom) return;
+		dragMoved = true;
+		rowAnchor = dragFrom;
+		rangeRows(id);
+	}
+
+	function endRowDrag() {
+		dragging = false;
+		dragFrom = "";
+	}
+
 	function onRowClick(e: MouseEvent, id: string) {
 		if (e.metaKey || e.ctrlKey) {
 			e.preventDefault();
@@ -65,6 +97,12 @@
 		if (e.shiftKey) {
 			e.preventDefault();
 			rangeRows(id);
+			return;
+		}
+		// The click that ends a drag must not clear what the drag just
+		// selected — mouseup fires a click on the row under the cursor.
+		if (dragMoved) {
+			dragMoved = false;
 			return;
 		}
 		if (selectedRows.length) {
@@ -275,7 +313,7 @@
 	}
 </script>
 
-<svelte:window onkeydown={(e) => { if (e.key === "Escape") { cellEdit = null; selectedRows = []; } }} onmousedown={(e) => { if (cellEdit && !(e.target as HTMLElement).closest(".cell-pop, td.editable")) cellEdit = null; }} />
+<svelte:window onkeydown={(e) => { if (e.key === "Escape") { cellEdit = null; selectedRows = []; } }} onmousedown={(e) => { if (cellEdit && !(e.target as HTMLElement).closest(".cell-pop, td.editable")) cellEdit = null; }} onmouseup={endRowDrag} />
 
 <div class="set-table">
 	<table>
@@ -339,7 +377,7 @@
 		</thead>
 		<tbody>
 			{#each rows as r (r.id)}
-				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)}>
+				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} onmousedown={(e) => onRowMouseDown(e, r.id)} onmouseenter={() => onRowEnter(r.id)}>
 					<td class="name"><span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || "Untitled"}</td>
 					{#each columns as c (c)}
 						{#if isEditable(c)}
@@ -493,6 +531,13 @@
 	}
 	.empty {
 		padding: 16px 10px;
+	}
+	/* Records are the selectable unit, so a drag must not leave native
+	   text highlighting behind. The cell editor popover lives outside the
+	   table, so it keeps normal text selection. */
+	tbody td {
+		user-select: none;
+		-webkit-user-select: none;
 	}
 	tr.selected td {
 		background: rgba(55, 122, 255, 0.25);
