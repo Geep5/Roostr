@@ -271,7 +271,15 @@
 					This cannot be undone.
 				</p>
 				<p class="hint">Type <b>delete</b> to confirm.</p>
-				<input class="del-input" bind:value={emptyDraft} placeholder="delete" autocomplete="off" />
+				<input
+					class="del-input"
+					bind:value={emptyDraft}
+					placeholder="delete"
+					autocomplete="off"
+					onkeydown={(e) => {
+						if (e.key === "Enter" && emptyArmed && binBusy === "") void emptyBin();
+					}}
+				/>
 				<div class="del-actions">
 					<button class="subtle-btn" onclick={() => (confirmEmpty = false)}>Cancel</button>
 					<button class="del-btn" disabled={!emptyArmed || binBusy !== ""} onclick={() => void emptyBin()}>
@@ -291,7 +299,16 @@
 					This cannot be undone.
 				</p>
 				<p class="hint">Type <b>delete</b> to confirm.</p>
-				<input class="del-input" bind:value={deleteDraft} placeholder="delete" autocomplete="off" bind:this={deleteInputEl} />
+				<input
+					class="del-input"
+					bind:value={deleteDraft}
+					placeholder="delete"
+					autocomplete="off"
+					bind:this={deleteInputEl}
+					onkeydown={(e) => {
+						if (e.key === "Enter" && deleteArmed && !deleting) void deleteSpace();
+					}}
+				/>
 				<div class="del-actions">
 					<button class="subtle-btn" disabled={deleting} onclick={() => (confirmDelete = false)}>Cancel</button>
 					<button class="del-btn" disabled={!deleteArmed || deleting} onclick={() => void deleteSpace()}>
