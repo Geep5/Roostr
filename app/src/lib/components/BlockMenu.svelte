@@ -97,6 +97,18 @@
 		sub = { kind, top: r.top };
 	}
 
+	/** Hover-open (mouse only - a tap synthesizes pointerenter AND click,
+	 *  which would open-then-toggle-shut on touch). */
+	function hoverSub(kind: SubKind, e: PointerEvent) {
+		if (e.pointerType !== "mouse" || sub?.kind === kind) return;
+		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		sub = { kind, top: r.top };
+	}
+
+	function hoverPlain(e: PointerEvent) {
+		if (e.pointerType === "mouse") sub = null;
+	}
+
 	const SUB_W = 220;
 	const subPos = $derived.by(() => {
 		if (!sub) return null;
@@ -228,31 +240,31 @@
 			{/if}
 			<div class="section-name">{t ? "Text" : "Block"}</div>
 			{#if t}
-				<button class="sub-row" class:open={sub?.kind === "style"} onclick={(e) => toggleSub("style", e)}>
+				<button class="sub-row" class:open={sub?.kind === "style"} onclick={(e) => toggleSub("style", e)} onpointerenter={(e) => hoverSub("style", e)}>
 					Style
 					<span class="trail">{curStyle}<span class="chev">›</span></span>
 				</button>
 			{/if}
-			<button class="sub-row" class:open={sub?.kind === "align"} onclick={(e) => toggleSub("align", e)}>
+			<button class="sub-row" class:open={sub?.kind === "align"} onclick={(e) => toggleSub("align", e)} onpointerenter={(e) => hoverSub("align", e)}>
 				Align
 				<span class="trail">{curAlign}<span class="chev">›</span></span>
 			</button>
 			{#if t}
-				<button class="sub-row" class:open={sub?.kind === "color"} onclick={(e) => toggleSub("color", e)}>
+				<button class="sub-row" class:open={sub?.kind === "color"} onclick={(e) => toggleSub("color", e)} onpointerenter={(e) => hoverSub("color", e)}>
 					Color
 					<span class="trail"><span class="dot" style="background:{curColor.text || 'var(--fg)'}"></span><span class="chev">›</span></span>
 				</button>
 			{/if}
-			<button class="sub-row" class:open={sub?.kind === "background"} onclick={(e) => toggleSub("background", e)}>
+			<button class="sub-row" class:open={sub?.kind === "background"} onclick={(e) => toggleSub("background", e)} onpointerenter={(e) => hoverSub("background", e)}>
 				Background
 				<span class="trail"><span class="dot" style="background:{curBg.bg || 'transparent'}"></span><span class="chev">›</span></span>
 			</button>
 			{#if t}
-				<button onclick={() => fire({ kind: "clear_style" })}>Clear style</button>
+				<button onpointerenter={hoverPlain} onclick={() => fire({ kind: "clear_style" })}>Clear style</button>
 			{/if}
 			<div class="sep"></div>
-			<button onclick={() => fire({ kind: "duplicate" })}>Duplicate</button>
-			<button class="danger" onclick={() => fire({ kind: "delete" })}>Delete block</button>
+			<button onpointerenter={hoverPlain} onclick={() => fire({ kind: "duplicate" })}>Duplicate</button>
+			<button class="danger" onpointerenter={hoverPlain} onclick={() => fire({ kind: "delete" })}>Delete block</button>
 		</div>
 	{/if}
 </div>
