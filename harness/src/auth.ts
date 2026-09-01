@@ -170,13 +170,15 @@ let refreshInflight: Promise<OAuthCredential> | null = null;
 
 // Claude Code rotates its access token in place — never cache across turns,
 // or the harness 401s an hour after the app's next refresh.
-async function keychainAuth(): Promise<ResolvedAuth | null> {
+async function keychainAuth(): Promise<(ResolvedAuth & { expires: number }) | null> {
 	try {
 		const proc = Bun.spawn(["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"], { stdout: "pipe", stderr: "ignore" });
 		const raw = await new Response(proc.stdout).text();
-		const parsed = JSON.parse(raw.trim()) as { claudeAiOauth?: { accessToken?: string } };
+		const parsed = JSON.parse(raw.trim()) as { claudeAiOauth?: { accessToken?: string; expiresAt?: number } };
 		if (parsed.claudeAiOauth?.accessToken) {
-			return { token: parsed.claudeAiOauth.accessToken, isOAuth: true };
+			// Expiry travels with the token: this path has no refresh of its
+			// own, so an expired one is dead weight and callers must know.
+			return { token: parsed.claudeAiOauth.accessToken, isOAuth: true, expires: parsed.claudeAiOauth.expiresAt ?? 0 };
 		}
 	} catch {
 		/* no keychain entry */
@@ -220,16 +222,36 @@ export async function resolveKimiKey(): Promise<string> {
 	return process.env.KIMI_API_KEY ?? process.env.MOONSHOT_API_KEY ?? "";
 }
 
-/** Status for the Settings UI — never leaks tokens. */
+/**
+ * Status for the Settings UI — never leaks tokens. `ready` answers the only
+ * question a caller actually has: will a turn on this provider authenticate
+ * right now? It mirrors the resolver's rules including expiry, so a
+ * present-but-expired Claude Code keychain token reports NOT ready instead of
+ * looking healthy and 401ing on the first turn.
+ */
 export async function authStatus(): Promise<Record<string, unknown>> {
 	const file = await readAuthFile();
 	const cred = file.credentials.anthropic;
 	let anthropic: Record<string, unknown>;
-	if (cred?.type === "oauth") anthropic = { mode: "plan", expires: cred.expires };
-	else if (cred?.type === "api_key") anthropic = { mode: "api_key", masked: `…${cred.key.slice(-4)}` };
-	else if (process.env.ANTHROPIC_API_KEY) anthropic = { mode: "env" };
-	else if (await keychainAuth()) anthropic = { mode: "claude_code" };
-	else anthropic = { mode: "none" };
-	const kimi = file.credentials.kimi?.type === "api_key" ? { mode: "api_key", masked: `…${file.credentials.kimi.key.slice(-4)}` } : { mode: "none" };
+	if (cred?.type === "oauth") {
+		// A refresh token renews an expired access token transparently, so
+		// only a refresh-less expired credential is unusable.
+		anthropic = { mode: "plan", expires: cred.expires, ready: cred.expires > Date.now() || cred.refresh !== "" };
+	} else if (cred?.type === "api_key") {
+		anthropic = { mode: "api_key", masked: `…${cred.key.slice(-4)}`, ready: true };
+	} else if (process.env.ANTHROPIC_API_KEY) {
+		anthropic = { mode: "env", ready: true };
+	} else {
+		const kc = await keychainAuth();
+		if (kc) anthropic = { mode: "claude_code", expires: kc.expires, ready: kc.expires > Date.now() };
+		else anthropic = { mode: "none", ready: false };
+	}
+	// Mirror resolveKimiKey: env vars count, so don't report "none" over a key
+	// the resolver would happily use.
+	const kimiFile = file.credentials.kimi?.type === "api_key" ? file.credentials.kimi.key : "";
+	const kimiKey = kimiFile || process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY || "";
+	const kimi = kimiKey
+		? { mode: kimiFile ? "api_key" : "env", masked: `…${kimiKey.slice(-4)}`, ready: true }
+		: { mode: "none", ready: false };
 	return { anthropic, kimi };
 }
