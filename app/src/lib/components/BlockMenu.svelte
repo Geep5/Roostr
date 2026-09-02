@@ -12,12 +12,15 @@
 		block,
 		x,
 		y,
+		groupCount = 1,
 		onaction,
 		onclose,
 	}: {
 		block: BlockJSON;
 		x: number;
 		y: number;
+		/** >1 when the menu acts on a multi-block selection. */
+		groupCount?: number;
 		onaction: (a: MenuAction) => void;
 		onclose: () => void;
 	} = $props();
@@ -204,6 +207,9 @@
 
 <div class="block-menu" bind:this={menuEl} style="left:{pos.left}px; top:{pos.top}px" role="menu" tabindex="-1">
 	<input bind:this={filterEl} bind:value={filter} placeholder="Filter actions…" oninput={() => (sub = null)} />
+	{#if groupCount > 1}
+		<div class="group-note">Applies to {groupCount} selected blocks</div>
+	{/if}
 	{#if filtering}
 		<div class="scroll">
 			{#each sections as section (section.name)}
@@ -479,5 +485,10 @@
 	.desc {
 		font-size: 11px;
 		color: var(--muted);
+	}
+	.group-note {
+		font-size: 11px;
+		color: var(--accent);
+		padding: 6px 12px 0;
 	}
 </style>

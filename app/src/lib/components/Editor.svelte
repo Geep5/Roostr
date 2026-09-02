@@ -93,19 +93,24 @@
 		return out;
 	});
 
-	/** Selected ids whose ancestors are NOT selected (subtrees move whole). */
-	function topmostSelected(): string[] {
+	/** Ids from `set` whose ancestors are NOT in it (subtrees act whole). */
+	function topmostOf(set: Set<string>): string[] {
 		const parentOf = new Map<string, string>();
 		for (const b of object.blocks) for (const c of b.childrenIds) parentOf.set(c, b.id);
 		return flatIds.filter((id) => {
-			if (!selectedSet.has(id)) return false;
+			if (!set.has(id)) return false;
 			let p = parentOf.get(id);
 			while (p) {
-				if (selectedSet.has(p)) return false;
+				if (set.has(p)) return false;
 				p = parentOf.get(p);
 			}
 			return true;
 		});
+	}
+
+	/** Selected ids whose ancestors are NOT selected (subtrees move whole). */
+	function topmostSelected(): string[] {
+		return topmostOf(selectedSet);
 	}
 
 	function toggleSelect(id: string) {
@@ -697,14 +702,14 @@
 	}
 
 	/** Turn-into from the block action menu. */
-	async function applyStyle(id: string, style: number) {
+	async function applyStyle(id: string, style: number, focus = true) {
 		const cur = byId.get(id)?.content.text;
 		const el = blockEl(id);
 		const { text, marks } = el ? fromDom(el) : { text: cur?.text ?? "", marks: cur?.marks ?? [] };
 		cancelPending(id);
 		lastLocalEdit = Date.now();
 		await note.blockUpdate(object.id, id, { text: { text, marks, style, checked: cur?.checked ?? false, color: cur?.color ?? "" } });
-		focusRequest = { blockId: id, offset: text.length };
+		if (focus) focusRequest = { blockId: id, offset: text.length };
 		await refresh();
 	}
 
@@ -813,12 +818,15 @@
 	}
 
 	// ── Block action menu (Anytype's blockAction) ─────────────────
-	let blockMenu = $state<{ blockId: string; x: number; y: number } | null>(null);
+	let blockMenu = $state<{ blockId: string; x: number; y: number; group: string[] | null } | null>(null);
 
 	function openBlockMenu(id: string, x: number, y: number) {
 		toolbar = null;
 		slash = null;
-		blockMenu = { blockId: id, x, y };
+		// Opened on a block inside a multi-selection: styling ops apply to
+		// the whole selection (Anytype's selection-wide block actions).
+		const group = selectedIds.length > 1 && selectedSet.has(id) ? [...selectedIds] : null;
+		blockMenu = { blockId: id, x, y, group };
 	}
 
 	async function setTextColor(id: string, color: string) {
@@ -879,20 +887,23 @@
 	async function onMenuAction(a: MenuAction) {
 		const id = blockMenu?.blockId;
 		if (!id) return;
+		// Styling from a multi-selection hits every selected block.
+		const ids = blockMenu?.group ?? [id];
+		const textIds = ids.filter((b) => byId.get(b)?.content.text);
 		lastLocalEdit = Date.now();
 		switch (a.kind) {
 			case "style":
-				await applyStyle(id, a.value as number);
+				for (const b of textIds) await applyStyle(b, a.value as number, ids.length === 1);
 				break;
 			case "align":
-				await note.blockSetAttrs(object.id, id, { align: a.value as number });
+				for (const b of ids) await note.blockSetAttrs(object.id, b, { align: a.value as number });
 				await refresh();
 				break;
 			case "color":
-				await setTextColor(id, a.value as string);
+				for (const b of textIds) await setTextColor(b, a.value as string);
 				break;
 			case "background":
-				await note.blockSetAttrs(object.id, id, { background_color: a.value as string });
+				for (const b of ids) await note.blockSetAttrs(object.id, b, { background_color: a.value as string });
 				await refresh();
 				break;
 			case "duplicate":
@@ -930,15 +941,25 @@
 			}
 			case "clear_style": {
 				// Anytype's Clear style: back to default color, background, align.
-				const cur = byId.get(id)?.content.text;
-				if (cur) await setTextColor(id, "");
-				await note.blockSetAttrs(object.id, id, { background_color: "", align: 0 });
+				for (const b of textIds) await setTextColor(b, "");
+				for (const b of ids) await note.blockSetAttrs(object.id, b, { background_color: "", align: 0 });
 				await refresh();
 				break;
 			}
-			case "delete":
-				await removeBlockById(id);
+			case "delete": {
+				if (ids.length > 1) {
+					const tops = topmostOf(new Set(ids));
+					selectedIds = [];
+					for (const b of tops) {
+						cancelPending(b);
+						await note.blockRemove(object.id, b);
+					}
+					await refresh();
+				} else {
+					await removeBlockById(id);
+				}
 				break;
+			}
 		}
 	}
 </script>
@@ -1009,6 +1030,7 @@
 		block={byId.get(blockMenu.blockId)!}
 		x={blockMenu.x}
 		y={blockMenu.y}
+		groupCount={blockMenu.group?.length ?? 1}
 		onaction={(a) => void onMenuAction(a)}
 		onclose={() => (blockMenu = null)}
 	/>
