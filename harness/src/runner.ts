@@ -127,6 +127,24 @@ async function publishSystemParts(agentId: string, parts: SystemPart[], ratio: n
 }
 
 /**
+ * Publish an agent's prompt without running a turn, so a client can read what
+ * the agent WOULD send before it has ever been messaged. Without this, a
+ * freshly created agent shows an empty prompt panel: its `system` field is
+ * unset because it uses the built-in default, and that default lives here in
+ * the harness where no remote client can see it.
+ */
+export async function publishSystemSnapshot(agentId: string, convId: string): Promise<void> {
+	try {
+		const agent = await fetchObject(agentId);
+		const conv = convId === agentId ? agent : await fetchObject(convId);
+		const view = buildConversationView(conv, agentId, tokenRatio(agent));
+		await publishSystemParts(agentId, await buildSystemParts(agent, view, {}), tokenRatio(agent));
+	} catch (err) {
+		console.error(`[harness] prompt snapshot failed for ${agentId.slice(0, 8)}:`, err);
+	}
+}
+
+/**
  * Run the agent until it stops calling tools. Returns the final reply text.
  * The conversation lives on `convId` (the agent's holistic chat; subagents
  * converse on their own object, convId === agentId). Every turn artifact

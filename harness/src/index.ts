@@ -15,7 +15,7 @@
  */
 
 import { API, chatPost, fetchObject, list, mutate, query, setField, str, subscribe, sv, createObject } from "./api";
-import { runTurn } from "./runner";
+import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled, syncHeartbeats } from "./roster";
@@ -273,14 +273,22 @@ async function serve(): Promise<void> {
 		syncHeartbeats(agents);
 		void buildServed(agents).then((next) => {
 			served = next;
-			for (const s of served.values()) void drive(s, s.chatId);
+			for (const s of served.values()) {
+				void publishSystemSnapshot(s.agentId, s.chatId);
+				void drive(s, s.chatId);
+			}
 		});
 	});
 	console.log(`[harness] serving ${agents.size} agent(s): ${[...agents].map((a) => a.slice(0, 8)).join(", ") || "(none — enable one from an agent page)"}`);
 	syncHeartbeats(agents);
 	// Catch up on chat messages that arrived while the harness was down.
 	// (Origin surfaces catch up on their next event.)
-	for (const s of served.values()) void drive(s, s.chatId);
+	// Publishing the prompt here rather than only mid-turn is what lets a
+	// never-messaged agent show a real prompt instead of an empty panel.
+	for (const s of served.values()) {
+		void publishSystemSnapshot(s.agentId, s.chatId);
+		void drive(s, s.chatId);
+	}
 	subscribe((objectId) => void route(objectId));
 	console.log("[harness] SSE connected; serving.");
 	void startNostrSync();

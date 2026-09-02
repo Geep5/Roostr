@@ -390,14 +390,21 @@
 						sections. Read-only: only the base prompt above is yours to edit; the rest is assembled
 						from skills, memory, and space instructions.
 					</p>
-					{#each a.effective as part (part.label)}
-						<details class="part">
+					{#each a.effective as part, i (part.label)}
+						<!-- The base prompt is the thing you came to read, so it is open;
+						     the assembled sections stay folded. -->
+						<details class="part" open={i === 0}>
 							<summary><span class="plabel">{part.label}</span><span class="ptok">{part.tokens} tok</span></summary>
 							<pre>{part.text}</pre>
 						</details>
 					{/each}
 				{:else}
-					<p class="hint">No prompt published yet — it appears after this agent's next turn.</p>
+					<p class="hint">
+						No prompt published yet. It appears once a machine serving this agent has
+						reported in — the assembled prompt (including the built-in default this
+						agent uses when the box above is empty) is written by the harness, not
+						guessed here.
+					</p>
 				{/if}
 			</div>
 		{/if}
