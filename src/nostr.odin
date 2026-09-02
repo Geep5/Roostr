@@ -63,37 +63,24 @@ nostr_write :: proc(s: Nostr_Settings) {
 /** Battle-tested public relays seeded on fresh installs (Settings can edit). */
 DEFAULT_RELAYS :: []string{"wss://roostr-relay.fly.dev"}
 
-/** Public bootstrap relays from early builds; migrated to the self-hosted set. */
-RETIRED_RELAYS :: []string{"wss://relay.damus.io", "wss://nos.lol", "wss://relay.nostr.band"}
-
 /** Settings with a key, generating one on first access. */
 nostr_ensure :: proc(allocator := context.temp_allocator) -> Nostr_Settings {
 	sync.lock(&g_nostr_mu)
 	defer sync.unlock(&g_nostr_mu)
 	s := nostr_read(allocator)
-	dirty := false
 	if len(s.privkey_hex) != 64 {
 		raw: [32]byte
 		crypto.rand_bytes(raw[:])
 		s.privkey_hex = strings.clone(string(hex.encode(raw[:], context.temp_allocator)), allocator)
-		dirty = true
+		// Fresh identity = fresh install: seed the default relay so sync
+		// works out of the box. An existing (even empty) list is the
+		// user's choice - Settings offers public relays as toggles now,
+		// so no migration may strip them back out.
+		if len(s.relays) == 0 {
+			for r in DEFAULT_RELAYS do append(&s.relays, r)
+		}
+		nostr_write(s)
 	}
-	// Migration: drop retired public relays (installs seeded before the
-	// self-hosted default existed).
-	kept := make([dynamic]string, allocator)
-	for r in s.relays {
-		retired := false
-		for x in RETIRED_RELAYS do if r == x do retired = true
-		if retired { dirty = true } else { append(&kept, r) }
-	}
-	s.relays = kept
-	// Empty set (fresh install or fully-retired list): seed the default
-	// so sync works out of the box.
-	if len(s.relays) == 0 {
-		for r in DEFAULT_RELAYS do append(&s.relays, r)
-		dirty = true
-	}
-	if dirty do nostr_write(s)
 	return s
 }
 

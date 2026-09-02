@@ -300,7 +300,18 @@
 		newRelay = "";
 	}
 
-	const SUGGESTED = ["wss://roostr-relay.fly.dev"];
+	/** Relays offered as toggles: ours on by default, public ones off. */
+	const KNOWN_RELAYS = [
+		{ url: "wss://roostr-relay.fly.dev", label: "Roostr relay", note: "self-hosted default" },
+		{ url: "wss://relay.damus.io", label: "Damus", note: "public" },
+		{ url: "wss://nos.lol", label: "nos.lol", note: "public" },
+		{ url: "wss://relay.nostr.band", label: "nostr.band", note: "public aggregator - often read-only" },
+	];
+	const KNOWN_URLS = new Set(KNOWN_RELAYS.map((k) => k.url));
+
+	function toggleRelay(url: string, on: boolean) {
+		void saveRelays(on ? [...relays.filter((r) => r !== url), url] : relays.filter((r) => r !== url));
+	}
 
 	// ── Spellcheck ignore list ──────────────────────────────────────
 	let ignored = $state<string[]>([]);
@@ -456,14 +467,26 @@
 		<section>
 			<h3>Relays {saveState ? `· ${saveState}` : ""}</h3>
 			<p class="hint">Where your encrypted changes sync. Your data stays local until relays are configured.</p>
-			{#each relays as r (r)}
+			{#each KNOWN_RELAYS as k (k.url)}
+				<div class="relay known">
+					<span class="relay-main">
+						<span class="relay-label">{k.label}</span>
+						<span class="relay-url">{k.url.replace("wss://", "")} · {k.note}</span>
+					</span>
+					<label class="switch">
+						<input type="checkbox" checked={relays.includes(k.url)} onchange={(e) => toggleRelay(k.url, (e.currentTarget as HTMLInputElement).checked)} />
+						<span class="slider"></span>
+					</label>
+				</div>
+			{/each}
+			{#each relays.filter((r) => !KNOWN_URLS.has(r)) as r (r)}
 				<div class="relay">
 					<span>{r}</span>
 					<button class="x" onclick={() => void saveRelays(relays.filter((x) => x !== r))}>×</button>
 				</div>
 			{/each}
 			{#if relays.length === 0}
-				<p class="hint none">No relays configured.</p>
+				<p class="hint none">No relays enabled - nothing syncs until one is on.</p>
 			{/if}
 			<form
 				onsubmit={(e) => {
@@ -474,13 +497,6 @@
 				<input bind:value={newRelay} placeholder="wss://relay.example.com" />
 				<button type="submit">Add</button>
 			</form>
-			{#if relays.length === 0}
-				<div class="suggested">
-					{#each SUGGESTED as s (s)}
-						<button class="chip" onclick={() => void saveRelays([...relays, s])}>{s.replace("wss://", "")}</button>
-					{/each}
-				</div>
-			{/if}
 		</section>
 
 		<section>
@@ -710,6 +726,8 @@
 				{/each}
 			{/if}
 		</section>
+
+		<p class="build-stamp">Build {__BUILD_STAMP__} — if this is older than the last code change, reload this window (⌘R).</p>
 	</div>
 </div>
 
@@ -1252,5 +1270,33 @@
 	}
 	.skill-prompt-actions {
 		align-items: center;
+	}
+	.relay.known {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.relay-main {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		min-width: 0;
+	}
+	.relay-label {
+		font-size: 13px;
+	}
+	.relay-url {
+		font-size: 11px;
+		color: var(--muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.build-stamp {
+		font-size: 11px;
+		color: var(--muted);
+		text-align: center;
+		margin: 4px 0 10px;
 	}
 </style>

@@ -368,13 +368,21 @@
 		if (focusRequest) {
 			const req = focusRequest;
 			focusRequest = null;
-			requestAnimationFrame(() => {
+			// A single rAF loses the race when render straddles frames - the
+			// caret then silently stays in the OLD block and the next
+			// keystrokes land one line above where the user is looking.
+			// Retry across frames until the element exists and focus took.
+			let tries = 0;
+			const attempt = () => {
 				const el = blockEl(req.blockId);
-				if (el) {
+				if (el && el.isConnected) {
 					el.focus();
 					setCaret(el, req.offset);
+					if (document.activeElement === el) return;
 				}
-			});
+				if (++tries < 24) requestAnimationFrame(attempt);
+			};
+			requestAnimationFrame(attempt);
 		}
 	}
 
