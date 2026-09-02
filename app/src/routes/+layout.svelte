@@ -958,6 +958,44 @@
 		--hl-light: rgba(255, 255, 255, 0.03);
 		--hl-med: rgba(255, 255, 255, 0.05);
 	}
+	/* Minimal scrollbars (Anytype look): thin rounded thumb riding a
+	   transparent track, no buttons - Windows' chunky default is gone.
+	   Chromium takes the -webkit path; the standard properties apply only
+	   where the pseudo-elements don't exist (Firefox), because setting
+	   scrollbar-width/color in Chromium would disable the styled ones. */
+	@supports not selector(::-webkit-scrollbar) {
+		:global(html),
+		:global(*) {
+			scrollbar-width: thin;
+			scrollbar-color: var(--border) transparent;
+		}
+	}
+	:global(::-webkit-scrollbar) {
+		width: 10px;
+		height: 10px;
+	}
+	:global(::-webkit-scrollbar-track),
+	:global(::-webkit-scrollbar-corner) {
+		background: transparent;
+	}
+	:global(::-webkit-scrollbar-thumb) {
+		background: rgb(255 255 255 / 0.16);
+		border-radius: 999px;
+		border: 3px solid transparent;
+		background-clip: padding-box;
+		min-height: 40px;
+	}
+	:global(::-webkit-scrollbar-thumb:hover) {
+		background: rgb(255 255 255 / 0.32);
+		border: 2px solid transparent;
+		background-clip: padding-box;
+	}
+	:global(::-webkit-scrollbar-button) {
+		display: none;
+		width: 0;
+		height: 0;
+	}
+
 	.search-row {
 		display: flex;
 		align-items: center;
