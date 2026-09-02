@@ -38,7 +38,18 @@
 					rows = [];
 					return;
 				}
-				const res = await fetchQuery({ ...body, limit: 50 });
+				// The widget mirrors the view's sort rules, so the sidebar
+				// order matches the page (falls back to newest-first).
+				const sortItems = o.fields["viewSorts"]?.valuesValue?.items ?? [];
+				const sorts = sortItems
+					.map((i) => {
+						const e = i.mapValue?.entries;
+						const key = e?.["key"]?.stringValue ?? "";
+						const type = e?.["type"]?.stringValue === "asc" ? "asc" : "desc";
+						return key ? { key, type, emptyPlacement: "end" } : null;
+					})
+					.filter((x): x is { key: string; type: string; emptyPlacement: string } => !!x);
+				const res = await fetchQuery({ ...body, sorts: sorts.length > 0 ? sorts : [{ key: "updatedAt", type: "desc", emptyPlacement: "end" }], limit: 50 });
 				rows = res.records;
 				return;
 			}
