@@ -17,12 +17,14 @@
 		relations,
 		groupKey,
 		onchanged,
+			sorts = [],
 	}: {
 		body: Record<string, unknown>;
 		object: ObjectJSON;
 		relations: RelationDefJSON[];
 		groupKey: string;
 		onchanged: () => Promise<void>;
+		sorts?: Array<{ key: string; type: "asc" | "desc" }>;
 	} = $props();
 
 	let rows = $state<QueryResultRow[]>([]);
@@ -30,7 +32,8 @@
 	const rel = $derived(relations.find((r) => r.key === groupKey));
 
 	async function load() {
-		const res = await fetchQuery(body);
+		const s = (sorts.length > 0 ? sorts : [{ key: "updatedAt", type: "desc" }]).map((x) => ({ ...x, emptyPlacement: "end" }));
+		const res = await fetchQuery({ ...body, sorts: s });
 		rows = res.records;
 	}
 

@@ -328,9 +328,9 @@
 				{#if tableBody}
 					{@const viewType = object.fields["viewType"]?.stringValue || "table"}
 					{#if viewType === "gallery"}
-						<GalleryView body={tableBody} {object} relations={store.relations} />
+						<GalleryView body={tableBody} {object} relations={store.relations} sorts={viewSorts} />
 					{:else if viewType === "kanban"}
-						<KanbanView body={tableBody} {object} relations={store.relations} groupKey={object.fields["viewGroupKey"]?.stringValue || ""} onchanged={refresh} />
+						<KanbanView body={tableBody} {object} relations={store.relations} sorts={viewSorts} groupKey={object.fields["viewGroupKey"]?.stringValue || ""} onchanged={refresh} />
 					{:else if viewType === "calendar"}
 						<CalendarView body={tableBody} {object} dateKey={object.fields["viewDateKey"]?.stringValue || "createdDate"} />
 					{:else}

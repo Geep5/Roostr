@@ -15,21 +15,25 @@
 		body,
 		object,
 		relations,
+		sorts = [],
 	}: {
 		body: Record<string, unknown>;
 		object: ObjectJSON;
 		relations: RelationDefJSON[];
+		sorts?: Array<{ key: string; type: "asc" | "desc" }>;
 	} = $props();
 
 	let rows = $state<QueryResultRow[]>([]);
 
 	async function load() {
-		const res = await fetchQuery(body);
+		const s = (sorts.length > 0 ? sorts : [{ key: "updatedAt", type: "desc" }]).map((x) => ({ ...x, emptyPlacement: "end" }));
+		const res = await fetchQuery({ ...body, sorts: s });
 		rows = res.records;
 	}
 
 	$effect(() => {
 		void JSON.stringify(body);
+		void JSON.stringify(sorts);
 		void object.updatedAt;
 		void load();
 	});
