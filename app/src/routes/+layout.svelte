@@ -414,6 +414,24 @@
 
 	// Anytype widget sections (sidebar/page/widget.tsx onToggle): section
 	// headers collapse; a viewing preference, persisted per device.
+	// ── Resizable sidebar (invisible drag strip on its right edge) ──
+	let sideWidth = $state(typeof localStorage === "undefined" ? 220 : parseInt(localStorage.getItem("side-width") ?? "220") || 220);
+	function sideResizeStart(e: PointerEvent) {
+		e.preventDefault();
+		const startX = e.clientX;
+		const startW = sideWidth;
+		const move = (ev: PointerEvent) => {
+			sideWidth = Math.min(480, Math.max(180, startW + ev.clientX - startX));
+		};
+		const up = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", up);
+			localStorage.setItem("side-width", String(sideWidth));
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", up);
+	}
+
 	let sectionCollapsed = $state<Record<string, boolean>>(
 		typeof localStorage === "undefined" ? {} : JSON.parse(localStorage.getItem("section-collapsed") ?? "{}"),
 	);
@@ -683,7 +701,7 @@
 	{/if}
 </div>
 {:else}
-<div class="shell">
+<div class="shell" style="grid-template-columns: 56px {sideWidth}px 1fr">
 	<nav class="vault">
 		{#each orderedSpaces as c (c.id)}
 			<button
@@ -866,6 +884,7 @@
 			</div>
 
 		{/if}
+		<div class="side-resize" role="separator" aria-orientation="vertical" onpointerdown={sideResizeStart}></div>
 	</aside>
 
 	<div class="main-col">
@@ -1176,11 +1195,25 @@
 		background: var(--hl-med);
 	}
 	.widgets {
+		position: relative;
 		padding: 10px 8px;
 		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
+	}
+	/* Invisible grab strip on the pane's right edge - only the cursor
+	   betrays it. Absolute top+bottom spans the full scroll content, so
+	   the visible edge is always draggable at any scroll position. */
+	.side-resize {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		right: 0;
+		width: 8px;
+		cursor: col-resize;
+		z-index: 40;
+		touch-action: none;
 	}
 	/* Anytype spaceHead: 600-weight name, 6px radius, highlight hover,
 	   settings affordance revealed on hover. */
