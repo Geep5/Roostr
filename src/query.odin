@@ -428,6 +428,12 @@ run_query :: proc(
 	loop: for _, s in states {
 		if s.deleted && !include_deleted do continue
 		if type_eq != "" && s.type_key != type_eq do continue
+		// The vanish ledger is bookkeeping, not content: a singleton whose
+		// fields are one key per deleted object. It is already absent from
+		// /api/objects, but an untyped query returned it, so any query-driven
+		// list showed a nameless row that opened an empty object page. Asking
+		// for it by type still works, which is how the sync daemon reads it.
+		if type_eq == "" && s.type_key == VANISH_LOG_TYPE do continue
 		for f in filters {
 			if !matches_filter(s, f, now) do continue loop
 		}
