@@ -140,10 +140,16 @@
 
 	function who(author: string): string {
 		if (author === me) return "You";
-		// The agent posts as its own object id; on its chat, the agent field.
+		// An agent posts as its own object id, wherever it is replying. It is
+		// absent from `summaries` (agents are hidden infrastructure), so the
+		// name comes from store.agents — without it, a reply on an ordinary
+		// object fell through to a raw id fragment.
+		const agent = store.agents.find((a) => a.id === author);
+		if (agent) return agent.name || "Agent";
+		// A chat object's own id: the brain-chat surface.
 		if (author === object.id) return object.fields["name"]?.stringValue || "Agent";
 		if (author && author === object.fields["agent"]?.stringValue)
-			return store.summaries.find((s) => s.id === author)?.name || object.fields["name"]?.stringValue || "Agent";
+			return object.fields["name"]?.stringValue || "Agent";
 		return author.slice(0, 6);
 	}
 
@@ -164,6 +170,8 @@
 	 * settings); the chat object itself covers agent-brain chats.
 	 */
 	function avatarEmoji(author: string): string {
+		const agent = store.agents.find((a) => a.id === author);
+		if (agent?.icon) return agent.icon;
 		if (author === object.id) return object.fields["iconEmoji"]?.stringValue ?? "";
 		return store.summaries.find((s) => s.id === author)?.icon ?? "";
 	}
