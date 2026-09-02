@@ -14,6 +14,8 @@
 	let { id }: { id: string } = $props();
 
 	const LIMIT = 4;
+	/* The card grid breathes better than rows - give it more slots. */
+	const GALLERY_LIMIT = 8;
 
 	let obj = $state<ObjectJSON | null>(null);
 	let rows = $state<QueryResultRow[]>([]);
@@ -146,12 +148,15 @@
 			</a>
 		{:else if viewType === "gallery"}
 			<div class="w-cards">
-				{#each rows.slice(0, LIMIT) as r (r.id)}
+				{#each rows.slice(0, GALLERY_LIMIT) as r (r.id)}
 					<a class="w-card" href="/object/{r.id}">
 						<span class="w-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span>
 						<span class="w-name">{r.fields["name"]?.stringValue || "Untitled"}</span>
 					</a>
 				{/each}
+				{#if rows.length > GALLERY_LIMIT}
+					<a class="w-card w-card-more" href="/object/{id}">+{rows.length - GALLERY_LIMIT} more</a>
+				{/if}
 			</div>
 		{:else}
 			{#each rows.slice(0, LIMIT) as r (r.id)}
@@ -270,5 +275,11 @@
 	}
 	.w-day.today {
 		outline: 1px solid var(--accent);
+	}
+	.w-card-more {
+		justify-content: center;
+		color: var(--muted);
+		font-weight: 400;
+		border-style: dashed;
 	}
 </style>
