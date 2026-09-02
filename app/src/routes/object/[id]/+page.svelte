@@ -176,7 +176,8 @@
 		if (isQuery) return { setId: object.id, filters: engineFilters, ...text };
 		if (isCollection) {
 			if (memberIds.length === 0) return null;
-			return { filters: [{ key: "id", condition: "in", value: memberIds }], ...text };
+			// View filters stack on top of membership (AND semantics).
+			return { filters: [{ key: "id", condition: "in", value: memberIds }, ...engineFilters], ...text };
 		}
 		return null;
 	});
@@ -320,9 +321,10 @@
 						</div>
 					{/if}
 				{/if}
-				{#if isQuery}
-					<QueryControls {object} relations={store.relations} onchanged={refresh} onsearch={(q) => (searchText = q)} />
-				{/if}
+				<!-- Collections share the query surface minus the Source pill:
+				     same layouts (table/gallery/kanban/calendar), filters,
+				     sorts, search, and view settings. -->
+				<QueryControls {object} relations={store.relations} onchanged={refresh} onsearch={(q) => (searchText = q)} mode={isQuery ? "query" : "collection"} />
 				{#if tableBody}
 					{@const viewType = object.fields["viewType"]?.stringValue || "table"}
 					{#if viewType === "gallery"}

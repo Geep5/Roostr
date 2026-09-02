@@ -17,7 +17,8 @@
 		relations,
 		onchanged,
 		onsearch,
-	}: { object: ObjectJSON; relations: RelationDefJSON[]; onchanged: () => Promise<void>; onsearch?: (q: string) => void } = $props();
+		mode = "query",
+	}: { object: ObjectJSON; relations: RelationDefJSON[]; onchanged: () => Promise<void>; onsearch?: (q: string) => void; mode?: "query" | "collection" } = $props();
 
 	// Anytype's dataview search (controls.tsx Filter): magnifier expands an
 	// inline input; text live-filters the records via textQuery.
@@ -334,9 +335,11 @@
 <svelte:window onmousedown={(e) => { if (settingsOpen && !(e.target as HTMLElement).closest(".settings-anchor")) settingsOpen = false; }} onkeydown={(e) => { if (e.key === "Escape") settingsOpen = false; }} />
 
 <div class="controls">
-	<button class="pill" class:active={open === "source"} onclick={() => (open = open === "source" ? "" : "source")}>
-		Source{sources.length ? `: ${sources.join(", ")}` : ""}
-	</button>
+	{#if mode === "query"}
+		<button class="pill" class:active={open === "source"} onclick={() => (open = open === "source" ? "" : "source")}>
+			Source{sources.length ? `: ${sources.join(", ")}` : ""}
+		</button>
+	{/if}
 	<span class="spacer"></span>
 	<span class="view-chip"><LayoutIcon kind={viewType} size={16} /> {viewType[0].toUpperCase() + viewType.slice(1)}</span>
 	<!-- Anytype dataviewControlsSideRight: search, then the collapsible
