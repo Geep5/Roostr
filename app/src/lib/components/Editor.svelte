@@ -48,18 +48,28 @@
 	 *  race when render straddles frames - the caret then silently stays in
 	 *  the OLD block and keystrokes land one line above where the user is
 	 *  looking. Retries across frames until focus verifiably lands. */
-	function focusNow(blockId: string, offset: number) {
+	function focusNow(blockId: string, offset: number, fallbackId = "") {
 		let tries = 0;
 		const attempt = () => {
 			const el = blockEl(blockId);
-			if (el && el.isConnected && el.dataset.ready === "1") {
+			if (el && el.isConnected) {
 				el.focus();
 				setCaret(el, offset);
 				if (document.activeElement === el) return;
 			}
-			if (++tries < 24) requestAnimationFrame(attempt);
+			if (++tries < 48) {
+				requestAnimationFrame(attempt);
+				return;
+			}
+			// Never leave the user with a dead caret: if the target block
+			// won't take focus, put the caret back where they were.
+			const back = fallbackId ? blockEl(fallbackId) : null;
+			if (back) {
+				back.focus();
+				setCaret(back, back.textContent?.length ?? 0);
+			}
 		};
-		requestAnimationFrame(attempt);
+		attempt();
 	}
 
 	// ── Spellcheck (basic English dictionary + ignore list) ─────────
@@ -526,7 +536,7 @@
 					innerEl.focus();
 					setCaret(innerEl, 0);
 				}
-				if (document.activeElement !== innerEl) focusNow(innerId, 0);
+				if (document.activeElement !== innerEl) focusNow(innerId, 0, id);
 				await note.blockAdd(object.id, { id: innerId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } }, id, Pos.INNER_FIRST);
 				await refresh();
 				return;
@@ -575,13 +585,19 @@
 				const par = object.blocks.find((b) => b.id !== newId && b.childrenIds.includes(id));
 				if (par) par.childrenIds.splice(par.childrenIds.indexOf(id) + 1, 0, newId);
 			});
-			if (el) el.innerHTML = toHtml(text.slice(0, at), headMarks);
+			// Focus BEFORE touching the old element's DOM: rewriting the
+			// focused element destroys the live selection, and if the new
+			// element lookup then missed, typing went dead entirely.
 			const newEl = blockEl(newId);
 			if (newEl) {
 				newEl.focus();
 				setCaret(newEl, 0);
 			}
-			if (document.activeElement !== newEl) focusNow(newId, 0);
+			if (document.activeElement !== newEl) focusNow(newId, 0, id);
+			if (el) {
+				const headHtml = toHtml(text.slice(0, at), headMarks);
+				if (el.innerHTML !== headHtml) el.innerHTML = headHtml;
+			}
 			await note.blockUpdate(object.id, id, contentFor(id, text.slice(0, at), headMarks));
 			await note.blockAdd(
 				object.id,
