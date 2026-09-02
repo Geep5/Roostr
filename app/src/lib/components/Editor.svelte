@@ -1024,16 +1024,42 @@
 		const ids = blockMenu?.group ?? [id];
 		const textIds = ids.filter((b) => byId.get(b)?.content.text);
 		lastLocalEdit = Date.now();
+		// Group styling snapshots its reads BEFORE any write and refreshes
+		// ONCE at the end: per-block write+refetch cycles let a mid-loop
+		// re-render (or an SSE echo) clobber later blocks' reads - the
+		// "last block randomly kept its style" bug.
+		const groupText = async (make: (cur: NonNullable<BlockJSON["content"]["text"]>, text: string, marks: ReturnType<typeof fromDom>["marks"]) => BlockJSON["content"]["text"]) => {
+			const payloads = textIds.map((b) => {
+				const cur = byId.get(b)!.content.text!;
+				const el = blockEl(b);
+				const dom = el && el.dataset.ready === "1" ? fromDom(el) : { text: cur.text ?? "", marks: cur.marks ?? [] };
+				return { b, content: { text: make(cur, dom.text, dom.marks) } };
+			});
+			for (const pIt of payloads) {
+				cancelPending(pIt.b);
+				await note.blockUpdate(object.id, pIt.b, pIt.content);
+			}
+		};
 		switch (a.kind) {
 			case "style":
-				for (const b of textIds) await applyStyle(b, a.value as number, ids.length === 1);
+				if (ids.length === 1) {
+					await applyStyle(id, a.value as number);
+					break;
+				}
+				await groupText((cur, text, marks) => ({ text, marks, style: a.value as number, checked: cur.checked ?? false, color: cur.color ?? "" }));
+				await refresh();
 				break;
 			case "align":
 				for (const b of ids) await note.blockSetAttrs(object.id, b, { align: a.value as number });
 				await refresh();
 				break;
 			case "color":
-				for (const b of textIds) await setTextColor(b, a.value as string);
+				if (ids.length === 1) {
+					await setTextColor(id, a.value as string);
+					break;
+				}
+				await groupText((cur, text, marks) => ({ ...cur, text, marks, color: a.value as string }));
+				await refresh();
 				break;
 			case "background":
 				for (const b of ids) await note.blockSetAttrs(object.id, b, { background_color: a.value as string });
@@ -1074,7 +1100,7 @@
 			}
 			case "clear_style": {
 				// Anytype's Clear style: back to default color, background, align.
-				for (const b of textIds) await setTextColor(b, "");
+				await groupText((cur, text, marks) => ({ ...cur, text, marks, color: "" }));
 				for (const b of ids) await note.blockSetAttrs(object.id, b, { background_color: "", align: 0 });
 				await refresh();
 				break;
