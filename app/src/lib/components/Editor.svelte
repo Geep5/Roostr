@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { flushSync } from "svelte";
 	import type { ObjectJSON, BlockJSON, MarkJSON } from "$lib/types";
 	import { Pos, Style, MarkT, Layout } from "$lib/types";
 	import { note, table, fetchObject } from "$lib/api";
@@ -516,9 +517,16 @@
 				// otherwise everything typed during the round trip lands in
 				// the old block (Anytype applies model-side first too).
 				const inner: BlockJSON = { id: innerId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } };
-				object.blocks.push(inner);
-				byId.get(id)!.childrenIds.unshift(innerId);
-				focusNow(innerId, 0);
+				flushSync(() => {
+					object.blocks.push(inner);
+					byId.get(id)!.childrenIds.unshift(innerId);
+				});
+				const innerEl = blockEl(innerId);
+				if (innerEl) {
+					innerEl.focus();
+					setCaret(innerEl, 0);
+				}
+				if (document.activeElement !== innerEl) focusNow(innerId, 0);
 				await note.blockAdd(object.id, { id: innerId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } }, id, Pos.INNER_FIRST);
 				await refresh();
 				return;
@@ -554,16 +562,26 @@
 			// typed right after Enter landed in the old line ("first items" /
 			// "econd"). Writes follow; refresh reconciles the same ids.
 			const cur = byId.get(id)!;
-			if (cur.content.text) {
-				cur.content.text.text = text.slice(0, at);
-				cur.content.text.marks = headMarks;
-			}
+			// flushSync renders the new block in THIS tick so the very next
+			// keystroke already finds the caret in it - a scheduled render +
+			// rAF focus still lost the first character to the old line.
+			flushSync(() => {
+				if (cur.content.text) {
+					cur.content.text.text = text.slice(0, at);
+					cur.content.text.marks = headMarks;
+				}
+				const idx = object.blocks.findIndex((b) => b.id === id);
+				object.blocks.splice(idx + 1, 0, tail);
+				const par = object.blocks.find((b) => b.id !== newId && b.childrenIds.includes(id));
+				if (par) par.childrenIds.splice(par.childrenIds.indexOf(id) + 1, 0, newId);
+			});
 			if (el) el.innerHTML = toHtml(text.slice(0, at), headMarks);
-			const idx = object.blocks.findIndex((b) => b.id === id);
-			object.blocks.splice(idx + 1, 0, tail);
-			const par = object.blocks.find((b) => b.id !== newId && b.childrenIds.includes(id));
-			if (par) par.childrenIds.splice(par.childrenIds.indexOf(id) + 1, 0, newId);
-			focusNow(newId, 0);
+			const newEl = blockEl(newId);
+			if (newEl) {
+				newEl.focus();
+				setCaret(newEl, 0);
+			}
+			if (document.activeElement !== newEl) focusNow(newId, 0);
 			await note.blockUpdate(object.id, id, contentFor(id, text.slice(0, at), headMarks));
 			await note.blockAdd(
 				object.id,
