@@ -61,10 +61,24 @@
 
 	function onEditorContextMenu(e: MouseEvent) {
 		const hit = misspelledAt(e.clientX, e.clientY);
-		if (!hit) return; // native menu (or block menu) as usual
-		e.preventDefault();
-		e.stopPropagation();
-		spellMenu = { word: hit.word, x: e.clientX, y: e.clientY };
+		if (hit) {
+			e.preventDefault();
+			e.stopPropagation();
+			spellMenu = { word: hit.word, x: e.clientX, y: e.clientY };
+			return;
+		}
+		// A live multi-selection owns the right-click (Anytype's provider
+		// intercepts contextmenu with selected ids). Without this, the
+		// indent area around nested rows belongs to an ANCESTOR's DOM, so
+		// right-clicking beside a selected child anchored the menu on the
+		// unselected parent toggle.
+		if (selectedIds.length > 1) {
+			const blockDiv = (e.target as HTMLElement).closest("[data-block]");
+			const hitId = blockDiv?.getAttribute("data-block") ?? "";
+			e.preventDefault();
+			e.stopPropagation();
+			openBlockMenu(selectedSet.has(hitId) ? hitId : selectedIds[0], e.clientX, e.clientY);
+		}
 	}
 
 	// ── Multi-block selection (Anytype selection/provider.tsx) ──────
