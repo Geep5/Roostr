@@ -439,6 +439,57 @@
 		return { text: { text, style: cur?.style ?? Style.PARAGRAPH, marks, checked: cur?.checked ?? false, color: cur?.color ?? "" } };
 	}
 
+	// ── Local-first structural ops (Anytype's dispatcher model) ──────
+	// Every keyboard op: 1) mutate local state inside flushSync so it
+	// renders THIS tick, 2) place the caret, 3) persist the same mutation,
+	// 4) one refresh reconciles. The UI never waits on the daemon.
+
+	function localInsertAfter(nb: BlockJSON, refId: string) {
+		const idx = object.blocks.findIndex((b) => b.id === refId);
+		object.blocks.splice(idx + 1, 0, nb);
+		const par = object.blocks.find((b) => b.id !== nb.id && b.childrenIds.includes(refId));
+		if (par) par.childrenIds.splice(par.childrenIds.indexOf(refId) + 1, 0, nb.id);
+	}
+
+	function localInsertBefore(nb: BlockJSON, refId: string) {
+		const idx = object.blocks.findIndex((b) => b.id === refId);
+		object.blocks.splice(Math.max(0, idx), 0, nb);
+		const par = object.blocks.find((b) => b.id !== nb.id && b.childrenIds.includes(refId));
+		if (par) par.childrenIds.splice(par.childrenIds.indexOf(refId), 0, nb.id);
+	}
+
+	function localDetach(rid: string) {
+		for (const b of object.blocks) {
+			const j = b.childrenIds.indexOf(rid);
+			if (j >= 0) b.childrenIds.splice(j, 1);
+		}
+	}
+
+	function localRemove(rid: string) {
+		localDetach(rid);
+		const i = object.blocks.findIndex((b) => b.id === rid);
+		if (i >= 0) object.blocks.splice(i, 1);
+	}
+
+	/** Synchronous caret move with async rescue. */
+	function focusSync(bid: string, offset: number, fallbackId = "") {
+		const target = blockEl(bid);
+		if (target) {
+			target.focus();
+			setCaret(target, offset);
+		}
+		if (document.activeElement !== target) focusNow(bid, offset, fallbackId);
+	}
+
+	/** Persist trailing writes; on failure the refresh restores server truth. */
+	async function persist(writes: () => Promise<unknown>) {
+		try {
+			await writes();
+		} finally {
+			await refresh();
+		}
+	}
+
 	/** Blocks with unsaved user input. Saves ONLY fire for dirty blocks —
 	 * blur/re-render races must never persist a DOM read the user didn't type. */
 	const dirty = new Set<string>();
@@ -510,9 +561,14 @@
 				const curText = byId.get(id)!.content.text!;
 				cancelPending(id);
 				lastLocalEdit = Date.now();
-				await note.blockUpdate(object.id, id, { text: { ...curText, text: "", marks: [], style: Style.PARAGRAPH, checked: false } });
-				focusRequest = { blockId: id, offset: 0 };
-				await refresh();
+				flushSync(() => {
+					curText.text = "";
+					curText.marks = [];
+					curText.style = Style.PARAGRAPH;
+					curText.checked = false;
+				});
+				focusSync(id, 0);
+				await persist(() => note.blockUpdate(object.id, id, { text: { text: "", marks: [], style: Style.PARAGRAPH, checked: false, color: curText.color ?? "" } }));
 				return;
 			}
 
@@ -531,14 +587,8 @@
 					object.blocks.push(inner);
 					byId.get(id)!.childrenIds.unshift(innerId);
 				});
-				const innerEl = blockEl(innerId);
-				if (innerEl) {
-					innerEl.focus();
-					setCaret(innerEl, 0);
-				}
-				if (document.activeElement !== innerEl) focusNow(innerId, 0, id);
-				await note.blockAdd(object.id, { id: innerId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } }, id, Pos.INNER_FIRST);
-				await refresh();
+				focusSync(innerId, 0, id);
+				await persist(() => note.blockAdd(object.id, { id: innerId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } }, id, Pos.INNER_FIRST));
 				return;
 			}
 
@@ -558,9 +608,10 @@
 			// (checkboxes spawn a fresh unchecked checkbox, others a paragraph).
 			if (at === 0 && text.length > 0) {
 				const aboveStyle = curStyle === Style.CHECKBOX ? Style.CHECKBOX : Style.PARAGRAPH;
-				await note.blockAdd(object.id, { id: newId, childrenIds: [], content: { text: { text: "", style: aboveStyle } } }, id, Pos.TOP);
-				focusRequest = { blockId: id, offset: 0 };
-				await refresh();
+				const above: BlockJSON = { id: newId, childrenIds: [], content: { text: { text: "", style: aboveStyle } } };
+				flushSync(() => localInsertBefore(above, id));
+				focusSync(id, 0);
+				await persist(() => note.blockAdd(object.id, { id: newId, childrenIds: [], content: { text: { text: "", style: aboveStyle } } }, id, Pos.TOP));
 				return;
 			}
 
@@ -573,39 +624,30 @@
 			// "econd"). Writes follow; refresh reconciles the same ids.
 			const cur = byId.get(id)!;
 			// flushSync renders the new block in THIS tick so the very next
-			// keystroke already finds the caret in it - a scheduled render +
-			// rAF focus still lost the first character to the old line.
+			// keystroke already finds the caret in it.
 			flushSync(() => {
 				if (cur.content.text) {
 					cur.content.text.text = text.slice(0, at);
 					cur.content.text.marks = headMarks;
 				}
-				const idx = object.blocks.findIndex((b) => b.id === id);
-				object.blocks.splice(idx + 1, 0, tail);
-				const par = object.blocks.find((b) => b.id !== newId && b.childrenIds.includes(id));
-				if (par) par.childrenIds.splice(par.childrenIds.indexOf(id) + 1, 0, newId);
+				localInsertAfter(tail, id);
 			});
 			// Focus BEFORE touching the old element's DOM: rewriting the
-			// focused element destroys the live selection, and if the new
-			// element lookup then missed, typing went dead entirely.
-			const newEl = blockEl(newId);
-			if (newEl) {
-				newEl.focus();
-				setCaret(newEl, 0);
-			}
-			if (document.activeElement !== newEl) focusNow(newId, 0, id);
+			// focused element destroys the live selection.
+			focusSync(newId, 0, id);
 			if (el) {
 				const headHtml = toHtml(text.slice(0, at), headMarks);
 				if (el.innerHTML !== headHtml) el.innerHTML = headHtml;
 			}
-			await note.blockUpdate(object.id, id, contentFor(id, text.slice(0, at), headMarks));
-			await note.blockAdd(
-				object.id,
-				{ id: newId, childrenIds: [], content: { text: { text: text.slice(at), style: newStyle, marks: tailMarks } } },
-				id,
-				Pos.BOTTOM,
-			);
-			await refresh();
+			await persist(async () => {
+				await note.blockUpdate(object.id, id, contentFor(id, text.slice(0, at), headMarks));
+				await note.blockAdd(
+					object.id,
+					{ id: newId, childrenIds: [], content: { text: { text: text.slice(at), style: newStyle, marks: tailMarks } } },
+					id,
+					Pos.BOTTOM,
+				);
+			});
 			return;
 		}
 
@@ -616,13 +658,18 @@
 				const cur = byId.get(id)!;
 				const curText = cur.content.text!;
 				if (curText.style !== Style.PARAGRAPH) {
-					// First backspace demotes style.
+					// First backspace demotes style - local flip, write behind.
 					const { text, marks } = fromDom(el);
 					cancelPending(id);
 					lastLocalEdit = Date.now();
-					await note.blockUpdate(object.id, id, { text: { ...curText, text, marks, style: Style.PARAGRAPH } });
-					focusRequest = { blockId: id, offset: 0 };
-					await refresh();
+					flushSync(() => {
+						curText.text = text;
+						curText.marks = marks;
+						curText.style = Style.PARAGRAPH;
+						curText.checked = false;
+					});
+					focusSync(id, 0);
+					await persist(() => note.blockUpdate(object.id, id, { text: { text, marks, style: Style.PARAGRAPH, checked: false, color: curText.color ?? "" } }));
 					return;
 				}
 				const idx = flatText.indexOf(id);
@@ -631,16 +678,28 @@
 				const prev = readBlock(prevId);
 				const cur2 = fromDom(el);
 				const shift = prev.text.length;
+				const mergedMarks = [
+					...prev.marks,
+					...cur2.marks.map((m) => ({ ...m, from: m.from + shift, to: m.to + shift })),
+				];
 				cancelPending(id);
 				cancelPending(prevId);
 				lastLocalEdit = Date.now();
-				await note.blockUpdate(object.id, prevId, contentFor(prevId, prev.text + cur2.text, [
-					...prev.marks,
-					...cur2.marks.map((m) => ({ ...m, from: m.from + shift, to: m.to + shift })),
-				]));
-				await note.blockRemove(object.id, id);
-				focusRequest = { blockId: prevId, offset: shift };
-				await refresh();
+				const prevBlock = byId.get(prevId)!;
+				flushSync(() => {
+					if (prevBlock.content.text) {
+						prevBlock.content.text.text = prev.text + cur2.text;
+						prevBlock.content.text.marks = mergedMarks;
+					}
+					localRemove(id);
+				});
+				const prevEl = blockEl(prevId);
+				if (prevEl) prevEl.innerHTML = toHtml(prev.text + cur2.text, mergedMarks);
+				focusSync(prevId, shift);
+				await persist(async () => {
+					await note.blockUpdate(object.id, prevId, contentFor(prevId, prev.text + cur2.text, mergedMarks));
+					await note.blockRemove(object.id, id);
+				});
 				return;
 			}
 		}
@@ -651,29 +710,61 @@
 			e.preventDefault();
 			const sel = selectionOffsets(el);
 			const at = sel?.from ?? 0;
+			// A move op carries no text: capture the DOM's CURRENT text into
+			// state + the trailing write. (cancelPending here used to throw
+			// away everything typed since the last save - Tab wiped text.)
+			const { text: liveText, marks: liveMarks } = fromDom(el);
+			const curBlock = byId.get(id)!;
+			cancelPending(id);
+			lastLocalEdit = Date.now();
 			const parentOf = new Map<string, string>();
 			for (const b of object.blocks) for (const c of b.childrenIds) parentOf.set(c, b.id);
 			const parentId = parentOf.get(id);
+			let targetId = "";
+			let pos = 0;
 			if (e.shiftKey) {
 				// Outdent: become the sibling right below the parent.
 				if (!parentId || parentId === "__content__") return;
-				cancelPending(id);
-				lastLocalEdit = Date.now();
-				await note.blockMove(object.id, id, parentId, Pos.BOTTOM);
+				targetId = parentId;
+				pos = Pos.BOTTOM;
+				flushSync(() => {
+					if (curBlock.content.text) {
+						curBlock.content.text.text = liveText;
+						curBlock.content.text.marks = liveMarks;
+					}
+					localDetach(id);
+					// Root ordering is blocks-array order: place after the parent.
+					const i = object.blocks.findIndex((b) => b.id === id);
+					const [me] = object.blocks.splice(i, 1);
+					const pIdx = object.blocks.findIndex((b) => b.id === parentId);
+					object.blocks.splice(pIdx + 1, 0, me);
+					const gp = object.blocks.find((b) => b.childrenIds.includes(parentId));
+					if (gp) gp.childrenIds.splice(gp.childrenIds.indexOf(parentId) + 1, 0, id);
+				});
 			} else {
 				// Indent: append under the sibling directly above.
 				const siblings = parentId ? (byId.get(parentId)?.childrenIds ?? []) : rootIds;
 				const idx = siblings.indexOf(id);
 				if (idx <= 0) return;
 				const prevId = siblings[idx - 1];
-				cancelPending(id);
-				lastLocalEdit = Date.now();
-				await note.blockMove(object.id, id, prevId, Pos.INNER);
+				targetId = prevId;
+				pos = Pos.INNER;
+				flushSync(() => {
+					if (curBlock.content.text) {
+						curBlock.content.text.text = liveText;
+						curBlock.content.text.marks = liveMarks;
+					}
+					localDetach(id);
+					byId.get(prevId)!.childrenIds.push(id);
+				});
 				// Tucking under a closed toggle would make the block vanish.
 				if (byId.get(prevId)?.content.text?.style === Style.TOGGLE) setToggleOpen(object.id, prevId, true);
 			}
-			focusRequest = { blockId: id, offset: at };
-			await refresh();
+			focusSync(id, at);
+			await persist(async () => {
+				await note.blockUpdate(object.id, id, contentFor(id, liveText, liveMarks));
+				await note.blockMove(object.id, id, targetId, pos);
+			});
 			return;
 		}
 
