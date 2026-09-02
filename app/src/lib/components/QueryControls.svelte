@@ -314,7 +314,10 @@
 		await saveSorts(next);
 	}
 	$effect(() => {
-		if (sources.length === 0) open = "source";
+		// A sourceless QUERY needs a source before it can show anything -
+		// open the picker. Collections have no source concept: their
+		// membership IS the source, so nothing auto-opens.
+		if (mode === "query" && sources.length === 0) open = "source";
 	});
 
 	function updateFilter(idx: number, patch: Partial<FilterRule>) {
@@ -443,7 +446,7 @@
 	<button class="new-btn" disabled={creating} onclick={() => void newRecord()}>New</button>
 </div>
 
-{#if open === "source"}
+{#if open === "source" && mode === "query"}
 	<div class="panel">
 		{#each sources as s, i (s + i)}
 			<div class="rule">
