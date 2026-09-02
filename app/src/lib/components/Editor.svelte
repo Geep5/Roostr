@@ -464,6 +464,38 @@
 			}
 		}
 
+		// Anytype Tab/Shift-Tab: indent under the previous sibling / outdent
+		// to a sibling of the parent. Works at any depth.
+		if (e.key === "Tab") {
+			e.preventDefault();
+			const sel = selectionOffsets(el);
+			const at = sel?.from ?? 0;
+			const parentOf = new Map<string, string>();
+			for (const b of object.blocks) for (const c of b.childrenIds) parentOf.set(c, b.id);
+			const parentId = parentOf.get(id);
+			if (e.shiftKey) {
+				// Outdent: become the sibling right below the parent.
+				if (!parentId || parentId === "__content__") return;
+				cancelPending(id);
+				lastLocalEdit = Date.now();
+				await note.blockMove(object.id, id, parentId, Pos.BOTTOM);
+			} else {
+				// Indent: append under the sibling directly above.
+				const siblings = parentId ? (byId.get(parentId)?.childrenIds ?? []) : rootIds;
+				const idx = siblings.indexOf(id);
+				if (idx <= 0) return;
+				const prevId = siblings[idx - 1];
+				cancelPending(id);
+				lastLocalEdit = Date.now();
+				await note.blockMove(object.id, id, prevId, Pos.INNER);
+				// Tucking under a closed toggle would make the block vanish.
+				if (byId.get(prevId)?.content.text?.style === Style.TOGGLE) setToggleOpen(object.id, prevId, true);
+			}
+			focusRequest = { blockId: id, offset: at };
+			await refresh();
+			return;
+		}
+
 		if (e.key === "/") {
 			// Open at the caret; the "/" lands in the block and is stripped on
 			// apply. Position is read after the character is inserted.
