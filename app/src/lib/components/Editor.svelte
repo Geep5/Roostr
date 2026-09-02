@@ -959,6 +959,11 @@
 		// Opened on a block inside a multi-selection: styling ops apply to
 		// the whole selection (Anytype's selection-wide block actions).
 		const group = selectedIds.length > 1 && selectedSet.has(id) ? [...selectedIds] : null;
+		// Opened OUTSIDE the selection: retarget it to the clicked block
+		// (Anytype getForClick) - the old selection stayed highlighted while
+		// the menu silently acted on the anchor, which read as "a block I
+		// didn't select got changed".
+		if (!group && selectedIds.length > 0 && !selectedSet.has(id)) selectedIds = [id];
 		blockMenu = { blockId: id, x, y, group };
 	}
 
