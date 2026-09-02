@@ -284,8 +284,13 @@
 		if (e.button !== 0 || !editorEl || dragSel) return;
 		const t = e.target as HTMLElement;
 		if (editorEl.contains(t)) return; // the editor's own handler owns this
-		const scope = editorEl.closest("article");
-		if (!scope || !scope.contains(t)) return;
+		// The page margins live in the scroll column around the article, so
+		// scope to that (Anytype's provider wraps the whole window).
+		const scope = scrollerOf();
+		if (scope === document.scrollingElement || scope === document.documentElement || !scope.contains(t)) {
+			const article = editorEl.closest("article");
+			if (!article?.parentElement?.contains(t)) return;
+		}
 		if (t.closest("input, textarea, select, button, a, [contenteditable], [role='dialog'], .block-menu, .flyout, .toolbar, .spell-menu")) return;
 		armDrag(e, false);
 	}
