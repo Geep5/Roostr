@@ -9,7 +9,7 @@
 
 	/** Objects in the active channel (unassigned objects live in the default channel). */
 	const objects = $derived(
-		store.summaries.filter((o) => !["type", "template", "agent", "pinned_fact", "milestone"].includes(o.typeKey) && (o.channelId === channelId || (o.channelId === "" && channelId === defaultChannelId))),
+		store.summaries.filter((o) => !["type", "template", "agent", "pinned_fact", "milestone"].includes(o.typeKey) && o.channelId === channelId),
 	);
 
 	let picking = $state(false);

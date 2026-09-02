@@ -82,10 +82,19 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		// An empty name stays empty: the title input shows an "Untitled"
 		// placeholder instead, so typing needs no delete-first.
 		append(&ops, Operation{kind = .Field_Set, key = "name", value = string_value(name)})
+		has_channel := false
 		if fields, ok := json_field(parsed, "fields"); ok {
 			for e in fields_from_json(fields, context.temp_allocator) {
+				if e.key == "channel" do has_channel = true
 				append(&ops, Operation{kind = .Field_Set, key = e.key, value = e.value})
 			}
+		}
+		// Every object belongs to a space (Anytype invariant): unassigned
+		// creations land in the oldest channel instead of floating into
+		// whichever space happens to be the display default.
+		if !has_channel && type_key != "channel" {
+			ch := oldest_channel_id()
+			if ch != "" do append(&ops, Operation{kind = .Field_Set, key = "channel", value = string_value(ch)})
 		}
 		if !commit_ops(id, ops[:]) {
 			respond_error(sock, "write failed", "500 Internal Server Error")
@@ -1041,4 +1050,24 @@ block_custom_meta :: proc(object_id, block_id: string) -> Block_Meta {
 		}
 	}, &m)
 	return m
+}
+
+/** The oldest live channel's id - the stable home for unassigned objects. */
+oldest_channel_id :: proc() -> string {
+	Ctx :: struct {
+		id:      string,
+		created: i64,
+	}
+	ctx := Ctx{"", 0}
+	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+		c := cast(^Ctx)user
+		for _, s in states {
+			if s.type_key != "channel" || s.deleted do continue
+			if c.id == "" || s.created_at < c.created {
+				c.created = s.created_at
+				c.id = strings.clone(s.id, context.temp_allocator)
+			}
+		}
+	}, &ctx)
+	return ctx.id
 }

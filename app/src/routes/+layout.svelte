@@ -41,7 +41,7 @@
 	const objectSummary = $derived(store.summaries.find((s) => s.id === objectId));
 
 	/** The channel whose pinnedIds owns this object (unassigned → default). */
-	const owningSpaceOf = (channelId: string) => channels.find((c) => c.id === (channelId || defaultChannelId));
+	const owningSpaceOf = (channelId: string) => channels.find((c) => c.id === channelId);
 	const isPinned = $derived.by(() => {
 		if (!objectSummary) return false;
 		return owningSpaceOf(objectSummary.channelId)?.pinnedIds.includes(objectSummary.id) ?? false;
@@ -77,7 +77,7 @@
 	const mobileRecents = $derived.by(() => {
 		if (!current) return [];
 		return store.summaries
-			.filter((x) => (x.channelId || defaultChannelId) === current.id)
+			.filter((x) => x.channelId === current.id)
 			.sort((a, b) => b.updatedAt - a.updatedAt)
 			.slice(0, 6);
 	});
@@ -86,7 +86,7 @@
 	function latestInChannel(channelId: string) {
 		let best: (typeof store.summaries)[number] | null = null;
 		for (const s of store.summaries) {
-			if ((s.channelId || defaultChannelId) !== channelId) continue;
+			if (s.channelId !== channelId) continue;
 			if (!best || s.updatedAt > best.updatedAt) best = s;
 		}
 		return best;
@@ -119,7 +119,7 @@
 	function typeObjects(typeKey: string) {
 		const ch = activeSpace.id || defaultChannelId;
 		return store.summaries
-			.filter((s) => s.typeKey === typeKey && (s.channelId || defaultChannelId) === ch)
+			.filter((s) => s.typeKey === typeKey && s.channelId === ch)
 			.sort((a, b) => b.updatedAt - a.updatedAt)
 			.slice(0, 6);
 	}
@@ -138,7 +138,7 @@
 	const collections = $derived(
 		store.summaries.filter(
 			(s) => s.typeKey === "collection" && s.id !== objectId &&
-				(s.channelId || defaultChannelId) === ((objectSummary?.channelId ?? activeSpace.id) || defaultChannelId),
+				s.channelId === ((objectSummary?.channelId || activeSpace.id) || defaultChannelId),
 		),
 	);
 
@@ -358,7 +358,7 @@
 		if (!current) return [];
 		const pinnedSet = new Set(current.pinnedIds);
 		return store.summaries
-			.filter((s) => !pinnedSet.has(s.id) && !["type", "template", "agent", "pinned_fact", "milestone"].includes(s.typeKey) && (s.channelId === current.id || (s.channelId === "" && current.id === defaultChannelId)))
+			.filter((s) => !pinnedSet.has(s.id) && !["type", "template", "agent", "pinned_fact", "milestone"].includes(s.typeKey) && s.channelId === current.id)
 			.slice(0, 8);
 	});
 
