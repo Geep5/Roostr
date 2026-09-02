@@ -218,7 +218,12 @@
 		if (editorEl) {
 			for (const el of editorEl.querySelectorAll("[data-block]")) {
 				const r = el.getBoundingClientRect();
-				if (r.left < x + w && r.right > x && r.top < y + h && r.bottom > y) {
+				// Hit-test the block's OWN row, not its subtree bounding box -
+				// otherwise sweeping nested children always drags the parents
+				// in (Anytype's selectionTarget excludes rendered children).
+				const firstNested = el.querySelector("[data-block]");
+				const bottom = firstNested ? Math.min(r.bottom, firstNested.getBoundingClientRect().top) : r.bottom;
+				if (r.left < x + w && r.right > x && r.top < y + h && bottom > y) {
 					hits.push(el.getAttribute("data-block")!);
 				}
 			}
