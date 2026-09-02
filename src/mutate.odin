@@ -15,6 +15,9 @@ import "core:encoding/json"
 import "core:encoding/hex"
 import "core:crypto"
 
+/** Root block every message thread hangs under (chat + object discussions). */
+DISCUSSION_ID :: "__discussion__"
+
 // ── Change builders ──────────────────────────────────────────────────
 
 make_change :: proc(object_id: string, ops: []Operation, author := "glon-odin") -> Change {
@@ -114,13 +117,26 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		block := block_from_json(block_json, context.temp_allocator)
 		if block.id == "" do block.id = new_uuid(context.temp_allocator)
 		position, _ := json_int(parsed, "position")
-		op := Operation {
-			kind      = .Block_Add,
-			block     = block,
-			target_id = json_str(parsed, "target_id"),
-			position  = position,
+		target_id := json_str(parsed, "target_id")
+		ops := make([dynamic]Operation, context.temp_allocator)
+		// insert_to degrades an unknown target to a root block rather than
+		// losing it, so adding into a discussion that doesn't exist yet
+		// silently orphans the block: present in the object, absent from
+		// the thread. chat_post has always guarded this by prepending an
+		// idempotent root add (replay skips it when the id exists); do the
+		// same here so the agent harness's first write to a fresh chat
+		// lands in the thread instead of beside it.
+		if target_id == DISCUSSION_ID {
+			root_meta := make([dynamic]Str_Pair, context.temp_allocator)
+			append(&ops, Operation {
+				kind      = .Block_Add,
+				block     = Block{id = DISCUSSION_ID, content = {kind = .Custom, custom = {content_type = "discussion", meta = root_meta}}},
+				target_id = "",
+				position  = 0,
+			})
 		}
-		if !commit_ops(object_id, {op}) {
+		append(&ops, Operation{kind = .Block_Add, block = block, target_id = target_id, position = position})
+		if !commit_ops(object_id, ops[:]) {
 			respond_error(sock, "write failed", "500 Internal Server Error")
 			return
 		}
@@ -337,7 +353,7 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		root_meta := make([dynamic]Str_Pair, context.temp_allocator)
 		append(&ops, Operation {
 			kind      = .Block_Add,
-			block     = Block{id = "__discussion__", content = {kind = .Custom, custom = {content_type = "discussion", meta = root_meta}}},
+			block     = Block{id = DISCUSSION_ID, content = {kind = .Custom, custom = {content_type = "discussion", meta = root_meta}}},
 			target_id = "",
 			position  = 0,
 		})
@@ -356,7 +372,7 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		append(&ops, Operation {
 			kind      = .Block_Add,
 			block     = Block{id = mid, content = {kind = .Custom, custom = {content_type = "chat", meta = meta}}},
-			target_id = "__discussion__",
+			target_id = DISCUSSION_ID,
 			position  = POS_INNER,
 		})
 		if !commit_ops(object_id, ops[:]) {
