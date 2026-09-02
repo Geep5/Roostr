@@ -10,6 +10,7 @@
 	import GraphIcon from "$lib/components/GraphIcon.svelte";
 	import PinnedWidget from "$lib/components/PinnedWidget.svelte";
 	import { creatableTypes, typeGlyph, createTyped, createCollection, createQuery } from "$lib/create";
+	import type { SpaceJSON } from "$lib/types";
 
 	let { children }: { children: import("svelte").Snippet } = $props();
 
@@ -252,6 +253,106 @@
 		await refreshAll();
 	}
 
+	// ── Space reorder (drag on the rail, long-press on mobile) ──────
+	//
+	// `channels` stays in creation order everywhere else on purpose:
+	// channels[0] is the default space that owns unassigned legacy objects,
+	// and letting a drag change it would hand every orphan object to
+	// whichever space you dragged to the top. So the user's order is a
+	// DISPLAY concern, applied here and nowhere else.
+	//
+	// Position is a float on the channel object, defaulting to createdAt so
+	// both live in one number space: an unordered vault already sorts
+	// correctly, and a drop only has to write the moved space's own field.
+	const orderOf = (c: SpaceJSON) => c.order ?? c.createdAt;
+	const orderedSpaces = $derived([...channels].sort((a, b) => orderOf(a) - orderOf(b) || a.createdAt - b.createdAt));
+
+	let spaceDragId = $state("");
+	let spaceOverId = $state("");
+	let spaceOverAfter = $state(false);
+
+	/** Midpoint between the drop neighbours — or a step beyond the edge. */
+	async function commitSpaceMove(draggedId: string, targetId: string, after: boolean) {
+		if (!draggedId || !targetId || draggedId === targetId) return;
+		const rest = orderedSpaces.filter((c) => c.id !== draggedId);
+		const at = rest.findIndex((c) => c.id === targetId) + (after ? 1 : 0);
+		const before = rest[at - 1];
+		const next = rest[at];
+		let position: number;
+		if (before && next) position = (orderOf(before) + orderOf(next)) / 2;
+		else if (next) position = orderOf(next) - 1000;
+		else if (before) position = orderOf(before) + 1000;
+		else return;
+		await note.setField(draggedId, "order", { floatValue: position });
+		await refreshAll();
+	}
+
+	function spaceDragOver(e: DragEvent, id: string) {
+		if (!spaceDragId || spaceDragId === id) return;
+		e.preventDefault();
+		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		spaceOverId = id;
+		spaceOverAfter = e.clientY > r.top + r.height / 2;
+	}
+
+	async function spaceDrop() {
+		const dragged = spaceDragId;
+		const target = spaceOverId;
+		const after = spaceOverAfter;
+		spaceDragId = spaceOverId = "";
+		await commitSpaceMove(dragged, target, after);
+	}
+
+	// Touch has no HTML5 drag, and a plain touchmove would fight the page
+	// scroll — so a card must be HELD to lift it, exactly like reordering
+	// home-screen icons. Once lifted, touchmove picks the card under the
+	// finger and the drop commits the same move the mouse path does.
+	const LIFT_MS = 350;
+	let liftTimer: ReturnType<typeof setTimeout> | undefined;
+	let spaceLiftId = $state("");
+
+	// Svelte attaches touchmove passively, where preventDefault is a no-op
+	// and the list would scroll out from under the held card. Same fix the
+	// search sheet uses: register it by hand, non-passive, for the duration
+	// of the lift only.
+	function onLiftMove(e: TouchEvent) {
+		if (!spaceLiftId) return;
+		e.preventDefault();
+		const t = e.touches[0];
+		if (!t) return;
+		const card = (document.elementFromPoint(t.clientX, t.clientY) as HTMLElement | null)?.closest("[data-space-id]");
+		const id = card?.getAttribute("data-space-id") ?? "";
+		if (!id || id === spaceLiftId) return;
+		const r = card!.getBoundingClientRect();
+		spaceOverId = id;
+		spaceOverAfter = t.clientY > r.top + r.height / 2;
+	}
+
+	function spaceTouchStart(id: string) {
+		clearTimeout(liftTimer);
+		liftTimer = setTimeout(() => {
+			spaceLiftId = id;
+			spaceDragId = id;
+			spaceOverId = "";
+			document.addEventListener("touchmove", onLiftMove, { passive: false });
+			// A lift is a mode change; tell the hand it happened.
+			navigator.vibrate?.(12);
+		}, LIFT_MS);
+	}
+
+	/** A move before the hold completes is a scroll, so drop the pending lift. */
+	function spaceTouchCancelLift() {
+		if (!spaceLiftId) clearTimeout(liftTimer);
+	}
+
+	async function spaceTouchEnd() {
+		clearTimeout(liftTimer);
+		if (!spaceLiftId) return;
+		document.removeEventListener("touchmove", onLiftMove);
+		spaceLiftId = "";
+		await spaceDrop();
+	}
+
 	/** Recently edited in the current channel (unpinned). */
 	const recent = $derived.by(() => {
 		if (!current) return [];
@@ -436,9 +537,30 @@
 				<span class="m-title">Spaces</span>
 			</div>
 			<div class="m-cards">
-				{#each channels as c (c.id)}
+				{#each orderedSpaces as c (c.id)}
 					{@const latest = latestInChannel(c.id)}
-					<button class="m-card" onclick={() => { selectSpace(c.id); mobileSpaceOpen = true; }}>
+					<button
+						class="m-card"
+						class:lifted={spaceLiftId === c.id}
+						class:over-before={spaceOverId === c.id && !spaceOverAfter}
+						class:over-after={spaceOverId === c.id && spaceOverAfter}
+						data-space-id={c.id}
+						ontouchstart={() => spaceTouchStart(c.id)}
+						ontouchmove={spaceTouchCancelLift}
+						ontouchend={() => void spaceTouchEnd()}
+						ontouchcancel={() => void spaceTouchEnd()}
+						oncontextmenu={(e) => {
+							// Long-press raises the iOS callout; the hold is ours.
+							if (spaceLiftId) e.preventDefault();
+						}}
+						onclick={() => {
+							// A completed lift is a reorder, never navigation.
+							if (spaceLiftId) return;
+							clearTimeout(liftTimer);
+							selectSpace(c.id);
+							mobileSpaceOpen = true;
+						}}
+					>
 						<span class="m-card-icon">
 							{#if c.icon?.startsWith("http")}
 								<img class="m-card-img" src={c.icon} alt="" />
@@ -563,11 +685,30 @@
 {:else}
 <div class="shell">
 	<nav class="vault">
-		{#each channels as c (c.id)}
+		{#each orderedSpaces as c (c.id)}
 			<button
 				class="space"
 				class:active={current?.id === c.id}
+				class:drag-src={spaceDragId === c.id}
+				class:over-before={spaceOverId === c.id && !spaceOverAfter}
+				class:over-after={spaceOverId === c.id && spaceOverAfter}
 				title="{c.name}{c.members.length ? ` · ${c.members.length} member(s)` : ''}"
+				draggable="true"
+				ondragstart={(e) => {
+					spaceDragId = c.id;
+					e.dataTransfer?.setData("text/plain", c.id);
+				}}
+				ondragover={(e) => spaceDragOver(e, c.id)}
+				ondragleave={() => {
+					if (spaceOverId === c.id) spaceOverId = "";
+				}}
+				ondrop={(e) => {
+					e.preventDefault();
+					void spaceDrop();
+				}}
+				ondragend={() => {
+					spaceDragId = spaceOverId = "";
+				}}
 				onclick={() => selectSpace(c.id)}
 			>
 				{#if c.icon?.startsWith("http")}
@@ -950,6 +1091,31 @@
 	}
 	.space.active {
 		box-shadow: 0 0 0 2px var(--accent);
+	}
+	/* Reorder affordances. The rail is vertical, so the drop line is
+	   horizontal; the dragged tile fades so the line reads as its
+	   destination rather than a second selection. */
+	.space {
+		position: relative;
+	}
+	.space.drag-src {
+		opacity: 0.4;
+	}
+	.space.over-before::before,
+	.space.over-after::after {
+		content: "";
+		position: absolute;
+		left: -2px;
+		right: -2px;
+		height: 2px;
+		border-radius: 2px;
+		background: var(--accent);
+	}
+	.space.over-before::before {
+		top: -4px;
+	}
+	.space.over-after::after {
+		bottom: -4px;
 	}
 	.space.add {
 		color: var(--muted);
@@ -1452,6 +1618,34 @@
 		text-align: left;
 		cursor: pointer;
 		min-height: 64px;
+	}
+	/* Held card lifts off the list; the accent line shows where releasing
+	   will drop it. touch-action keeps the hold from scrolling the page. */
+	.m-card {
+		position: relative;
+		touch-action: pan-y;
+	}
+	.m-card.lifted {
+		transform: scale(1.03);
+		box-shadow: 0 10px 28px rgb(0 0 0 / 0.45);
+		border-color: var(--accent);
+		z-index: 2;
+	}
+	.m-card.over-before::before,
+	.m-card.over-after::after {
+		content: "";
+		position: absolute;
+		left: 8px;
+		right: 8px;
+		height: 2px;
+		border-radius: 2px;
+		background: var(--accent);
+	}
+	.m-card.over-before::before {
+		top: -5px;
+	}
+	.m-card.over-after::after {
+		bottom: -5px;
 	}
 	.m-card.add {
 		justify-content: center;

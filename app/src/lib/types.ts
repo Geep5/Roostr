@@ -65,6 +65,9 @@ export interface SpaceJSON {
 	pinnedIds: string[];
 	members: Array<{ npub: string; role: string }>;
 	keyId: number;
+	createdAt: number;
+	/** Drag-reorder position for the rail. Absent = fall back to createdAt. */
+	order?: number;
 }
 
 export interface RelationDefJSON {

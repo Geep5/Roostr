@@ -433,6 +433,15 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 			if v, ok := fields_get(s.fields, "keyId"); ok && v.kind == .Int do key_id = v.i
 			o["keyId"] = json.Integer(key_id)
 			o["createdAt"] = json.Integer(s.created_at)
+			// Display order for the space rail, set by drag-reorder. Absent
+			// means "use createdAt", so the two live in one number space and
+			// an unordered vault needs no migration. Deliberately does NOT
+			// affect the sort below: this payload's order is the protocol's
+			// (oldest first), and the UI applies the user's on top.
+			if v, ok := fields_get(s.fields, "order"); ok {
+				if v.kind == .Float do o["order"] = json.Float(v.f)
+				else if v.kind == .Int do o["order"] = json.Float(f64(v.i))
+			}
 			append(&arr, json.Object(o))
 			append(&keys, s.created_at)
 		}
