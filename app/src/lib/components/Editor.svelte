@@ -78,7 +78,21 @@
 	let selRect = $state<{ x: number; y: number; w: number; h: number } | null>(null);
 	let editorEl: HTMLElement | undefined = $state();
 	let lastFocused = "";
-	let dragSel: { x: number; y: number; base: string[]; mode: "replace" | "toggle" | "remove"; moved: boolean } | null = null;
+	// Anchor in scroll-container coords so the rect survives scrolling;
+	// textOrigin drags defer to the native text selection until they cross
+	// into a second block (Anytype selection/provider.tsx).
+	let dragSel: {
+		ax: number;
+		ay: number;
+		base: string[];
+		mode: "replace" | "toggle" | "remove";
+		moved: boolean;
+		textOrigin: boolean;
+		lastX: number;
+		lastY: number;
+		scroller: Element;
+	} | null = null;
+	let autoScrollTimer: ReturnType<typeof setInterval> | undefined;
 
 	/** Blocks in document order (tree DFS), Anytype's getTreeList. */
 	const flatIds = $derived.by(() => {
@@ -129,6 +143,35 @@
 		selectedIds = flatIds.slice(Math.min(a, b), Math.max(a, b) + 1);
 	}
 
+	/** The element whose scrolling moves the blocks under this editor. */
+	function scrollerOf(): Element {
+		let el: Element | null = editorEl ?? null;
+		while (el && el !== document.body) {
+			const o = getComputedStyle(el).overflowY;
+			if ((o === "auto" || o === "scroll") && el.scrollHeight > el.clientHeight) return el;
+			el = el.parentElement;
+		}
+		return document.scrollingElement ?? document.documentElement;
+	}
+
+	function armDrag(e: MouseEvent, textOrigin: boolean) {
+		const scroller = scrollerOf();
+		dragSel = {
+			ax: e.clientX + scroller.scrollLeft,
+			ay: e.clientY + scroller.scrollTop,
+			base: [...selectedIds],
+			mode: e.metaKey || e.ctrlKey ? "toggle" : e.altKey ? "remove" : "replace",
+			moved: false,
+			textOrigin,
+			lastX: e.clientX,
+			lastY: e.clientY,
+			scroller,
+		};
+		window.addEventListener("mousemove", selMouseMove);
+		window.addEventListener("mouseup", selMouseUp);
+		window.addEventListener("scroll", selOnScroll, true);
+	}
+
 	function selMouseDown(e: MouseEvent) {
 		if (e.button !== 0) return;
 		const t = e.target as HTMLElement;
@@ -144,32 +187,33 @@
 		// dragging a selected block drags the whole selection, and the
 		// clearing here used to collapse the group before dragstart fired.
 		if (t.closest(".handle")) return;
-		if (t.closest("[contenteditable], input, textarea, select, button, a")) {
+		if (t.closest("input, textarea, select, button, a")) {
 			if (blockDiv) lastFocused = blockDiv.getAttribute("data-block")!;
 			selectedIds = [];
 			return;
 		}
-		dragSel = {
-			x: e.clientX,
-			y: e.clientY,
-			base: [...selectedIds],
-			mode: e.metaKey || e.ctrlKey ? "toggle" : e.altKey ? "remove" : "replace",
-			moved: false,
-		};
-		window.addEventListener("mousemove", selMouseMove);
-		window.addEventListener("mouseup", selMouseUp);
+		if (t.closest("[contenteditable]")) {
+			if (blockDiv) lastFocused = blockDiv.getAttribute("data-block")!;
+			selectedIds = [];
+			// The native text drag proceeds - but if it escapes this block,
+			// it converts into a block selection (Anytype cross-select).
+			if (blockDiv) armDrag(e, true);
+			return;
+		}
+		armDrag(e, false);
 	}
 
-	function selMouseMove(e: MouseEvent) {
+	function selUpdate(cx: number, cy: number) {
 		if (!dragSel) return;
-		if (!dragSel.moved && Math.hypot(e.clientX - dragSel.x, e.clientY - dragSel.y) < 5) return;
-		dragSel.moved = true;
-		window.getSelection()?.removeAllRanges();
-		const x = Math.min(dragSel.x, e.clientX);
-		const y = Math.min(dragSel.y, e.clientY);
-		const w = Math.abs(e.clientX - dragSel.x);
-		const h = Math.abs(e.clientY - dragSel.y);
-		selRect = { x, y, w, h };
+		const ax = dragSel.ax - dragSel.scroller.scrollLeft;
+		const ay = dragSel.ay - dragSel.scroller.scrollTop;
+		const w = Math.abs(cx - ax);
+		const h = Math.abs(cy - ay);
+		// Anytype THRESHOLD: ignore only when BOTH axes are tiny, so a long
+		// thin drag across one line still selects.
+		if (!dragSel.moved && w < 20 && h < 20) return;
+		const x = Math.min(ax, cx);
+		const y = Math.min(ay, cy);
 		const hits: string[] = [];
 		if (editorEl) {
 			for (const el of editorEl.querySelectorAll("[data-block]")) {
@@ -179,6 +223,15 @@
 				}
 			}
 		}
+		if (dragSel.textOrigin && !dragSel.moved) {
+			// Native selection owns the drag until a second block is hit.
+			if (hits.length < 2) return;
+			window.getSelection()?.removeAllRanges();
+			(document.activeElement as HTMLElement | null)?.blur?.();
+		}
+		dragSel.moved = true;
+		if (!dragSel.textOrigin) window.getSelection()?.removeAllRanges();
+		selRect = { x, y, w, h };
 		if (dragSel.mode === "toggle") {
 			const base = new Set(dragSel.base);
 			selectedIds = [...dragSel.base.filter((i) => !hits.includes(i)), ...hits.filter((i) => !base.has(i))];
@@ -189,12 +242,52 @@
 		}
 	}
 
+	function selMouseMove(e: MouseEvent) {
+		if (!dragSel) return;
+		dragSel.lastX = e.clientX;
+		dragSel.lastY = e.clientY;
+		selUpdate(e.clientX, e.clientY);
+		if (dragSel.moved && autoScrollTimer === undefined) {
+			// Edge autoscroll: pointer parked near an edge keeps scrolling,
+			// and the scroll event re-runs the hit test (Anytype scrollOnMove).
+			autoScrollTimer = setInterval(() => {
+				if (!dragSel?.moved) return;
+				const B = 48;
+				const y = dragSel.lastY;
+				const el = dragSel.scroller;
+				if (y < B) el.scrollTop -= Math.min(12, Math.ceil((B - y) / 6));
+				else if (y > window.innerHeight - B) el.scrollTop += Math.min(12, Math.ceil((y - (window.innerHeight - B)) / 6));
+			}, 50);
+		}
+	}
+
+	function selOnScroll() {
+		if (dragSel) selUpdate(dragSel.lastX, dragSel.lastY);
+	}
+
 	function selMouseUp() {
-		if (dragSel && !dragSel.moved && dragSel.mode === "replace") selectedIds = [];
+		if (dragSel && !dragSel.moved && dragSel.mode === "replace" && !dragSel.textOrigin) selectedIds = [];
 		dragSel = null;
 		selRect = null;
+		if (autoScrollTimer !== undefined) {
+			clearInterval(autoScrollTimer);
+			autoScrollTimer = undefined;
+		}
 		window.removeEventListener("mousemove", selMouseMove);
 		window.removeEventListener("mouseup", selMouseUp);
+		window.removeEventListener("scroll", selOnScroll, true);
+	}
+
+	/** Arm from the page margins around the editor (Anytype's provider wraps
+	 *  the whole window, so margin drags select too). */
+	function marginMouseDown(e: MouseEvent) {
+		if (e.button !== 0 || !editorEl || dragSel) return;
+		const t = e.target as HTMLElement;
+		if (editorEl.contains(t)) return; // the editor's own handler owns this
+		const scope = editorEl.closest("article");
+		if (!scope || !scope.contains(t)) return;
+		if (t.closest("input, textarea, select, button, a, [contenteditable], [role='dialog'], .block-menu, .flyout, .toolbar, .spell-menu")) return;
+		armDrag(e, false);
 	}
 
 	async function onWindowKeydown(e: KeyboardEvent) {
@@ -1000,6 +1093,7 @@
 	onkeydown={(e) => void onWindowKeydown(e)}
 	onmousedown={(e) => {
 		if (spellMenu && !(e.target as HTMLElement).closest(".spell-menu")) spellMenu = null;
+		marginMouseDown(e);
 	}}
 />
 
