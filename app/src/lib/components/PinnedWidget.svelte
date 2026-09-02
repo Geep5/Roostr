@@ -220,23 +220,34 @@
 	.w-more:hover {
 		color: var(--fg);
 	}
+	/* Anytype's sidebar gallery: pronounced bordered cards on a 2-col
+	   grid - roomy padding, 500-weight names, visible outlines. */
 	.w-cards {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 4px;
-		padding-right: 8px;
+		gap: 8px;
+		padding: 4px 8px 6px 0;
 	}
 	.w-card {
 		display: flex;
 		align-items: center;
-		gap: 5px;
+		gap: 8px;
+		min-width: 0;
 		background: var(--hl-light);
-		border-radius: 8px;
-		padding: 6px 8px;
-		font-size: 11px;
-		color: var(--muted);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 11px 12px;
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--fg);
 		text-decoration: none;
 		overflow: hidden;
+	}
+	.w-card:hover {
+		border-color: color-mix(in srgb, var(--border) 55%, var(--fg));
+	}
+	.w-card .w-icon {
+		font-size: 15px;
 	}
 	.w-cal {
 		display: grid;
