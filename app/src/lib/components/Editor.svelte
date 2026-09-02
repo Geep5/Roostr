@@ -43,6 +43,24 @@
 	let draggingId = $state("");
 	let focusRequest = $state<{ blockId: string; offset: number } | null>(null);
 
+	/** Move the caret as soon as the element exists. A single rAF loses the
+	 *  race when render straddles frames - the caret then silently stays in
+	 *  the OLD block and keystrokes land one line above where the user is
+	 *  looking. Retries across frames until focus verifiably lands. */
+	function focusNow(blockId: string, offset: number) {
+		let tries = 0;
+		const attempt = () => {
+			const el = blockEl(blockId);
+			if (el && el.isConnected && el.dataset.ready === "1") {
+				el.focus();
+				setCaret(el, offset);
+				if (document.activeElement === el) return;
+			}
+			if (++tries < 24) requestAnimationFrame(attempt);
+		};
+		requestAnimationFrame(attempt);
+	}
+
 	// ── Spellcheck (basic English dictionary + ignore list) ─────────
 	let spellTimer: ReturnType<typeof setTimeout> | undefined;
 	let spellMenu = $state<{ word: string; x: number; y: number } | null>(null);
@@ -368,21 +386,7 @@
 		if (focusRequest) {
 			const req = focusRequest;
 			focusRequest = null;
-			// A single rAF loses the race when render straddles frames - the
-			// caret then silently stays in the OLD block and the next
-			// keystrokes land one line above where the user is looking.
-			// Retry across frames until the element exists and focus took.
-			let tries = 0;
-			const attempt = () => {
-				const el = blockEl(req.blockId);
-				if (el && el.isConnected) {
-					el.focus();
-					setCaret(el, req.offset);
-					if (document.activeElement === el) return;
-				}
-				if (++tries < 24) requestAnimationFrame(attempt);
-			};
-			requestAnimationFrame(attempt);
+			focusNow(req.blockId, req.offset);
 		}
 	}
 
@@ -508,8 +512,14 @@
 				const innerId = crypto.randomUUID();
 				cancelPending(id);
 				lastLocalEdit = Date.now();
+				// Optimistic: state + caret move NOW, the write catches up -
+				// otherwise everything typed during the round trip lands in
+				// the old block (Anytype applies model-side first too).
+				const inner: BlockJSON = { id: innerId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } };
+				object.blocks.push(inner);
+				byId.get(id)!.childrenIds.unshift(innerId);
+				focusNow(innerId, 0);
 				await note.blockAdd(object.id, { id: innerId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } }, id, Pos.INNER_FIRST);
-				focusRequest = { blockId: innerId, offset: 0 };
 				await refresh();
 				return;
 			}
@@ -536,14 +546,31 @@
 				return;
 			}
 
-			await note.blockUpdate(object.id, id, contentFor(id, text.slice(0, at), marks.filter((m) => m.from < at).map((m) => ({ ...m, to: Math.min(m.to, at) }))));
+			const headMarks = marks.filter((m) => m.from < at).map((m) => ({ ...m, to: Math.min(m.to, at) }));
+			const tailMarks = marks.filter((m) => m.to > at).map((m) => ({ ...m, from: Math.max(0, m.from - at), to: m.to - at }));
+			const tail: BlockJSON = { id: newId, childrenIds: [], content: { text: { text: text.slice(at), style: newStyle, marks: tailMarks } } };
+			// Optimistic: split the state and move the caret SYNCHRONOUSLY -
+			// the daemon round trip used to own the caret, so keystrokes
+			// typed right after Enter landed in the old line ("first items" /
+			// "econd"). Writes follow; refresh reconciles the same ids.
+			const cur = byId.get(id)!;
+			if (cur.content.text) {
+				cur.content.text.text = text.slice(0, at);
+				cur.content.text.marks = headMarks;
+			}
+			if (el) el.innerHTML = toHtml(text.slice(0, at), headMarks);
+			const idx = object.blocks.findIndex((b) => b.id === id);
+			object.blocks.splice(idx + 1, 0, tail);
+			const par = object.blocks.find((b) => b.id !== newId && b.childrenIds.includes(id));
+			if (par) par.childrenIds.splice(par.childrenIds.indexOf(id) + 1, 0, newId);
+			focusNow(newId, 0);
+			await note.blockUpdate(object.id, id, contentFor(id, text.slice(0, at), headMarks));
 			await note.blockAdd(
 				object.id,
-				{ id: newId, childrenIds: [], content: { text: { text: text.slice(at), style: newStyle, marks: marks.filter((m) => m.to > at).map((m) => ({ ...m, from: Math.max(0, m.from - at), to: m.to - at })) } } },
+				{ id: newId, childrenIds: [], content: { text: { text: text.slice(at), style: newStyle, marks: tailMarks } } },
 				id,
 				Pos.BOTTOM,
 			);
-			focusRequest = { blockId: newId, offset: 0 };
 			await refresh();
 			return;
 		}
