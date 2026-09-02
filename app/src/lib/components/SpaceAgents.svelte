@@ -800,7 +800,10 @@
 	}
 	.avatar-btn {
 		background: var(--hl-light, rgba(255, 255, 255, 0.06));
-		border: 1px solid transparent;
+		/* A bare emoji on a near-invisible fill reads as decoration, so the
+		   one control that sets an agent's avatar looked absent. A resting
+		   hairline says "button"; hover still promotes to accent. */
+		border: 1px solid var(--border);
 		border-radius: 50%;
 		width: 28px;
 		height: 28px;
