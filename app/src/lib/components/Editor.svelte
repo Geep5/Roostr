@@ -231,13 +231,10 @@
 		const hits: string[] = [];
 		if (editorEl) {
 			for (const el of editorEl.querySelectorAll("[data-block]")) {
+				// Each [data-block] is the block's OWN row - children live in a
+				// sibling .nested wrapper (Anytype's selectionTarget shape).
 				const r = el.getBoundingClientRect();
-				// Hit-test the block's OWN row, not its subtree bounding box -
-				// otherwise sweeping nested children always drags the parents
-				// in (Anytype's selectionTarget excludes rendered children).
-				const firstNested = el.querySelector("[data-block]");
-				const bottom = firstNested ? Math.min(r.bottom, firstNested.getBoundingClientRect().top) : r.bottom;
-				if (r.left < x + w && r.right > x && r.top < y + h && bottom > y) {
+				if (r.left < x + w && r.right > x && r.top < y + h && r.bottom > y) {
 					hits.push(el.getAttribute("data-block")!);
 				}
 			}

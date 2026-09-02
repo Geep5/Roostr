@@ -125,19 +125,15 @@
 	};
 
 	function computeZone(e: DragEvent): number {
+		// Anytype's content DropTarget wraps only the block's own row - and
+		// since children now render OUTSIDE this element, the rect IS the row.
 		const el = e.currentTarget as HTMLElement;
 		const r = el.getBoundingClientRect();
 		const gutter = el.querySelector(":scope > .gutter");
 		const contentLeft = gutter ? gutter.getBoundingClientRect().right : r.left;
-		// Anytype's content DropTarget wraps only the block's own row - the
-		// zone bands never span rendered children. Below the content row,
-		// the nested blocks (and the bot strip) own the pointer.
-		const kids = el.querySelector(":scope > .nested");
-		const contentBottom = kids ? kids.getBoundingClientRect().top : r.bottom;
-		if (e.clientY > contentBottom) return 0;
 		if (e.clientX < contentLeft) return Pos.LEFT;
 		if (e.clientX > r.right - 24) return Pos.RIGHT;
-		const h = contentBottom - r.top;
+		const h = r.height;
 		const y = h > 0 ? (e.clientY - r.top) / h : 0;
 		const style = block?.content.text?.style;
 		if (style !== undefined && CAN_HAVE_CHILDREN[style]) {
@@ -151,13 +147,13 @@
 
 {#if block}
 	{#if block.content.layout?.style === Layout.ROW}
-		<div class="row" data-block={block.id} style="grid-template-columns: {block.childrenIds.map(widthOf).join(' ')}">
+		<div class="row" style="grid-template-columns: {block.childrenIds.map(widthOf).join(' ')}">
 			{#each block.childrenIds as cid (cid)}
 				<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 			{/each}
 		</div>
 	{:else if block.content.layout?.style === Layout.COLUMN}
-		<div class="col" data-block={block.id}>
+		<div class="col">
 			{#each block.childrenIds as cid (cid)}
 				<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 			{/each}
@@ -206,11 +202,14 @@
 		</div>
 	{:else if block.content.text}
 		{@const t = block.content.text}
+		<!-- Anytype block/index.tsx: the selectionTarget wraps ONLY the row;
+		     children render as a SIBLING inside a plain wrapper, so pointer
+		     events near nested rows can never land on this ancestor. -->
+		<div class="block-tree" class:dragging={draggingId === block.id} style={block.backgroundColor ? `background:${block.backgroundColor}` : ""}>
 		<div
-			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
+			class="block zone-{zone}" class:selected={selectedIds.has(block.id)}
 			data-block={block.id}
 			role="presentation"
-			style={block.backgroundColor ? `background:${block.backgroundColor}` : ""}
 			ondragover={(e) => {
 				if (!draggingId || draggingId === block.id) return;
 				e.preventDefault();
@@ -304,6 +303,7 @@
 				{...IOS_KEYBOARD_OFF}
 				data-placeholder={t.style === Style.TITLE ? "Untitled" : "Type / for commands"}
 			></div>
+		</div>
 			{#if block.childrenIds.length > 0 && (!isToggle || toggleOpen)}
 				<div class="nested">
 					{#each block.childrenIds as cid (cid)}
@@ -510,11 +510,17 @@
 			</div>
 		</div>
 	{:else if block.content.custom}
-		<div class="block custom" class:selected={selectedIds.has(block.id)} data-block={block.id}>
-			<span class="chip">{block.content.custom.contentType}</span>
-			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
-			{/each}
+		<div class="block-tree">
+			<div class="block custom" class:selected={selectedIds.has(block.id)} data-block={block.id}>
+				<span class="chip">{block.content.custom.contentType}</span>
+			</div>
+			{#if block.childrenIds.length > 0}
+				<div class="nested">
+					{#each block.childrenIds as cid (cid)}
+						<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
+					{/each}
+				</div>
+			{/if}
 		</div>
 	{/if}
 {/if}
@@ -530,16 +536,19 @@
 		flex-direction: column;
 		min-width: 0;
 	}
+	.block-tree {
+		position: relative;
+		border-radius: 4px;
+	}
+	.block-tree.dragging {
+		opacity: 0.4;
+	}
 	.block {
 		position: relative;
 		display: flex;
 		align-items: flex-start;
 		padding: 1px 0;
 		border-radius: 4px;
-		flex-wrap: wrap;
-	}
-	.block.dragging {
-		opacity: 0.4;
 	}
 	.block.zone-1 { box-shadow: 0 -2px 0 var(--accent); }
 	.block.zone-2 { box-shadow: 0 2px 0 var(--accent); }
@@ -691,7 +700,6 @@
 		opacity: 0.6;
 	}
 	.nested {
-		flex-basis: 100%;
 		padding-left: 26px;
 	}
 	.h1 { font-size: 28px; font-weight: 700; line-height: 1.3; }
