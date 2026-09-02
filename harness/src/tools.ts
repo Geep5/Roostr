@@ -460,8 +460,21 @@ const SUBMIT_TOOL: ToolDef = {
 	input_schema: { type: "object", properties: { content: { type: "string" } }, required: ["content"] },
 };
 
-/** Tool set for a template ("" = principal agent: everything). */
-export function toolDefs(template: string, depth: number): ToolDef[] {
+/**
+ * Tool set for a template ("" = principal agent: everything).
+ *
+ * `shell` opts one principal agent into shell_exec. It is per-agent and
+ * off by default because this is the one capability whose blast radius is
+ * the whole machine rather than the vault: the tool is `sh -lc` in the home
+ * directory, and any device holding the vault key can message the agent
+ * that has it. Subagents never inherit it — a spawned child runs on its
+ * parent's instructions, not the owner's, so the grant stops at depth 0.
+ *
+ * Catalog skills that drive a CLI (google's gws, browserless) are unusable
+ * without this, which is why they read as installed-but-inert until an
+ * agent is granted the shell.
+ */
+export function toolDefs(template: string, depth: number, shell = false): ToolDef[] {
 	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read"]);
 	let defs = TOOLS.map((t) => t.def);
 	if (template === "explore") defs = defs.filter((d) => READ_ONLY.has(d.name));
@@ -470,8 +483,10 @@ export function toolDefs(template: string, depth: number): ToolDef[] {
 		// Least privilege: installs need only the shell and the result channel.
 		return [SHELL_TOOL.def, SUBMIT_TOOL];
 	}
-	if (template === "") out.push(SPAWN_TOOL);
-	else out.push(SUBMIT_TOOL);
+	if (template === "") {
+		out.push(SPAWN_TOOL);
+		if (shell && depth === 0) out.push(SHELL_TOOL.def);
+	} else out.push(SUBMIT_TOOL);
 	if (template === "task" && depth < 2) out.push(SPAWN_TOOL);
 	return out;
 }
