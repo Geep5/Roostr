@@ -1948,6 +1948,13 @@
 		max-width: none;
 		border-bottom: none;
 	}
+	/* Screen 2's header lives inside the padded m-screen, which would
+	   double both the inset and the safe-area (back button drifts 14px
+	   right and one notch down vs the object header). Pull it back to
+	   the viewport edges so every back button sits in ONE place. */
+	.m-screen > .m-top {
+		margin: calc(-1 * (env(safe-area-inset-top, 0px) + 12px)) -14px 0;
+	}
 	.m-top {
 		position: relative;
 		display: flex;
