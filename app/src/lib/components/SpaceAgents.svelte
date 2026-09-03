@@ -39,8 +39,6 @@
 		turnState: string;
 		/** What the harness last actually assembled and sent, section by section. */
 		effective: SystemPart[];
-		/** Whether this agent may run shell commands on its serving machine. */
-		shell: boolean;
 	}
 
 	let agents = $state<AgentRow[]>([]);
@@ -113,7 +111,6 @@
 				system: r.fields["system"]?.stringValue ?? "",
 				turnState: r.fields["turn_state"]?.stringValue ?? "",
 				effective: parseEffective(r.fields["system_effective"]?.stringValue ?? ""),
-				shell: r.fields["shell_enabled"]?.boolValue === true,
 			}));
 	}
 
@@ -137,17 +134,6 @@
 	let promptOpen = $state("");
 	let promptDraft = $state<Record<string, string>>({});
 	let promptSaved = $state("");
-
-	/**
-	 * shell_exec is the one capability that reaches past the vault to the
-	 * machine, so it is per-agent, off by default, and revocable from any
-	 * device that holds the key — the serving harness re-reads the flag on
-	 * every tool call.
-	 */
-	async function toggleShell(a: AgentRow) {
-		await note.setField(a.id, "shell_enabled", { boolValue: !a.shell });
-		await load();
-	}
 
 	// ── Ask the configurator ────────────────────────────────────────
 	//
@@ -461,14 +447,6 @@
 						</button>
 					</div>
 				{/if}
-				<label class="shell-row">
-					<input type="checkbox" checked={a.shell} onchange={() => void toggleShell(a)} />
-					<span>
-						Allow shell commands (<code>shell_exec</code>) on the serving machine — required by
-						CLI-backed skills like <code>google</code>. Any device with your key can message this
-						agent.
-					</span>
-				</label>
 				{#if a.effective.length > 0}
 					{@const total = a.effective.reduce((n, p) => n + p.tokens, 0)}
 					<p class="hint">
@@ -745,23 +723,6 @@
 	}
 	.ask-row input:focus {
 		border-color: var(--accent);
-	}
-	.shell-row {
-		display: flex;
-		gap: 8px;
-		align-items: flex-start;
-		color: var(--muted);
-		font-size: 11.5px;
-		line-height: 1.5;
-		margin: 0 0 10px;
-	}
-	.shell-row input {
-		flex: none;
-		margin-top: 2px;
-	}
-	.shell-row code {
-		font-size: 11px;
-		color: var(--fg);
 	}
 	.part {
 		border-top: 1px solid var(--border);

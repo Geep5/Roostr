@@ -175,7 +175,7 @@ export async function runTurn(agentId: string, convId: string, opts: RunOptions 
 		const model = str(agent.fields, "model") || "mock";
 		// Re-read every iteration with everything else, so revoking the grant
 		// takes effect on the agent's next tool call rather than its next turn.
-		const tools = toolDefs(opts.template ?? "", ctx.depth, flag(agent.fields, "shell_enabled"));
+		const tools = toolDefs(opts.template ?? "", ctx.depth);
 
 		let view = buildConversationView(conv, agentId, ratio);
 		const systemParts = await buildSystemParts(agent, view, opts);
