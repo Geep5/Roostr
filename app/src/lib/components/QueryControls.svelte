@@ -20,6 +20,7 @@
 		mode = "query",
 		channelId = "",
 		oncreated,
+		onnewinline,
 	}: {
 		object: ObjectJSON;
 		relations: RelationDefJSON[];
@@ -30,6 +31,8 @@
 		channelId?: string;
 		/** Table views: handle the new record inline instead of navigating. */
 		oncreated?: (id: string) => Promise<void>;
+		/** Table views: the accent New button opens the in-table entry row. */
+		onnewinline?: () => void;
 	} = $props();
 
 	// Anytype's dataview search (controls.tsx Filter): magnifier expands an
@@ -274,7 +277,7 @@
 	/** Create a record inheriting the view (filters seed fields, calendar
 	 *  seeds the date, the page's space is stamped). Exported so the
 	 *  table's "+ New Object" row shares one implementation. */
-	export async function createRecord(): Promise<void> {
+	export async function createRecord(name = ""): Promise<void> {
 		if (creating) return;
 		creating = true;
 		try {
@@ -292,7 +295,7 @@
 			if (viewType === "calendar" && dateKey) {
 				fields[dateKey] = { intValue: Date.now() };
 			}
-			const { id } = await note.create("", typeKey, fields);
+			const { id } = await note.create(name, typeKey, fields);
 			await onchanged();
 			// Anytype's table New edits the record in place; other views open it.
 			if (oncreated && viewType === "table") await oncreated(id);
@@ -302,7 +305,11 @@
 		}
 	}
 
-	const newRecord = () => createRecord();
+	const newRecord = () => {
+		// Anytype's table New IS the inline entry row.
+		if (viewType === "table" && onnewinline) return void onnewinline();
+		return createRecord();
+	};
 
 	// ── View settings menu (Anytype dataviewViewSettings) ───────────
 	// The controls row carries a single settings button; Layout (and the

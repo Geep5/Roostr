@@ -22,7 +22,7 @@
 		object,
 		relations,
 		defaultSorts = [],
-		onnewrow,
+		oncreate,
 		onchanged,
 	}: {
 		/** /api/query request body (setId, filters, …). */
@@ -31,8 +31,9 @@
 		object: ObjectJSON;
 		relations: RelationDefJSON[];
 		defaultSorts?: Array<{ key: string; type: "asc" | "desc" }>;
-		/** Renders the Anytype "+ New Object" footer row when provided. */
-		onnewrow?: () => void;
+		/** Renders the Anytype "+ New Object" footer row when provided.
+		 *  Committing the entry row calls it with the typed name. */
+		oncreate?: (name: string) => Promise<void>;
 		onchanged: () => Promise<void>;
 	} = $props();
 
@@ -280,22 +281,30 @@
 		return load();
 	}
 
-	// ── Inline rename (Anytype: New edits the record in place) ──────
-	let renamingId = $state("");
-	let renameDraft = $state("");
+	// ── Pending entry row (Anytype: "+ New Object" shows an "Enter
+	// name" row in place; the record exists only once committed) ──────
+	let pendingNew = $state(false);
+	let newDraft = $state("");
+	let committing = $state(false);
 
-	export function beginRename(id: string) {
-		renamingId = id;
-		renameDraft = "";
+	export function beginNew() {
+		pendingNew = true;
+		newDraft = "";
 	}
 
-	async function commitRename() {
-		const id = renamingId;
-		if (!id) return;
-		renamingId = "";
-		const name = renameDraft.trim();
-		if (name) await note.setField(id, "name", { stringValue: name });
-		await load();
+	async function commitNew(cancel = false) {
+		if (committing) return;
+		const name = newDraft.trim();
+		pendingNew = false;
+		newDraft = "";
+		if (cancel || !oncreate) return;
+		committing = true;
+		try {
+			await oncreate(name);
+			await load();
+		} finally {
+			committing = false;
+		}
 	}
 
 	function renameInput(node: HTMLInputElement) {
@@ -403,27 +412,7 @@
 		<tbody>
 			{#each rows as r (r.id)}
 				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} onmousedown={(e) => onRowMouseDown(e, r.id)} onmouseenter={() => onRowEnter(r.id)}>
-					<td class="name">
-						{#if renamingId === r.id}
-							<span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span>
-							<input
-								class="rename"
-								placeholder="Untitled"
-								bind:value={renameDraft}
-								use:renameInput
-								onblur={() => void commitRename()}
-								onkeydown={(e) => {
-									if (e.key === "Enter") e.currentTarget.blur();
-									if (e.key === "Escape") {
-										renameDraft = "";
-										e.currentTarget.blur();
-									}
-								}}
-							/>
-						{:else}
-							<span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || "Untitled"}
-						{/if}
-					</td>
+					<td class="name"><span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || "Untitled"}</td>
 					{#each columns as c (c)}
 						{#if isEditable(c)}
 							{@const rel = relations.find((x) => x.key === c)}
@@ -447,13 +436,38 @@
 					<td></td>
 				</tr>
 			{/each}
-			{#if onnewrow}
+			{#if oncreate}
+			{#if pendingNew}
+				<tr class="entry-row">
+					<!-- colspan must match the REAL column count: an oversized
+					     colspan in a fixed-layout table fabricates phantom
+					     columns and crushes the visible ones. -->
+					<td colspan={cols.length + 2}>
+						<span class="entry-wrap">
+							<input
+								class="rename"
+								placeholder="Enter name"
+								bind:value={newDraft}
+								use:renameInput
+								onblur={() => void commitNew(newDraft.trim() === "")}
+								onkeydown={(e) => {
+									if (e.key === "Enter") {
+										e.preventDefault();
+										void commitNew();
+									}
+									if (e.key === "Escape") {
+										e.preventDefault();
+										void commitNew(true);
+									}
+								}}
+							/>
+						</span>
+					</td>
+				</tr>
+			{/if}
 			<tr class="new-row">
-				<!-- colspan must match the REAL column count: an oversized
-				     colspan in a fixed-layout table fabricates phantom
-				     columns and crushes the visible ones. -->
 				<td colspan={cols.length + 2}>
-					<button class="new-object" onclick={() => onnewrow?.()}>＋ New Object</button>
+					<button class="new-object" onclick={() => beginNew()}>＋ New Object</button>
 				</td>
 			</tr>
 		{/if}
@@ -688,5 +702,18 @@
 		color: var(--fg);
 		font: inherit;
 		width: 100%;
+	}
+	.entry-row td {
+		border-bottom: none;
+		padding: 4px 0;
+	}
+	.entry-wrap {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		border: 2px solid var(--accent);
+		border-radius: 8px;
+		padding: 8px 10px;
+		max-width: 420px;
 	}
 </style>

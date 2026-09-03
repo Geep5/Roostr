@@ -22,15 +22,14 @@
 	let object = $state<ObjectJSON>();
 	let editor = $state<Editor>();
 	let table = $state<SetTable>();
-	let queryControls = $state<{ createRecord: () => Promise<void> } | undefined>();
+	let queryControls = $state<{ createRecord: (name?: string) => Promise<void> } | undefined>();
 
 	/** Table-view New: the record joins the view (collection membership
-	 *  included) and gets renamed in place - Anytype's inline row. */
+	 *  included) - Anytype's inline entry row. */
 	async function onRecordCreated(id: string) {
 		if (isCollection) await setMembers([...memberIds, id]);
 		await refresh();
 		await table?.reload();
-		table?.beginRename(id);
 	}
 
 	// Client-side load keyed on the route param; re-fetches on navigation.
@@ -343,6 +342,7 @@
 					mode={isQuery ? "query" : "collection"}
 					channelId={object.fields["channel"]?.stringValue ?? ""}
 					oncreated={onRecordCreated}
+					onnewinline={() => table?.beginNew()}
 				/>
 				{#if tableBody}
 					{@const viewType = object.fields["viewType"]?.stringValue || "table"}
@@ -353,7 +353,7 @@
 					{:else if viewType === "calendar"}
 						<CalendarView body={tableBody} {object} dateKey={object.fields["viewDateKey"]?.stringValue || "createdDate"} />
 					{:else}
-						<SetTable bind:this={table} body={tableBody} {object} relations={store.relations} defaultSorts={viewSorts} onchanged={refresh} onnewrow={() => void queryControls?.createRecord()} />
+						<SetTable bind:this={table} body={tableBody} {object} relations={store.relations} defaultSorts={viewSorts} onchanged={refresh} oncreate={(name) => queryControls?.createRecord(name) ?? Promise.resolve()} />
 					{/if}
 				{:else}
 					<p class="muted">Empty collection — add objects.</p>
