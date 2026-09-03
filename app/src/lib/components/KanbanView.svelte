@@ -7,6 +7,7 @@
 	 * Anytype. Dragging a card between columns rewrites its group value.
 	 */
 	import { goto } from "$app/navigation";
+	import RowContextMenu from "./RowContextMenu.svelte";
 	import { fetchQuery, note, type QueryResultRow } from "$lib/api";
 	import type { ObjectJSON, RelationDefJSON } from "$lib/types";
 	import { objectIcon } from "$lib/icons";
@@ -17,7 +18,8 @@
 		relations,
 		groupKey,
 		onchanged,
-			sorts = [],
+		sorts = [],
+		onremove,
 	}: {
 		body: Record<string, unknown>;
 		object: ObjectJSON;
@@ -25,9 +27,16 @@
 		groupKey: string;
 		onchanged: () => Promise<void>;
 		sorts?: Array<{ key: string; type: "asc" | "desc" }>;
+		/** Collections only: drop a card's object from the collection. */
+		onremove?: (ids: string[]) => Promise<void>;
 	} = $props();
 
 	let rows = $state<QueryResultRow[]>([]);
+
+	// Same right-click menu as the other views: a card here is a record in
+	// a view too, and a collection browsed as a board still needs its
+	// membership severable.
+	let ctxMenu = $state<{ x: number; y: number; id: string } | null>(null);
 
 	const rel = $derived(relations.find((r) => r.key === groupKey));
 
@@ -141,6 +150,10 @@
 							dropCol = "";
 						}}
 						onclick={() => void goto(`/object/${r.id}`)}
+						oncontextmenu={(e) => {
+							e.preventDefault();
+							ctxMenu = { x: e.clientX, y: e.clientY, id: r.id };
+						}}
 						onkeydown={(e) => {
 							if (e.key === "Enter") void goto(`/object/${r.id}`);
 						}}
@@ -156,6 +169,17 @@
 			</div>
 		{/each}
 	</div>
+{/if}
+
+{#if ctxMenu}
+	<RowContextMenu
+		x={ctxMenu.x}
+		y={ctxMenu.y}
+		ids={[ctxMenu.id]}
+		{onremove}
+		onchanged={load}
+		onclose={() => (ctxMenu = null)}
+	/>
 {/if}
 
 <style>

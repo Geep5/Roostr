@@ -6,6 +6,7 @@
 	 * we have no file storage yet, Anytype's ObjectCover needs one.)
 	 */
 	import { goto } from "$app/navigation";
+	import RowContextMenu from "./RowContextMenu.svelte";
 	import { tagStyle } from "$lib/options";
 	import { fetchQuery, type QueryResultRow } from "$lib/api";
 	import type { ObjectJSON, RelationDefJSON } from "$lib/types";
@@ -16,14 +17,22 @@
 		object,
 		relations,
 		sorts = [],
+		onremove,
 	}: {
 		body: Record<string, unknown>;
 		object: ObjectJSON;
 		relations: RelationDefJSON[];
 		sorts?: Array<{ key: string; type: "asc" | "desc" }>;
+		/** Collections only: drop a card's object from the collection. */
+		onremove?: (ids: string[]) => Promise<void>;
 	} = $props();
 
 	let rows = $state<QueryResultRow[]>([]);
+
+	// A card is a record in a view, same as a table row, so it carries the
+	// same right-click menu — a collection is just as often browsed as a
+	// gallery, and membership is only severable from here.
+	let ctxMenu = $state<{ x: number; y: number; id: string } | null>(null);
 
 	async function load() {
 		const s = (sorts.length > 0 ? sorts : [{ key: "updatedAt", type: "desc" }]).map((x) => ({ ...x, emptyPlacement: "end" }));
@@ -63,7 +72,14 @@
 
 <div class="gallery">
 	{#each rows as r (r.id)}
-		<button class="card" onclick={() => void goto(`/object/${r.id}`)}>
+		<button
+			class="card"
+			onclick={() => void goto(`/object/${r.id}`)}
+			oncontextmenu={(e) => {
+				e.preventDefault();
+				ctxMenu = { x: e.clientX, y: e.clientY, id: r.id };
+			}}
+		>
 			<div class="card-head">
 				<span class="g-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span>
 				<span class="g-name">{r.fields["name"]?.stringValue || "Untitled"}</span>
@@ -89,6 +105,17 @@
 		<p class="muted">No objects match.</p>
 	{/if}
 </div>
+
+{#if ctxMenu}
+	<RowContextMenu
+		x={ctxMenu.x}
+		y={ctxMenu.y}
+		ids={[ctxMenu.id]}
+		{onremove}
+		onchanged={load}
+		onclose={() => (ctxMenu = null)}
+	/>
+{/if}
 
 <style>
 	.gallery {

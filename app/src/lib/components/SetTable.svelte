@@ -8,6 +8,7 @@
 	 * (hide column); click a header to sort.
 	 */
 	import PropertyFlow from "./PropertyFlow.svelte";
+	import RowContextMenu from "./RowContextMenu.svelte";
 	import PropertyValue from "./PropertyValue.svelte";
 	import { tagStyle } from "$lib/options";
 	import CheckboxIcon from "./CheckboxIcon.svelte";
@@ -186,20 +187,6 @@
 		return selectedRows.includes(ctxMenu.id) ? [...selectedRows] : [ctxMenu.id];
 	}
 
-	async function ctxRemove() {
-		const ids = ctxTargets();
-		ctxMenu = null;
-		selectedRows = [];
-		await onremove?.(ids);
-	}
-
-	async function ctxDelete() {
-		const ids = ctxTargets();
-		ctxMenu = null;
-		selectedRows = [];
-		for (const id of ids) await note.del(id);
-		await reload();
-	}
 	let override = $state<{ key: string; dir: "asc" | "desc" } | null>(null);
 	const sortKey = $derived(override?.key ?? defaultSorts[0]?.key ?? "updatedAt");
 	const sortDir = $derived(override?.dir ?? defaultSorts[0]?.type ?? "desc");
@@ -554,16 +541,17 @@
 {/if}
 
 {#if ctxMenu}
-	{@const n = ctxTargets().length}
-	<button class="ctx-backdrop" aria-label="Close menu" onclick={() => (ctxMenu = null)} oncontextmenu={(e) => { e.preventDefault(); ctxMenu = null; }}></button>
-	<div class="ctx-menu" style="left: {Math.min(ctxMenu.x, window.innerWidth - 210)}px; top: {Math.min(ctxMenu.y, window.innerHeight - 130)}px" role="menu">
-		<button role="menuitem" onclick={() => { const id = ctxMenu!.id; ctxMenu = null; location.href = `/object/${id}`; }}>Open</button>
-		{#if onremove}
-			<button role="menuitem" onclick={() => void ctxRemove()}>⊖ Remove from collection{n > 1 ? ` (${n})` : ""}</button>
-		{/if}
-		<div class="ctx-sep"></div>
-		<button role="menuitem" class="danger" onclick={() => void ctxDelete()}>🗑 Move to bin{n > 1 ? ` (${n})` : ""}</button>
-	</div>
+	<RowContextMenu
+		x={ctxMenu.x}
+		y={ctxMenu.y}
+		ids={ctxTargets()}
+		{onremove}
+		onchanged={reload}
+		onclose={() => {
+			ctxMenu = null;
+			selectedRows = [];
+		}}
+	/>
 {/if}
 <style>
 	.set-table {
@@ -770,48 +758,5 @@
 	.head-icon {
 		margin-right: 5px;
 		font-size: 12px;
-	}
-	.ctx-backdrop {
-		position: fixed;
-		inset: 0;
-		z-index: 90;
-		background: none;
-		border: none;
-		cursor: default;
-	}
-	.ctx-menu {
-		position: fixed;
-		z-index: 91;
-		min-width: 190px;
-		background: var(--panel);
-		border: 1px solid var(--border);
-		border-radius: 10px;
-		padding: 4px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-		display: flex;
-		flex-direction: column;
-	}
-	.ctx-menu button {
-		display: block;
-		width: 100%;
-		text-align: left;
-		background: none;
-		border: none;
-		color: var(--fg);
-		font-size: 13px;
-		padding: 7px 10px;
-		border-radius: 6px;
-		cursor: pointer;
-	}
-	.ctx-menu button:hover {
-		background: var(--hover);
-	}
-	.ctx-menu .danger {
-		color: var(--red);
-	}
-	.ctx-sep {
-		height: 1px;
-		background: var(--border);
-		margin: 4px 6px;
 	}
 </style>

@@ -330,9 +330,9 @@
 				{#if tableBody}
 					{@const viewType = object.fields["viewType"]?.stringValue || "table"}
 					{#if viewType === "gallery"}
-						<GalleryView body={tableBody} {object} relations={scopedRelations} sorts={viewSorts} />
+						<GalleryView body={tableBody} {object} relations={scopedRelations} sorts={viewSorts} onremove={isCollection ? (ids) => setMembers(memberIds.filter((m) => !ids.includes(m))) : undefined} />
 					{:else if viewType === "kanban"}
-						<KanbanView body={tableBody} {object} relations={scopedRelations} sorts={viewSorts} groupKey={object.fields["viewGroupKey"]?.stringValue || ""} onchanged={refresh} />
+						<KanbanView body={tableBody} {object} relations={scopedRelations} sorts={viewSorts} groupKey={object.fields["viewGroupKey"]?.stringValue || ""} onchanged={refresh} onremove={isCollection ? (ids) => setMembers(memberIds.filter((m) => !ids.includes(m))) : undefined} />
 					{:else if viewType === "calendar"}
 						<CalendarView body={tableBody} {object} dateKey={object.fields["viewDateKey"]?.stringValue || "createdDate"} />
 					{:else}
