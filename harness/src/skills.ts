@@ -32,14 +32,23 @@ export interface SkillListing {
 	id: string;
 	name: string;
 	description: string;
+	/** Owning agent id, or "" for a global skill every agent sees. */
+	owner: string;
 }
 
 /**
- * List skills visible to `agentId`. Catalog-managed skills are device
- * capabilities: enabled ones surface only to the coordinator agent (when
- * one is set — otherwise to everyone); other agents get a prompt note
- * telling them to ask the coordinator instead. Hand-made skill objects
- * always list.
+ * A skill is either global or one agent's own.
+ *
+ * Global skills (`agent` unset) are shared vocabulary: device
+ * capabilities like gws and browserless describe this machine, and a
+ * hand-written convention can be published the same way. An owned skill
+ * (`agent` = an agent id) is that agent's private playbook: nobody else
+ * lists it and nobody else can read it, so a specialist's procedure
+ * costs every other agent nothing.
+ *
+ * Spaces do not enter into it: an agent already belongs to exactly one,
+ * so ownership is the finer grain and a global skill stays reachable
+ * from anywhere.
  */
 export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 	const { CATALOG, enabledCatalogKeys, getCoordinator } = await import("./skillmgr");
@@ -53,8 +62,11 @@ export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 			id: r.id,
 			name: str(r.fields, "name") || r.id.slice(0, 8),
 			description: str(r.fields, "description"),
+			owner: str(r.fields, "agent"),
 		}))
 		.filter((s) => {
+			// Someone else's playbook: invisible, whoever is asking.
+			if (s.owner !== "" && s.owner !== agentId) return false;
 			const key = s.name.toLowerCase();
 			if (!managed.has(key)) return true;
 			if (!enabled.has(key)) return false;
@@ -62,8 +74,8 @@ export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 		});
 }
 
-export async function readSkill(name: string): Promise<string> {
-	const skills = await listSkills();
+export async function readSkill(name: string, agentId?: string): Promise<string> {
+	const skills = await listSkills(agentId);
 	const hit = skills.find((s) => s.name.toLowerCase() === name.toLowerCase());
 	if (!hit) return `No skill named "${name}". Available: ${skills.map((s) => s.name).join(", ") || "(none)"}`;
 	const obj = await fetchObject(hit.id);

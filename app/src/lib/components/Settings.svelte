@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { settings } from "$lib/api";
+	import { fetchQuery, settings } from "$lib/api";
+	import { goto } from "$app/navigation";
 	import { exportAll } from "$lib/export";
 	import { ignoredWords, removeFromDictionary } from "$lib/spell";
 
@@ -82,6 +83,7 @@
 			skillRows = out.skills;
 			coordinator = out.coordinator;
 			skillAgents = out.agents;
+			await loadGlobalSkills();
 			const busy = skillRows.some((s) => s.phase === "installing" || s.phase === "uninstalling");
 			if (busy && !skillPoll) skillPoll = setInterval(() => void loadSkills(), 2000);
 			if (!busy && skillPoll) {
@@ -90,7 +92,32 @@
 			}
 		} catch {
 			skillRows = null;
+			await loadGlobalSkills();
 		}
+	}
+
+	// ── Unassigned skills ───────────────────────────────────────────
+	//
+	// The global set is hardcoded: exactly the catalog above, device
+	// capabilities every agent lists. A hand-written skill belongs to one
+	// agent, set in that agent's prompt panel — these are the ones with
+	// no owner yet, so every agent still lists them.
+	interface GlobalSkill {
+		id: string;
+		name: string;
+		description: string;
+	}
+	let globalSkills = $state<GlobalSkill[]>([]);
+
+	async function loadGlobalSkills() {
+		const res = await fetchQuery({ type: "skill", limit: 100 });
+		globalSkills = res.records
+			.filter((r) => !(r.fields["agent"]?.stringValue ?? "") && r.fields["scope"]?.stringValue !== "global")
+			.map((r) => ({
+				id: r.id,
+				name: r.fields["name"]?.stringValue || "Untitled",
+				description: r.fields["description"]?.stringValue ?? "",
+			}));
 	}
 
 	let skillResetConfirm = $state<string>("");
@@ -725,6 +752,24 @@
 					</div>
 				{/each}
 			{/if}
+			<div class="gskills">
+				<p class="hint">
+					The skills above are the global set — every agent lists them. Any other skill belongs to
+					one agent, assigned in that agent's prompt panel. These have no owner yet, so every agent
+					still lists them:
+				</p>
+				{#each globalSkills as g (g.id)}
+					<div class="gskill">
+						<button
+							class="skill-name"
+							onclick={() => {
+								onclose();
+								void goto(`/object/${g.id}`);
+							}}>{g.name}</button>
+						<span class="hint-inline">{g.description || "no description — agents pick skills by it"}</span>
+					</div>
+				{/each}
+			</div>
 		</section>
 
 		<p class="build-stamp">Build {__BUILD_STAMP__} — if this is older than the last code change, reload this window (⌘R).</p>
@@ -732,6 +777,17 @@
 </div>
 
 <style>
+	.gskills {
+		border-top: 1px solid var(--border);
+		margin-top: 10px;
+		padding-top: 8px;
+	}
+	.gskill {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		padding: 3px 0;
+	}
 	.coord-row {
 		display: flex;
 		align-items: center;

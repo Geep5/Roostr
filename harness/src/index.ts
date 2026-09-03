@@ -17,6 +17,7 @@
 import { API, chatPost, fetchObject, list, mutate, query, setField, str, subscribe, sv, createObject } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
+import { convergeCatalogScope } from "./skillmgr";
 import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled, syncHeartbeats } from "./roster";
 import { startNostrSync, vanishOnRelays } from "./nostrsync";
@@ -155,6 +156,7 @@ async function handleSurface(s: Served, surfaceId: string): Promise<boolean> {
 }
 
 async function serve(): Promise<void> {
+	await convergeCatalogScope();
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
 	const busy = new Set<string>();

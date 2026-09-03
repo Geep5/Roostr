@@ -451,7 +451,7 @@ const TOOLS: RegisteredTool[] = [
 			description: "Load a skill's full instructions by name. Call BEFORE starting any task that matches a listed skill.",
 			input_schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
 		},
-		handler: async (input) => readSkill(S(input.name)),
+		handler: async (input, ctx) => readSkill(S(input.name), ctx.agentId),
 	},
 ];
 

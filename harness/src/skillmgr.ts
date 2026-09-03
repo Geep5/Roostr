@@ -109,6 +109,25 @@ async function writeState(state: StateFile): Promise<void> {
 	await Bun.write(STATE_PATH, JSON.stringify(state, null, "\t"));
 }
 
+/**
+ * The global set is hardcoded: it is exactly this catalog. Their skill
+ * objects carry `scope: global` so both apps can tell a device capability
+ * from a hand-written skill without asking the daemon — the latter is
+ * assignable to one agent, the former never is.
+ */
+export const GLOBAL_SCOPE = "global";
+
+/** Backfill the marker on catalog objects installed before it existed. */
+export async function convergeCatalogScope(): Promise<void> {
+	const names = new Map(CATALOG.map((c) => [c.name.toLowerCase(), c]));
+	const rows = await query({ type: "skill", limit: 100 });
+	for (const r of rows) {
+		const name = str(r.fields, "name").toLowerCase();
+		if (!names.has(name) || str(r.fields, "scope") === GLOBAL_SCOPE) continue;
+		await mutate("set_field", { object_id: r.id, key: "scope", value: { stringValue: GLOBAL_SCOPE } });
+	}
+}
+
 export async function getCoordinator(): Promise<string> {
 	return (await readState()).coordinator ?? "";
 }
@@ -201,6 +220,7 @@ async function upsertSkillObject(entry: CatalogEntry): Promise<void> {
 	}
 	const { id } = await createObject(entry.name, "skill", {
 		description: { stringValue: entry.description },
+		scope: { stringValue: GLOBAL_SCOPE },
 	});
 	await mutate("block_add", { object_id: id, block: { content: { text: { text: entry.skillBody, style: 0 } } } });
 }
@@ -219,7 +239,12 @@ export async function setSkillPrompt(key: string, text: string): Promise<void> {
 	if (!entry) throw new Error(`unknown skill "${key}"`);
 	let id = await findSkillObject(entry);
 	if (!id) {
-		id = (await createObject(entry.name, "skill", { description: { stringValue: entry.description } })).id;
+		id = (
+			await createObject(entry.name, "skill", {
+				description: { stringValue: entry.description },
+				scope: { stringValue: GLOBAL_SCOPE },
+			})
+		).id;
 	} else {
 		// Drop the existing body blocks (everything except the discussion subtree).
 		const obj = await fetchObject(id);

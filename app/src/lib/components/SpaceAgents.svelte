@@ -35,6 +35,8 @@
 		types: string[];
 		/** The editable base prompt (agent field `system`). */
 		system: string;
+		/** "configurator" marks the agent that rewrites the others in this space. */
+		role: string;
 		/** "working" while a turn is in flight, published by the serving harness. */
 		turnState: string;
 		/** What the harness last actually assembled and sent, section by section. */
@@ -93,6 +95,7 @@
 	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
 
 	async function load() {
+		await loadOwnSkills();
 		const res = await fetchQuery({ type: "agent", limit: 100 });
 		agents = res.records
 			.filter((r) => {
@@ -109,6 +112,7 @@
 				host: r.fields["harness_host"]?.stringValue ?? "",
 				types: (r.fields["responsible_types"]?.valuesValue?.items ?? []).map((i) => i.stringValue ?? "").filter(Boolean),
 				system: r.fields["system"]?.stringValue ?? "",
+				role: r.fields["role"]?.stringValue ?? "",
 				turnState: r.fields["turn_state"]?.stringValue ?? "",
 				effective: parseEffective(r.fields["system_effective"]?.stringValue ?? ""),
 			}));
@@ -141,9 +145,43 @@
 	// changed and the configurator agent rewrites this agent's fields. It
 	// runs on whichever machine serves it, so the round trip is the same
 	// sync path as everything else — hence the poll rather than a response.
-	const configurator = $derived(store.agents.find((x) => x.role === "configurator"));
+	//
+	// An agent is a citizen of exactly one space, so the configurator must
+	// live in this one: every id-taking tool refuses a target outside its
+	// own space. Hence one configurator per space, found among these agents
+	// rather than across the vault.
+	const configurator = $derived(agents.find((x) => x.role === "configurator"));
 	let askDraft = $state<Record<string, string>>({});
 	let asking = $state("");
+	let addingConfig = $state(false);
+
+	/** The configurator's own instructions. It reads the configure-agents
+	 * skill for the field reference, so this stays short. */
+	const CONFIG_SYSTEM = [
+		"You are the configuration assistant for this space. You do not chat and you do not do the humans' work — you change how the other agents in this space are set up, one instruction at a time.",
+		"Every instruction you receive names a target agent and includes that agent's current prompt. Apply the change to that agent and stop. There is no conversation: the human is watching the target's prompt panel, not this thread, and will send another instruction if they want more.",
+		"Read the configure-agents skill before your first change. It lists which fields are writable, which are the harness's to own, and how to author a skill object.",
+		"Rewrite the whole `system` field rather than appending, folding the request into the prompt that is already there. Never drop an existing instruction because this request did not mention it.",
+		"You can only touch objects in your own space. If asked about an agent elsewhere, say so instead of trying.",
+		"Finish with exactly one line naming what you changed.",
+	].join("\n\n");
+
+	async function addConfigurator() {
+		addingConfig = true;
+		try {
+			const { id } = await note.create("Config", "agent", {
+				channel: { stringValue: channelId },
+				model: { stringValue: "claude-sonnet-4-5" },
+				system: { stringValue: CONFIG_SYSTEM },
+				role: { stringValue: "configurator" },
+				iconEmoji: { stringValue: "⚙️" },
+			});
+			await toggle(id, true); // useless unless something serves it
+			await load();
+		} finally {
+			addingConfig = false;
+		}
+	}
 
 	async function askConfigurator(a: AgentRow) {
 		const instruction = (askDraft[a.id] ?? "").trim();
@@ -181,6 +219,72 @@
 		} finally {
 			asking = "";
 		}
+	}
+
+	// ── This agent's own skills ─────────────────────────────────────
+	//
+	// The global set is hardcoded — the device capabilities in the
+	// harness catalog, marked `scope: global`, listed to every agent and
+	// never claimable by one. Everything else is settable here: a skill
+	// owned via its `agent` field is listed and readable by that agent
+	// alone, so a specialist's procedure costs every other agent nothing.
+	// The body is only loaded when that agent calls skill_read.
+	interface OwnedSkill {
+		id: string;
+		name: string;
+		description: string;
+	}
+	let ownSkills = $state<Record<string, OwnedSkill[]>>({});
+
+	async function loadOwnSkills() {
+		const res = await fetchQuery({ type: "skill", limit: 100 });
+		const next: Record<string, OwnedSkill[]> = {};
+		for (const r of res.records) {
+			const owner = r.fields["agent"]?.stringValue ?? "";
+			if (!owner) continue;
+			(next[owner] ??= []).push({
+				id: r.id,
+				name: r.fields["name"]?.stringValue || "Untitled",
+				description: r.fields["description"]?.stringValue ?? "",
+			});
+		}
+		ownSkills = next;
+		unassigned = res.records
+			.filter((r) => !(r.fields["agent"]?.stringValue ?? "") && r.fields["scope"]?.stringValue !== "global")
+			.map((r) => ({
+				id: r.id,
+				name: r.fields["name"]?.stringValue || "Untitled",
+				description: r.fields["description"]?.stringValue ?? "",
+			}));
+	}
+
+	async function newOwnSkill(a: AgentRow) {
+		const name = prompt(`New skill for ${a.name}:`);
+		if (!name?.trim()) return;
+		const { id } = await note.create(name.trim(), "skill", {
+			channel: { stringValue: channelId },
+			agent: { stringValue: a.id },
+		});
+		await goto(`/object/${id}`);
+	}
+
+	/** Dropping the owner returns it to the unassigned pool. It does not
+	 * become a global skill: that set is the hardcoded catalog. */
+	async function unassignSkill(id: string) {
+		await note.setField(id, "agent", { stringValue: "" });
+		await loadOwnSkills();
+	}
+
+	/** Skills with no owner yet — assignable to exactly one agent. */
+	let unassigned = $state<OwnedSkill[]>([]);
+	let adoptPick = $state<Record<string, string>>({});
+
+	async function assignSkill(a: AgentRow) {
+		const id = adoptPick[a.id];
+		if (!id) return;
+		await note.setField(id, "agent", { stringValue: a.id });
+		adoptPick[a.id] = "";
+		await loadOwnSkills();
 	}
 
 	async function savePrompt(a: AgentRow) {
@@ -431,7 +535,39 @@
 						<button class="subtle" onclick={() => (promptDraft[a.id] = a.system)}>Discard</button>
 					{/if}
 				</div>
-				{#if configurator && configurator.id !== a.id}
+				<div class="own-skills">
+					{#each ownSkills[a.id] ?? [] as k (k.id)}
+						<div class="own-skill">
+							<a href={`/object/${k.id}`}>{k.name}</a>
+							<span class="sk-desc">{k.description || "no description — this agent picks skills by it"}</span>
+							<button class="subtle nowrap" title="Return it to the unassigned pool" onclick={() => void unassignSkill(k.id)}>Unassign</button>
+						</div>
+					{/each}
+					<button class="subtle" onclick={() => void newOwnSkill(a)}>+ New skill for {a.name}</button>
+					{#if unassigned.length > 0}
+						<select
+							value={adoptPick[a.id] ?? ""}
+							onchange={(e) => {
+								adoptPick[a.id] = (e.currentTarget as HTMLSelectElement).value;
+								void assignSkill(a);
+							}}
+						>
+							<option value="">Assign a skill to {a.name}…</option>
+							{#each unassigned as g (g.id)}
+								<option value={g.id}>{g.name}</option>
+							{/each}
+						</select>
+					{/if}
+					<span class="sk-desc">only {a.name} lists these; the hardcoded global skills are in Settings → Skills</span>
+				</div>
+				{#if !configurator}
+					<div class="ask-row">
+						<button class="subtle" disabled={addingConfig} onclick={() => void addConfigurator()}>
+							{addingConfig ? "Adding…" : "+ Add a Config agent for this space"}
+						</button>
+						<span class="hint ask-hint">then tell it what to change here, instead of writing prompts by hand</span>
+					</div>
+				{:else if configurator.id !== a.id}
 					<div class="ask-row">
 						<input
 							placeholder={asking === a.id ? "Applying…" : `Tell ${configurator.name} what to change about ${a.name}…`}
@@ -706,6 +842,34 @@
 		border-color: transparent;
 		color: var(--muted);
 	}
+	.own-skills {
+		border-top: 1px solid var(--border);
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 6px 10px;
+		margin: 8px 0 10px;
+		padding-top: 8px;
+	}
+	.own-skill {
+		display: flex;
+		align-items: baseline;
+		gap: 6px;
+		width: 100%;
+	}
+	.own-skill a {
+		color: var(--fg);
+		font-size: 12px;
+		white-space: nowrap;
+	}
+	.sk-desc {
+		color: var(--muted);
+		font-size: 11.5px;
+		margin-right: auto;
+	}
+	.own-skills .nowrap {
+		white-space: nowrap;
+	}
 	.ask-row {
 		display: flex;
 		gap: 6px;
@@ -723,6 +887,10 @@
 	}
 	.ask-row input:focus {
 		border-color: var(--accent);
+	}
+	.ask-row .ask-hint {
+		margin: 0;
+		align-self: center;
 	}
 	.part {
 		border-top: 1px solid var(--border);
