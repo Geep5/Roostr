@@ -315,6 +315,11 @@
 		return SPECIALS.find((s) => s.key === key)?.name ?? relations.find((r) => r.key === key)?.name ?? key;
 	}
 
+	/** The property's own emoji, when it has one (specials have none). */
+	function colIcon(key: string): string {
+		return relations.find((r) => r.key === key)?.iconEmoji ?? "";
+	}
+
 	function formatOf(key: string): string {
 		return relations.find((r) => r.key === key)?.format ?? "";
 	}
@@ -386,7 +391,7 @@
 						}}
 						ondragend={() => (dragIdx = overIdx = -1)}
 					>
-						<button class="head" onclick={() => toggleSort(c.key)}>{colName(c.key)} {sortKey === c.key ? (sortDir === "asc" ? "↑" : "↓") : ""}</button>
+						<button class="head" onclick={() => toggleSort(c.key)}>{#if colIcon(c.key)}<span class="head-icon">{colIcon(c.key)}</span>{/if}{colName(c.key)} {sortKey === c.key ? (sortDir === "asc" ? "↑" : "↓") : ""}</button>
 						<button class="hide" title="Hide column" onclick={() => void saveColumns(cols.filter((x) => x.key !== c.key))}>×</button>
 						<span
 							class="resize"
@@ -715,5 +720,9 @@
 		border-radius: 8px;
 		padding: 8px 10px;
 		max-width: 420px;
+	}
+	.head-icon {
+		margin-right: 5px;
+		font-size: 12px;
 	}
 </style>
