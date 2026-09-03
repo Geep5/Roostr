@@ -284,13 +284,29 @@
 			const typeKey = sources[0] || "note";
 			const fields: Record<string, ValueJSON> = {};
 			if (channelId) fields["channel"] = { stringValue: channelId };
+			// Every equal/in filter seeds the matching field with a value of
+			// the relation's OWN shape - a record born in a filtered view
+			// must satisfy the view (Anytype getDetails).
 			for (const f of filters) {
-				if (!["equal", "in", "allIn"].includes(f.condition) || f.value.length === 0) continue;
+				if (!["equal", "in", "allIn"].includes(f.condition)) continue;
 				const rel = relations.find((r) => r.key === f.key);
 				if (!rel) continue;
-				fields[f.key] = rel.format === "tag" || rel.format === "status"
-					? { valuesValue: { items: f.value.map((v) => ({ stringValue: v })) } }
-					: { stringValue: f.value[0] };
+				if (rel.format === "checkbox") {
+					// Checkbox equal-filters carry no value list: equal means
+					// "checked" (an explicit first value overrides).
+					fields[f.key] = { boolValue: f.value[0] === undefined ? true : f.value[0] !== "false" };
+					continue;
+				}
+				if (f.value.length === 0) continue;
+				if (rel.format === "tag" || rel.format === "status") {
+					fields[f.key] = { valuesValue: { items: f.value.map((v) => ({ stringValue: v })) } };
+				} else if (rel.format === "number") {
+					fields[f.key] = { floatValue: Number(f.value[0]) || 0 };
+				} else if (rel.format === "date") {
+					fields[f.key] = { intValue: Number(f.value[0]) || Date.now() };
+				} else {
+					fields[f.key] = { stringValue: f.value[0] };
+				}
 			}
 			if (viewType === "calendar" && dateKey) {
 				fields[dateKey] = { intValue: Date.now() };
