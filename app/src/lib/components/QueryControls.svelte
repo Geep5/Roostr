@@ -18,7 +18,19 @@
 		onchanged,
 		onsearch,
 		mode = "query",
-	}: { object: ObjectJSON; relations: RelationDefJSON[]; onchanged: () => Promise<void>; onsearch?: (q: string) => void; mode?: "query" | "collection" } = $props();
+		channelId = "",
+		oncreated,
+	}: {
+		object: ObjectJSON;
+		relations: RelationDefJSON[];
+		onchanged: () => Promise<void>;
+		onsearch?: (q: string) => void;
+		mode?: "query" | "collection";
+		/** The page object's space - new records land beside it. */
+		channelId?: string;
+		/** Table views: handle the new record inline instead of navigating. */
+		oncreated?: (id: string) => Promise<void>;
+	} = $props();
 
 	// Anytype's dataview search (controls.tsx Filter): magnifier expands an
 	// inline input; text live-filters the records via textQuery.
@@ -258,12 +270,17 @@
 	// from the view filters (getDetails: equal/in/allIn conditions seed
 	// values); calendar views seed the date property with today.
 	let creating = $state(false);
-	async function newRecord() {
+
+	/** Create a record inheriting the view (filters seed fields, calendar
+	 *  seeds the date, the page's space is stamped). Exported so the
+	 *  table's "+ New Object" row shares one implementation. */
+	export async function createRecord(): Promise<void> {
 		if (creating) return;
 		creating = true;
 		try {
 			const typeKey = sources[0] || "note";
 			const fields: Record<string, ValueJSON> = {};
+			if (channelId) fields["channel"] = { stringValue: channelId };
 			for (const f of filters) {
 				if (!["equal", "in", "allIn"].includes(f.condition) || f.value.length === 0) continue;
 				const rel = relations.find((r) => r.key === f.key);
@@ -277,11 +294,15 @@
 			}
 			const { id } = await note.create("", typeKey, fields);
 			await onchanged();
-			await goto(`/object/${id}`);
+			// Anytype's table New edits the record in place; other views open it.
+			if (oncreated && viewType === "table") await oncreated(id);
+			else await goto(`/object/${id}`);
 		} finally {
 			creating = false;
 		}
 	}
+
+	const newRecord = () => createRecord();
 
 	// ── View settings menu (Anytype dataviewViewSettings) ───────────
 	// The controls row carries a single settings button; Layout (and the

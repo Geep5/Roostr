@@ -22,6 +22,7 @@
 		object,
 		relations,
 		defaultSorts = [],
+		onnewrow,
 		onchanged,
 	}: {
 		/** /api/query request body (setId, filters, …). */
@@ -30,6 +31,8 @@
 		object: ObjectJSON;
 		relations: RelationDefJSON[];
 		defaultSorts?: Array<{ key: string; type: "asc" | "desc" }>;
+		/** Renders the Anytype "+ New Object" footer row when provided. */
+		onnewrow?: () => void;
 		onchanged: () => Promise<void>;
 	} = $props();
 
@@ -277,6 +280,28 @@
 		return load();
 	}
 
+	// ── Inline rename (Anytype: New edits the record in place) ──────
+	let renamingId = $state("");
+	let renameDraft = $state("");
+
+	export function beginRename(id: string) {
+		renamingId = id;
+		renameDraft = "";
+	}
+
+	async function commitRename() {
+		const id = renamingId;
+		if (!id) return;
+		renamingId = "";
+		const name = renameDraft.trim();
+		if (name) await note.setField(id, "name", { stringValue: name });
+		await load();
+	}
+
+	function renameInput(node: HTMLInputElement) {
+		requestAnimationFrame(() => node.focus());
+	}
+
 	function colName(key: string): string {
 		return SPECIALS.find((s) => s.key === key)?.name ?? relations.find((r) => r.key === key)?.name ?? key;
 	}
@@ -378,7 +403,27 @@
 		<tbody>
 			{#each rows as r (r.id)}
 				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} onmousedown={(e) => onRowMouseDown(e, r.id)} onmouseenter={() => onRowEnter(r.id)}>
-					<td class="name"><span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || "Untitled"}</td>
+					<td class="name">
+						{#if renamingId === r.id}
+							<span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span>
+							<input
+								class="rename"
+								placeholder="Untitled"
+								bind:value={renameDraft}
+								use:renameInput
+								onblur={() => void commitRename()}
+								onkeydown={(e) => {
+									if (e.key === "Enter") e.currentTarget.blur();
+									if (e.key === "Escape") {
+										renameDraft = "";
+										e.currentTarget.blur();
+									}
+								}}
+							/>
+						{:else}
+							<span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || "Untitled"}
+						{/if}
+					</td>
 					{#each columns as c (c)}
 						{#if isEditable(c)}
 							{@const rel = relations.find((x) => x.key === c)}
@@ -402,7 +447,14 @@
 					<td></td>
 				</tr>
 			{/each}
-		</tbody>
+			{#if onnewrow}
+			<tr class="new-row">
+				<td colspan="99">
+					<button class="new-object" onclick={() => onnewrow?.()}>＋ New Object</button>
+				</td>
+			</tr>
+		{/if}
+	</tbody>
 	</table>
 	{#if cellEdit}
 		{@const rel = relations.find((x) => x.key === cellEdit!.key)}
@@ -606,5 +658,32 @@
 		border-radius: 10px;
 		padding: 8px;
 		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+	}
+	.new-object {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		width: 100%;
+		border: none;
+		background: none;
+		color: var(--muted);
+		font-size: 14px;
+		padding: 10px 8px;
+		cursor: pointer;
+		text-align: left;
+	}
+	.new-object:hover {
+		color: var(--fg);
+	}
+	.new-row td {
+		border-bottom: none;
+	}
+	input.rename {
+		background: none;
+		border: none;
+		outline: none;
+		color: var(--fg);
+		font: inherit;
+		width: 100%;
 	}
 </style>

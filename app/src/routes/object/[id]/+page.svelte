@@ -22,6 +22,16 @@
 	let object = $state<ObjectJSON>();
 	let editor = $state<Editor>();
 	let table = $state<SetTable>();
+	let queryControls = $state<{ createRecord: () => Promise<void> } | undefined>();
+
+	/** Table-view New: the record joins the view (collection membership
+	 *  included) and gets renamed in place - Anytype's inline row. */
+	async function onRecordCreated(id: string) {
+		if (isCollection) await setMembers([...memberIds, id]);
+		await refresh();
+		await table?.reload();
+		table?.beginRename(id);
+	}
 
 	// Client-side load keyed on the route param; re-fetches on navigation.
 	$effect(() => {
@@ -324,7 +334,16 @@
 				<!-- Collections share the query surface minus the Source pill:
 				     same layouts (table/gallery/kanban/calendar), filters,
 				     sorts, search, and view settings. -->
-				<QueryControls {object} relations={store.relations} onchanged={refresh} onsearch={(q) => (searchText = q)} mode={isQuery ? "query" : "collection"} />
+				<QueryControls
+					bind:this={queryControls}
+					{object}
+					relations={store.relations}
+					onchanged={refresh}
+					onsearch={(q) => (searchText = q)}
+					mode={isQuery ? "query" : "collection"}
+					channelId={object.fields["channel"]?.stringValue ?? ""}
+					oncreated={onRecordCreated}
+				/>
 				{#if tableBody}
 					{@const viewType = object.fields["viewType"]?.stringValue || "table"}
 					{#if viewType === "gallery"}
@@ -334,7 +353,7 @@
 					{:else if viewType === "calendar"}
 						<CalendarView body={tableBody} {object} dateKey={object.fields["viewDateKey"]?.stringValue || "createdDate"} />
 					{:else}
-						<SetTable bind:this={table} body={tableBody} {object} relations={store.relations} defaultSorts={viewSorts} onchanged={refresh} />
+						<SetTable bind:this={table} body={tableBody} {object} relations={store.relations} defaultSorts={viewSorts} onchanged={refresh} onnewrow={() => void queryControls?.createRecord()} />
 					{/if}
 				{:else}
 					<p class="muted">Empty collection — add objects.</p>
