@@ -10,7 +10,7 @@
 	import { onMount } from "svelte";
 	import EmojiPicker from "./EmojiPicker.svelte";
 	import { goto } from "$app/navigation";
-	import { fetchQuery, note } from "$lib/api";
+	import { fetchQuery, note, chat } from "$lib/api";
 	import { store } from "$lib/data.svelte";
 
 	let { channelId }: { channelId: string } = $props();
@@ -147,6 +147,54 @@
 	async function toggleShell(a: AgentRow) {
 		await note.setField(a.id, "shell_enabled", { boolValue: !a.shell });
 		await load();
+	}
+
+	// ── Ask the configurator ────────────────────────────────────────
+	//
+	// One instruction, one edit, no thread: the human types what they want
+	// changed and the configurator agent rewrites this agent's fields. It
+	// runs on whichever machine serves it, so the round trip is the same
+	// sync path as everything else — hence the poll rather than a response.
+	const configurator = $derived(store.agents.find((x) => x.role === "configurator"));
+	let askDraft = $state<Record<string, string>>({});
+	let asking = $state("");
+
+	async function askConfigurator(a: AgentRow) {
+		const instruction = (askDraft[a.id] ?? "").trim();
+		const cfg = configurator;
+		if (!instruction || !cfg) return;
+		asking = a.id;
+		try {
+			const chats = await fetchQuery({
+				type: "chat",
+				filters: [{ key: "agent", condition: "equal", value: cfg.id }],
+				limit: 1,
+			});
+			const chatId = chats.records[0]?.id;
+			if (!chatId) {
+				asking = "";
+				return; // no chat yet: the harness creates it when it first serves the agent
+			}
+			// Everything the configurator needs, since it never sees this screen.
+			const framed = [
+				`Target agent: ${a.name} (id ${a.id})`,
+				`Model: ${a.model || "(default)"}`,
+				`Current prompt:\n${a.system || "(empty — using the harness default)"}`,
+				`Instruction: ${instruction}`,
+			].join("\n\n");
+			await chat.post(chatId, framed);
+			askDraft[a.id] = "";
+			// The edit lands on the target object; watch for it rather than
+			// waiting on a reply we do not display.
+			const before = a.system;
+			for (let i = 0; i < 30; i++) {
+				await new Promise((r) => setTimeout(r, 2000));
+				await load();
+				if ((agents.find((x) => x.id === a.id)?.system ?? "") !== before) break;
+			}
+		} finally {
+			asking = "";
+		}
 	}
 
 	async function savePrompt(a: AgentRow) {
@@ -397,6 +445,22 @@
 						<button class="subtle" onclick={() => (promptDraft[a.id] = a.system)}>Discard</button>
 					{/if}
 				</div>
+				{#if configurator && configurator.id !== a.id}
+					<div class="ask-row">
+						<input
+							placeholder={asking === a.id ? "Applying…" : `Tell ${configurator.name} what to change about ${a.name}…`}
+							disabled={asking === a.id}
+							value={askDraft[a.id] ?? ""}
+							oninput={(e) => (askDraft[a.id] = (e.currentTarget as HTMLInputElement).value)}
+							onkeydown={(e) => {
+								if (e.key === "Enter") void askConfigurator(a);
+							}}
+						/>
+						<button disabled={asking === a.id || !(askDraft[a.id] ?? "").trim()} onclick={() => void askConfigurator(a)}>
+							{asking === a.id ? "…" : "Apply"}
+						</button>
+					</div>
+				{/if}
 				<label class="shell-row">
 					<input type="checkbox" checked={a.shell} onchange={() => void toggleShell(a)} />
 					<span>
@@ -663,6 +727,24 @@
 	.prompt .subtle {
 		border-color: transparent;
 		color: var(--muted);
+	}
+	.ask-row {
+		display: flex;
+		gap: 6px;
+		margin: 0 0 10px;
+	}
+	.ask-row input {
+		flex: 1;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		color: var(--fg);
+		font-size: 12px;
+		padding: 6px 10px;
+		outline: none;
+	}
+	.ask-row input:focus {
+		border-color: var(--accent);
 	}
 	.shell-row {
 		display: flex;
