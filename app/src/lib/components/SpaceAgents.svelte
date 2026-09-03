@@ -12,6 +12,7 @@
 	import { goto } from "$app/navigation";
 	import { fetchQuery, note, chat, fetchAllQuery } from "$lib/api";
 	import { store } from "$lib/data.svelte";
+	import { typeGlyph } from "$lib/create";
 
 	let { channelId }: { channelId: string } = $props();
 
@@ -599,7 +600,7 @@
 							disabled={!!owner || a.types.includes("*")}
 							onchange={() => void toggleType(a, t.key)}
 						/>
-						{t.name}
+						<span class="obj-icon">{t.icon || typeGlyph(t.key)}</span>{t.name}
 						{#if owner}<span class="opt-hint">— {owner.name}</span>{/if}
 					</label>
 				{/each}
