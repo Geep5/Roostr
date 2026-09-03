@@ -205,10 +205,12 @@
 		if (!rel || deletingProp) return;
 		deletingProp = true;
 		try {
-			const res = await fetchQuery({ filters: [{ key: rel.key, condition: "exists" }], limit: 1000 });
-			for (const r of res.records) {
-				if (r.id === rel.id || r.typeKey === "relation" || r.typeKey === "type") continue;
-				await note.deleteField(r.id, rel.key);
+			// Page until exhausted - a property can live on >1000 objects.
+			for (;;) {
+				const res = await fetchQuery({ filters: [{ key: rel.key, condition: "exists" }], limit: 1000 });
+				const victims = res.records.filter((r) => r.id !== rel.id && r.typeKey !== "relation" && r.typeKey !== "type");
+				if (victims.length === 0) break;
+				for (const r of victims) await note.deleteField(r.id, rel.key);
 			}
 			await note.vanish(rel.id);
 			confirmDeleteProp = false;
