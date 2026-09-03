@@ -118,9 +118,14 @@
 		}));
 	});
 
-	// ── mini month: which days have items ──────────────────────────
+	// ── mini month (Anytype widget): navigable, Monday-first grid
+	// padded with adjacent-month days; items mark their day. ─────────
+	let monthOff = $state(0);
 	const month = $derived.by(() => {
 		const now = new Date();
+		const view = new Date(now.getFullYear(), now.getMonth() + monthOff, 1);
+		const y = view.getFullYear();
+		const m = view.getMonth();
 		const tsOf = (r: QueryResultRow): number => {
 			if (dateKey === "createdDate") return r.createdAt;
 			if (dateKey === "modifiedDate") return r.updatedAt;
@@ -132,16 +137,22 @@
 			const ts = tsOf(r);
 			if (!ts) continue;
 			const d = new Date(ts);
-			if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) marked.add(d.getDate());
+			if (d.getFullYear() === y && d.getMonth() === m) marked.add(d.getDate());
 		}
-		const first = new Date(now.getFullYear(), now.getMonth(), 1);
-		const offset = (first.getDay() + 6) % 7;
-		const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-		return { offset, days, today: now.getDate(), marked };
+		const offset = (view.getDay() + 6) % 7;
+		const days = new Date(y, m + 1, 0).getDate();
+		const prevDays = new Date(y, m, 0).getDate();
+		const isThis = y === now.getFullYear() && m === now.getMonth();
+		const cells: Array<{ n: number; cur: boolean; today: boolean; marked: boolean }> = [];
+		for (let i = 0; i < offset; i++) cells.push({ n: prevDays - offset + 1 + i, cur: false, today: false, marked: false });
+		for (let i = 1; i <= days; i++) cells.push({ n: i, cur: true, today: isThis && i === now.getDate(), marked: marked.has(i) });
+		let next = 1;
+		while (cells.length % 7 !== 0) cells.push({ n: next++, cur: false, today: false, marked: false });
+		return { label: view.toLocaleDateString(undefined, { month: "long" }), year: String(y), cells };
 	});
 </script>
 
-{#if obj && rows.length > 0}
+{#if obj && (rows.length > 0 || viewType === "calendar")}
 	<div class="widget-body">
 		{#if viewType === "kanban" && groupRel}
 			{#each groups.filter((g) => g.count > 0) as g (g.id)}
@@ -151,12 +162,23 @@
 				</a>
 			{/each}
 		{:else if viewType === "calendar"}
-			<a class="w-cal" href="/object/{id}" aria-label="Open calendar">
-				{#each Array(month.offset) as _, i (i)}<span class="w-day dim"></span>{/each}
-				{#each Array(month.days) as _, i (i)}
-					<span class="w-day" class:today={i + 1 === month.today} class:marked={month.marked.has(i + 1)}>{i + 1}</span>
-				{/each}
-			</a>
+			<div class="w-cal">
+				<div class="w-cal-head">
+					<a class="w-cal-title" href="/object/{id}">{month.label} <span class="w-cal-year">{month.year}</span></a>
+					<span class="w-cal-nav">
+						<button aria-label="Previous month" onclick={() => monthOff--}>‹</button>
+						<button aria-label="Next month" onclick={() => monthOff++}>›</button>
+					</span>
+				</div>
+				<a class="w-cal-grid" href="/object/{id}" aria-label="Open calendar">
+					{#each ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] as d, i (d)}
+						<span class="w-dow" class:wknd={i >= 5}>{d}</span>
+					{/each}
+					{#each month.cells as c, i (i)}
+						<span class="w-day" class:dim={!c.cur} class:today={c.today} class:marked={c.marked} class:wknd={i % 7 >= 5}>{c.n}</span>
+					{/each}
+				</a>
+			</div>
 		{:else if viewType === "gallery"}
 			<div class="w-cards">
 				{#each rows.slice(0, GALLERY_LIMIT) as r (r.id)}
@@ -266,26 +288,91 @@
 		font-size: 15px;
 	}
 	.w-cal {
-		display: grid;
-		grid-template-columns: repeat(7, 1fr);
-		gap: 1px;
-		padding: 2px 8px 2px 0;
+		padding: 2px 8px 6px 0;
+	}
+	.w-cal-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 2px 2px 6px 6px;
+	}
+	.w-cal-title {
+		font-size: 15px;
+		font-weight: 700;
+		color: var(--fg);
 		text-decoration: none;
 	}
-	.w-day {
-		font-size: 9px;
+	.w-cal-year {
+		margin-left: 4px;
+	}
+	.w-cal-nav {
+		display: flex;
+		gap: 2px;
+	}
+	.w-cal-nav button {
+		background: none;
+		border: none;
+		color: var(--muted);
+		font-size: 16px;
+		line-height: 1;
+		cursor: pointer;
+		padding: 2px 5px;
+	}
+	.w-cal-nav button:hover {
+		color: var(--fg);
+	}
+	.w-cal-grid {
+		display: grid;
+		grid-template-columns: repeat(7, 1fr);
+		text-decoration: none;
+	}
+	.w-dow {
+		font-size: 11px;
 		color: var(--muted);
 		text-align: center;
-		border-radius: 4px;
-		padding: 1px 0;
+		padding: 4px 0;
 	}
-	.w-day.marked {
-		background: var(--hl-med);
+	.w-day {
+		font-size: 12.5px;
 		color: var(--fg);
-		font-weight: 600;
+		text-align: center;
+		padding: 5px 0;
+		position: relative;
+	}
+	.w-day.dim {
+		color: var(--muted);
+		opacity: 0.6;
 	}
 	.w-day.today {
-		outline: 1px solid var(--accent);
+		color: var(--accent);
+		font-weight: 700;
+	}
+	/* Weekend band: Sa/Su columns ride a raised strip (Anytype look). */
+	.wknd {
+		background: var(--hl-light);
+	}
+	.w-dow.wknd:nth-child(6) {
+		border-top-left-radius: 8px;
+	}
+	.w-dow.wknd:nth-child(7) {
+		border-top-right-radius: 8px;
+	}
+	.w-cal-grid > :nth-last-child(2).wknd {
+		border-bottom-left-radius: 8px;
+	}
+	.w-cal-grid > :nth-last-child(1).wknd {
+		border-bottom-right-radius: 8px;
+	}
+	.w-day.marked::after {
+		content: "";
+		position: absolute;
+		left: 50%;
+		transform: translateX(-50%);
+		bottom: 1px;
+		width: 3px;
+		height: 3px;
+		border-radius: 50%;
+		background: var(--accent);
 	}
 	.w-card-more {
 		justify-content: center;
