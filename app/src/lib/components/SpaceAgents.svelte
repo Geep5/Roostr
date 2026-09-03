@@ -10,7 +10,7 @@
 	import { onMount } from "svelte";
 	import EmojiPicker from "./EmojiPicker.svelte";
 	import { goto } from "$app/navigation";
-	import { fetchQuery, note, chat } from "$lib/api";
+	import { fetchQuery, note, chat, fetchAllQuery } from "$lib/api";
 	import { store } from "$lib/data.svelte";
 
 	let { channelId }: { channelId: string } = $props();
@@ -60,8 +60,8 @@
 
 	async function load() {
 		await loadOwnSkills();
-		const res = await fetchQuery({ type: "agent", limit: 100 });
-		agents = res.records
+		const records = await fetchAllQuery({ type: "agent" });
+		agents = records
 			.filter((r) => {
 				if (r.fields["spawn_parent"]?.stringValue) return false; // subagents are ephemeral
 				const ch = r.fields["channel"]?.stringValue ?? "";

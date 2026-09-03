@@ -5,7 +5,7 @@
  * and collectionIds membership.
  */
 
-import { fetchQuery } from "$lib/api";
+import { fetchAllQuery } from "$lib/api";
 
 export interface Backlink {
 	id: string;
@@ -15,9 +15,11 @@ export interface Backlink {
 }
 
 export async function fetchBacklinks(objectId: string): Promise<Backlink[]> {
-	const res = await fetchQuery({ limit: 2000 });
+	// Every object, since any of them may link here: a cap drops backlinks
+	// silently, which reads as "nothing links here".
+	const records = await fetchAllQuery({});
 	const out: Backlink[] = [];
-	for (const r of res.records) {
+	for (const r of records) {
 		if (r.id === objectId) continue;
 		let links = false;
 		for (const [key, v] of Object.entries(r.fields)) {

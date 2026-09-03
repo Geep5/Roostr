@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { fetchQuery, settings } from "$lib/api";
+	import { fetchQuery, settings, fetchAllQuery } from "$lib/api";
 	import { goto } from "$app/navigation";
 	import { exportAll } from "$lib/export";
 	import { ignoredWords, removeFromDictionary } from "$lib/spell";
@@ -110,8 +110,8 @@
 	let globalSkills = $state<GlobalSkill[]>([]);
 
 	async function loadGlobalSkills() {
-		const res = await fetchQuery({ type: "skill", limit: 100 });
-		globalSkills = res.records
+		const records = await fetchAllQuery({ type: "skill" });
+		globalSkills = records
 			.filter((r) => !(r.fields["agent"]?.stringValue ?? "") && r.fields["scope"]?.stringValue !== "global")
 			.map((r) => ({
 				id: r.id,

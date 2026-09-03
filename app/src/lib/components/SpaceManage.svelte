@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { ObjectJSON, SpaceJSON } from "$lib/types";
-	import { space as spaceApi, fetchQuery, note } from "$lib/api";
+	import { space as spaceApi, note, fetchAllQuery } from "$lib/api";
 	import { inviteUrl } from "$lib/invite";
 	import { objectIcon } from "$lib/icons";
 	import { onMount } from "svelte";
@@ -25,8 +25,11 @@
 	async function deleteSpace() {
 		deleting = true;
 		try {
-			const res = await fetchQuery({ filters: [{ key: "channel", condition: "equal", value: object.id }], limit: 1000 });
-			const ids = [object.id, ...res.records.map((r) => r.id)];
+			// Every object, not a page of them: the space goes with them, so
+			// anything left behind is unreachable — there is no space to
+			// browse it from.
+			const records = await fetchAllQuery({ filters: [{ key: "channel", condition: "equal", value: object.id }] });
+			const ids = [object.id, ...records.map((r) => r.id)];
 			await note.vanish(ids);
 			await refreshAll();
 			const next = store.channels[0]?.id ?? "";
@@ -48,8 +51,13 @@
 
 	async function loadBin() {
 		// Deleted objects of this space (query rows now carry `deleted`).
-		const res = await fetchQuery({ includeDeleted: true, filters: [{ key: "channel", condition: "equal", value: object.id }], limit: 500 });
-		bin = res.records
+		// Read to exhaustion: "Empty bin" vanishes exactly this list, so a
+		// capped read would delete a page and report the bin emptied.
+		const records = await fetchAllQuery({
+			includeDeleted: true,
+			filters: [{ key: "channel", condition: "equal", value: object.id }],
+		});
+		bin = records
 			.filter((r) => (r as { deleted?: boolean }).deleted)
 			.map((r) => ({
 				id: r.id,

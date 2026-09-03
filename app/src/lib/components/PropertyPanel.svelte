@@ -6,7 +6,7 @@
 	 */
 	import type { ObjectJSON, ValueJSON } from "$lib/types";
 	import { fieldStr } from "$lib/types";
-	import { fetchQuery, type QueryResultRow } from "$lib/api";
+	import { fetchQuery, type QueryResultRow, fetchAllQuery } from "$lib/api";
 	import { objectIcon } from "$lib/icons";
 	import { store } from "$lib/data.svelte";
 	import { currentSpaceId } from "$lib/relations";
@@ -29,10 +29,10 @@
 			own === (store.channels[0]?.id ?? "")
 				? { key: "channel", condition: "in", value: [own, ""] }
 				: { key: "channel", condition: "equal", value: own };
-		const res = await fetchQuery({ filters: [{ key, condition: "notEmpty" }, spaceFilter], limit: 500 });
+		const records = await fetchAllQuery({ filters: [{ key, condition: "notEmpty" }, spaceFilter] });
 		// Definition objects (relations/types) carry system fields like
 		// `key`/`format` themselves — keep the listing to real records.
-		rows = res.records
+		rows = records
 			.filter((r) => r.id !== object.id && r.typeKey !== "relation" && r.typeKey !== "type")
 			.toSorted((a, b) => b.updatedAt - a.updatedAt);
 		loaded = true;
