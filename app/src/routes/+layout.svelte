@@ -739,10 +739,12 @@
 					</div>
 				{/each}
 				<div class="m-section">
-					<button class="m-section-label" onclick={() => (mCollapsed["__recent"] = !mCollapsed["__recent"])}>
-						Recently edited
-						<span class="m-chev" class:open={!mCollapsed["__recent"]}>⌄</span>
-					</button>
+					<div class="m-section-head">
+						<button class="m-section-label" onclick={() => (mCollapsed["__recent"] = !mCollapsed["__recent"])}>Recently edited</button>
+						<button class="m-chev-btn" aria-label={mCollapsed["__recent"] ? "Expand" : "Collapse"} onclick={() => (mCollapsed["__recent"] = !mCollapsed["__recent"])}>
+							<span class="m-chev" class:open={!mCollapsed["__recent"]}>⌄</span>
+						</button>
+					</div>
 					{#if !mCollapsed["__recent"]}
 						<div class="m-section-body">
 							{#each mobileRecents as o (o.id)}
