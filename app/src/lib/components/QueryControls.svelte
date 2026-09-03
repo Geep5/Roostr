@@ -198,10 +198,15 @@
 		return (relations.find((r) => r.key === key)?.options ?? []).map((o) => o.text);
 	}
 
-	/** Filterable keys: virtual keys + every non-hidden relation. */
+	/** Filterable keys: virtual keys + every non-hidden relation.
+	 *
+	 * Unique: these key the option and rule `{#each}` blocks, and a repeat
+	 * is a render error that takes the whole panel down. `type` and the
+	 * timestamps are virtual, so a space owning a property of the same key
+	 * would collide here even with one def per key upstream. */
 	const filterKeys = $derived.by(() => {
 		const keys = relations.filter((r) => !r.hidden && r.key !== "setOf").map((r) => r.key);
-		return ["type", ...keys, "createdAt", "updatedAt"];
+		return [...new Set(["type", ...keys, "createdAt", "updatedAt"])];
 	});
 
 	function labelOf(key: string): string {

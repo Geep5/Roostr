@@ -61,9 +61,23 @@ export function formatGlyph(format: string): string {
 /**
  * Spaces are fully self-contained: every property - including the
  * seeded defaults - belongs to exactly one space.
+ *
+ * One def per key, because two devices can create the same property
+ * before either has seen the other's: nothing serialises a
+ * content-addressed DAG, so `Team` written on two machines converges to
+ * two defs sharing the key `team`. Consumers index by key and some key
+ * `{#each}` blocks by it, where a repeat is a hard render error - so the
+ * collision is resolved here, once, rather than in every caller. The
+ * survivor is the lowest id so every device picks the same one.
  */
 export function spaceRelations(relations: RelationDefJSON[], spaceId: string): RelationDefJSON[] {
-	return relations.filter((r) => r.space === spaceId);
+	const byKey = new Map<string, RelationDefJSON>();
+	for (const r of relations) {
+		if (r.space !== spaceId) continue;
+		const held = byKey.get(r.key);
+		if (!held || r.id < held.id) byKey.set(r.key, r);
+	}
+	return [...byKey.values()];
 }
 
 /** The active space id, falling back to the default space. */
