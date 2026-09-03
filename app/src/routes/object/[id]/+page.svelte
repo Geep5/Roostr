@@ -16,6 +16,7 @@
 	import GalleryView from "$lib/components/GalleryView.svelte";
 	import SpaceManage from "$lib/components/SpaceManage.svelte";
 	import TypePanel from "$lib/components/TypePanel.svelte";
+	import PropertyPanel from "$lib/components/PropertyPanel.svelte";
 	import EmojiPicker from "$lib/components/EmojiPicker.svelte";
 	import { objectIcon } from "$lib/icons";
 
@@ -103,6 +104,7 @@
 	const isAgent = $derived(object?.typeKey === "agent");
 	const isType = $derived(object?.typeKey === "type");
 	const isTemplate = $derived(object?.typeKey === "template");
+	const isRelation = $derived(object?.typeKey === "relation");
 
 	/** A template renders with its TARGET type's layout (so a task template shows the checkbox). */
 	const effectiveTypeKey = $derived.by(() => {
@@ -292,7 +294,7 @@
 		{#if isTemplate}
 			<p class="tpl-note">Template{templateTargetName ? ` of ${templateTargetName}` : ""} — new objects copy these blocks.</p>
 		{/if}
-		{#if !isChannel && !isChat && !isType}
+		{#if !isChannel && !isChat && !isType && !isRelation}
 			<FeaturedProps {object} relations={store.relations} onchanged={refresh} />
 		{/if}
 
@@ -302,6 +304,8 @@
 			<Discussion {object} full onchanged={refresh} />
 		{:else if isType}
 			<TypePanel {object} onchanged={refresh} />
+		{:else if isRelation}
+			<PropertyPanel {object} />
 		{:else if isQuery || isCollection}
 			<!-- Dataview aligns with the title/featured edge (48px rail). -->
 			<div class="dataview">
@@ -364,7 +368,7 @@
 		{/if}
 
 		<!-- Anytype: queries/collections (sets) carry no discussion. -->
-		{#if !isChannel && !isChat && !isAgent && !isType && !isTemplate && !isQuery && !isCollection}
+		{#if !isChannel && !isChat && !isAgent && !isType && !isTemplate && !isRelation && !isQuery && !isCollection}
 			<Discussion {object} onchanged={refresh} />
 		{/if}
 

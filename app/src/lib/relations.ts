@@ -41,6 +41,22 @@ export const CREATABLE_FORMATS = [
 	"object",
 ] as const;
 
+/** Sidebar/list glyph per relation format (Anytype's per-format icons). */
+export function formatGlyph(format: string): string {
+	switch (format) {
+		case "number": return "#";
+		case "status": return "◐";
+		case "tag": return "◧";
+		case "date": return "📅";
+		case "checkbox": return "☑";
+		case "url": return "🔗";
+		case "email": return "＠";
+		case "phone": return "☎";
+		case "object": return "▣";
+		default: return "≡";
+	}
+}
+
 export function emptyValueFor(format: string): ValueJSON {
 	if (format === "checkbox") return { boolValue: false };
 	if (format === "tag" || format === "object") return { valuesValue: { items: [] } };

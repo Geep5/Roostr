@@ -10,6 +10,7 @@
 	import GraphIcon from "$lib/components/GraphIcon.svelte";
 	import PinnedWidget from "$lib/components/PinnedWidget.svelte";
 	import { creatableTypes, typeGlyph, createTyped, createCollection, createQuery } from "$lib/create";
+	import { CREATABLE_FORMATS, RESERVED_KEYS, createRelation, formatGlyph } from "$lib/relations";
 	import type { SpaceJSON } from "$lib/types";
 
 	let { children }: { children: import("svelte").Snippet } = $props();
@@ -378,6 +379,24 @@
 	}
 
 	/** Create a type object (Anytype: U.Object.createType); opens its page. */
+	const sidebarProps = $derived(
+		store.relations
+			.filter((r) => !r.hidden && !RESERVED_KEYS[r.key])
+			.toSorted((a, b) => (a.name || a.key).localeCompare(b.name || b.key)),
+	);
+
+	async function newProperty() {
+		const name = prompt("Property name:");
+		if (!name?.trim()) return;
+		const fmt = prompt(`Format (${CREATABLE_FORMATS.join(", ")}):`, "shorttext")?.trim() ?? "";
+		if (!(CREATABLE_FORMATS as readonly string[]).includes(fmt)) {
+			if (fmt) alert(`Unknown format "${fmt}".`);
+			return;
+		}
+		const rel = await createRelation(name.trim(), fmt);
+		if (rel) await goto(`/object/${rel.id}`);
+	}
+
 	async function newType() {
 		const name = prompt("Type name:");
 		if (!name?.trim()) return;
@@ -596,6 +615,24 @@
 					</button>
 				{/each}
 				<button class="m-card add" onclick={() => void newSpace()}>＋ New space</button>
+				<div class="m-section">
+					<div class="m-section-head">
+						<button class="m-section-label" onclick={() => (mCollapsed["__props"] = !mCollapsed["__props"])}>
+							Properties
+							<span class="m-chev" class:open={!mCollapsed["__props"]}>⌄</span>
+						</button>
+						<button class="m-section-add" aria-label="New property" onclick={() => void newProperty()}>＋</button>
+					</div>
+					{#if !mCollapsed["__props"]}
+						<div class="m-section-body">
+							{#each sidebarProps as r (r.id)}
+								<a class="m-row" href="/object/{r.id}">
+									<span class="obj-icon">{formatGlyph(r.format)}</span>{r.name || r.key}
+								</a>
+							{/each}
+						</div>
+					{/if}
+				</div>
 			</div>
 			<div class="m-bottom">
 				<button class="m-search" onclick={() => (showSearch = true)}>⌕ Search</button>
@@ -879,6 +916,27 @@
 								</div>
 							{/if}
 						{/each}
+					</div>
+				{/if}
+			</div>
+
+			<div class="section">
+				<div class="section-head">
+					<button class="section-name" onclick={() => flipSection("props")}>
+						<span class="section-arrow" class:open={!sectionCollapsed["props"]}>▶</span>Properties
+					</button>
+					<button class="section-add" title="New property" onclick={() => void newProperty()}>＋</button>
+				</div>
+				{#if !sectionCollapsed["props"]}
+					<div class="section-body">
+						{#each sidebarProps as r (r.id)}
+							<a class="item" class:current={page.url.pathname === `/object/${r.id}`} href="/object/{r.id}">
+								<span class="obj-icon">{formatGlyph(r.format)}</span>{r.name || r.key}
+							</a>
+						{/each}
+						{#if sidebarProps.length === 0}
+							<span class="none">No properties yet</span>
+						{/if}
 					</div>
 				{/if}
 			</div>
