@@ -3,7 +3,7 @@
 	import { goto } from "$app/navigation";
 	import { page } from "$app/state";
 	import { activeSpace } from "$lib/space.svelte";
-	import { space as spaceApi, note, fetchObject } from "$lib/api";
+	import { space as spaceApi, note, fetchObject, fetchQuery } from "$lib/api";
 	import { inviteUrl } from "$lib/invite";
 	import { objectIcon } from "$lib/icons";
 	import { store, refreshAll, connectEvents } from "$lib/data.svelte";
@@ -40,6 +40,7 @@
 	// ── Header toolbar (Anytype header/main/object.tsx) ───────────
 	const objectId = $derived(page.url.pathname.startsWith("/object/") ? page.url.pathname.slice("/object/".length) : "");
 	const objectSummary = $derived(store.summaries.find((s) => s.id === objectId));
+	const objectRelation = $derived(objectId ? store.relations.find((r) => r.id === objectId) : undefined);
 
 	/** The channel whose pinnedIds owns this object (unassigned → default). */
 	const owningSpaceOf = (channelId: string) => channels.find((c) => c.id === channelId);
@@ -182,6 +183,40 @@
 			await note.blockAdd(id, { ...b, childrenIds: [] }, pid ?? "", pid ? 5 : 0);
 		}
 		await goto(`/object/${id}`);
+	}
+
+	// ── Property deletion: the value is stripped from every object
+	// holding it, then the relation object itself is vanished. ──────
+	let confirmDeleteProp = $state(false);
+	let deletingProp = $state(false);
+	let propUsage = $state(-1);
+
+	async function openDeleteProperty() {
+		if (!objectRelation) return;
+		showMore = false;
+		propUsage = -1;
+		confirmDeleteProp = true;
+		const res = await fetchQuery({ filters: [{ key: objectRelation.key, condition: "exists" }], limit: 1000 });
+		propUsage = res.records.filter((r) => r.id !== objectRelation!.id && r.typeKey !== "relation" && r.typeKey !== "type").length;
+	}
+
+	async function deleteProperty() {
+		const rel = objectRelation;
+		if (!rel || deletingProp) return;
+		deletingProp = true;
+		try {
+			const res = await fetchQuery({ filters: [{ key: rel.key, condition: "exists" }], limit: 1000 });
+			for (const r of res.records) {
+				if (r.id === rel.id || r.typeKey === "relation" || r.typeKey === "type") continue;
+				await note.deleteField(r.id, rel.key);
+			}
+			await note.vanish(rel.id);
+			confirmDeleteProp = false;
+			await refreshAll();
+			await goto("/");
+		} finally {
+			deletingProp = false;
+		}
 	}
 
 	async function moveToBin() {
@@ -524,7 +559,23 @@
 				{/if}
 				<span class="m-obj-name">{headerPath.name}</span>
 			</span>
-			{#if objectSummary}
+			{#if objectRelation}
+				<div class="m-actions">
+				<span class="m-sync" class:ok={store.connected} data-tip={store.connected ? "Local daemon live" : "Daemon offline"}><span class="m-sync-dot"></span></span>
+				<div class="more-wrap">
+					<button class="m-btn" data-tip="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
+					{#if showMore}
+						<div class="more-menu">
+							<button onclick={() => { showMore = false; void goto(`/graph?focus=${objectId}`); }}>
+								<span class="menu-graph-icon"><GraphIcon size={14} /></span> Graph
+							</button>
+							<div class="menu-sep"></div>
+							<button class="danger" onclick={() => void openDeleteProperty()}>🗑 Delete property</button>
+						</div>
+					{/if}
+				</div>
+				</div>
+			{:else if objectSummary}
 				<div class="m-actions">
 				<span class="m-sync" class:ok={store.connected} data-tip={store.connected ? "Local daemon live" : "Daemon offline"}><span class="m-sync-dot"></span></span>
 				<div class="more-wrap">
@@ -963,7 +1014,16 @@
 			</button>
 			<div class="header-side right">
 				<a class="hbtn" data-tip="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}><GraphIcon size={16} /></a>
-				{#if objectSummary}
+				{#if objectRelation}
+					<div class="more-wrap">
+						<button class="hbtn" data-tip="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
+						{#if showMore}
+							<div class="more-menu">
+								<button class="danger" onclick={() => void openDeleteProperty()}>🗑 Delete property</button>
+							</div>
+						{/if}
+					</div>
+				{:else if objectSummary}
 					<div class="more-wrap">
 						<button class="hbtn" data-tip="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
 						{#if showMore}
@@ -1001,6 +1061,23 @@
 		<main>{@render children()}</main>
 	</div>
 </div>
+{/if}
+
+{#if confirmDeleteProp && objectRelation}
+	<div class="prop-del-overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget && !deletingProp) confirmDeleteProp = false; }}>
+		<div class="prop-del-modal" role="dialog" aria-label="Delete property">
+			<h3>Delete "{objectRelation.name || objectRelation.key}"?</h3>
+			<p class="hint">
+				This deletes the property and removes its value from
+				{propUsage < 0 ? "…" : `${propUsage} object${propUsage === 1 ? "" : "s"}`}
+				— on every device, forever. This cannot be undone.
+			</p>
+			<div class="prop-del-row">
+				<button onclick={() => (confirmDeleteProp = false)} disabled={deletingProp}>Cancel</button>
+				<button class="danger" onclick={() => void deleteProperty()} disabled={deletingProp}>{deletingProp ? "Deleting…" : "Delete property"}</button>
+			</div>
+		</div>
+	</div>
 {/if}
 
 {#if showSettings}
@@ -2197,5 +2274,57 @@
 		display: inline-flex;
 		vertical-align: -2px;
 		margin-right: 2px;
+	}
+	.prop-del-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 200;
+	}
+	.prop-del-modal {
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		padding: 20px;
+		width: min(420px, calc(100vw - 40px));
+	}
+	.prop-del-modal h3 {
+		margin: 0 0 8px;
+		font-size: 16px;
+	}
+	.prop-del-modal .hint {
+		color: var(--muted);
+		font-size: 13px;
+		margin: 0 0 14px;
+		line-height: 1.5;
+	}
+	.prop-del-row {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+	}
+	.prop-del-row button {
+		border: 1px solid var(--border);
+		background: none;
+		color: var(--fg);
+		border-radius: 8px;
+		padding: 7px 14px;
+		cursor: pointer;
+		font-size: 13px;
+	}
+	.prop-del-row button:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.prop-del-row .danger {
+		border-color: var(--red);
+		color: var(--red);
+	}
+	.prop-del-row .danger:hover:not(:disabled) {
+		background: var(--red);
+		color: #fff;
 	}
 </style>
