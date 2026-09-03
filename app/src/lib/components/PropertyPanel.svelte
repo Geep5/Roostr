@@ -8,6 +8,8 @@
 	import { fieldStr } from "$lib/types";
 	import { fetchQuery, type QueryResultRow } from "$lib/api";
 	import { objectIcon } from "$lib/icons";
+	import { store } from "$lib/data.svelte";
+	import { currentSpaceId } from "$lib/relations";
 
 	let { object }: { object: ObjectJSON } = $props();
 
@@ -19,7 +21,15 @@
 
 	async function load() {
 		if (!key) return;
-		const res = await fetchQuery({ filters: [{ key, condition: "notEmpty" }], limit: 500 });
+		// Spaces are self-contained: a stamped property lists its own
+		// space's holders; a bundled (global) one lists the space you are
+		// browsing from. The default space also owns unstamped objects.
+		const own = fieldStr(object.fields, "channel") || currentSpaceId();
+		const spaceFilter =
+			own === (store.channels[0]?.id ?? "")
+				? { key: "channel", condition: "in", value: [own, ""] }
+				: { key: "channel", condition: "equal", value: own };
+		const res = await fetchQuery({ filters: [{ key, condition: "notEmpty" }, spaceFilter], limit: 500 });
 		// Definition objects (relations/types) carry system fields like
 		// `key`/`format` themselves — keep the listing to real records.
 		rows = res.records
