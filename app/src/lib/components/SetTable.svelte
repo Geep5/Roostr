@@ -23,6 +23,7 @@
 		relations,
 		defaultSorts = [],
 		oncreate,
+		onremove,
 		onchanged,
 	}: {
 		/** /api/query request body (setId, filters, …). */
@@ -34,6 +35,9 @@
 		/** Renders the Anytype "+ New Object" footer row when provided.
 		 *  Committing the entry row calls it with the typed name. */
 		oncreate?: (name: string) => Promise<void>;
+		/** Collections: the row context menu offers "Remove from
+		 *  collection", severing membership without touching the object. */
+		onremove?: (ids: string[]) => Promise<void>;
 		onchanged: () => Promise<void>;
 	} = $props();
 
@@ -162,6 +166,36 @@
 
 	async function deleteSelected() {
 		const ids = [...selectedRows];
+		selectedRows = [];
+		for (const id of ids) await note.del(id);
+		await reload();
+	}
+
+	// ── Row context menu (right-click): open / remove-from-collection /
+	// bin. A right-click inside the selection acts on the whole
+	// selection; outside it, on just that row. ───────────────────────
+	let ctxMenu = $state<{ x: number; y: number; id: string } | null>(null);
+
+	function onRowContext(e: MouseEvent, id: string) {
+		e.preventDefault();
+		ctxMenu = { x: e.clientX, y: e.clientY, id };
+	}
+
+	function ctxTargets(): string[] {
+		if (!ctxMenu) return [];
+		return selectedRows.includes(ctxMenu.id) ? [...selectedRows] : [ctxMenu.id];
+	}
+
+	async function ctxRemove() {
+		const ids = ctxTargets();
+		ctxMenu = null;
+		selectedRows = [];
+		await onremove?.(ids);
+	}
+
+	async function ctxDelete() {
+		const ids = ctxTargets();
+		ctxMenu = null;
 		selectedRows = [];
 		for (const id of ids) await note.del(id);
 		await reload();
@@ -352,7 +386,7 @@
 	}
 </script>
 
-<svelte:window onkeydown={(e) => { if (e.key === "Escape") { cellEdit = null; selectedRows = []; } }} onmousedown={(e) => { if (cellEdit && !(e.target as HTMLElement).closest(".cell-pop, td.editable")) cellEdit = null; }} onmouseup={endRowDrag} />
+<svelte:window onkeydown={(e) => { if (e.key === "Escape") { cellEdit = null; selectedRows = []; ctxMenu = null; } }} onmousedown={(e) => { if (cellEdit && !(e.target as HTMLElement).closest(".cell-pop, td.editable")) cellEdit = null; }} onmouseup={endRowDrag} />
 
 <div class="set-table">
 	<table>
@@ -416,7 +450,7 @@
 		</thead>
 		<tbody>
 			{#each rows as r (r.id)}
-				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} onmousedown={(e) => onRowMouseDown(e, r.id)} onmouseenter={() => onRowEnter(r.id)}>
+				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} onmousedown={(e) => onRowMouseDown(e, r.id)} onmouseenter={() => onRowEnter(r.id)} oncontextmenu={(e) => onRowContext(e, r.id)}>
 					<td class="name"><span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || "Untitled"}</td>
 					{#each columns as c (c)}
 						{#if isEditable(c)}
@@ -519,6 +553,18 @@
 	/>
 {/if}
 
+{#if ctxMenu}
+	{@const n = ctxTargets().length}
+	<button class="ctx-backdrop" aria-label="Close menu" onclick={() => (ctxMenu = null)} oncontextmenu={(e) => { e.preventDefault(); ctxMenu = null; }}></button>
+	<div class="ctx-menu" style="left: {Math.min(ctxMenu.x, window.innerWidth - 210)}px; top: {Math.min(ctxMenu.y, window.innerHeight - 130)}px" role="menu">
+		<button role="menuitem" onclick={() => { const id = ctxMenu!.id; ctxMenu = null; location.href = `/object/${id}`; }}>Open</button>
+		{#if onremove}
+			<button role="menuitem" onclick={() => void ctxRemove()}>⊖ Remove from collection{n > 1 ? ` (${n})` : ""}</button>
+		{/if}
+		<div class="ctx-sep"></div>
+		<button role="menuitem" class="danger" onclick={() => void ctxDelete()}>🗑 Move to bin{n > 1 ? ` (${n})` : ""}</button>
+	</div>
+{/if}
 <style>
 	.set-table {
 		overflow-x: auto;
@@ -724,5 +770,48 @@
 	.head-icon {
 		margin-right: 5px;
 		font-size: 12px;
+	}
+	.ctx-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 90;
+		background: none;
+		border: none;
+		cursor: default;
+	}
+	.ctx-menu {
+		position: fixed;
+		z-index: 91;
+		min-width: 190px;
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 4px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+		display: flex;
+		flex-direction: column;
+	}
+	.ctx-menu button {
+		display: block;
+		width: 100%;
+		text-align: left;
+		background: none;
+		border: none;
+		color: var(--fg);
+		font-size: 13px;
+		padding: 7px 10px;
+		border-radius: 6px;
+		cursor: pointer;
+	}
+	.ctx-menu button:hover {
+		background: var(--hover);
+	}
+	.ctx-menu .danger {
+		color: var(--red);
+	}
+	.ctx-sep {
+		height: 1px;
+		background: var(--border);
+		margin: 4px 6px;
 	}
 </style>

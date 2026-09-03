@@ -336,7 +336,7 @@
 					{:else if viewType === "calendar"}
 						<CalendarView body={tableBody} {object} dateKey={object.fields["viewDateKey"]?.stringValue || "createdDate"} />
 					{:else}
-						<SetTable bind:this={table} body={tableBody} {object} relations={scopedRelations} defaultSorts={viewSorts} onchanged={refresh} oncreate={(name) => queryControls?.createRecord(name) ?? Promise.resolve()} />
+						<SetTable bind:this={table} body={tableBody} {object} relations={scopedRelations} defaultSorts={viewSorts} onchanged={refresh} oncreate={(name) => queryControls?.createRecord(name) ?? Promise.resolve()} onremove={isCollection ? (ids) => setMembers(memberIds.filter((m) => !ids.includes(m))) : undefined} />
 					{/if}
 				{:else}
 					<p class="muted">Empty collection — add objects.</p>
