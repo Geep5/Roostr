@@ -74,6 +74,18 @@ export async function createCollection(channelId: string): Promise<string> {
 }
 
 /** Create a sourceless query; the query page opens the type suggest (Anytype: a new set asks for its source). */
+/**
+ * Default content every fresh space starts with: a "Chats" query over
+ * the chat type, so conversations are reachable the moment the space
+ * exists. No navigation - the caller decides where to land.
+ */
+export async function seedSpaceDefaults(channelId: string): Promise<void> {
+	await note.create("Chats", "query", {
+		...channelField(channelId),
+		setOf: { valuesValue: { items: [{ stringValue: "chat" }] } },
+	});
+}
+
 export async function createQuery(channelId: string): Promise<string> {
 	const { id } = await note.create("New query", "query", {
 		...channelField(channelId),

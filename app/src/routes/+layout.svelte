@@ -9,7 +9,7 @@
 	import { store, refreshAll, connectEvents } from "$lib/data.svelte";
 	import GraphIcon from "$lib/components/GraphIcon.svelte";
 	import PinnedWidget from "$lib/components/PinnedWidget.svelte";
-	import { creatableTypes, typeGlyph, createTyped, createCollection, createQuery } from "$lib/create";
+	import { creatableTypes, typeGlyph, createTyped, createCollection, createQuery, seedSpaceDefaults } from "$lib/create";
 	import { CREATABLE_FORMATS, RESERVED_KEYS, createRelation, formatGlyph } from "$lib/relations";
 	import type { SpaceJSON } from "$lib/types";
 
@@ -409,6 +409,7 @@
 		const name = prompt("Space name:");
 		if (!name) return;
 		const { id } = await spaceApi.create(name);
+		await seedSpaceDefaults(id);
 		await refreshAll();
 		selectSpace(id);
 	}
@@ -512,6 +513,7 @@
 			else if (store.channels.length > 0) activeSpace.id = store.channels[0].id;
 			else {
 				void spaceApi.create("Personal").then(async ({ id }) => {
+					await seedSpaceDefaults(id);
 					await refreshAll();
 					activeSpace.id = id;
 				});
