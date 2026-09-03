@@ -7,6 +7,7 @@
 
 import { note } from "$lib/api";
 import { refreshAll, store } from "$lib/data.svelte";
+import { activeSpace } from "$lib/space.svelte";
 import type { RelationDefJSON, ValueJSON } from "$lib/types";
 
 export const RESERVED_KEYS: Record<string, true> = {
@@ -57,6 +58,20 @@ export function formatGlyph(format: string): string {
 	}
 }
 
+/**
+ * Spaces are self-contained: a property belongs to the space it was
+ * created in. Bundled/system defs (no space stamp) exist in every
+ * space; everything else shows only in its own.
+ */
+export function spaceRelations(relations: RelationDefJSON[], spaceId: string): RelationDefJSON[] {
+	return relations.filter((r) => !r.space || r.space === spaceId);
+}
+
+/** The active space id, falling back to the default space. */
+export function currentSpaceId(): string {
+	return activeSpace.id || store.channels[0]?.id || "";
+}
+
 export function emptyValueFor(format: string): ValueJSON {
 	if (format === "checkbox") return { boolValue: false };
 	if (format === "tag" || format === "object") return { valuesValue: { items: [] } };
@@ -77,6 +92,7 @@ export async function createRelation(name: string, format: string): Promise<Rela
 	const existing = store.relations.find((r) => r.key === key);
 	if (existing) return existing;
 	await note.create(name, "relation", {
+		channel: { stringValue: currentSpaceId() },
 		key: { stringValue: key },
 		name: { stringValue: name },
 		format: { stringValue: format },

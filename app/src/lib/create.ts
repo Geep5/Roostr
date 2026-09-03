@@ -9,6 +9,7 @@ import { fetchObject, note } from "$lib/api";
 import type { ValueJSON } from "$lib/types";
 import { TYPE_GLYPHS } from "$lib/icons";
 import { store } from "$lib/data.svelte";
+import { activeSpace } from "$lib/space.svelte";
 
 const channelField = (channelId: string): Record<string, ValueJSON> =>
 	channelId ? { channel: { stringValue: channelId } } : {};
@@ -16,10 +17,12 @@ const channelField = (channelId: string): Record<string, ValueJSON> =>
 /** Legacy fallback until the type objects have loaded. */
 export const CREATABLE_TYPES = ["page", "note", "task", "person", "project", "bookmark", "chat"] as const;
 
-/** Creatable types for the sidebar dropdown: the space's type objects. */
+/** Creatable types for the sidebar dropdown: bundled types plus the
+ *  active space's own — spaces are self-contained. */
 export function creatableTypes(): Array<{ key: string; name: string; icon: string }> {
 	if (store.types.length === 0) return CREATABLE_TYPES.map((k) => ({ key: k, name: k[0].toUpperCase() + k.slice(1), icon: typeGlyph(k) }));
-	return store.types.map((t) => ({ key: t.key, name: t.name || t.key, icon: t.icon || typeGlyph(t.key) }));
+	const sid = activeSpace.id || store.channels[0]?.id || "";
+	return store.types.filter((t) => !t.space || t.space === sid).map((t) => ({ key: t.key, name: t.name || t.key, icon: t.icon || typeGlyph(t.key) }));
 }
 
 export function typeGlyph(typeKey: string): string {

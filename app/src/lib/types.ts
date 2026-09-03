@@ -76,6 +76,8 @@ export interface RelationDefJSON {
 	format: string;
 	name: string;
 	iconEmoji?: string;
+	/** Owning space id; "" = bundled/system def, present in every space. */
+	space?: string;
 	hidden: boolean;
 	readOnly: boolean;
 	maxCount: number;

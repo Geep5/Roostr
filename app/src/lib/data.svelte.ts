@@ -28,6 +28,8 @@ export interface TypeDef {
 	icon: string;
 	layout: string; // "page" | "task"
 	defaultTemplateId: string;
+	/** Owning space id; "" = bundled/system type, present in every space. */
+	space: string;
 }
 
 export const store = $state({
@@ -52,6 +54,7 @@ async function fetchTypes(): Promise<TypeDef[]> {
 			icon: s(r.fields, "iconEmoji"),
 			layout: s(r.fields, "layout") || "page",
 			defaultTemplateId: s(r.fields, "default_template_id"),
+			space: s(r.fields, "channel"),
 		}))
 		.filter((t) => t.key)
 		.sort((a, b) => a.name.localeCompare(b.name));

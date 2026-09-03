@@ -9,7 +9,7 @@
 	import { fetchObject, fetchQuery, type QueryResultRow } from "$lib/api";
 	import type { ObjectJSON, RelationDefJSON } from "$lib/types";
 	import { store, onObjectEvent } from "$lib/data.svelte";
-	import { engineFiltersOf } from "$lib/filters";
+	import { engineFiltersOf, spaceFilterOf } from "$lib/filters";
 	import { objectIcon } from "$lib/icons";
 
 	let { id }: { id: string } = $props();
@@ -31,7 +31,7 @@
 					.filter((s): s is string => !!s);
 				// The widget applies the view's filter rules exactly like the
 				// page does - a record outside the view never shows here.
-				const filters = engineFiltersOf(o, store.relations);
+				const filters = [...engineFiltersOf(o, store.relations), spaceFilterOf(o, store.channels[0]?.id ?? "")];
 				const body =
 					o.typeKey === "collection"
 						? memberIds.length

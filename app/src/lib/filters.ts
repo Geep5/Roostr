@@ -38,3 +38,16 @@ export function engineFiltersOf(object: ObjectJSON, relations: RelationDefJSON[]
 	}
 	return out;
 }
+
+/**
+ * The implicit space filter: a set/query only ever matches objects of
+ * its own space. Objects with no space stamp belong to the default
+ * space (the daemon's display fallback), so the default space includes
+ * them; every other space is exact-match.
+ */
+export function spaceFilterOf(object: ObjectJSON, defaultSpaceId: string): Record<string, unknown> {
+	const owning = object.fields["channel"]?.stringValue || defaultSpaceId;
+	return owning === defaultSpaceId
+		? { key: "channel", condition: "in", value: [owning, ""] }
+		: { key: "channel", condition: "equal", value: owning };
+}

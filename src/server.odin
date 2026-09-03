@@ -362,6 +362,7 @@ handle_relations :: proc(sock: net.TCP_Socket) {
 			o["format"] = json.String(str(s, "format"))
 			o["name"] = json.String(str(s, "name"))
 			o["iconEmoji"] = json.String(str(s, "iconEmoji"))
+			o["space"] = json.String(str(s, "channel"))
 			hidden := false
 			if v, ok := fields_get(s.fields, "hidden"); ok && v.kind == .Bool do hidden = v.b
 			o["hidden"] = json.Boolean(hidden)

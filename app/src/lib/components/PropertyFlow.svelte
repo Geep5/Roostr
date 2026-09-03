@@ -12,7 +12,7 @@
 	 *      format submenu (never the browser's native select), Create.
 	 */
 	import { store } from "$lib/data.svelte";
-	import { RESERVED_KEYS, createRelation } from "$lib/relations";
+	import { RESERVED_KEYS, createRelation, currentSpaceId, spaceRelations } from "$lib/relations";
 	import type { RelationDefJSON } from "$lib/types";
 
 	export interface FlowItem {
@@ -74,7 +74,7 @@
 	// ── Stage 2 data (Anytype relationSuggest getSections) ─────────
 	const SYSTEM_KEYS = ["createdDate", "modifiedDate", "dueDate", "done", "tag", "status", "url", "email", "phone", "description"];
 	const present = $derived(new Set(items.map((i) => i.key)));
-	const allRels = $derived(store.relations.filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && !present.has(r.key)));
+	const allRels = $derived(spaceRelations(store.relations, currentSpaceId()).filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && !present.has(r.key)));
 	const q = $derived(query.trim().toLowerCase());
 	const matching = $derived(q ? allRels.filter((r) => (r.name || r.key).toLowerCase().includes(q)) : allRels);
 	const library = $derived(matching.filter((r) => !SYSTEM_KEYS.includes(r.key)));

@@ -6,7 +6,7 @@
 	 * `Create property "<query>"` which reveals a format picker.
 	 */
 	import { store } from "$lib/data.svelte";
-	import { CREATABLE_FORMATS, RESERVED_KEYS, createRelation } from "$lib/relations";
+	import { CREATABLE_FORMATS, RESERVED_KEYS, createRelation, currentSpaceId, spaceRelations } from "$lib/relations";
 	import type { RelationDefJSON } from "$lib/types";
 
 	let {
@@ -39,7 +39,7 @@
 		inputEl?.focus();
 	});
 
-	const all = $derived(store.relations.filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && !exclude.includes(r.key)));
+	const all = $derived(spaceRelations(store.relations, currentSpaceId()).filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && !exclude.includes(r.key)));
 	const filtered = $derived.by(() => {
 		const q = query.trim().toLowerCase();
 		if (!q) return all;

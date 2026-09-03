@@ -4,7 +4,8 @@
 	import { goto } from "$app/navigation";
 	import type { ObjectJSON } from "$lib/types";
 	import { fieldStr } from "$lib/types";
-	import { engineFiltersOf } from "$lib/filters";
+	import { engineFiltersOf, spaceFilterOf } from "$lib/filters";
+	import { spaceRelations } from "$lib/relations";
 	import { fetchObject, fetchQuery, note } from "$lib/api";
 	import { store, refreshAll, onObjectEvent, layoutOf } from "$lib/data.svelte";
 	import Editor from "$lib/components/Editor.svelte";
@@ -136,6 +137,10 @@
 	/** Stored viewFilters → engine filter objects with format-aware value coercion. */
 	const engineFilters = $derived.by((): Array<Record<string, unknown>> => (object ? engineFiltersOf(object, store.relations) : []));
 
+	/** Pick-lists (columns, filters, featured props) offer only this
+	 *  space's properties - spaces are self-contained. */
+	const scopedRelations = $derived(object ? spaceRelations(store.relations, object.fields["channel"]?.stringValue || store.channels[0]?.id || "") : []);
+
 	const viewSorts = $derived.by((): Array<{ key: string; type: "asc" | "desc" }> => {
 		const items = object?.fields["viewSorts"]?.valuesValue?.items ?? [];
 		const out: Array<{ key: string; type: "asc" | "desc" }> = [];
@@ -154,11 +159,14 @@
 	const tableBody = $derived.by((): Record<string, unknown> | null => {
 		if (!object) return null;
 		const text = searchText.trim() ? { textQuery: searchText.trim() } : {};
-		if (isQuery) return { setId: object.id, filters: engineFilters, ...text };
+		// Spaces are self-contained: every set implicitly filters to the
+		// owning space's objects.
+		const spaceFilter = spaceFilterOf(object, store.channels[0]?.id ?? "");
+		if (isQuery) return { setId: object.id, filters: [...engineFilters, spaceFilter], ...text };
 		if (isCollection) {
 			if (memberIds.length === 0) return null;
 			// View filters stack on top of membership (AND semantics).
-			return { filters: [{ key: "id", condition: "in", value: memberIds }, ...engineFilters], ...text };
+			return { filters: [{ key: "id", condition: "in", value: memberIds }, ...engineFilters, spaceFilter], ...text };
 		}
 		return null;
 	});
@@ -265,11 +273,11 @@
 			<p class="tpl-note">Template{templateTargetName ? ` of ${templateTargetName}` : ""} — new objects copy these blocks.</p>
 		{/if}
 		{#if !isChannel && !isChat && !isType && !isRelation}
-			<FeaturedProps {object} relations={store.relations} onchanged={refresh} />
+			<FeaturedProps {object} relations={scopedRelations} onchanged={refresh} />
 		{/if}
 
 		{#if isChannel}
-			<SpaceManage {object} {spaceInfo} relations={store.relations} onchanged={refresh} />
+			<SpaceManage {object} {spaceInfo} relations={scopedRelations} onchanged={refresh} />
 		{:else if isChat}
 			<Discussion {object} full onchanged={refresh} />
 		{:else if isType}
@@ -310,7 +318,7 @@
 				<QueryControls
 					bind:this={queryControls}
 					{object}
-					relations={store.relations}
+					relations={scopedRelations}
 					onchanged={refresh}
 					onsearch={(q) => (searchText = q)}
 					mode={isQuery ? "query" : "collection"}
@@ -321,13 +329,13 @@
 				{#if tableBody}
 					{@const viewType = object.fields["viewType"]?.stringValue || "table"}
 					{#if viewType === "gallery"}
-						<GalleryView body={tableBody} {object} relations={store.relations} sorts={viewSorts} />
+						<GalleryView body={tableBody} {object} relations={scopedRelations} sorts={viewSorts} />
 					{:else if viewType === "kanban"}
-						<KanbanView body={tableBody} {object} relations={store.relations} sorts={viewSorts} groupKey={object.fields["viewGroupKey"]?.stringValue || ""} onchanged={refresh} />
+						<KanbanView body={tableBody} {object} relations={scopedRelations} sorts={viewSorts} groupKey={object.fields["viewGroupKey"]?.stringValue || ""} onchanged={refresh} />
 					{:else if viewType === "calendar"}
 						<CalendarView body={tableBody} {object} dateKey={object.fields["viewDateKey"]?.stringValue || "createdDate"} />
 					{:else}
-						<SetTable bind:this={table} body={tableBody} {object} relations={store.relations} defaultSorts={viewSorts} onchanged={refresh} oncreate={(name) => queryControls?.createRecord(name) ?? Promise.resolve()} />
+						<SetTable bind:this={table} body={tableBody} {object} relations={scopedRelations} defaultSorts={viewSorts} onchanged={refresh} oncreate={(name) => queryControls?.createRecord(name) ?? Promise.resolve()} />
 					{/if}
 				{:else}
 					<p class="muted">Empty collection — add objects.</p>
