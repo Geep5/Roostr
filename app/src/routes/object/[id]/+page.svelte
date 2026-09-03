@@ -177,7 +177,8 @@
 
 	async function openPicker() {
 		if (!object) return;
-		const res = await fetchQuery({ limit: 200 });
+		// Self-contained spaces: only this space's objects are addable.
+		const res = await fetchQuery({ filters: [spaceFilterOf(object, store.channels[0]?.id ?? "")], limit: 200 });
 		const HIDDEN: Record<string, true> = { program: true, typescript: true, json: true, proto: true, relation: true, collection: true, query: true, set: true, type: true, template: true, agent: true, skill: true };
 		const currentId = object.id;
 		candidates = res.records
