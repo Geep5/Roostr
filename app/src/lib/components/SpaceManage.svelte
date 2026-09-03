@@ -90,19 +90,15 @@
 		binBusy = "";
 	}
 	import { invalidateAll } from "$app/navigation";
-	import SetTable from "./SetTable.svelte";
 	import SpaceAgents from "./SpaceAgents.svelte";
-	import type { RelationDefJSON } from "$lib/types";
 
 	let {
 		object,
 		spaceInfo,
-		relations,
 		onchanged,
 	}: {
 		object: ObjectJSON;
 		spaceInfo: SpaceJSON | undefined;
-		relations: RelationDefJSON[];
 		onchanged: () => Promise<void>;
 	} = $props();
 
@@ -235,19 +231,6 @@
 			}}>Rotate key</button
 		>
 	</div>
-
-	<h3>Objects in this space</h3>
-	<SetTable
-		body={{
-			filters: [
-				{ key: "channel", condition: "equal", value: object.id },
-				{ key: "type", condition: "notIn", value: ["agent"] },
-			],
-		}}
-		{object}
-		{relations}
-		{onchanged}
-	/>
 
 	<div class="bin-head">
 		<h3>Bin</h3>

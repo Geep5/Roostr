@@ -278,7 +278,7 @@
 		{/if}
 
 		{#if isChannel}
-			<SpaceManage {object} {spaceInfo} relations={scopedRelations} onchanged={refresh} />
+			<SpaceManage {object} {spaceInfo} onchanged={refresh} />
 		{:else if isChat}
 			<Discussion {object} full onchanged={refresh} />
 		{:else if isType}
