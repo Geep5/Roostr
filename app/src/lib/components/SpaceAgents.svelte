@@ -46,42 +46,6 @@
 	let agents = $state<AgentRow[]>([]);
 	let roster = $state<string[] | null>(null); // null = no local daemon
 
-	interface SkillRow {
-		key: string;
-		name: string;
-		phase: "off" | "installing" | "needs-auth" | "on" | "failed" | "uninstalling";
-	}
-	/** Device-local capabilities (installed on the machine whose harness serves
-	 * these agents). Compact mirror of Settings -> Skills. */
-	let skills = $state<SkillRow[] | null>(null);
-	let coordinator = $state("");
-	let skillPoll: ReturnType<typeof setInterval> | undefined;
-
-	async function loadSkills() {
-		try {
-			const res = await fetch(`${HARNESS}/skills`);
-			const out = (await res.json()) as { skills: SkillRow[]; coordinator: string };
-			skills = out.skills;
-			coordinator = out.coordinator;
-			const busy = skills.some((k) => k.phase === "installing" || k.phase === "uninstalling");
-			if (busy && !skillPoll) skillPoll = setInterval(() => void loadSkills(), 2000);
-			if (!busy && skillPoll) {
-				clearInterval(skillPoll);
-				skillPoll = undefined;
-			}
-		} catch {
-			skills = null;
-		}
-	}
-
-	async function skillOp(key: string, op: "enable" | "disable" | "recheck") {
-		try {
-			await fetch(`${HARNESS}/skills/${op}`, { method: "POST", body: JSON.stringify({ key }) });
-		} catch {
-			/* daemon offline */
-		}
-		await loadSkills();
-	}
 	let now = $state(Date.now());
 	let assigning = $state(""); // agent id whose responsibility editor is open
 	let avatarPick = $state(""); // agent id whose avatar picker is open
@@ -393,7 +357,6 @@
 
 	onMount(() => {
 		void loadRoster();
-		void loadSkills();
 		void loadAuth();
 		// The same tick that ages the presence labels re-checks credentials,
 		// so an expiry that lands while this page is open shows up.
@@ -401,10 +364,7 @@
 			now = Date.now();
 			void loadAuth();
 		}, 15_000);
-		return () => {
-			clearInterval(t);
-			if (skillPoll) clearInterval(skillPoll);
-		};
+		return () => clearInterval(t);
 	});
 
 	$effect(() => {
@@ -653,51 +613,6 @@
 
 <button class="new-agent" onclick={() => void newAgent()}>＋ New agent</button>
 
-{#if skills !== null}
-	<h3>Device skills</h3>
-	<p class="hint">
-		Capabilities installed on this machine. The coordinator agent
-		{#if coordinator}
-			({agents.find((a) => a.id === coordinator)?.name ?? "set in Settings"})
-		{:else}
-			(none set — all agents)
-		{/if}
-		fronts them; manage install/uninstall in global Settings → Skills.
-	</p>
-	<div class="skill-list">
-		{#each skills as k (k.key)}
-			<div class="skill-row">
-				<span class="sname">{k.name}</span>
-				<span class="chip {k.phase}">
-					{k.phase === "on"
-						? "on"
-						: k.phase === "installing"
-							? "installing…"
-							: k.phase === "uninstalling"
-								? "removing…"
-								: k.phase === "needs-auth"
-									? "auth needed"
-									: k.phase === "failed"
-										? "failed"
-										: "off"}
-				</span>
-				{#if k.phase === "needs-auth" || k.phase === "failed"}
-					<button class="recheck" onclick={() => void skillOp(k.key, "recheck")}>Re-check</button>
-				{/if}
-				<label class="switch">
-					<input
-						type="checkbox"
-						checked={k.phase === "on" || k.phase === "installing"}
-						disabled={k.phase === "installing" || k.phase === "uninstalling"}
-						onchange={(e) => void skillOp(k.key, (e.currentTarget as HTMLInputElement).checked ? "enable" : "disable")}
-					/>
-					<span class="slider"></span>
-				</label>
-			</div>
-		{/each}
-	</div>
-{/if}
-
 <style>
 	h3 {
 		font-size: 13px;
@@ -925,93 +840,6 @@
 		margin: 6px 0 2px;
 		font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
 		color: var(--muted);
-	}
-	.skill-list {
-		margin-bottom: 8px;
-	}
-	.skill-row {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 5px 2px;
-		border-top: 1px solid var(--border);
-		font-size: 13px;
-	}
-	.skill-row:first-child {
-		border-top: none;
-	}
-	.sname {
-		font-weight: 600;
-		flex: 1;
-	}
-	.chip {
-		font-size: 11px;
-		padding: 2px 8px;
-		border-radius: 10px;
-		background: var(--hover, #2a2a2a);
-		color: var(--muted);
-	}
-	.chip.on {
-		background: rgb(48 209 88 / 0.16);
-		color: var(--green);
-	}
-	.chip.installing,
-	.chip.uninstalling {
-		background: rgb(125 122 255 / 0.16);
-		color: var(--indigo);
-	}
-	.chip.needs-auth {
-		background: rgb(255 159 10 / 0.16);
-		color: var(--orange);
-	}
-	.chip.failed {
-		background: rgb(255 69 58 / 0.16);
-		color: var(--red);
-	}
-	.recheck {
-		font-size: 11px;
-	}
-	.switch {
-		position: relative;
-		width: 38px;
-		height: 22px;
-		flex: none;
-	}
-	.switch input {
-		opacity: 0;
-		width: 100%;
-		height: 100%;
-		margin: 0;
-		cursor: pointer;
-	}
-	.slider {
-		position: absolute;
-		inset: 0;
-		border-radius: 999px;
-		background: var(--hover, #333);
-		pointer-events: none;
-		transition: background 0.15s;
-	}
-	.slider::before {
-		content: "";
-		position: absolute;
-		top: 2px;
-		left: 2px;
-		width: 18px;
-		height: 18px;
-		border-radius: 50%;
-		background: #fff;
-		box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
-		transition: transform 0.15s;
-	}
-	.switch input:checked + .slider {
-		background: var(--accent);
-	}
-	.switch input:checked + .slider::before {
-		transform: translateX(16px);
-	}
-	.switch input:disabled {
-		cursor: default;
 	}
 	.new-agent {
 		margin-top: 2px;
