@@ -449,7 +449,10 @@
 			{/each}
 			{#if onnewrow}
 			<tr class="new-row">
-				<td colspan="99">
+				<!-- colspan must match the REAL column count: an oversized
+				     colspan in a fixed-layout table fabricates phantom
+				     columns and crushes the visible ones. -->
+				<td colspan={cols.length + 2}>
 					<button class="new-object" onclick={() => onnewrow?.()}>＋ New Object</button>
 				</td>
 			</tr>
