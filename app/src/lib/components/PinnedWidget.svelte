@@ -9,6 +9,7 @@
 	import { fetchObject, fetchQuery, type QueryResultRow } from "$lib/api";
 	import type { ObjectJSON, RelationDefJSON } from "$lib/types";
 	import { store, onObjectEvent } from "$lib/data.svelte";
+	import { engineFiltersOf } from "$lib/filters";
 	import { objectIcon } from "$lib/icons";
 
 	let { id }: { id: string } = $props();
@@ -28,12 +29,15 @@
 				const memberIds = (o.fields["collectionIds"]?.valuesValue?.items ?? [])
 					.map((i) => i.stringValue)
 					.filter((s): s is string => !!s);
+				// The widget applies the view's filter rules exactly like the
+				// page does - a record outside the view never shows here.
+				const filters = engineFiltersOf(o, store.relations);
 				const body =
 					o.typeKey === "collection"
 						? memberIds.length
-							? { filters: [{ key: "id", condition: "in", value: memberIds }] }
+							? { filters: [{ key: "id", condition: "in", value: memberIds }, ...filters] }
 							: null
-						: { setId: o.id };
+						: { setId: o.id, filters };
 				if (!body) {
 					rows = [];
 					return;

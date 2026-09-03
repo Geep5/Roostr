@@ -3,7 +3,8 @@
 	import { page } from "$app/state";
 	import { goto } from "$app/navigation";
 	import type { ObjectJSON } from "$lib/types";
-	import { fieldStr, SYSTEM_TYPE_KEYS } from "$lib/types";
+	import { fieldStr } from "$lib/types";
+	import { engineFiltersOf } from "$lib/filters";
 	import { fetchObject, fetchQuery, note } from "$lib/api";
 	import { store, refreshAll, onObjectEvent, layoutOf } from "$lib/data.svelte";
 	import Editor from "$lib/components/Editor.svelte";
@@ -133,38 +134,7 @@
 	});
 
 	/** Stored viewFilters → engine filter objects with format-aware value coercion. */
-	const engineFilters = $derived.by((): Array<Record<string, unknown>> => {
-		const items = object?.fields["viewFilters"]?.valuesValue?.items ?? [];
-		const out: Array<Record<string, unknown>> = [];
-		for (const item of items) {
-			const e = item.mapValue?.entries;
-			if (!e) continue;
-			const key = e["key"]?.stringValue ?? "";
-			const condition = e["condition"]?.stringValue ?? "equal";
-			const values = (e["value"]?.valuesValue?.items ?? [])
-				.map((i) => i.stringValue)
-				.filter((s): s is string => typeof s === "string");
-			if (!key) continue;
-			const format = key === "createdAt" || key === "updatedAt" ? "number" : (store.relations.find((r) => r.key === key)?.format ?? "shorttext");
-			let value: unknown;
-			if (format === "checkbox") value = true; // "is checked"/"is unchecked" via equal/notEqual true
-			else if (condition === "in" || condition === "notIn" || condition === "allIn" || condition === "exactIn") value = values;
-			else if (format === "number" || format === "date") value = values[0] !== undefined ? Number(values[0]) : undefined;
-			else value = values[0];
-			if (condition !== "empty" && condition !== "notEmpty" && condition !== "exists" && format !== "checkbox" && (value === undefined || value === "" || (Array.isArray(value) && value.length === 0))) {
-				continue; // incomplete rule — don't filter on it yet
-			}
-			out.push({ key, condition, value });
-		}
-		// Unsourced query: Anytype-style system exclusion - the substrate's
-		// own objects (source files, programs, agent internals) never show
-		// unless a Source explicitly targets them.
-		const sources = object?.fields["setOf"]?.valuesValue?.items ?? [];
-		if (sources.length === 0) {
-			out.push({ key: "typeKey", condition: "notIn", value: [...SYSTEM_TYPE_KEYS] });
-		}
-		return out;
-	});
+	const engineFilters = $derived.by((): Array<Record<string, unknown>> => (object ? engineFiltersOf(object, store.relations) : []));
 
 	const viewSorts = $derived.by((): Array<{ key: string; type: "asc" | "desc" }> => {
 		const items = object?.fields["viewSorts"]?.valuesValue?.items ?? [];
