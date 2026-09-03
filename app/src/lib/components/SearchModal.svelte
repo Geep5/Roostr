@@ -205,7 +205,7 @@
 
 		<div class="chips">
 			<button class="chip" class:on={typeChip === ""} onclick={() => (typeChip = "")}>All</button>
-			{#each store.types as t (t.id)}
+			{#each store.types.filter((t) => t.space === channelId) as t (t.id)}
 				<button class="chip" class:on={typeChip === t.key} onclick={() => (typeChip = typeChip === t.key ? "" : t.key)}>{t.icon} {t.name || t.key}</button>
 			{/each}
 		</div>
