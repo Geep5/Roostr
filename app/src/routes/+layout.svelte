@@ -2145,15 +2145,13 @@
 		justify-content: center;
 		color: var(--muted);
 		font-size: 13px;
-		/* The ⌄ glyph rides its baseline low - a flexed 1em box with a
-		   nudge puts it on the row's optical center. */
+		/* A flexed 1em box centers the ⌄ glyph; the flex row does the rest. */
 		line-height: 1;
 		height: 1em;
-		transform: translateY(-2px);
 		transition: transform 0.12s;
 	}
 	.m-chev.open {
-		transform: translateY(-2px) rotate(180deg);
+		transform: rotate(180deg);
 	}
 	.m-wcard-body {
 		padding: 0 10px 10px;
