@@ -15,6 +15,7 @@ import {
 	sv,
 	setField,
 	type ObjectJSON,
+	API,
 } from "./api";
 import { objectText, readSkill } from "./skills";
 import * as memory from "./memory";
@@ -121,26 +122,66 @@ function summarizeObject(obj: ObjectJSON): string {
 	return JSON.stringify({ id: obj.id, typeKey: obj.typeKey, fields, text: objectText(obj).slice(0, 4000) }, null, 1);
 }
 
+// ── Space containment ────────────────────────────────────────────
+//
+// Agents are citizens of exactly one space. Reads list/search only that
+// space; every id-taking tool verifies the target lives there. Bundled
+// definitions (relations/types with no space stamp) are global
+// infrastructure and stay readable. Objects with no stamp belong to the
+// default space (the display fallback), so the default space includes
+// them.
+
+
+let defaultSpaceCache: string | null = null;
+async function defaultSpaceId(): Promise<string> {
+	if (defaultSpaceCache !== null) return defaultSpaceCache;
+	const res = await fetch(`${API}/api/channels`);
+	const chans = (await res.json()) as Array<{ id: string }>;
+	defaultSpaceCache = chans[0]?.id ?? "";
+	return defaultSpaceCache;
+}
+
+async function agentSpace(ctx: ToolContext): Promise<string> {
+	return ctx.channelId || (await defaultSpaceId());
+}
+
+async function spaceFilter(ctx: ToolContext): Promise<Record<string, unknown>> {
+	const own = await agentSpace(ctx);
+	return own === (await defaultSpaceId())
+		? { key: "channel", condition: "in", value: [own, ""] }
+		: { key: "channel", condition: "equal", value: own };
+}
+
+/** Throws unless the object belongs to the agent's space. */
+async function assertInSpace(obj: ObjectJSON, ctx: ToolContext): Promise<ObjectJSON> {
+	const stamp = str(obj.fields, "channel");
+	if (!stamp && (obj.typeKey === "relation" || obj.typeKey === "type")) return obj; // bundled defs are global
+	const own = await agentSpace(ctx);
+	const objSpace = stamp || (await defaultSpaceId());
+	if (objSpace !== own) throw new Error(`object ${obj.id.slice(0, 8)} is outside this agent's space`);
+	return obj;
+}
+
 const TOOLS: RegisteredTool[] = [
 	{
 		def: {
 			name: "object_search",
-			description: "Full-text search over all objects (names, fields, block content). Returns id/type/name rows.",
+			description: "Full-text search over this space's objects (names, fields, block content). Returns id/type/name rows.",
 			input_schema: { type: "object", properties: { query: { type: "string" }, type: { type: "string" } }, required: ["query"] },
 		},
-		handler: async (input) => {
-			const rows = await query({ textQuery: S(input.query), type: S(input.type) || undefined, limit: 20 });
+		handler: async (input, ctx) => {
+			const rows = await query({ textQuery: S(input.query), type: S(input.type) || undefined, filters: [await spaceFilter(ctx)], limit: 20 });
 			return JSON.stringify(rows.map((r) => ({ id: r.id, type: r.typeKey, name: r.name ?? str(r.fields, "name") })));
 		},
 	},
 	{
 		def: {
 			name: "object_list",
-			description: "List recent objects, optionally by type (note, task, query, collection, skill, …).",
+			description: "List this space's recent objects, optionally by type (note, task, query, collection, skill, …).",
 			input_schema: { type: "object", properties: { type: { type: "string" }, limit: { type: "number" } } },
 		},
-		handler: async (input) => {
-			const rows = await query({ type: S(input.type) || undefined, limit: N(input.limit) ?? 20 });
+		handler: async (input, ctx) => {
+			const rows = await query({ type: S(input.type) || undefined, filters: [await spaceFilter(ctx)], limit: N(input.limit) ?? 20 });
 			return JSON.stringify(rows.map((r) => ({ id: r.id, type: r.typeKey, name: r.name ?? str(r.fields, "name") })));
 		},
 	},
@@ -152,7 +193,7 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
-			return summarizeObject(await fetchObject(S(input.id)));
+			return summarizeObject(await assertInSpace(await fetchObject(S(input.id)), ctx));
 		},
 	},
 	{
@@ -170,7 +211,7 @@ const TOOLS: RegisteredTool[] = [
 			},
 		},
 		handler: async (input, ctx) => {
-			const obj = await fetchObject(S(input.id));
+			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx);
 			ctx.touched.add(obj.id);
 			const byId = new Map(obj.blocks.map((b) => [b.id, b]));
 			const root = byId.get("__discussion__");
@@ -225,6 +266,7 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
+			await assertInSpace(await fetchObject(S(input.id)), ctx);
 			await setField(S(input.id), S(input.key), sv(S(input.value)));
 			return "ok";
 		},
@@ -246,6 +288,7 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
+			await assertInSpace(await fetchObject(S(input.id)), ctx);
 			return await appendBody(S(input.id), S(input.text), S(input.under));
 		},
 	},
@@ -257,6 +300,7 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
+			await assertInSpace(await fetchObject(S(input.id)), ctx);
 			await mutate("delete", { object_id: S(input.id) });
 			return "ok";
 		},
@@ -268,6 +312,7 @@ const TOOLS: RegisteredTool[] = [
 			input_schema: { type: "object", properties: { object_id: { type: "string" }, text: { type: "string" } }, required: ["object_id", "text"] },
 		},
 		handler: async (input, ctx) => {
+			await assertInSpace(await fetchObject(S(input.object_id)), ctx);
 			await chatPost(S(input.object_id), S(input.text), ctx.agentId);
 			return "ok";
 		},
