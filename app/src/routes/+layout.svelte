@@ -676,11 +676,13 @@
 				<button class="m-card add" onclick={() => void newSpace()}>＋ New space</button>
 				<div class="m-section">
 					<div class="m-section-head">
-						<button class="m-section-label" onclick={() => (mCollapsed["__props"] = !mCollapsed["__props"])}>
-							Properties
+						<button class="m-section-label" onclick={() => (mCollapsed["__props"] = !mCollapsed["__props"])}>Properties</button>
+						{#if !mCollapsed["__props"]}
+							<button class="m-section-add" aria-label="New property" onclick={() => void newProperty()}>＋</button>
+						{/if}
+						<button class="m-chev-btn" aria-label={mCollapsed["__props"] ? "Expand" : "Collapse"} onclick={() => (mCollapsed["__props"] = !mCollapsed["__props"])}>
 							<span class="m-chev" class:open={!mCollapsed["__props"]}>⌄</span>
 						</button>
-						<button class="m-section-add" aria-label="New property" onclick={() => void newProperty()}>＋</button>
 					</div>
 					{#if !mCollapsed["__props"]}
 						<div class="m-section-body">
@@ -753,13 +755,16 @@
 				</div>
 				<div class="m-section">
 					<div class="m-section-head">
-						<button class="m-section-label" onclick={() => (mCollapsed["__types"] = !mCollapsed["__types"])}>
-							Types
+						<button class="m-section-label" onclick={() => (mCollapsed["__types"] = !mCollapsed["__types"])}>Types</button>
+						<!-- Types are only creatable from here on mobile: the bottom ＋
+						     composes objects, not types. A collapsed section hides its
+						     ＋ - the chevron holds the right edge. -->
+						{#if !mCollapsed["__types"]}
+							<button class="m-section-add" aria-label="New type" onclick={() => void newType()}>＋</button>
+						{/if}
+						<button class="m-chev-btn" aria-label={mCollapsed["__types"] ? "Expand" : "Collapse"} onclick={() => (mCollapsed["__types"] = !mCollapsed["__types"])}>
 							<span class="m-chev" class:open={!mCollapsed["__types"]}>⌄</span>
 						</button>
-						<!-- Types are only creatable from here on mobile: the bottom ＋
-						     composes objects, not types. -->
-						<button class="m-section-add" aria-label="New type" onclick={() => void newType()}>＋</button>
 					</div>
 					{#if !mCollapsed["__types"]}
 						<div class="m-section-body">
@@ -2133,12 +2138,20 @@
 		text-overflow: ellipsis;
 	}
 	.m-chev {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		color: var(--muted);
 		font-size: 13px;
+		/* The ⌄ glyph rides its baseline low - a flexed 1em box with a
+		   nudge puts it on the row's optical center. */
+		line-height: 1;
+		height: 1em;
+		transform: translateY(-2px);
 		transition: transform 0.12s;
 	}
 	.m-chev.open {
-		transform: rotate(180deg);
+		transform: translateY(-2px) rotate(180deg);
 	}
 	.m-wcard-body {
 		padding: 0 10px 10px;
