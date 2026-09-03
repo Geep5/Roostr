@@ -674,6 +674,15 @@
 		padding: 3px 0;
 		cursor: pointer;
 	}
+	/* Component styles are scoped, so the shared .obj-icon rule in the
+	   layout does not reach this row: without a fixed column the glyphs
+	   keep their own widths and the names step in and out. */
+	.opt .obj-icon {
+		flex: none;
+		width: 20px;
+		text-align: center;
+		color: var(--accent);
+	}
 	.opt.disabled {
 		opacity: 0.45;
 		cursor: default;
