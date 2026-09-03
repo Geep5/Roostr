@@ -8,7 +8,7 @@
  * that channel.
  */
 
-import { fetchObject, query, str, type ObjectJSON } from "./api";
+import { fetchObject, query, queryAll, str, type ObjectJSON } from "./api";
 
 /** Serialize an object's text blocks in tree order. */
 export function objectText(obj: ObjectJSON): string {
@@ -56,7 +56,7 @@ export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 	const coordinator = await getCoordinator();
 	const managed = new Set(CATALOG.map((c) => c.name.toLowerCase()));
 	const gated = coordinator !== "" && agentId !== undefined && agentId !== coordinator;
-	const rows = await query({ type: "skill", limit: 100 });
+	const rows = await queryAll({ type: "skill" });
 	return rows
 		.map((r) => ({
 			id: r.id,
@@ -92,6 +92,8 @@ export function skillsPromptSection(skills: SkillListing[]): string {
 /** Channel instructions (CLAUDE.md analog): inlined fully. */
 export async function channelInstructions(channelId: string): Promise<string> {
 	if (!channelId) return "";
+	// Capped on purpose: these are inlined verbatim into every prompt for
+	// the space, so the ceiling is a token budget, not a read limit.
 	const rows = await query({
 		type: "instructions",
 		filters: [{ key: "channel", condition: "equal", value: channelId }],

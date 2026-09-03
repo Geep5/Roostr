@@ -408,11 +408,15 @@ Sort_Spec :: struct {
 	empty_placement: string,
 }
 
+// `matched` is the number of objects the filters selected, before paging:
+// a caller that asked for one page still learns how many exist, which is
+// what lets a client page to exhaustion instead of silently truncating.
 run_query :: proc(
 	states: map[string]^Object_State,
 	body: json.Value,
 	extra_filter: json.Value = nil,
 	allocator := context.temp_allocator,
+	matched: ^int = nil,
 ) -> [dynamic]^Object_State {
 	now := f64(unix_ms())
 	include_deleted, _ := json_bool(body, "includeDeleted")
@@ -460,9 +464,17 @@ run_query :: proc(
 		slice.sort_by(out[:], sort_less)
 	}
 
-	// Paging.
+	// Paging. The full match count goes out before the slice.
+	if matched != nil do matched^ = len(out)
 	offset, has_offset := json_int(body, "offset")
 	limit, has_limit := json_int(body, "limit")
+	// A page is only meaningful over a total order. Sorted queries already
+	// tiebreak on id; an unsorted one is in map order, which rehashes on
+	// insert — so consecutive pages could repeat or skip a record. Order
+	// by id when paging, and only then: full reads pay nothing.
+	if len(sorts) == 0 && (has_offset || has_limit) {
+		slice.sort_by(out[:], proc(a, b: ^Object_State) -> bool {return a.id < b.id})
+	}
 	start := has_offset ? int(offset) : 0
 	if start > len(out) do start = len(out)
 	end := has_limit ? start + int(limit) : len(out)

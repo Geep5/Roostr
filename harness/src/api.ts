@@ -60,6 +60,34 @@ export async function query(body: Record<string, unknown>): Promise<QueryRow[]> 
 	return out.records;
 }
 
+/**
+ * Every match, a page at a time. `total` is the unpaged count, so a
+ * complete read costs one request unless the set really is larger than
+ * a page. Use it wherever a partial answer is a bug — skill catalogs,
+ * agent rosters — rather than guessing a cap a growing vault will
+ * quietly outrun. Agent-facing tools keep their small explicit limits:
+ * there the cap is the point.
+ */
+export async function queryAll(body: Record<string, unknown>, page = 500): Promise<QueryRow[]> {
+	const fetchPage = async (offset: number): Promise<{ total: number; records: QueryRow[] }> => {
+		const res = await fetch(`${API}/api/query`, {
+			method: "POST",
+			body: JSON.stringify({ ...body, offset, limit: page }),
+		});
+		if (!res.ok) throw new Error(`query: ${res.status}`);
+		return (await res.json()) as { total: number; records: QueryRow[] };
+	};
+	const first = await fetchPage(0);
+	if (first.records.length >= first.total) return first.records;
+	const out = first.records.slice();
+	while (out.length < first.total) {
+		const next = await fetchPage(out.length);
+		if (next.records.length === 0) break; // concurrent delete shrank the set
+		out.push(...next.records);
+	}
+	return out;
+}
+
 export async function mutate(action: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
 	const res = await fetch(`${API}/api/mutate`, {
 		method: "POST",

@@ -14,7 +14,7 @@
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
-import { API, chatPost, fetchObject, list, mutate, query, setField, str, subscribe, sv, createObject } from "./api";
+import { API, chatPost, fetchObject, list, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { convergeCatalogScope } from "./skillmgr";
@@ -32,7 +32,7 @@ function argValue(flagName: string): string {
 async function servedAgents(): Promise<Set<string>> {
 	const roster = new Set(await readRoster());
 	if (roster.size === 0) return roster;
-	const rows = await query({ type: "agent", limit: 200 });
+	const rows = await queryAll({ type: "agent" });
 	return new Set(rows.filter((r) => roster.has(r.id) && !str(r.fields, "spawn_parent")).map((r) => r.id));
 }
 

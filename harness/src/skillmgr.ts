@@ -12,7 +12,7 @@
  * shared "Setup" chat object — the coordinator-channel pattern, on-DAG.
  */
 
-import { createObject, chatPost, fetchObject, mutate, query, str } from "./api";
+import { createObject, chatPost, fetchObject, mutate, query, str, queryAll } from "./api";
 import { objectText } from "./skills";
 
 export interface CatalogEntry {
@@ -120,7 +120,7 @@ export const GLOBAL_SCOPE = "global";
 /** Backfill the marker on catalog objects installed before it existed. */
 export async function convergeCatalogScope(): Promise<void> {
 	const names = new Map(CATALOG.map((c) => [c.name.toLowerCase(), c]));
-	const rows = await query({ type: "skill", limit: 100 });
+	const rows = await queryAll({ type: "skill" });
 	for (const r of rows) {
 		const name = str(r.fields, "name").toLowerCase();
 		if (!names.has(name) || str(r.fields, "scope") === GLOBAL_SCOPE) continue;
@@ -202,7 +202,7 @@ async function postToSetupChat(text: string): Promise<void> {
 
 /** The catalog entry's skill object, if it exists. */
 async function findSkillObject(entry: CatalogEntry): Promise<string | null> {
-	const rows = await query({ type: "skill", limit: 100 });
+	const rows = await queryAll({ type: "skill" });
 	return rows.find((r) => str(r.fields, "name") === entry.name)?.id ?? null;
 }
 

@@ -35,6 +35,28 @@ export async function fetchQuery(body: Record<string, unknown>): Promise<{ total
 	return res.json();
 }
 
+/**
+ * Every match, a page at a time.
+ *
+ * `total` is the unpaged match count, so a full first page is the only
+ * thing that costs a second round trip — and a vault that outgrows any
+ * single limit stops silently dropping the tail. Use this wherever a
+ * partial answer would be wrong (definitions, rosters); a capped
+ * `fetchQuery` is right only when the cap IS the intent, like a
+ * top-20 search.
+ */
+export async function fetchAllQuery(body: Record<string, unknown>, page = 500): Promise<QueryResultRow[]> {
+	const first = await fetchQuery({ ...body, offset: 0, limit: page });
+	if (first.records.length >= first.total) return first.records;
+	const out = first.records.slice();
+	while (out.length < first.total) {
+		const next = await fetchQuery({ ...body, offset: out.length, limit: page });
+		if (next.records.length === 0) break; // concurrent delete shrank the set
+		out.push(...next.records);
+	}
+	return out;
+}
+
 async function mutate(action: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
 	const res = await fetch(`${API}/api/mutate`, {
 		method: "POST",

@@ -4,7 +4,7 @@
  * Odin backend and kept live via the /api/events SSE stream.
  */
 
-import { API, fetchChannels, fetchObjects, fetchQuery, fetchRelations } from "$lib/api";
+import { API, fetchChannels, fetchObjects, fetchQuery, fetchRelations, fetchAllQuery } from "$lib/api";
 import type { SpaceJSON, ObjectSummary, RelationDefJSON } from "$lib/types";
 
 /** A type object (Anytype ObjectType analog). */
@@ -42,9 +42,9 @@ export const store = $state({
 });
 
 async function fetchTypes(): Promise<TypeDef[]> {
-	const res = await fetchQuery({ type: "type", limit: 100 });
+	const records = await fetchAllQuery({ type: "type" });
 	const s = (f: Record<string, { stringValue?: string }>, k: string) => f[k]?.stringValue ?? "";
-	return res.records
+	return records
 		.map((r) => ({
 			id: r.id,
 			key: s(r.fields, "key"),
@@ -59,8 +59,8 @@ async function fetchTypes(): Promise<TypeDef[]> {
 }
 
 async function fetchAgents(): Promise<AgentRef[]> {
-	const res = await fetchQuery({ type: "agent", limit: 200 });
-	return res.records.map((r) => ({
+	const records = await fetchAllQuery({ type: "agent" });
+	return records.map((r) => ({
 		id: r.id,
 		name: r.fields["name"]?.stringValue ?? "",
 		icon: r.fields["iconEmoji"]?.stringValue ?? "",

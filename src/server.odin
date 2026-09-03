@@ -490,7 +490,8 @@ handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
 			}
 		}
 
-		matched := run_query(states, c.body, extra)
+		total := 0
+		matched := run_query(states, c.body, extra, context.temp_allocator, &total)
 		text := json_str(c.body, "textQuery")
 		records := make([dynamic]json.Value, context.temp_allocator)
 		for s in matched {
@@ -511,7 +512,9 @@ handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
 			append(&records, json.Object(o))
 		}
 		out := jobj()
-		out["total"] = json.Integer(i64(len(records)))
+		// The count of everything that matched, not of this page: a client
+		// asking for one page needs it to know whether more exist.
+		out["total"] = json.Integer(i64(total))
 		out["records"] = json.Array(records)
 		respond_json(c.sock, json.Object(out))
 	}, &ctx)
