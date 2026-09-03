@@ -423,8 +423,8 @@
 			.toSorted((a, b) => (a.name || a.key).localeCompare(b.name || b.key)),
 	);
 
-	/** Spaces are self-contained: bundled types plus this space's own. */
-	const sidebarTypes = $derived(store.types.filter((t) => !t.space || t.space === (activeSpace.id || defaultChannelId)));
+	/** Spaces are fully self-contained: only this space's types. */
+	const sidebarTypes = $derived(store.types.filter((t) => t.space === (activeSpace.id || defaultChannelId)));
 
 	async function newProperty() {
 		const name = prompt("Property name:");

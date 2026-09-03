@@ -59,12 +59,11 @@ export function formatGlyph(format: string): string {
 }
 
 /**
- * Spaces are self-contained: a property belongs to the space it was
- * created in. Bundled/system defs (no space stamp) exist in every
- * space; everything else shows only in its own.
+ * Spaces are fully self-contained: every property - including the
+ * seeded defaults - belongs to exactly one space.
  */
 export function spaceRelations(relations: RelationDefJSON[], spaceId: string): RelationDefJSON[] {
-	return relations.filter((r) => !r.space || r.space === spaceId);
+	return relations.filter((r) => r.space === spaceId);
 }
 
 /** The active space id, falling back to the default space. */

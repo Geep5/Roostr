@@ -155,7 +155,6 @@ async function spaceFilter(ctx: ToolContext): Promise<Record<string, unknown>> {
 /** Throws unless the object belongs to the agent's space. */
 async function assertInSpace(obj: ObjectJSON, ctx: ToolContext): Promise<ObjectJSON> {
 	const stamp = str(obj.fields, "channel");
-	if (!stamp && (obj.typeKey === "relation" || obj.typeKey === "type")) return obj; // bundled defs are global
 	const own = await agentSpace(ctx);
 	const objSpace = stamp || (await defaultSpaceId());
 	if (objSpace !== own) throw new Error(`object ${obj.id.slice(0, 8)} is outside this agent's space`);

@@ -577,6 +577,7 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 			return
 		}
 		channel_key_set(id, 1)
+		seed_space_defaults(id)
 		extra := jobj()
 		extra["id"] = json.String(strings.clone(id, context.temp_allocator))
 		extra["key_id"] = json.Integer(1)
@@ -822,61 +823,72 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	{"setOf", "object", "Set of", "🗂️", true, false, 0},
 }
 
-/** Idempotent: creates any bundled relation whose key is missing and
- *  converges existing bundled ones onto the bundle's emoji (same
- *  deterministic-id union trick as bundled types). */
-bootstrap_relations :: proc() {
-	Existing :: struct {
+/**
+ * Seed one space's default definitions (idempotent per key+space) and
+ * converge their name/emoji onto the current catalog. There are no
+ * global definitions: every space owns its OWN copies of the default
+ * relations and types - spaces are fully self-contained.
+ */
+seed_space_defaults :: proc(channel_id: string) {
+	Present :: struct {
 		id:    string,
+		name:  string,
 		emoji: string,
 	}
-	have := make(map[string]bool)
-	defer delete(have)
-	existing := make(map[string]Existing)
-	defer delete(existing)
+	rels := make(map[string]Present)
+	defer delete(rels)
+	types := make(map[string]Present)
+	defer delete(types)
 	Ctx :: struct {
-		have:     ^map[string]bool,
-		existing: ^map[string]Existing,
+		rels:    ^map[string]Present,
+		types:   ^map[string]Present,
+		chan_id: string,
 	}
-	ctx := Ctx{&have, &existing}
+	ctx := Ctx{&rels, &types, channel_id}
 	with_states(proc(states: map[string]^Object_State, user: rawptr) {
 		c := cast(^struct {
-			have:     ^map[string]bool,
-			existing: ^map[string]Existing,
+			rels:    ^map[string]Present,
+			types:   ^map[string]Present,
+			chan_id: string,
 		})user
 		for _, s in states {
-			if s.type_key != "relation" || s.deleted do continue
+			if s.deleted do continue
+			if s.type_key != "relation" && s.type_key != "type" do continue
+			ch := ""
+			if v, ok := fields_get(s.fields, "channel"); ok && v.kind == .String do ch = v.str
+			if ch != c.chan_id do continue
 			key, kok := fields_get(s.fields, "key")
 			if !kok || key.kind != .String do continue
-			c.have^[strings.clone(key.str, context.temp_allocator)] = true
-			bundled, bok := fields_get(s.fields, "bundled")
-			if !bok || bundled.kind != .Bool || !bundled.b do continue
-			e := Existing{id = strings.clone(s.id, context.temp_allocator)}
+			e := Present{id = strings.clone(s.id, context.temp_allocator)}
+			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do e.name = strings.clone(v.str, context.temp_allocator)
 			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do e.emoji = strings.clone(v.str, context.temp_allocator)
-			c.existing^[strings.clone(key.str, context.temp_allocator)] = e
+			if s.type_key == "relation" {
+				c.rels^[strings.clone(key.str, context.temp_allocator)] = e
+			} else {
+				c.types^[strings.clone(key.str, context.temp_allocator)] = e
+			}
 		}
 	}, &ctx)
 
+	// Deterministic per-space ids: every device's seeding of the same
+	// space converges on the SAME objects, so multi-device sync unions
+	// changes instead of duplicating definitions per install.
+	prefix := len(channel_id) >= 8 ? channel_id[:8] : channel_id
+	created := 0
 	updated := 0
 	for r in BUNDLED_RELATIONS {
-		e, exists := existing[r.key]
-		if !exists do continue
-		if e.emoji == r.emoji do continue
-		ops := []Operation{{kind = .Field_Set, key = "iconEmoji", value = string_value(r.emoji)}}
-		if commit_ops(e.id, ops) do updated += 1
-	}
-	if updated > 0 do fmt.printfln("[glon-odin] converged %d bundled relation(s) to the current bundle", updated)
-
-	created := 0
-	for r in BUNDLED_RELATIONS {
-		if have[r.key] do continue
-		// Deterministic id: every machine's bootstrap converges on the SAME
-		// object, so multi-device sync unions changes instead of duplicating
-		// relation definitions per install.
-		id := fmt.tprintf("bundled-rel-%s", r.key)
+		if e, ok := rels[r.key]; ok {
+			if e.emoji != r.emoji {
+				ops := []Operation{{kind = .Field_Set, key = "iconEmoji", value = string_value(r.emoji)}}
+				if commit_ops(e.id, ops) do updated += 1
+			}
+			continue
+		}
+		id := fmt.tprintf("bundled-rel-%s-%s", r.key, prefix)
 		empty: []Value
 		ops := []Operation{
 			{kind = .Object_Create, type_key = "relation"},
+			{kind = .Field_Set, key = "channel", value = string_value(channel_id)},
 			{kind = .Field_Set, key = "key", value = string_value(r.key)},
 			{kind = .Field_Set, key = "format", value = string_value(r.format)},
 			{kind = .Field_Set, key = "name", value = string_value(r.name)},
@@ -889,7 +901,70 @@ bootstrap_relations :: proc() {
 		}
 		if commit_ops(id, ops) do created += 1
 	}
-	if created > 0 do fmt.printfln("[glon-odin] bootstrapped %d bundled relation(s)", created)
+	for t in BUNDLED_TYPES {
+		if e, ok := types[t.key]; ok {
+			ops := make([dynamic]Operation, context.temp_allocator)
+			if e.name != t.name do append(&ops, Operation{kind = .Field_Set, key = "name", value = string_value(t.name)})
+			if e.emoji != t.emoji do append(&ops, Operation{kind = .Field_Set, key = "iconEmoji", value = string_value(t.emoji)})
+			if len(ops) > 0 && commit_ops(e.id, ops[:]) do updated += 1
+			continue
+		}
+		id := fmt.tprintf("bundled-type-%s-%s", t.key, prefix)
+		ops := []Operation{
+			{kind = .Object_Create, type_key = "type"},
+			{kind = .Field_Set, key = "channel", value = string_value(channel_id)},
+			{kind = .Field_Set, key = "key", value = string_value(t.key)},
+			{kind = .Field_Set, key = "name", value = string_value(t.name)},
+			{kind = .Field_Set, key = "iconEmoji", value = string_value(t.emoji)},
+			{kind = .Field_Set, key = "layout", value = string_value(t.layout)},
+			{kind = .Field_Set, key = "bundled", value = bool_value(true)},
+		}
+		if commit_ops(id, ops) do created += 1
+	}
+	if created > 0 || updated > 0 do fmt.printfln("[glon-odin] space %s: seeded %d / converged %d default def(s)", prefix, created, updated)
+}
+
+/**
+ * Startup pass: every space gets its own default definitions, and the
+ * legacy GLOBAL bundled defs (no space stamp, from the vault-wide era)
+ * are retired with a soft delete once per-space copies exist.
+ */
+bootstrap_space_defaults :: proc() {
+	chans := make([dynamic]string)
+	defer delete(chans)
+	legacy := make([dynamic]string)
+	defer delete(legacy)
+	Ctx :: struct {
+		chans:  ^[dynamic]string,
+		legacy: ^[dynamic]string,
+	}
+	ctx := Ctx{&chans, &legacy}
+	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+		c := cast(^struct {
+			chans:  ^[dynamic]string,
+			legacy: ^[dynamic]string,
+		})user
+		for _, s in states {
+			if s.deleted do continue
+			if s.type_key == "channel" {
+				append(c.chans, strings.clone(s.id, context.temp_allocator))
+				continue
+			}
+			if s.type_key != "relation" && s.type_key != "type" do continue
+			bundled, bok := fields_get(s.fields, "bundled")
+			if !bok || bundled.kind != .Bool || !bundled.b do continue
+			ch := ""
+			if v, ok := fields_get(s.fields, "channel"); ok && v.kind == .String do ch = v.str
+			if ch == "" do append(c.legacy, strings.clone(s.id, context.temp_allocator))
+		}
+	}, &ctx)
+
+	for c in chans do seed_space_defaults(c)
+	for id in legacy {
+		ops := []Operation{{kind = .Object_Delete}}
+		commit_ops(id, ops)
+	}
+	if len(legacy) > 0 do fmt.printfln("[glon-odin] retired %d legacy global def(s)", len(legacy))
 }
 
 // ── Bundled types ────────────────────────────────────────────────────
@@ -923,83 +998,6 @@ BUNDLED_TYPES :: []Bundled_Type{
 	{"chat", "Chat", "💬", "chat"},
 }
 
-/** Idempotent: creates any bundled type whose key is missing. */
-bootstrap_types :: proc() {
-	have := make(map[string]bool)
-	defer delete(have)
-	Ctx :: struct {
-		have: ^map[string]bool,
-	}
-	ctx := Ctx{&have}
-	with_states(proc(states: map[string]^Object_State, user: rawptr) {
-		c := cast(^struct {
-			have: ^map[string]bool,
-		})user
-		for _, s in states {
-			if s.type_key != "type" || s.deleted do continue
-			if v, ok := fields_get(s.fields, "key"); ok && v.kind == .String do c.have^[v.str] = true
-		}
-	}, &ctx)
-
-	// Existing bundled types converge on the bundle's current name/emoji
-	// (bundled=true marks them system-managed; user-created types with
-	// colliding keys are never touched because they lack the flag).
-	Existing :: struct {
-		id:    string,
-		name:  string,
-		emoji: string,
-	}
-	existing := make(map[string]Existing)
-	defer delete(existing)
-	Ctx2 :: struct {
-		out: ^map[string]Existing,
-	}
-	ctx2 := Ctx2{&existing}
-	with_states(proc(states: map[string]^Object_State, user: rawptr) {
-		c := cast(^struct {
-			out: ^map[string]Existing,
-		})user
-		for _, s in states {
-			if s.type_key != "type" || s.deleted do continue
-			bundled, bok := fields_get(s.fields, "bundled")
-			if !bok || bundled.kind != .Bool || !bundled.b do continue
-			key, kok := fields_get(s.fields, "key")
-			if !kok || key.kind != .String do continue
-			e := Existing{id = strings.clone(s.id, context.temp_allocator)}
-			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do e.name = strings.clone(v.str, context.temp_allocator)
-			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do e.emoji = strings.clone(v.str, context.temp_allocator)
-			c.out^[strings.clone(key.str, context.temp_allocator)] = e
-		}
-	}, &ctx2)
-
-	updated := 0
-	for t in BUNDLED_TYPES {
-		e, exists := existing[t.key]
-		if !exists do continue
-		ops := make([dynamic]Operation, context.temp_allocator)
-		if e.name != t.name do append(&ops, Operation{kind = .Field_Set, key = "name", value = string_value(t.name)})
-		if e.emoji != t.emoji do append(&ops, Operation{kind = .Field_Set, key = "iconEmoji", value = string_value(t.emoji)})
-		if len(ops) > 0 && commit_ops(e.id, ops[:]) do updated += 1
-	}
-	if updated > 0 do fmt.printfln("[glon-odin] converged %d bundled type(s) to the current bundle", updated)
-
-	created := 0
-	for t in BUNDLED_TYPES {
-		if have[t.key] do continue
-		// Deterministic id — multi-device bootstraps converge (see relations).
-		id := fmt.tprintf("bundled-type-%s", t.key)
-		ops := []Operation{
-			{kind = .Object_Create, type_key = "type"},
-			{kind = .Field_Set, key = "key", value = string_value(t.key)},
-			{kind = .Field_Set, key = "name", value = string_value(t.name)},
-			{kind = .Field_Set, key = "iconEmoji", value = string_value(t.emoji)},
-			{kind = .Field_Set, key = "layout", value = string_value(t.layout)},
-			{kind = .Field_Set, key = "bundled", value = bool_value(true)},
-		}
-		if commit_ops(id, ops) do created += 1
-	}
-	if created > 0 do fmt.printfln("[glon-odin] bootstrapped %d bundled type(s)", created)
-}
 
 // -- Table helpers ------------------------------------------------
 

@@ -22,7 +22,9 @@ export const CREATABLE_TYPES = ["page", "note", "task", "person", "project", "bo
 export function creatableTypes(): Array<{ key: string; name: string; icon: string }> {
 	if (store.types.length === 0) return CREATABLE_TYPES.map((k) => ({ key: k, name: k[0].toUpperCase() + k.slice(1), icon: typeGlyph(k) }));
 	const sid = activeSpace.id || store.channels[0]?.id || "";
-	return store.types.filter((t) => !t.space || t.space === sid).map((t) => ({ key: t.key, name: t.name || t.key, icon: t.icon || typeGlyph(t.key) }));
+	const own = store.types.filter((t) => t.space === sid);
+	if (own.length === 0) return CREATABLE_TYPES.map((k) => ({ key: k, name: k[0].toUpperCase() + k.slice(1), icon: typeGlyph(k) }));
+	return own.map((t) => ({ key: t.key, name: t.name || t.key, icon: t.icon || typeGlyph(t.key) }));
 }
 
 export function typeGlyph(typeKey: string): string {
