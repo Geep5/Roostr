@@ -13,7 +13,7 @@
 	import SlashMenu, { type SlashPick } from "./SlashMenu.svelte";
 	import PropertySuggest from "./PropertySuggest.svelte";
 	import LinkPicker from "./LinkPicker.svelte";
-	import { store } from "$lib/data.svelte";
+	import { store, refreshAll } from "$lib/data.svelte";
 	import { RESERVED_KEYS, emptyValueFor, objectSpaceId, spaceRelations } from "$lib/relations";
 	import type { RelationDefJSON } from "$lib/types";
 	import { getProcessorByUrl, getEmbedUrl, isSingleUrl, type EmbedProcessor } from "$lib/embed";
@@ -1257,9 +1257,21 @@
 				// Anytype's Turn into object: the block's text becomes a new
 				// object's name, its children become that object's content,
 				// and a link block takes its place.
+				//
+				// Every read below is server state, and typing is saved on a
+				// 600ms debounce, so a line turned into an object right after
+				// it was typed read as empty: the object was named
+				// "Untitled" and the text died with the block that carried
+				// it. Flush first, exactly as refresh() does, then re-read -
+				// the children are copied from the same state and were just
+				// as stale.
+				for (const b of [...dirty]) await flushSave(b);
+				await onchanged();
 				const src = byId.get(id);
 				if (!src) break;
-				const name = (src.content.text?.text ?? "").trim().slice(0, 120) || "Untitled";
+				const typed = blockEl(id)?.textContent ?? "";
+				const stored = src.content.text?.text ?? "";
+				const name = (stored || typed).trim().slice(0, 120) || "Untitled";
 				const ch = object.fields["channel"]?.stringValue ?? "";
 				const { id: newId } = await note.create(name, a.value as string, ch ? { channel: { stringValue: ch } } : {});
 				const moveInto = async (srcId: string, targetId: string, position: number) => {
@@ -1272,6 +1284,10 @@
 				for (const cid of src.childrenIds) await moveInto(cid, "", 0);
 				await note.blockAdd(object.id, { id: crypto.randomUUID(), childrenIds: [], content: { custom: { contentType: "link", meta: { target: newId } } } }, id, Pos.BOTTOM);
 				await removeBlockById(id);
+				// The link row resolves its target through store.summaries, so
+				// until those include the object just created it renders as a
+				// dead row rather than a link to it.
+				await refreshAll();
 				break;
 			}
 			case "clear_style": {
