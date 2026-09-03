@@ -15,7 +15,6 @@
 	const emptyArmed = $derived(emptyDraft.trim().toLowerCase() === "delete");
 	let deleteDraft = $state("");
 	let deleteInputEl = $state<HTMLInputElement>();
-	const deleteArmed = $derived(deleteDraft.trim().toLowerCase() === "delete");
 	$effect(() => {
 		if (confirmDelete) deleteInputEl?.focus();
 	});
@@ -103,6 +102,13 @@
 	} = $props();
 
 	const members = $derived(spaceInfo?.members ?? []);
+	const spaceName = $derived(object.fields["name"]?.stringValue?.trim() ?? "");
+	/** The space's own name, not the word "delete": the gate should cost a
+	 * look at WHICH space this is, and muscle memory from every other
+	 * confirm box shouldn't clear it. A space with no name has nothing to
+	 * type, so it keeps the word. */
+	const deletePhrase = $derived(spaceName || "delete");
+	const deleteArmed = $derived(deleteDraft.trim().toLowerCase() === deletePhrase.toLowerCase());
 	let npubDraft = $state("");
 	let invite = $state<string>("");
 	let confirmRemove = $state("");
@@ -289,16 +295,16 @@
 	{#if confirmDelete}
 		<div class="del-overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget && !deleting) confirmDelete = false; }}>
 			<div class="del-modal" role="dialog" aria-label="Delete space">
-				<h3 class="del-title">Delete {object.fields["name"]?.stringValue || "this space"}?</h3>
+				<h3 class="del-title">Delete {spaceName || "this space"}?</h3>
 				<p class="hint">
 					This permanently deletes the space and every object in it — on every device, forever.
 					This cannot be undone.
 				</p>
-				<p class="hint">Type <b>delete</b> to confirm.</p>
+				<p class="hint">Type <b>{deletePhrase}</b> to confirm.</p>
 				<input
 					class="del-input"
 					bind:value={deleteDraft}
-					placeholder="delete"
+					placeholder={deletePhrase}
 					autocomplete="off"
 					bind:this={deleteInputEl}
 					onkeydown={(e) => {
