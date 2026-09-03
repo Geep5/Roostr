@@ -135,7 +135,7 @@
 	});
 
 	/** Stored viewFilters → engine filter objects with format-aware value coercion. */
-	const engineFilters = $derived.by((): Array<Record<string, unknown>> => (object ? engineFiltersOf(object, store.relations) : []));
+	const engineFilters = $derived.by((): Array<Record<string, unknown>> => (object ? engineFiltersOf(object, scopedRelations) : []));
 
 	/** Pick-lists (columns, filters, featured props) offer only this
 	 *  space's properties - spaces are self-contained. */

@@ -9,6 +9,7 @@
 	import type { ObjectJSON } from "$lib/types";
 	import { note } from "$lib/api";
 	import { store } from "$lib/data.svelte";
+	import { objectSpaceId, spaceRelations } from "$lib/relations";
 	import PropertyValue from "./PropertyValue.svelte";
 
 	let {
@@ -22,7 +23,7 @@
 	} = $props();
 
 	const key = $derived(block.content.custom?.meta?.["key"] ?? "");
-	const rel = $derived(store.relations.find((r) => r.key === key));
+	const rel = $derived(spaceRelations(store.relations, objectSpaceId(object)).find((r) => r.key === key));
 </script>
 
 {#if rel}

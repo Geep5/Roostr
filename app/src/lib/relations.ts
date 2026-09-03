@@ -8,7 +8,7 @@
 import { note } from "$lib/api";
 import { refreshAll, store } from "$lib/data.svelte";
 import { activeSpace } from "$lib/space.svelte";
-import type { RelationDefJSON, ValueJSON } from "$lib/types";
+import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
 
 export const RESERVED_KEYS: Record<string, true> = {
 	name: true,
@@ -71,6 +71,11 @@ export function currentSpaceId(): string {
 	return activeSpace.id || store.channels[0]?.id || "";
 }
 
+/** The space an object belongs to (default space when unstamped). */
+export function objectSpaceId(object: ObjectJSON): string {
+	return object.fields["channel"]?.stringValue || store.channels[0]?.id || "";
+}
+
 export function emptyValueFor(format: string): ValueJSON {
 	if (format === "checkbox") return { boolValue: false };
 	if (format === "tag" || format === "object") return { valuesValue: { items: [] } };
@@ -88,7 +93,9 @@ export function slugKey(name: string): string {
  */
 export async function createRelation(name: string, format: string): Promise<RelationDefJSON | undefined> {
 	const key = slugKey(name);
-	const existing = store.relations.find((r) => r.key === key);
+	// Dedupe within THIS space only - another space's same-named
+	// property is a different property.
+	const existing = spaceRelations(store.relations, currentSpaceId()).find((r) => r.key === key);
 	if (existing) return existing;
 	await note.create(name, "relation", {
 		channel: { stringValue: currentSpaceId() },
@@ -102,5 +109,5 @@ export async function createRelation(name: string, format: string): Promise<Rela
 		bundled: { boolValue: false },
 	});
 	await refreshAll();
-	return store.relations.find((r) => r.key === key);
+	return spaceRelations(store.relations, currentSpaceId()).find((r) => r.key === key);
 }

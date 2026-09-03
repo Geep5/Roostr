@@ -14,7 +14,7 @@
 	import PropertySuggest from "./PropertySuggest.svelte";
 	import LinkPicker from "./LinkPicker.svelte";
 	import { store } from "$lib/data.svelte";
-	import { RESERVED_KEYS, emptyValueFor } from "$lib/relations";
+	import { RESERVED_KEYS, emptyValueFor, objectSpaceId, spaceRelations } from "$lib/relations";
 	import type { RelationDefJSON } from "$lib/types";
 	import { getProcessorByUrl, getEmbedUrl, isSingleUrl, type EmbedProcessor } from "$lib/embed";
 
@@ -371,7 +371,7 @@
 	let slash = $state<{ blockId: string; start: number; filter: string; x: number; y: number } | null>(null);
 	let slashMenu: { move: (d: number) => void; confirm: () => void } | undefined = $state();
 	/** Object's present, non-hidden properties for the slash section. */
-	const presentRelations = $derived(store.relations.filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && r.key in object.fields));
+	const presentRelations = $derived(spaceRelations(store.relations, objectSpaceId(object)).filter((r) => !r.hidden && !RESERVED_KEYS[r.key] && r.key in object.fields));
 
 	/** Property-suggest popover opened from slash "Add property". */
 	let propertySuggest = $state<{ blockId: string; x: number; y: number } | null>(null);
@@ -987,7 +987,7 @@
 			await note.blockAdd(object.id, relBlock, id, Pos.BOTTOM);
 		}
 		if (!(key in object.fields)) {
-			const rel = store.relations.find((r) => r.key === key);
+			const rel = spaceRelations(store.relations, objectSpaceId(object)).find((r) => r.key === key);
 			await note.setField(object.id, key, emptyValueFor(rel?.format ?? "shorttext"));
 		}
 	}

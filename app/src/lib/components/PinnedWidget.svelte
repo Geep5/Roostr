@@ -10,6 +10,7 @@
 	import type { ObjectJSON, RelationDefJSON } from "$lib/types";
 	import { store, onObjectEvent } from "$lib/data.svelte";
 	import { engineFiltersOf, spaceFilterOf } from "$lib/filters";
+	import { objectSpaceId, spaceRelations } from "$lib/relations";
 	import { objectIcon } from "$lib/icons";
 
 	let { id }: { id: string } = $props();
@@ -31,7 +32,7 @@
 					.filter((s): s is string => !!s);
 				// The widget applies the view's filter rules exactly like the
 				// page does - a record outside the view never shows here.
-				const filters = [...engineFiltersOf(o, store.relations), spaceFilterOf(o, store.channels[0]?.id ?? "")];
+				const filters = [...engineFiltersOf(o, spaceRelations(store.relations, objectSpaceId(o))), spaceFilterOf(o, store.channels[0]?.id ?? "")];
 				const body =
 					o.typeKey === "collection"
 						? memberIds.length
@@ -92,7 +93,7 @@
 	const viewType = $derived(isSet ? obj?.fields["viewType"]?.stringValue || "table" : "table");
 	const groupKey = $derived(obj?.fields["viewGroupKey"]?.stringValue || "");
 	const dateKey = $derived(obj?.fields["viewDateKey"]?.stringValue || "createdDate");
-	const groupRel = $derived<RelationDefJSON | undefined>(store.relations.find((r) => r.key === groupKey));
+	const groupRel = $derived<RelationDefJSON | undefined>(obj ? spaceRelations(store.relations, objectSpaceId(obj)).find((r) => r.key === groupKey) : undefined);
 
 	// ── kanban groups (name, count) in the property's option order ──
 	const groups = $derived.by(() => {
