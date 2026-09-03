@@ -330,10 +330,17 @@
 		await saveTypes(a, a.types.includes("*") ? [] : ["*"]);
 	}
 
+	/** Every space owns its own copies of the default types, so the
+	 * vault-wide list repeats each key once per space. Responsibility
+	 * matches on the key, and an agent only ever serves this space. */
+	const spaceTypes = $derived(
+		store.types.filter((t) => t.space === channelId || (t.space === "" && channelId === defaultChannelId)),
+	);
+
 	function describe(a: AgentRow): string {
 		if (a.types.includes("*")) return "Everything else";
 		if (a.types.length === 0) return agents.length === 1 ? "Everything (sole agent)" : "Nothing assigned";
-		return a.types.map((t) => store.types.find((x) => x.key === t)?.name ?? t).join(", ");
+		return a.types.map((t) => spaceTypes.find((x) => x.key === t)?.name ?? t).join(", ");
 	}
 
 	async function loadRoster() {
@@ -623,7 +630,7 @@
 					Everything else <span class="opt-hint">{restHolder ? `— ${restHolder.name} has it` : "(whatever isn't explicitly assigned)"}</span>
 				</label>
 				<div class="assign-sep"></div>
-				{#each store.types as t (t.id)}
+				{#each spaceTypes as t (t.id)}
 					{@const owner = claimed.get(t.key)}
 					<label class="opt" class:disabled={!!owner || a.types.includes("*")}>
 						<input
