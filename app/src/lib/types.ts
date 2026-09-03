@@ -75,6 +75,7 @@ export interface RelationDefJSON {
 	key: string;
 	format: string;
 	name: string;
+	iconEmoji?: string;
 	hidden: boolean;
 	readOnly: boolean;
 	maxCount: number;

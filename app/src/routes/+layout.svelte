@@ -682,7 +682,7 @@
 						<div class="m-section-body">
 							{#each sidebarProps as r (r.id)}
 								<a class="m-row" href="/object/{r.id}">
-									<span class="obj-icon">{formatGlyph(r.format)}</span>{r.name || r.key}
+									<span class="obj-icon">{r.iconEmoji || formatGlyph(r.format)}</span>{r.name || r.key}
 								</a>
 							{/each}
 						</div>
@@ -986,7 +986,7 @@
 					<div class="section-body">
 						{#each sidebarProps as r (r.id)}
 							<a class="item" class:current={page.url.pathname === `/object/${r.id}`} href="/object/{r.id}">
-								<span class="obj-icon">{formatGlyph(r.format)}</span>{r.name || r.key}
+								<span class="obj-icon">{r.iconEmoji || formatGlyph(r.format)}</span>{r.name || r.key}
 							</a>
 						{/each}
 						{#if sidebarProps.length === 0}

@@ -799,45 +799,73 @@ Bundled_Relation :: struct {
 	key:       string,
 	format:    string,
 	name:      string,
+	emoji:     string,
 	hidden:    bool,
 	read_only: bool,
 	max_count: i64,
 }
 
 BUNDLED_RELATIONS :: []Bundled_Relation{
-	{"name", "shorttext", "Name", false, false, 0},
-	{"description", "longtext", "Description", false, false, 0},
-	{"iconEmoji", "emoji", "Icon", true, false, 0},
-	{"createdDate", "date", "Created date", false, true, 0},
-	{"modifiedDate", "date", "Modified date", false, true, 0},
-	{"dueDate", "date", "Due date", false, false, 0},
-	{"tag", "tag", "Tag", false, false, 0},
-	{"status", "status", "Status", false, false, 1},
-	{"done", "checkbox", "Done", false, false, 0},
-	{"url", "url", "URL", false, false, 0},
-	{"email", "email", "Email", false, false, 0},
-	{"phone", "phone", "Phone", false, false, 0},
-	{"featuredRelations", "relations", "Featured relations", true, false, 0},
-	{"setOf", "object", "Set of", true, false, 0},
+	{"name", "shorttext", "Name", "✏️", false, false, 0},
+	{"description", "longtext", "Description", "📝", false, false, 0},
+	{"iconEmoji", "emoji", "Icon", "🖼️", true, false, 0},
+	{"createdDate", "date", "Created date", "📅", false, true, 0},
+	{"modifiedDate", "date", "Modified date", "🗓️", false, true, 0},
+	{"dueDate", "date", "Due date", "⏰", false, false, 0},
+	{"tag", "tag", "Tag", "🏷️", false, false, 0},
+	{"status", "status", "Status", "🚦", false, false, 1},
+	{"done", "checkbox", "Done", "✅", false, false, 0},
+	{"url", "url", "URL", "🔗", false, false, 0},
+	{"email", "email", "Email", "✉️", false, false, 0},
+	{"phone", "phone", "Phone", "📞", false, false, 0},
+	{"featuredRelations", "relations", "Featured relations", "⭐", true, false, 0},
+	{"setOf", "object", "Set of", "🗂️", true, false, 0},
 }
 
-/** Idempotent: creates any bundled relation whose key is missing. */
+/** Idempotent: creates any bundled relation whose key is missing and
+ *  converges existing bundled ones onto the bundle's emoji (same
+ *  deterministic-id union trick as bundled types). */
 bootstrap_relations :: proc() {
+	Existing :: struct {
+		id:    string,
+		emoji: string,
+	}
 	have := make(map[string]bool)
 	defer delete(have)
+	existing := make(map[string]Existing)
+	defer delete(existing)
 	Ctx :: struct {
-		have: ^map[string]bool,
+		have:     ^map[string]bool,
+		existing: ^map[string]Existing,
 	}
-	ctx := Ctx{&have}
+	ctx := Ctx{&have, &existing}
 	with_states(proc(states: map[string]^Object_State, user: rawptr) {
 		c := cast(^struct {
-			have: ^map[string]bool,
+			have:     ^map[string]bool,
+			existing: ^map[string]Existing,
 		})user
 		for _, s in states {
 			if s.type_key != "relation" || s.deleted do continue
-			if v, ok := fields_get(s.fields, "key"); ok && v.kind == .String do c.have^[v.str] = true
+			key, kok := fields_get(s.fields, "key")
+			if !kok || key.kind != .String do continue
+			c.have^[strings.clone(key.str, context.temp_allocator)] = true
+			bundled, bok := fields_get(s.fields, "bundled")
+			if !bok || bundled.kind != .Bool || !bundled.b do continue
+			e := Existing{id = strings.clone(s.id, context.temp_allocator)}
+			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do e.emoji = strings.clone(v.str, context.temp_allocator)
+			c.existing^[strings.clone(key.str, context.temp_allocator)] = e
 		}
 	}, &ctx)
+
+	updated := 0
+	for r in BUNDLED_RELATIONS {
+		e, exists := existing[r.key]
+		if !exists do continue
+		if e.emoji == r.emoji do continue
+		ops := []Operation{{kind = .Field_Set, key = "iconEmoji", value = string_value(r.emoji)}}
+		if commit_ops(e.id, ops) do updated += 1
+	}
+	if updated > 0 do fmt.printfln("[glon-odin] converged %d bundled relation(s) to the current bundle", updated)
 
 	created := 0
 	for r in BUNDLED_RELATIONS {
@@ -852,6 +880,7 @@ bootstrap_relations :: proc() {
 			{kind = .Field_Set, key = "key", value = string_value(r.key)},
 			{kind = .Field_Set, key = "format", value = string_value(r.format)},
 			{kind = .Field_Set, key = "name", value = string_value(r.name)},
+			{kind = .Field_Set, key = "iconEmoji", value = string_value(r.emoji)},
 			{kind = .Field_Set, key = "hidden", value = bool_value(r.hidden)},
 			{kind = .Field_Set, key = "readOnly", value = bool_value(r.read_only)},
 			{kind = .Field_Set, key = "maxCount", value = int_value(r.max_count)},
