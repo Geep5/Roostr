@@ -79,7 +79,7 @@ export interface PendingMessage {
 	text: string;
 }
 
-function chatBlocks(obj: ObjectJSON): Array<{ id: string; block: BlockJSON }> {
+export function chatBlocks(obj: ObjectJSON): Array<{ id: string; block: BlockJSON }> {
 	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
 	const root = byId.get("__discussion__");
 	if (!root) return [];

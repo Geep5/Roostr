@@ -12,6 +12,7 @@
  */
 
 import { addBlock, chatPost, fetchObject, flag, fv, iv, num, setField, str, sv, type ObjectJSON } from "./api";
+import { boundObjectContext } from "./spacemap";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
 import { callLLM, isContextOverflowError } from "./llm";
@@ -20,6 +21,21 @@ import { coordinatorNote } from "./skillmgr";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { digest } from "./memory";
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
+
+const OBJECT_AGENT_PRIMER = `You are the agent of exactly one object in Roostr - a local-first
+knowledge space where every note, person, task, and project is an object
+with typed properties, living in exactly one space, connected by links.
+Saved views (queries/collections) are the human's own groupings of the
+space - treat them as the semantic map.
+
+Your world, in the sections below: your object (its fields), its type
+(what the human says it means), its connections (typed links in and out),
+and the space census. Bodies of neighbors are one object_get away.
+
+Economics: reading is free and unlimited - space_map, neighborhood, find,
+query_run, object_get cost nothing. Query until you understand. Act on
+your object and its space with the write tools when asked. Answer the
+human in the discussion plainly and concretely.`;
 
 const DEFAULT_SYSTEM = `You are a helpful agent living inside Roostr, a local-first notes app where
 everything is an object in a content-addressed DAG. You converse with your
@@ -91,7 +107,19 @@ export interface SystemPart {
 }
 
 async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts: RunOptions): Promise<SystemPart[]> {
-	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || DEFAULT_SYSTEM }];
+	const boundId = str(agent.fields, "bound_object");
+	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || (boundId ? OBJECT_AGENT_PRIMER : DEFAULT_SYSTEM) }];
+	if (boundId) {
+		try {
+			const bc = await boundObjectContext(boundId, str(agent.fields, "channel"));
+			parts.push({ label: "Your object", text: bc.object });
+			parts.push({ label: "Your type", text: bc.type });
+			parts.push({ label: "Connections", text: bc.connections });
+			parts.push({ label: "Space map", text: bc.space });
+		} catch (err) {
+			console.error(`[harness] bound context failed for ${agent.id.slice(0, 8)}:`, err);
+		}
+	}
 	if (opts.systemSuffix) parts.push({ label: "Subagent template", text: opts.systemSuffix });
 	if (view.systemExtension) parts.push({ label: "Conversation summary", text: view.systemExtension });
 	if (flag(agent.fields, "memory_digest_enabled")) {
@@ -170,6 +198,7 @@ export async function runTurn(agentId: string, convId: string, opts: RunOptions 
 		const agent = await fetchObject(agentId);
 		const conv = convId === agentId ? agent : await fetchObject(convId);
 		ctx.channelId = str(agent.fields, "channel");
+		ctx.boundObject = str(agent.fields, "bound_object") || undefined;
 		const ratio = tokenRatio(agent);
 		const cfg = compactionConfig(agent);
 		const model = str(agent.fields, "model") || "mock";

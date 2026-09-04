@@ -18,6 +18,7 @@ import {
 	API,
 } from "./api";
 import { objectText, readSkill } from "./skills";
+import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor } from "./spacemap";
 import * as memory from "./memory";
 import { TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
 
@@ -94,6 +95,8 @@ async function appendBody(objectId: string, text: string, under = ""): Promise<s
 export interface ToolContext {
 	agentId: string;
 	channelId: string;
+	/** Set for object-bound agents: the object this agent belongs to. */
+	boundObject?: string;
 	depth: number;
 	/** Wired by spawn.ts; declared here to break the import cycle. */
 	spawn?: (task: string, template: string, ctx: ToolContext) => Promise<string>;
@@ -513,9 +516,79 @@ const SUBMIT_TOOL: ToolDef = {
  * a spawned child runs on its parent's instructions, not the owner's,
  * so the shell stops at depth 0 (installer template excepted).
  */
+// ── Evaluation toolkit: reads are free; query before you ever ask ──
+
+const EVAL_TOOLS: RegisteredTool[] = [
+	{
+		def: {
+			name: "space_map",
+			description: "The space census: every type (with the human's definition and count), every saved view, every agent alive. Free - use it to orient.",
+			input_schema: { type: "object", properties: {} },
+		},
+		handler: async (_input, ctx) => await buildSpaceMap(ctx.channelId),
+	},
+	{
+		def: {
+			name: "neighborhood",
+			description: "Typed connections of an object - links in/out with property names, collection memberships, saved views matching it, and which neighbors have agents. Defaults to your own object. Free - hop the graph with this instead of waking anyone.",
+			input_schema: { type: "object", properties: { id: { type: "string", description: "object id; omit for your bound object" } } },
+		},
+		handler: async (input, ctx) => {
+			const id = S(input.id) || ctx.boundObject || "";
+			if (!id) throw new Error("no id given and this agent is not bound to an object");
+			await assertInSpace(await fetchObject(id), ctx);
+			return await buildNeighborhood(id, ctx.channelId);
+		},
+	},
+	{
+		def: {
+			name: "find",
+			description: "Structured query over this space - the same engine the human's views run on. filters: [{key, condition, value}], conditions equal/notEqual/in/notIn/greater/less/empty/notEmpty. Free and unlimited: query until you know who to ask and what to ask.",
+			input_schema: {
+				type: "object",
+				properties: {
+					type: { type: "string", description: "type key (person, task, ...)" },
+					text: { type: "string", description: "full-text query" },
+					filters: { type: "array", description: "engine filters", items: { type: "object" } },
+					limit: { type: "number" },
+				},
+			},
+		},
+		handler: async (input, ctx) => {
+			const sf = await spaceFilterFor(ctx.channelId);
+			const extra = Array.isArray(input.filters)
+				? (input.filters as Array<Record<string, unknown>>).filter((f) => typeof f?.key === "string" && f.key !== "channel")
+				: [];
+			const rows = await query({
+				type: S(input.type) || undefined,
+				textQuery: S(input.text) || undefined,
+				filters: [...extra, sf],
+				limit: Math.min(100, N(input.limit) ?? 25),
+			});
+			return JSON.stringify(rows.map((r) => ({ id: r.id, type: r.typeKey, name: r.name ?? str(r.fields, "name") })));
+		},
+	},
+	{
+		def: {
+			name: "query_run",
+			description: "Run one of the human's saved views (a query or collection) exactly as their UI runs it - the views are the human's own semantic map of the space. Free.",
+			input_schema: { type: "object", properties: { query_id: { type: "string" } }, required: ["query_id"] },
+		},
+		handler: async (input, ctx) => {
+			const view = await assertInSpace(await fetchObject(S(input.query_id)), ctx);
+			if (!["query", "set", "collection"].includes(view.typeKey)) throw new Error(`${view.id.slice(0, 8)} is a ${view.typeKey}, not a saved view`);
+			const rels = await relationDefs(ctx.channelId);
+			const body = await savedViewBody(view, ctx.channelId, rels);
+			if (!body) return "[] (empty view)";
+			const rows = await query({ ...body, limit: 100 });
+			return JSON.stringify(rows.map((r) => ({ id: r.id, type: r.typeKey, name: r.name ?? str(r.fields, "name") })));
+		},
+	},
+];
+
 export function toolDefs(template: string, depth: number): ToolDef[] {
 	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read"]);
-	let defs = TOOLS.map((t) => t.def);
+	let defs = [...TOOLS, ...EVAL_TOOLS].map((t) => t.def);
 	if (template === "explore") defs = defs.filter((d) => READ_ONLY.has(d.name));
 	const out = [...defs];
 	if (template === "installer") {
@@ -542,7 +615,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>,
 			ctx.submitResult(S(input.content));
 			return { content: "result submitted", isError: false };
 		}
-		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : TOOLS.find((t) => t.def.name === name);
+		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS].find((t) => t.def.name === name);
 		if (!tool) return { content: `unknown tool: ${name}`, isError: true };
 		const content = await tool.handler(input, ctx);
 		return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };

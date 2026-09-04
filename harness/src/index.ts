@@ -21,7 +21,7 @@ import { convergeCatalogScope } from "./skillmgr";
 import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled, syncHeartbeats } from "./roster";
 import { startNostrSync, vanishOnRelays } from "./nostrsync";
-import { ensureChat, frameMessage, ingestIntoChat, pendingMessages, setMark } from "./surfaces";
+import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, pendingMessages, setMark } from "./surfaces";
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);
@@ -60,6 +60,8 @@ interface Served {
 	channelId: string;
 	/** Type keys this agent is responsible for; "*" = everything else. */
 	types: string[];
+	/** Object-bound agents: the one object this agent belongs to. */
+	bound: string;
 	name: string;
 	icon: string;
 }
@@ -82,6 +84,29 @@ export const agentTurnStatus = new Map<string, AgentTurnStatus>();
 /** Unassigned (pre-channel) objects live in the default channel — UI rule. */
 let defaultChannelId = "";
 
+/** Prepare one agent for serving (chat ensured, channel pinned). */
+async function buildServedOne(agentId: string, defaultChannel: string): Promise<Served> {
+	const agent = await fetchObject(agentId);
+	let channelId = str(agent.fields, "channel");
+	if (!channelId) {
+		// Never let an agent float on channel ordering: bind it to the
+		// current default PERMANENTLY. (An ordering flip once moved every
+		// floating agent - and their chats - into a duplicate channel.)
+		channelId = defaultChannel;
+		if (channelId) await setField(agentId, "channel", sv(channelId));
+	}
+	const chatId = await ensureChat(agent, channelId);
+	return {
+		agentId,
+		chatId,
+		channelId,
+		types: list(agent.fields, "responsible_types"),
+		bound: str(agent.fields, "bound_object"),
+		name: str(agent.fields, "name") || agentId.slice(0, 8),
+		icon: str(agent.fields, "iconEmoji"),
+	};
+}
+
 /** agentId → Served; rebuilt on roster change. */
 async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
 	const out = new Map<string, Served>();
@@ -91,24 +116,7 @@ async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
 	defaultChannelId = defaultChannel;
 	for (const agentId of agents) {
 		try {
-			const agent = await fetchObject(agentId);
-			let channelId = str(agent.fields, "channel");
-			if (!channelId) {
-				// Never let an agent float on channel ordering: bind it to the
-				// current default PERMANENTLY. (An ordering flip once moved every
-				// floating agent - and their chats - into a duplicate channel.)
-				channelId = defaultChannel;
-				if (channelId) await setField(agentId, "channel", sv(channelId));
-			}
-			const chatId = await ensureChat(agent, channelId);
-			out.set(agentId, {
-				agentId,
-				chatId,
-				channelId,
-				types: list(agent.fields, "responsible_types"),
-				name: str(agent.fields, "name") || agentId.slice(0, 8),
-				icon: str(agent.fields, "iconEmoji"),
-			});
+			out.set(agentId, await buildServedOne(agentId, defaultChannel));
 		} catch (err) {
 			console.error(`[harness] failed to prepare agent ${agentId.slice(0, 8)}:`, err);
 		}
@@ -159,6 +167,48 @@ async function serve(): Promise<void> {
 	await convergeCatalogScope();
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
+
+	// ── Object-bound agents ─────────────────────────────────────────
+	// objectId → its bound agent. Minted ONLY from a human discussion
+	// message; agents can never create other minds. Lazily adopted into
+	// `served` when their surface first stirs.
+	const boundBy = new Map<string, string>();
+	for (const a of await queryAll({ type: "agent" })) {
+		const b = str(a.fields, "bound_object");
+		if (b) boundBy.set(b, a.id);
+	}
+	console.log(`[harness] ${boundBy.size} object-bound agent(s) known`);
+
+	/** Kinds that never get their own mind. */
+	const UNMINTABLE = new Set(["agent", "chat", "channel", "relation", "type", "template", "skill", "program", "typescript", "json", "proto", "pinned_fact", "milestone"]);
+
+	/** True when the newest discussion message is human-authored - the
+	 * ONLY trigger that may mint an agent. */
+	function lastMessageIsHuman(obj: Parameters<typeof chatBlocks>[0]): boolean {
+		const msgs = chatBlocks(obj);
+		if (msgs.length === 0) return false;
+		const last = msgs[msgs.length - 1].block.content.custom?.meta ?? {};
+		if (last["origin"]) return false;
+		const author = last["author"] ?? "";
+		return !/^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(author); // uuid author = an agent
+	}
+
+	async function mintBoundAgent(obj: Awaited<ReturnType<typeof fetchObject>>, channelId: string): Promise<string> {
+		// Model follows the space's existing agents so quality is uniform.
+		const sibling = [...served.values()].find((x) => x.channelId === channelId);
+		const model = sibling ? str((await fetchObject(sibling.agentId)).fields, "model") : "";
+		const name = str(obj.fields, "name") || obj.typeKey;
+		const { id } = await createObject(name, "agent", {
+			channel: sv(channelId),
+			bound_object: sv(obj.id),
+			iconEmoji: sv(str(obj.fields, "iconEmoji") || "🛰️"),
+			model: sv(model || process.env.GLON_AGENT_MODEL || "claude-sonnet-4-5"),
+		});
+		boundBy.set(obj.id, id);
+		console.log(`[harness] minted agent for "${name}" (${obj.id.slice(0, 8)}) → ${id.slice(0, 8)}`);
+		return id;
+	}
+
 	const busy = new Set<string>();
 	const active = new Map<string, string>(); // agentId → surface of the in-flight turn
 	const dirty = new Map<string, Set<string>>(); // agentId → surfaces awaiting a turn
@@ -253,6 +303,16 @@ async function serve(): Promise<void> {
 			}
 			return; // agent objects are not surfaces
 		}
+		// Any agent object event (incl. one minted on another machine)
+		// keeps the bound index current.
+		if (!agents.has(objectId)) {
+			const maybe = await fetchObject(objectId).catch(() => null);
+			if (maybe?.typeKey === "agent") {
+				const b = str(maybe.fields, "bound_object");
+				if (b) boundBy.set(b, objectId);
+				return;
+			}
+		}
 		// Any other object in a served agent's channel is a surface; the
 		// responsible agent (by type) answers.
 		let obj;
@@ -263,10 +323,43 @@ async function serve(): Promise<void> {
 		}
 		if (obj.typeKey === "chat" || obj.typeKey === "agent") return; // other agents' chats/brains
 		const channelId = objectId === defaultChannelId || obj.typeKey === "channel" ? objectId : str(obj.fields, "channel") || defaultChannelId;
+
+		// ── Bound agent takes its own object's surface, always. ──
+		const boundAgent = boundBy.get(objectId);
+		if (boundAgent) {
+			let s2 = served.get(boundAgent);
+			if (!s2) {
+				try {
+					s2 = await buildServedOne(boundAgent, defaultChannelId);
+					served.set(boundAgent, s2);
+				} catch (err) {
+					console.error(`[harness] failed to adopt bound agent ${boundAgent.slice(0, 8)}:`, err);
+					return;
+				}
+			}
+			const pending2 = await pendingMessages(obj, s2.agentId);
+			if (pending2.length > 0) void drive(s2, objectId);
+			return;
+		}
+
+		// ── Explicitly responsible space agent answers, as before. ──
 		const s = responsibleFor(channelId, obj.typeKey);
-		if (!s) return;
-		const pending = await pendingMessages(obj, s.agentId);
-		if (pending.length > 0) void drive(s, objectId);
+		if (s) {
+			const pending = await pendingMessages(obj, s.agentId);
+			if (pending.length > 0) void drive(s, objectId);
+			return;
+		}
+
+		// ── Nobody claims it: a HUMAN message on a discussable object
+		// mints the object's own agent and serves this very message. ──
+		if (UNMINTABLE.has(obj.typeKey)) return;
+		if (!lastMessageIsHuman(obj)) return;
+		const minted = await mintBoundAgent(obj, channelId);
+		const s3 = await buildServedOne(minted, defaultChannelId);
+		served.set(minted, s3);
+		void publishSystemSnapshot(s3.agentId, s3.chatId);
+		const pending3 = await pendingMessages(obj, s3.agentId);
+		if (pending3.length > 0) void drive(s3, objectId);
 	}
 
 	startAuthServer(agents, (next) => {
