@@ -490,29 +490,49 @@
 	// headers collapse; a viewing preference, persisted per device.
 	// ── Resizable sidebar (invisible drag strip on its right edge) ──
 	let sideWidth = $state(typeof localStorage === "undefined" ? 220 : parseInt(localStorage.getItem("side-width") ?? "220") || 220);
-	/** Anytype vault: the icon rail drags out to show space names. */
-	let railWide = $state(typeof localStorage === "undefined" ? false : localStorage.getItem("rail-wide") === "1");
-	function setRailWide(v: boolean) {
-		railWide = v;
-		localStorage.setItem("rail-wide", v ? "1" : "0");
+	/** Anytype vault: the icon rail pulls out continuously - width follows
+	 * the pointer; releasing below the threshold collapses back to icons.
+	 * A plain click on the gutter toggles between icons and the last width. */
+	const RAIL_MIN = 56;
+	const RAIL_MAX = 320;
+	let railWidth = $state(
+		typeof localStorage === "undefined"
+			? 56
+			: parseInt(localStorage.getItem("rail-width") ?? "") || (localStorage.getItem("rail-wide") === "1" ? 236 : 56),
+	);
+	let railWideWidth = $state(typeof localStorage === "undefined" ? 236 : parseInt(localStorage.getItem("rail-width-wide") ?? "") || 236);
+	let railDragging = $state(false);
+	const railWide = $derived(railWidth > 100);
+	function railPersist() {
+		localStorage.setItem("rail-width", String(railWidth));
+		if (railWidth > 100) localStorage.setItem("rail-width-wide", String(railWidth));
 	}
-	/** The rail gutter: a plain click toggles; a drag past the threshold
-	 * snaps open/closed. Both land in the same two states. */
+	function railToggle() {
+		railWidth = railWidth > 100 ? RAIL_MIN : Math.max(160, railWideWidth);
+		railPersist();
+	}
 	function railResizeStart(e: PointerEvent) {
 		e.preventDefault();
 		const startX = e.clientX;
-		const startWide = railWide;
+		const startW = railWidth;
 		let moved = false;
+		railDragging = true;
 		const move = (ev: PointerEvent) => {
 			const dx = ev.clientX - startX;
 			if (Math.abs(dx) > 4) moved = true;
-			if (!startWide && dx > 40) setRailWide(true);
-			else if (startWide && dx < -40) setRailWide(false);
+			railWidth = Math.min(RAIL_MAX, Math.max(RAIL_MIN, startW + dx));
 		};
 		const up = () => {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", up);
-			if (!moved) setRailWide(!startWide);
+			railDragging = false;
+			if (!moved) {
+				railToggle();
+				return;
+			}
+			if (railWidth < 140) railWidth = RAIL_MIN;
+			else railWideWidth = railWidth;
+			railPersist();
 		};
 		window.addEventListener("pointermove", move);
 		window.addEventListener("pointerup", up);
@@ -853,7 +873,7 @@
 	{/if}
 </div>
 {:else}
-<div class="shell" style="grid-template-columns: {railWide ? 236 : 56}px {sideWidth}px 1fr">
+<div class="shell" style="grid-template-columns: {railWidth}px {sideWidth}px 1fr;{railDragging ? ' transition: none;' : ''}">
 	<nav class="vault" class:wide={railWide}>
 		{#each orderedSpaces as c (c.id)}
 			<button
@@ -1418,6 +1438,7 @@
 		border-radius: 10px;
 	}
 	.space-ico {
+		box-sizing: border-box;
 		display: flex;
 		align-items: center;
 		justify-content: center;
