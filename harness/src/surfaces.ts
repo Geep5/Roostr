@@ -52,23 +52,48 @@ export async function setMark(surfaceId: string, blockId: string): Promise<void>
 
 // ── Default chat per (agent × channel) ────────────────────────────
 
+/**
+ * In-flight chat creations, claimed synchronously by the caller.
+ *
+ * The roster callback rebuilds every served agent, so a few quick toggles
+ * (or two devices) put several buildServed passes in the air at once. Each
+ * one queried, saw nothing, and created - one agent ended up with three
+ * holistic chats, and since the harness takes the first row it saw, its
+ * conversation split across them and the agent looked amnesiac.
+ */
+const ensuring = new Map<string, Promise<string>>();
+
 /** Find or create the agent's holistic chat for its channel. */
 export async function ensureChat(agent: ObjectJSON, channelId: string): Promise<string> {
-	const rows = await query({
-		type: "chat",
-		filters: [
-			{ key: "agent", condition: "equal", value: agent.id },
-			...(channelId ? [{ key: "channel", condition: "equal", value: channelId }] : []),
-		],
-		limit: 1,
-	});
-	if (rows.length > 0) return rows[0].id;
-	const name = str(agent.fields, "name") || "Agent";
-	const fields: Record<string, ReturnType<typeof sv>> = { agent: sv(agent.id) };
-	if (channelId) fields.channel = sv(channelId);
-	const { id } = await createObject(name, "chat", fields);
-	console.log(`[harness] created chat "${name}" (${id.slice(0, 8)}) for agent ${agent.id.slice(0, 8)}`);
-	return id;
+	const key = `${agent.id}:${channelId}`;
+	const inFlight = ensuring.get(key);
+	if (inFlight) return inFlight;
+	const run = (async () => {
+		const rows = await query({
+			type: "chat",
+			filters: [
+				{ key: "agent", condition: "equal", value: agent.id },
+				...(channelId ? [{ key: "channel", condition: "equal", value: channelId }] : []),
+			],
+			limit: 50,
+		});
+		// Lowest id wins, as with a twin agent: if another device created one
+		// concurrently, every device converges on the same chat instead of
+		// each preferring whichever row its query happened to return first.
+		if (rows.length > 0) return rows.map((r) => r.id).sort()[0];
+		const name = str(agent.fields, "name") || "Agent";
+		const fields: Record<string, ReturnType<typeof sv>> = { agent: sv(agent.id) };
+		if (channelId) fields.channel = sv(channelId);
+		const { id } = await createObject(name, "chat", fields);
+		console.log(`[harness] created chat "${name}" (${id.slice(0, 8)}) for agent ${agent.id.slice(0, 8)}`);
+		return id;
+	})();
+	ensuring.set(key, run);
+	try {
+		return await run;
+	} finally {
+		ensuring.delete(key);
+	}
 }
 
 // ── Pending messages (watermarked) ────────────────────────────────
