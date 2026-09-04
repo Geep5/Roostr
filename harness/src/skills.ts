@@ -51,11 +51,9 @@ export interface SkillListing {
  * from anywhere.
  */
 export async function listSkills(agentId?: string): Promise<SkillListing[]> {
-	const { CATALOG, enabledCatalogKeys, getCoordinator } = await import("./skillmgr");
+	const { CATALOG, enabledCatalogKeys } = await import("./skillmgr");
 	const enabled = await enabledCatalogKeys();
-	const coordinator = await getCoordinator();
 	const managed = new Set(CATALOG.map((c) => c.name.toLowerCase()));
-	const gated = coordinator !== "" && agentId !== undefined && agentId !== coordinator;
 	const rows = await queryAll({ type: "skill" });
 	return rows
 		.map((r) => ({
@@ -69,8 +67,7 @@ export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 			if (s.owner !== "" && s.owner !== agentId) return false;
 			const key = s.name.toLowerCase();
 			if (!managed.has(key)) return true;
-			if (!enabled.has(key)) return false;
-			return !gated;
+			return enabled.has(key);
 		});
 }
 

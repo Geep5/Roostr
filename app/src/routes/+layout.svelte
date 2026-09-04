@@ -563,6 +563,7 @@
 	}
 
 	let showSettings = $state(false);
+	let showMachine = $state(false);
 	let showSearch = $state(false);
 
 	function onGlobalKeydown(e: KeyboardEvent) {
@@ -695,6 +696,9 @@
 			<div class="m-head">
 				<!-- Anytype: the avatar sits alone on top; the title gets its own line below. -->
 				<div class="m-head-top">
+					<button class="m-avatar" data-tip="This machine" aria-label="This machine" onclick={() => (showMachine = true)}>
+						<svg style="width:17px;height:17px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></svg>
+					</button>
 					<button class="m-avatar" data-tip="Settings" aria-label="Settings" onclick={() => (showSettings = true)}>
 						{#if profilePic}<img class="m-avatar-img" src={profilePic} alt="" />{:else}⚙{/if}
 					</button>
@@ -915,6 +919,10 @@
 		<div class="rail-spacer"></div>
 		<!-- Your identity opens Settings - the avatar when the profile has
 		     one, a person glyph otherwise (the gear lives inside). -->
+		<button class="space settings" title="This machine — integrations &amp; holdups" onclick={() => (showMachine = true)}>
+			<span class="space-ico"><svg style="width:17px;height:17px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></svg></span>
+			{#if railWide}<span class="space-label">This machine</span>{/if}
+		</button>
 		<button class="space settings" title="Settings" onclick={() => (showSettings = true)}>
 			<span class="space-ico round">{#if profilePic}<img class="rail-avatar" src={profilePic} alt="" />{:else}<svg style="width:18px;height:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{/if}</span>
 			{#if railWide}<span class="space-label">{profileName ? `@${profileName.replace(/^@/, "")}` : "Settings"}</span>{/if}
@@ -1184,6 +1192,12 @@
 {#if showSettings}
 	{#await import("$lib/components/Settings.svelte") then { default: Settings }}
 		<Settings onclose={() => (showSettings = false)} />
+	{/await}
+{/if}
+
+{#if showMachine}
+	{#await import("$lib/components/Machine.svelte") then { default: Machine }}
+		<Machine onclose={() => (showMachine = false)} />
 	{/await}
 {/if}
 

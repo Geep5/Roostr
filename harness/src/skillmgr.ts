@@ -73,7 +73,9 @@ export const CATALOG: CatalogEntry[] = [
 			"(it is a small shell script this machine wrote, not a package). Finish when `command -v browserless` fails.",
 		checkCmd: "command -v browserless",
 		skillBody:
-			"Headless Chrome from the shell via the `browserless` command — a thin wrapper over this machine's Chrome.\n" +
+			"Web pages through this machine's headless Chrome.\n" +
+			"Every agent has the `web_fetch` tool — that IS this capability, brokered by the harness; just call it with a URL.\n" +
+			"Agents with shell access can also run the `browserless` command directly for screenshots/PDFs.\n" +
 			"Use it when a page needs JavaScript to render (SPAs, dashboards) and plain curl returns an empty shell.\n" +
 			"`browserless <url>` prints the rendered DOM; `browserless --screenshot out.png <url>` and `browserless --pdf out.pdf <url>` capture the page.\n" +
 			"It runs in Chrome's own headless profile, never signed in as the human — expect logged-out pages.\n" +
@@ -113,10 +115,23 @@ interface SkillState {
 
 const STATE_PATH = `${process.env.GLON_DATA ?? `${process.env.HOME}/.glon`}/skills.json`;
 
+/** An agent needed a machine capability and could not proceed. */
+export interface Holdup {
+	id: string;
+	capability: string;
+	agentId: string;
+	agentName: string;
+	objectId: string;
+	objectName: string;
+	error: string;
+	count: number;
+	firstAt: number;
+	updatedAt: number;
+}
+
 interface StateFile {
 	skills: Record<string, SkillState>;
-	/** Agent id that fronts all device skills; others ask it in chat. */
-	coordinator?: string;
+	holdups?: Holdup[];
 }
 
 async function readState(): Promise<StateFile> {
@@ -153,14 +168,43 @@ export async function convergeCatalogScope(): Promise<void> {
 	}
 }
 
-export async function getCoordinator(): Promise<string> {
-	return (await readState()).coordinator ?? "";
+// ── Holdups: the machine's ledger of blocked capability calls ─────
+//
+// Filed by brokered tools when a capability is missing or broken;
+// listed in the Machine panel; cleared by the human after fixing.
+
+export async function listHoldups(): Promise<Holdup[]> {
+	return (await readState()).holdups ?? [];
 }
 
-export async function setCoordinator(agentId: string): Promise<void> {
+export async function fileHoldup(h: Omit<Holdup, "id" | "count" | "firstAt" | "updatedAt">): Promise<void> {
 	const state = await readState();
-	state.coordinator = agentId || undefined;
+	state.holdups ??= [];
+	const existing = state.holdups.find((x) => x.capability === h.capability && x.agentId === h.agentId);
+	if (existing) {
+		existing.error = h.error;
+		existing.count += 1;
+		existing.updatedAt = Date.now();
+	} else {
+		state.holdups.push({ ...h, id: crypto.randomUUID(), count: 1, firstAt: Date.now(), updatedAt: Date.now() });
+	}
 	await writeState(state);
+}
+
+export async function clearHoldup(id: string): Promise<void> {
+	const state = await readState();
+	state.holdups = (state.holdups ?? []).filter((x) => x.id !== id);
+	await writeState(state);
+}
+
+/** Is a catalog capability ready to serve? Reason strings are shown to agents and humans. */
+export async function skillReady(key: string): Promise<{ ok: boolean; reason: string }> {
+	const entry = CATALOG.find((c) => c.key === key);
+	if (!entry) return { ok: false, reason: `unknown capability "${key}"` };
+	const st = (await readState()).skills[key];
+	if (!st?.enabled) return { ok: false, reason: `${entry.name} is switched off on this machine` };
+	if (!st.installed) return { ok: false, reason: `${entry.name} is not installed on this machine` };
+	return { ok: true, reason: "" };
 }
 
 /** Catalog skills enabled on this device. */
@@ -169,29 +213,6 @@ export async function enabledCatalogKeys(): Promise<Set<string>> {
 	return new Set(CATALOG.filter((c) => state.skills[c.key]?.enabled).map((c) => c.key));
 }
 
-/**
- * Prompt note for a non-coordinator agent: device skills exist, but they
- * flow through the coordinator — ask in its chat instead of wielding them.
- */
-export async function coordinatorNote(agentId: string): Promise<string> {
-	const state = await readState();
-	if (!state.coordinator || state.coordinator === agentId) return "";
-	const enabled = CATALOG.filter((c) => state.skills[c.key]?.enabled);
-	if (enabled.length === 0) return "";
-	let coordinatorName = "the coordinator";
-	try {
-		const obj = await fetchObject(state.coordinator);
-		coordinatorName = str(obj.fields, "name") || coordinatorName;
-	} catch {
-		/* coordinator object unreachable; generic name */
-	}
-	const lines = enabled.map((c) => `- ${c.name}: ${c.description}`);
-	return (
-		`<device-skills>\nThis machine has capabilities that are handled by the coordinator agent "${coordinatorName}", not by you:\n` +
-		`${lines.join("\n")}\n` +
-		`When a task needs one, ask ${coordinatorName} by posting the request in their chat (chat_reply_on on their chat object) and wait for their reply. Do not attempt these tools yourself.\n</device-skills>`
-	);
-}
 
 // -- Live jobs ----------------------------------------------------
 
@@ -380,14 +401,12 @@ function expire(ms: number, message: string): Promise<never> {
 	return promise;
 }
 
-/** Which agent the installer runs as a subagent of: coordinator, else any served agent. */
+/** Which agent the installer runs as a subagent of: any served agent. */
 async function installerParentId(): Promise<string> {
-	const state = await readState();
-	if (state.coordinator) return state.coordinator;
 	const { readRoster } = await import("./roster");
 	const roster = await readRoster();
 	if (roster.length > 0) return roster[0];
-	throw new Error("no served agent — enable one (or set a coordinator) so installs can run as its subagent");
+	throw new Error("no served agent — enable one so installs can run as its subagent");
 }
 
 /**

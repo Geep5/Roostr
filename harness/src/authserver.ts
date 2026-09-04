@@ -10,7 +10,7 @@ import { SimplePool, finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
 import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
-import { disableSkill, enableSkill, getCoordinator, recheckSkill, setCoordinator, skillStatus, uninstallSkill, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
+import { clearHoldup, disableSkill, enableSkill, listHoldups, recheckSkill, skillStatus, uninstallSkill, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { fetchObject, str } from "./api";
 
 /** Public identity (npub + hex pubkey) derived from the local nostr key. */
@@ -158,21 +158,12 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					return json({ ok: true, roster: next });
 				}
 				if (req.method === "GET" && url.pathname === "/skills") {
-					const [skills, coordinator, roster] = await Promise.all([skillStatus(), getCoordinator(), readRoster()]);
-					const agents: { id: string; name: string }[] = [];
-					for (const id of roster) {
-						try {
-							const obj = await fetchObject(id);
-							agents.push({ id, name: str(obj.fields, "name") || id.slice(0, 8) });
-						} catch {
-							agents.push({ id, name: id.slice(0, 8) });
-						}
-					}
-					return json({ skills, coordinator, agents });
+					const [skills, holdups] = await Promise.all([skillStatus(), listHoldups()]);
+					return json({ skills, holdups });
 				}
-				if (req.method === "POST" && url.pathname === "/skills/coordinator") {
+				if (req.method === "POST" && url.pathname === "/skills/holdup-clear") {
 					const body = (await req.json()) as { id?: string };
-					await setCoordinator(body.id ?? "");
+					await clearHoldup(body.id ?? "");
 					return json({ ok: true });
 				}
 				if (req.method === "POST" && url.pathname.startsWith("/skills/")) {

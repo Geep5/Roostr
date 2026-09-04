@@ -19,6 +19,7 @@ import {
 	addBlock,
 	API,
 } from "./api";
+import { fileHoldup, skillReady } from "./skillmgr";
 import { objectText, readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor } from "./spacemap";
 import * as memory from "./memory";
@@ -170,6 +171,97 @@ async function assertInSpace(obj: ObjectJSON, ctx: ToolContext): Promise<ObjectJ
 	if (objSpace !== own) throw new Error(`object ${obj.id.slice(0, 8)} is outside this agent's space`);
 	return obj;
 }
+
+// ── Machine capabilities, brokered ────────────────────────────────
+//
+// The harness executes these in-process with machine-local credentials;
+// agents get the effect, never the secret. A capability failure files a
+// holdup in the machine ledger (Machine panel) and tells the agent the
+// truth so it can answer honestly instead of inventing a coordinator.
+
+const WEB_FETCH_TIMEOUT_MS = 60_000;
+const WEB_FETCH_CAP = 14_000;
+
+function shq(v: string): string {
+	return `'${v.replace(/'/g, `'\''`)}'`;
+}
+
+/** Crude but honest DOM → text: scripts/styles out, tags out, whitespace collapsed. */
+function domToText(html: string): string {
+	const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() ?? "";
+	const text = html
+		.replace(/<script[\s\S]*?<\/script>/gi, " ")
+		.replace(/<style[\s\S]*?<\/style>/gi, " ")
+		.replace(/<!--[\s\S]*?-->/g, " ")
+		.replace(/<a\s[^>]*href="([^"#][^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href, body) => `${body.replace(/<[^>]+>/g, "")} (${href}) `)
+		.replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)[^>]*>/gi, "\n")
+		.replace(/<[^>]+>/g, " ")
+		.replace(/&nbsp;/g, " ")
+		.replace(/&amp;/g, "&")
+		.replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">")
+		.replace(/&#39;|&apos;/g, "'")
+		.replace(/&quot;/g, '"')
+		.replace(/[ \t]+/g, " ")
+		.replace(/\n\s*\n\s*/g, "\n")
+		.trim();
+	return (title ? `[title] ${title}\n` : "") + text;
+}
+
+/** File a holdup with best-effort agent/object names; never throws. */
+async function fileCapabilityHoldup(capability: string, error: string, ctx: ToolContext): Promise<void> {
+	let agentName = ctx.agentId.slice(0, 8);
+	let objectId = ctx.boundObject ?? "";
+	let objectName = "";
+	try {
+		const agent = await fetchObject(ctx.agentId);
+		agentName = str(agent.fields, "name") || agentName;
+		objectId ||= str(agent.fields, "bound_object");
+		if (objectId) objectName = str((await fetchObject(objectId)).fields, "name");
+	} catch {
+		/* names are cosmetic */
+	}
+	try {
+		await fileHoldup({ capability, agentId: ctx.agentId, agentName, objectId, objectName, error });
+	} catch {
+		/* the ledger must never break the turn */
+	}
+}
+
+const WEB_TOOLS: RegisteredTool[] = [
+	{
+		def: {
+			name: "web_fetch",
+			description:
+				"Fetch a live web page through this machine's headless Chrome (renders JavaScript) and return its text. Use for looking things up on the web - profiles, docs, articles. If the capability is unavailable the call files a holdup for the human and tells you so - relay that honestly and continue without it.",
+			input_schema: {
+				type: "object",
+				properties: { url: { type: "string", description: "absolute http(s) URL" } },
+				required: ["url"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const url = S(input.url).trim();
+			if (!/^https?:\/\//i.test(url)) return "error: url must be absolute http(s)";
+			const ready = await skillReady("browserless");
+			if (!ready.ok) {
+				await fileCapabilityHoldup("browserless", ready.reason, ctx);
+				return `Capability unavailable: ${ready.reason}. A holdup has been filed - the human will see it in the Machine panel and can fix it there. Tell them plainly; do not retry this turn.`;
+			}
+			const proc = Bun.spawn(["sh", "-lc", `browserless ${shq(url)}`], { cwd: process.env.HOME, stdout: "pipe", stderr: "pipe" });
+			const timer = setTimeout(() => proc.kill(), WEB_FETCH_TIMEOUT_MS);
+			const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+			const code = await proc.exited;
+			clearTimeout(timer);
+			if (code !== 0 || !out.trim()) {
+				const reason = `browserless failed on ${url}: ${(err || out || "no output").trim().slice(0, 300)}`;
+				await fileCapabilityHoldup("browserless", reason, ctx);
+				return `Capability failed: ${reason}. A holdup has been filed for the human in the Machine panel. Tell them plainly.`;
+			}
+			return domToText(out).slice(0, WEB_FETCH_CAP) || "(page rendered empty)";
+		},
+	},
+];
 
 const TOOLS: RegisteredTool[] = [
 	{
@@ -660,7 +752,7 @@ const A2A_TOOL: RegisteredTool = {
 
 export function toolDefs(template: string, depth: number, allowAsk = false): ToolDef[] {
 	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read"]);
-	let defs = [...TOOLS, ...EVAL_TOOLS].map((t) => t.def);
+	let defs = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS].map((t) => t.def);
 	if (template === "" && depth === 0 && allowAsk) defs.push(A2A_TOOL.def);
 	if (template === "explore") defs = defs.filter((d) => READ_ONLY.has(d.name));
 	const out = [...defs];
@@ -688,7 +780,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>,
 			ctx.submitResult(S(input.content));
 			return { content: "result submitted", isError: false };
 		}
-		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS, A2A_TOOL].find((t) => t.def.name === name);
+		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, A2A_TOOL].find((t) => t.def.name === name);
 		if (!tool) return { content: `unknown tool: ${name}`, isError: true };
 		const content = await tool.handler(input, ctx);
 		return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };
