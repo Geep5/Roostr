@@ -10,6 +10,7 @@ import "core:os"
 import "core:fmt"
 import "core:sync"
 import "core:strings"
+import "core:slice"
 import "core:path/filepath"
 import "core:encoding/json"
 import "core:encoding/hex"
@@ -631,6 +632,50 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		}
 		extra := jobj()
 		extra["vanished"] = json.Integer(i64(vanished))
+		ok_response(sock, extra)
+
+	// Sweep every tombstone. `delete` leaves the object's changes on disk and
+	// on the relays forever; the bin in each space can only reach tombstones
+	// whose space still exists, so objects orphaned by a deleted space were
+	// unreclaimable by any surface. The daemon collects the set itself rather
+	// than trusting a client's list, and reports before it destroys: no
+	// `confirm: true`, no writes.
+	case "purge_deleted":
+		Sweep :: struct {
+			ids: [dynamic]string,
+		}
+		sweep := Sweep{make([dynamic]string, context.temp_allocator)}
+		with_states(proc(states: map[string]^Object_State, user: rawptr) {
+			s := cast(^Sweep)user
+			for id, st in states {
+				if !st.deleted do continue
+				if id == VANISH_LOG_ID do continue
+				// Cloned, per the convention the cascade helpers follow: these
+				// keys belong to the store, and vanish_objects invalidates it
+				// (freeing them) before its own broadcast loop reads them back.
+				append(&s.ids, strings.clone(id, context.temp_allocator))
+			}
+			slice.sort(s.ids[:]) // deterministic report and cascade order
+		}, &sweep)
+		confirmed, _ := json_bool(parsed, "confirm")
+		if !confirmed {
+			sample := make([dynamic]json.Value, context.temp_allocator)
+			for id in sweep.ids do append(&sample, json.String(id))
+			extra := jobj()
+			extra["wouldPurge"] = json.Integer(i64(len(sweep.ids)))
+			extra["ids"] = json.Array(sample)
+			ok_response(sock, extra)
+			return
+		}
+		if len(sweep.ids) == 0 {
+			extra := jobj()
+			extra["purged"] = json.Integer(0)
+			ok_response(sock, extra)
+			return
+		}
+		purged := vanish_objects(sweep.ids[:])
+		extra := jobj()
+		extra["purged"] = json.Integer(i64(purged))
 		ok_response(sock, extra)
 
 	case "channel_create":
