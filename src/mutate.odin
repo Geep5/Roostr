@@ -540,6 +540,8 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		// A type definition takes its instances with it (computed before
 		// the tombstone lands).
 		instances := type_instance_cascade(object_id)
+		// A property definition takes its values with it.
+		rel_ids, rel_key := relation_value_cascade(object_id)
 		if !commit_ops(object_id, {Operation{kind = .Object_Delete}}) {
 			respond_error(sock, "write failed", "500 Internal Server Error")
 			return
@@ -552,6 +554,7 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 			icascade := bound_agent_cascade(iid)
 			for cid in icascade do commit_ops(cid, {Operation{kind = .Object_Delete}})
 		}
+		for oid in rel_ids do commit_ops(oid, {Operation{kind = .Field_Delete, key = rel_key}})
 		ok_response(sock)
 
 	// Real deletion: purge the change files and record it in the synced
@@ -574,11 +577,14 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 			return
 		}
 		// A type definition takes its instances with it; then bound agents
-		// (and their chats) vanish with every object in the set.
+		// (and their chats) vanish with every object in the set. A property
+		// definition wipes its values from the survivors first.
 		expanded := make([dynamic]string, context.temp_allocator)
 		for id in ids {
 			append(&expanded, id)
 			for iid in type_instance_cascade(id) do append(&expanded, iid)
+			rel_ids, rel_key := relation_value_cascade(id)
+			for oid in rel_ids do commit_ops(oid, {Operation{kind = .Field_Delete, key = rel_key}})
 		}
 		root_count := len(expanded)
 		for i in 0 ..< root_count {
@@ -828,6 +834,45 @@ type_instance_cascade :: proc(object_id: string) -> [dynamic]string {
 		}
 	}, &ctx)
 	return out
+}
+
+// ── Relation-value cascade ───────────────────────────────────────────
+//
+// Deleting a property definition wipes that field from every live
+// object in the def's space: a value whose meaning is gone is noise
+// that would silently resurrect if the key were ever reused.
+relation_value_cascade :: proc(object_id: string) -> (ids: [dynamic]string, key: string) {
+	ids = make([dynamic]string, context.temp_allocator)
+	Ctx :: struct {
+		ids: ^[dynamic]string,
+		key: ^string,
+		id:  string,
+	}
+	ctx := Ctx{&ids, &key, object_id}
+	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+		c := cast(^struct {
+			ids: ^[dynamic]string,
+			key: ^string,
+			id:  string,
+		})user
+		def, ok := states[c.id]
+		if !ok || def.type_key != "relation" do return
+		k, kok := fields_get(def.fields, "key")
+		if !kok || k.kind != .String || k.str == "" do return
+		c.key^ = strings.clone(k.str, context.temp_allocator)
+		ch := ""
+		if v, vok := fields_get(def.fields, "channel"); vok && v.kind == .String do ch = v.str
+		for _, s in states {
+			if s.deleted || s.id == c.id do continue
+			sch := ""
+			if v, vok := fields_get(s.fields, "channel"); vok && v.kind == .String do sch = v.str
+			if sch != ch do continue
+			if _, has := fields_get(s.fields, k.str); has {
+				append(c.ids, strings.clone(s.id, context.temp_allocator))
+			}
+		}
+	}, &ctx)
+	return
 }
 
 // ── Bound-agent cascade ──────────────────────────────────────────────
