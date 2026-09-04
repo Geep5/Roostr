@@ -307,13 +307,21 @@ handle_list_objects :: proc(sock: net.TCP_Socket) {
 }
 
 sort_summaries :: proc(arr: ^[dynamic]json.Value) {
-	// insertion sort by updatedAt desc (lists are small)
+	// Insertion sort by updatedAt desc (lists are small), id asc as the
+	// tiebreak. Without the tiebreak the order among objects sharing a
+	// timestamp came from the state map, which iterates differently in every
+	// process - so two runs of `list` disagreed and the app's lists reshuffled
+	// across reloads for no reason the user did.
 	for i in 1 ..< len(arr) {
 		j := i
 		for j > 0 {
 			a, _ := json_int(arr[j - 1], "updatedAt")
 			b, _ := json_int(arr[j], "updatedAt")
-			if a >= b do break
+			if a != b {
+				if a > b do break
+			} else {
+				if json_str(arr[j - 1], "id") <= json_str(arr[j], "id") do break
+			}
 			arr[j - 1], arr[j] = arr[j], arr[j - 1]
 			j -= 1
 		}

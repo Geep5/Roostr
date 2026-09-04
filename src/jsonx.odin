@@ -136,14 +136,27 @@ object_to_json_value :: proc(s: ^Object_State, allocator := context.temp_allocat
 	return json.Object(o)
 }
 
+/**
+ * Key order must not depend on which process serialised the state.
+ * `json.Object` is an Odin map, so iteration order is randomised per process
+ * and reshuffles as the map grows. That leaked into every API response: it
+ * left `dump` unable to reproduce its own output - the one job the README
+ * gives it, parity testing against the TS engine - and it made the harness
+ * render a different prompt from identical inputs, rewriting two fields on
+ * the agent object every time the daemon restarted.
+ */
+DETERMINISTIC_JSON :: json.Marshal_Options {
+	sort_maps_by_key = true,
+}
+
 object_to_json :: proc(s: ^Object_State, allocator := context.temp_allocator) -> []byte {
-	out, err := json.marshal(object_to_json_value(s, allocator), allocator = allocator)
+	out, err := json.marshal(object_to_json_value(s, allocator), DETERMINISTIC_JSON, allocator)
 	if err != nil do return transmute([]byte)string("{}")
 	return out
 }
 
 marshal :: proc(v: json.Value, allocator := context.temp_allocator) -> []byte {
-	out, err := json.marshal(v, allocator = allocator)
+	out, err := json.marshal(v, DETERMINISTIC_JSON, allocator)
 	if err != nil do return transmute([]byte)string("null")
 	return out
 }

@@ -11,6 +11,7 @@ import "core:fmt"
 import "core:strconv"
 import "core:path/filepath"
 import "core:encoding/hex"
+import "core:slice"
 
 main :: proc() {
 	data_root := os.get_env_alloc("GLON_DATA", context.allocator)
@@ -56,8 +57,15 @@ main :: proc() {
 }
 
 cli_list :: proc() {
+	// Sorted by id: `list` is a parity-testing tool, and the state map
+	// iterates in a different order in every process, so an unsorted walk
+	// could not reproduce its own output.
 	with_states(proc(states: map[string]^Object_State, _: rawptr) {
-		for id, s in states {
+		ids := make([dynamic]string, context.temp_allocator)
+		for id in states do append(&ids, id)
+		slice.sort(ids[:])
+		for id in ids {
+			s := states[id]
 			name := ""
 			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
 			fmt.printfln("%-38s %-12s %-24s blocks=%d deleted=%v", id, s.type_key, name, len(s.blocks), s.deleted)
