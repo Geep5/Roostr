@@ -1518,6 +1518,15 @@
 	}
 	/* Faint add affordance (Anytype nameWrap buttons). */
 	.section-add {
+		/* The hover square is 20px, so the glyph has to be centred in it
+		   rather than sitting on the text baseline inside the browser's
+		   default 1px 6px button padding - that left 8px of content box
+		   for a fullwidth ＋ and pushed it 2px right of centre. */
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+		line-height: 1;
 		background: none;
 		border: none;
 		color: var(--muted);
