@@ -537,6 +537,9 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 			respond_error(sock, "object_id required")
 			return
 		}
+		// A type definition takes its instances with it (computed before
+		// the tombstone lands).
+		instances := type_instance_cascade(object_id)
 		if !commit_ops(object_id, {Operation{kind = .Object_Delete}}) {
 			respond_error(sock, "write failed", "500 Internal Server Error")
 			return
@@ -544,6 +547,11 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		// The object's bound agent (and its chat) go with it.
 		cascade := bound_agent_cascade(object_id)
 		for cid in cascade do commit_ops(cid, {Operation{kind = .Object_Delete}})
+		for iid in instances {
+			commit_ops(iid, {Operation{kind = .Object_Delete}})
+			icascade := bound_agent_cascade(iid)
+			for cid in icascade do commit_ops(cid, {Operation{kind = .Object_Delete}})
+		}
 		ok_response(sock)
 
 	// Real deletion: purge the change files and record it in the synced
@@ -565,11 +573,16 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 			respond_error(sock, "the vanish ledger cannot be vanished")
 			return
 		}
-		// Bound agents (and their chats) vanish with their objects.
+		// A type definition takes its instances with it; then bound agents
+		// (and their chats) vanish with every object in the set.
 		expanded := make([dynamic]string, context.temp_allocator)
 		for id in ids {
 			append(&expanded, id)
-			cascade := bound_agent_cascade(id)
+			for iid in type_instance_cascade(id) do append(&expanded, iid)
+		}
+		root_count := len(expanded)
+		for i in 0 ..< root_count {
+			cascade := bound_agent_cascade(expanded[i])
 			for cid in cascade do append(&expanded, cid)
 		}
 		vanished := vanish_objects(expanded[:])
@@ -780,6 +793,41 @@ channel_key_rotate :: proc(channel_id: string) -> i64 {
 	next := found ? key_id + 1 : 1
 	channel_key_set(channel_id, next)
 	return next
+}
+
+// ── Type-instance cascade ────────────────────────────────────────────
+//
+// Deleting a type definition takes every instance of that type (in the
+// def's space) with it: a type IS the meaning of its objects. Keep an
+// object by retyping it first (⋯ → Change type).
+type_instance_cascade :: proc(object_id: string) -> [dynamic]string {
+	out := make([dynamic]string, context.temp_allocator)
+	Ctx :: struct {
+		out: ^[dynamic]string,
+		id:  string,
+	}
+	ctx := Ctx{&out, object_id}
+	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+		c := cast(^struct {
+			out: ^[dynamic]string,
+			id:  string,
+		})user
+		def, ok := states[c.id]
+		if !ok || def.type_key != "type" do return
+		key, kok := fields_get(def.fields, "key")
+		if !kok || key.kind != .String || key.str == "" do return
+		ch := ""
+		if v, vok := fields_get(def.fields, "channel"); vok && v.kind == .String do ch = v.str
+		for _, s in states {
+			if s.deleted || s.id == c.id do continue
+			if s.type_key != key.str do continue
+			sch := ""
+			if v, vok := fields_get(s.fields, "channel"); vok && v.kind == .String do sch = v.str
+			if sch != ch do continue
+			append(c.out, strings.clone(s.id, context.temp_allocator))
+		}
+	}, &ctx)
+	return out
 }
 
 // ── Bound-agent cascade ──────────────────────────────────────────────
