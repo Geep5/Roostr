@@ -516,6 +516,39 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		}
 		ok_response(sock)
 
+	case "restore":
+		object_id := json_str(parsed, "object_id")
+		if object_id == "" {
+			respond_error(sock, "object_id required")
+			return
+		}
+		// Revival = re-create under the object's own type. Replay clears
+		// the tombstone; fields, blocks, and history are all still there.
+		tk := ""
+		{
+			Ctx :: struct {
+				tk: ^string,
+				id: string,
+			}
+			ctx := Ctx{&tk, object_id}
+			with_states(proc(states: map[string]^Object_State, user: rawptr) {
+				c := cast(^struct {
+					tk: ^string,
+					id: string,
+				})user
+				if s, ok := states[c.id]; ok do c.tk^ = strings.clone(s.type_key, context.temp_allocator)
+			}, &ctx)
+		}
+		if tk == "" {
+			respond_error(sock, "unknown object")
+			return
+		}
+		if !commit_ops(object_id, {Operation{kind = .Object_Create, type_key = tk}}) {
+			respond_error(sock, "write failed", "500 Internal Server Error")
+			return
+		}
+		ok_response(sock)
+
 	case "set_type":
 		object_id := json_str(parsed, "object_id")
 		type_key := json_str(parsed, "type_key")

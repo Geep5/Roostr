@@ -71,6 +71,18 @@
 		void loadIdentity();
 	});
 
+	async function restoreObject(id: string) {
+		binBusy = id;
+		try {
+			await note.restore(id);
+			await loadBin();
+			await onchanged();
+			await invalidateAll();
+		} finally {
+			binBusy = "";
+		}
+	}
+
 	/** Empty bin: vanish every deleted object in this space at once. */
 	async function emptyBin() {
 		if (!bin || bin.length === 0) return;
@@ -291,6 +303,7 @@
 				<div class="bin-row">
 					<span class="obj-icon">{objectIcon(b.icon, b.typeKey)}</span>
 					<span class="bin-name">{b.name}</span>
+					<button disabled={binBusy === b.id} onclick={() => void restoreObject(b.id)}>Restore</button>
 					<button class="danger" disabled={binBusy === b.id} onclick={() => void vanishObject(b.id, b.name)}>Delete forever</button>
 				</div>
 			{/each}

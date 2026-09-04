@@ -87,6 +87,8 @@ export const note = {
 	deleteField: (objectId: string, key: string) =>
 		mutate("delete_field", { object_id: objectId, key }),
 	del: (objectId: string) => mutate("delete", { object_id: objectId }),
+	/** Restore from the bin: revives the object under its own type. */
+	restore: (objectId: string) => mutate("restore", { object_id: objectId }),
 	/** Retype in place: history, blocks, and fields survive. */
 	setType: (objectId: string, typeKey: string) => mutate("set_type", { object_id: objectId, type_key: typeKey }),
 	vanish: (objectIds: string | string[]) =>

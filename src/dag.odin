@@ -589,6 +589,10 @@ compute_state :: proc(changes: []Change, allocator := context.allocator) -> (Obj
 			case .Object_Create:
 				state.type_key = op.type_key
 				state.created_at = change.timestamp
+				// A create AFTER a delete is a revival: restore-from-bin
+				// commits exactly this. Histories always open with a create,
+				// so pre-existing replays are unchanged.
+				state.deleted = false
 			case .Field_Set:
 				fields_set(&state.fields, op.key, op.value)
 			case .Field_Delete:
