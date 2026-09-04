@@ -56,16 +56,20 @@
 
 	// Profile avatar for the Spaces header (cache-first, harness refresh).
 	let profilePic = $state("");
+	let profileName = $state("");
 	$effect(() => {
 		try {
-			profilePic = ((JSON.parse(localStorage.getItem("roostr-profile") ?? "{}") as { picture?: string }).picture ?? "");
+			const cached = JSON.parse(localStorage.getItem("roostr-profile") ?? "{}") as { picture?: string; name?: string; display_name?: string };
+			profilePic = cached.picture ?? "";
+			profileName = cached.display_name || cached.name || "";
 		} catch {
 			/* no cache */
 		}
 		void fetch("http://127.0.0.1:7334/profile")
 			.then((r) => r.json())
-			.then((p: { picture?: string }) => {
+			.then((p: { picture?: string; name?: string; display_name?: string }) => {
 				profilePic = p.picture ?? "";
+				profileName = p.display_name || p.name || "";
 				localStorage.setItem("roostr-profile", JSON.stringify(p));
 			})
 			.catch(() => {});
@@ -486,6 +490,30 @@
 	// headers collapse; a viewing preference, persisted per device.
 	// ── Resizable sidebar (invisible drag strip on its right edge) ──
 	let sideWidth = $state(typeof localStorage === "undefined" ? 220 : parseInt(localStorage.getItem("side-width") ?? "220") || 220);
+	/** Anytype vault: the icon rail drags out to show space names. */
+	let railWide = $state(typeof localStorage === "undefined" ? false : localStorage.getItem("rail-wide") === "1");
+	function setRailWide(v: boolean) {
+		railWide = v;
+		localStorage.setItem("rail-wide", v ? "1" : "0");
+	}
+	/** Dragging the rail's edge past the threshold snaps it open/closed. */
+	function railResizeStart(e: PointerEvent) {
+		e.preventDefault();
+		const startX = e.clientX;
+		const startWide = railWide;
+		const move = (ev: PointerEvent) => {
+			const dx = ev.clientX - startX;
+			if (!startWide && dx > 48) setRailWide(true);
+			else if (startWide && dx < -48) setRailWide(false);
+		};
+		const up = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", up);
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", up);
+	}
+
 	function sideResizeStart(e: PointerEvent) {
 		e.preventDefault();
 		const startX = e.clientX;
@@ -821,8 +849,11 @@
 	{/if}
 </div>
 {:else}
-<div class="shell" style="grid-template-columns: 56px {sideWidth}px 1fr">
-	<nav class="vault">
+<div class="shell" style="grid-template-columns: {railWide ? 236 : 56}px {sideWidth}px 1fr">
+	<nav class="vault" class:wide={railWide}>
+		<button class="rail-toggle" title={railWide ? "Collapse" : "Expand"} aria-label="Toggle space names" onclick={() => setRailWide(!railWide)}>
+			<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><line x1="9.5" y1="4" x2="9.5" y2="20"/></svg>
+		</button>
 		{#each orderedSpaces as c (c.id)}
 			<button
 				class="space"
@@ -849,20 +880,25 @@
 				}}
 				onclick={() => selectSpace(c.id)}
 			>
-				{#if c.icon?.startsWith("http")}
-					<img class="rail-img" src={c.icon} alt={c.name} />
-				{:else}
-					{c.icon || c.name.slice(0, 1).toUpperCase() || "?"}
-				{/if}
+				<span class="space-ico">
+					{#if c.icon?.startsWith("http")}
+						<img class="rail-img" src={c.icon} alt={c.name} />
+					{:else}
+						{c.icon || c.name.slice(0, 1).toUpperCase() || "?"}
+					{/if}
+				</span>
+				{#if railWide}<span class="space-label">{c.name}</span>{/if}
 			</button>
 		{/each}
-		<button class="space add" title="New space" onclick={() => void newSpace()}>+</button>
+		<button class="space add" title="New space" onclick={() => void newSpace()}><span class="space-ico">+</span>{#if railWide}<span class="space-label">New space</span>{/if}</button>
 		<div class="rail-spacer"></div>
 		<!-- Your identity opens Settings - the avatar when the profile has
 		     one, a person glyph otherwise (the gear lives inside). -->
 		<button class="space settings" title="Settings" onclick={() => (showSettings = true)}>
-			{#if profilePic}<img class="rail-avatar" src={profilePic} alt="" />{:else}<svg style="width:18px;height:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{/if}
+			<span class="space-ico round">{#if profilePic}<img class="rail-avatar" src={profilePic} alt="" />{:else}<svg style="width:18px;height:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{/if}</span>
+			{#if railWide}<span class="space-label">{profileName ? `@${profileName.replace(/^@/, "")}` : "Settings"}</span>{/if}
 		</button>
+		<div class="rail-resize" role="separator" aria-orientation="vertical" onpointerdown={railResizeStart}></div>
 	</nav>
 
 	<aside class="widgets">
@@ -1299,10 +1335,12 @@
 		display: grid;
 		grid-template-columns: 56px 220px 1fr;
 		height: 100vh;
+		transition: grid-template-columns 0.16s ease;
 	}
 	/* Anytype pageVault: a rounded solid card, no border — panes separate
 	   by background, not lines. */
 	.vault {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
@@ -1311,16 +1349,104 @@
 		margin: 6px 0 6px 6px;
 		background: var(--panel);
 		border-radius: 16px;
+		overflow: hidden;
+	}
+	.vault.wide {
+		align-items: stretch;
+		padding: 10px 8px;
+	}
+	.rail-toggle {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 24px;
+		flex: none;
+		align-self: center;
+		border: none;
+		background: none;
+		border-radius: 7px;
+		color: var(--muted);
+		cursor: pointer;
+	}
+	.rail-toggle:hover {
+		background: var(--hover);
+		color: var(--fg);
+	}
+	.vault.wide .rail-toggle {
+		align-self: flex-end;
+	}
+	.rail-resize {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		right: 0;
+		width: 7px;
+		cursor: col-resize;
+		z-index: 40;
+		touch-action: none;
 	}
 	.space {
+		display: flex;
+		align-items: center;
+		gap: 10px;
 		width: 36px;
 		height: 36px;
-		border-radius: 10px;
-		border: 1px solid var(--border);
-		background: var(--panel);
+		padding: 0;
+		border: none;
+		background: none;
 		color: var(--fg);
 		font-size: 15px;
 		cursor: pointer;
+		border-radius: 10px;
+	}
+	.space-ico {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
+		flex: none;
+		border-radius: 10px;
+		border: 1px solid var(--border);
+		background: var(--panel);
+		overflow: hidden;
+	}
+	.space-ico.round {
+		border-radius: 50%;
+		border: none;
+		background: none;
+	}
+	.space-label {
+		min-width: 0;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		font-size: 14.5px;
+		font-weight: 500;
+		text-align: left;
+	}
+	.vault.wide .space {
+		width: 100%;
+		height: 42px;
+		padding: 3px 5px;
+		border-radius: 12px;
+	}
+	.vault.wide .space:hover,
+	.vault.wide .space.active {
+		background: var(--hover);
+	}
+	.vault.wide .space.active {
+		box-shadow: none;
+	}
+	.vault.wide .space-ico {
+		width: 32px;
+		height: 32px;
+		border-radius: 9px;
+		font-size: 14px;
+	}
+	.vault.wide .space-ico.round {
+		border-radius: 50%;
 	}
 	.space:hover {
 		background: var(--hover);
@@ -1366,17 +1492,11 @@
 	}
 	.space.settings {
 		color: var(--muted);
-		background: none;
 		font-size: 17px;
-		/* The avatar IS the button: no border ring, no inset - a clean
-		   circle clipping the image. */
-		border: none;
-		padding: 0;
-		border-radius: 50%;
+	}
+	.space.settings .space-ico {
+		/* The avatar IS the icon: a clean circle clipping the image. */
 		overflow: hidden;
-		display: flex;
-		align-items: center;
-		justify-content: center;
 	}
 	.space.settings:hover {
 		color: var(--fg);
