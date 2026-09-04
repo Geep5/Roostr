@@ -15,6 +15,7 @@
  */
 
 import { API, chatPost, fetchObject, list, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
+import type { ObjectJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { convergeCatalogScope } from "./skillmgr";
@@ -205,7 +206,22 @@ async function serve(): Promise<void> {
 		return !/^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(author); // uuid author = an agent
 	}
 
-	async function mintBoundAgent(obj: Awaited<ReturnType<typeof fetchObject>>, channelId: string): Promise<string> {
+	/** Object ids with a mint in flight. Claimed synchronously by the caller,
+	 * because the decision to mint and the create that follows are separated
+	 * by an await while one human message arrives as several commit events. */
+	const minting = new Set<string>();
+
+	async function mintBoundAgent(obj: ObjectJSON, channelId: string): Promise<string> {
+		// Ask the DAG before creating. `boundBy` only knows what this process
+		// has seen, and another machine can mint for the same object between
+		// our check and this call - twin agents on one object then answer
+		// every message twice and eventually answer each other.
+		const existing = await queryAll({ type: "agent", filters: [{ key: "bound_object", condition: "equal", value: obj.id }] });
+		if (existing.length > 0) {
+			const keep = existing.map((a) => a.id).sort()[0]; // every device picks the same twin
+			boundBy.set(obj.id, keep);
+			return keep;
+		}
 		// Model follows the space's existing agents so quality is uniform.
 		const sibling = [...served.values()].find((x) => x.channelId === channelId);
 		const model = sibling ? str((await fetchObject(sibling.agentId)).fields, "model") : "";
@@ -217,6 +233,13 @@ async function serve(): Promise<void> {
 			model: sv(model || process.env.GLON_AGENT_MODEL || "claude-sonnet-4-5"),
 		});
 		boundBy.set(obj.id, id);
+		// Minting is also an assignment: this machine answers for what it
+		// minted, and the agent page shows it enabled here. Required now that
+		// the bound path honours the roster - otherwise a freshly minted agent
+		// would be served by nobody after the next restart.
+		agents.add(id);
+		await setEnabled(id, true);
+		syncHeartbeats(agents);
 		console.log(`[harness] minted agent for "${name}" (${obj.id.slice(0, 8)}) → ${id.slice(0, 8)}`);
 		return id;
 	}
@@ -412,9 +435,14 @@ async function serve(): Promise<void> {
 		if (obj.typeKey === "agent") return; // other agents' brains
 		const channelId = objectId === defaultChannelId || obj.typeKey === "channel" ? objectId : str(obj.fields, "channel") || defaultChannelId;
 
-		// ── Bound agent takes its own object's surface, always. ──
+		// ── Bound agent takes its own object's surface - if it is ours. ──
 		const boundAgent = boundBy.get(objectId);
 		if (boundAgent) {
+			// Assignment is a local fact (roster.ts): not ours unless set up or
+			// enabled here. Adopting on every machine that merely saw the object
+			// event made two harnesses answer the same message once each, since
+			// the answered-mark lives in a machine-local file.
+			if (!agents.has(boundAgent)) return;
 			let s2 = served.get(boundAgent);
 			if (!s2) {
 				try {
@@ -441,13 +469,25 @@ async function serve(): Promise<void> {
 		// ── Nobody claims it: a HUMAN message on a discussable object
 		// mints the object's own agent and serves this very message. ──
 		if (UNMINTABLE.has(obj.typeKey)) return;
+		// A stub read (no type) would mint a nameless agent stamped to the
+		// default space instead of the object's own - and a bound agent in
+		// the wrong space cannot even read the object it speaks for.
+		if (!obj.typeKey) return;
 		if (!lastMessageIsHuman(obj)) return;
-		const minted = await mintBoundAgent(obj, channelId);
-		const s3 = await buildServedOne(minted, defaultChannelId);
-		served.set(minted, s3);
-		void publishSystemSnapshot(s3.agentId, s3.chatId);
-		const pending3 = await pendingMessages(obj, s3.agentId);
-		if (pending3.length > 0) void drive(s3, objectId);
+		// Claim the object before the first await: one message arrives as
+		// several events, and every one of them reaches this line.
+		if (minting.has(objectId)) return;
+		minting.add(objectId);
+		try {
+			const minted = await mintBoundAgent(obj, channelId);
+			const s3 = served.get(minted) ?? (await buildServedOne(minted, defaultChannelId));
+			served.set(minted, s3);
+			void publishSystemSnapshot(s3.agentId, s3.chatId);
+			const pending3 = await pendingMessages(obj, s3.agentId);
+			if (pending3.length > 0) void drive(s3, objectId);
+		} finally {
+			minting.delete(objectId);
+		}
 	}
 
 	startAuthServer(agents, (next) => {
@@ -458,7 +498,16 @@ async function serve(): Promise<void> {
 			served = next;
 			for (const s of served.values()) {
 				void publishSystemSnapshot(s.agentId, s.chatId);
-				void drive(s, s.chatId);
+				// Only if the chat is actually waiting on us. An unconditional
+				// turn here made enabling an agent start one, and a message
+				// arriving during that turn gets folded into it by drive's
+				// steer branch - which ingested it a second time and drew a
+				// second answer. Every other drive call site checks first.
+				void (async () => {
+					const chat = await fetchObject(s.chatId).catch(() => null);
+					if (!chat) return;
+					if ((await pendingMessages(chat, s.agentId)).length > 0) void drive(s, s.chatId);
+				})();
 			}
 		});
 	});
