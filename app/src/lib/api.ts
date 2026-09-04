@@ -111,10 +111,6 @@ export const space = {
 		mutate("channel_member_add", { channel_id: channelId, npub, role }),
 	memberRemove: (channelId: string, npub: string) =>
 		mutate("channel_member_remove", { channel_id: channelId, npub }),
-	invitePayload: async (channelId: string, npub: string) => {
-		const out = await mutate("channel_invite_payload", { channel_id: channelId, npub });
-		return out.payload as Record<string, unknown>;
-	},
 	keyRotate: (channelId: string) => mutate("channel_key_rotate", { channel_id: channelId }),
 };
 

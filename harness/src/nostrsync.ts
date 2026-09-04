@@ -17,10 +17,17 @@
  */
 
 import { SimplePool, finalizeEvent, getPublicKey, nip19, nip44, type Event } from "nostr-tools";
+import { unwrapEvent, wrapEvent } from "nostr-tools/nip59";
 import { API, subscribe } from "./api";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 
 const CHANGE_KIND = 1078;
+/** NIP-59 gift wrap: space-key invites and join requests, addressed by npub. */
+const WRAP_KIND = 1059;
+const INVITE_RUMOR_KIND = 24891;
+const JOINREQ_RUMOR_KIND = 24892;
+/** Gift wraps randomize created_at up to ~2 days back; look back further. */
+const WRAP_LOOKBACK_S = 3 * 86_400;
 const KEYRING_KIND = 30078;
 const KEYRING_D = "roostr-keyring";
 /** NIP-09 deletion request. Advisory: relays SHOULD honour it, MAY ignore it. */
@@ -46,6 +53,10 @@ interface SyncState {
 	publishedSpace?: Record<string, true>;
 	/** spaceId -> keyId whose full history has been (re)queued shared. */
 	sharedQueued?: Record<string, number>;
+	/** "spaceId/memberHex" -> keyId already gift-wrapped to that member. */
+	invitesSent?: Record<string, number>;
+	/** gift-wrap event ids already processed. */
+	wrapsSeen?: Record<string, true>;
 }
 
 function statePath(): string {
@@ -55,11 +66,11 @@ function statePath(): string {
 async function readState(): Promise<SyncState> {
 	try {
 		const parsed = (await Bun.file(statePath()).json()) as SyncState;
-		if (parsed?.version === 1) return { ...parsed, vanishRequested: parsed.vanishRequested ?? {}, publishedSpace: parsed.publishedSpace ?? {}, sharedQueued: parsed.sharedQueued ?? {} };
+		if (parsed?.version === 1) return { ...parsed, vanishRequested: parsed.vanishRequested ?? {}, publishedSpace: parsed.publishedSpace ?? {}, sharedQueued: parsed.sharedQueued ?? {}, invitesSent: parsed.invitesSent ?? {}, wrapsSeen: parsed.wrapsSeen ?? {} };
 	} catch {
 		/* fresh */
 	}
-	return { version: 1, published: {}, cursor: 0, vanishRequested: {}, publishedSpace: {}, sharedQueued: {} };
+	return { version: 1, published: {}, cursor: 0, vanishRequested: {}, publishedSpace: {}, sharedQueued: {}, invitesSent: {}, wrapsSeen: {} };
 }
 
 function writeState(state: SyncState): void {
@@ -67,6 +78,56 @@ function writeState(state: SyncState): void {
 	mkdirSync(dataRoot(), { recursive: true });
 	writeFileSync(tmp, JSON.stringify(state));
 	renameSync(tmp, statePath());
+}
+
+// ── Join requests ────────────────────────────────────────────────
+//
+// A join link (r2, no key inside) lets anyone SEND a request; it lands
+// here as a gift wrap and waits for the owner's explicit approval in
+// space settings. Own file so UI clears never race the sync state.
+
+export interface JoinRequest {
+	/** "spaceId/requesterHex" - stable dedupe key. */
+	key: string;
+	space: string;
+	spaceName: string;
+	requester: string;
+	requesterNpub: string;
+	/** kind-0 profile at request time, when the relays had one. */
+	name?: string;
+	picture?: string;
+	at: number;
+}
+
+function joinReqPath(): string {
+	return `${dataRoot()}/join-requests.json`;
+}
+
+export async function listJoinRequests(): Promise<JoinRequest[]> {
+	try {
+		const parsed = (await Bun.file(joinReqPath()).json()) as { requests?: JoinRequest[] };
+		return parsed.requests ?? [];
+	} catch {
+		return [];
+	}
+}
+
+async function writeJoinRequests(requests: JoinRequest[]): Promise<void> {
+	const tmp = `${joinReqPath()}.tmp`;
+	mkdirSync(dataRoot(), { recursive: true });
+	writeFileSync(tmp, JSON.stringify({ requests }));
+	renameSync(tmp, joinReqPath());
+}
+
+export async function clearJoinRequest(key: string): Promise<void> {
+	await writeJoinRequests((await listJoinRequests()).filter((r) => r.key !== key));
+}
+
+async function recordJoinRequest(r: Omit<JoinRequest, "key">): Promise<void> {
+	const key = `${r.space}/${r.requester}`;
+	const rest = (await listJoinRequests()).filter((x) => x.key !== key);
+	rest.push({ ...r, key });
+	await writeJoinRequests(rest);
 }
 
 interface Identity {
@@ -586,6 +647,194 @@ export async function startNostrSync(): Promise<void> {
 		for (const spaceId of sharedSpaces.keys()) spaceMap.set(spaceId, spaceId);
 	}
 
+	// ── Space invites: gift-wrapped key delivery + join requests ───
+
+	/** ALL member hexes of a space (any role - viewers need the key too). */
+	async function spaceMemberHexes(spaceId: string): Promise<string[]> {
+		try {
+			const obj = (await (await fetch(`${API}/api/objects/${spaceId}`)).json()) as {
+				fields?: Record<string, { stringValue?: string; valuesValue?: { items?: Array<{ mapValue?: { entries?: Record<string, { stringValue?: string }> } }> } }>;
+			};
+			const out: string[] = [];
+			for (const item of obj.fields?.["members"]?.valuesValue?.items ?? []) {
+				const hex = npubToHex(item.mapValue?.entries?.["npub"]?.stringValue ?? "");
+				if (hex) out.push(hex);
+			}
+			return out;
+		} catch {
+			return [];
+		}
+	}
+
+	async function spaceNameOf(spaceId: string): Promise<string> {
+		try {
+			const obj = (await (await fetch(`${API}/api/objects/${spaceId}`)).json()) as { fields?: Record<string, { stringValue?: string }> };
+			return obj.fields?.["name"]?.stringValue ?? "";
+		} catch {
+			return "";
+		}
+	}
+
+	/** Owner duty: every member holds the current key. Adding a member (or
+	 * rotating the key) gift-wraps {space, key, keyId} to their npub - the
+	 * member's own device imports it and the space appears. Idempotent per
+	 * (member, keyId); failures retry on the next reconcile. */
+	let inviteFailLogged = 0;
+	async function reconcileInvites(): Promise<void> {
+		for (const space of sharedSpaces.values()) {
+			if (space.owner && space.owner !== id!.pk) continue; // not mine to administer
+			const members = await spaceMemberHexes(space.spaceId);
+			if (members.length === 0) continue;
+			const name = await spaceNameOf(space.spaceId);
+			for (const hex of members) {
+				if (hex === id!.pk) continue;
+				const sentKey = `${space.spaceId}/${hex}`;
+				if (state.invitesSent![sentKey] === space.keyId) continue;
+				try {
+					const wrap = wrapEvent(
+						{
+							kind: INVITE_RUMOR_KIND,
+							tags: [],
+							content: JSON.stringify({ t: "space-invite", space: space.spaceId, name, key: space.keyHex, keyId: space.keyId }),
+						},
+						id!.sk,
+						hex,
+					);
+					await Promise.any(pool.publish(id!.relays, wrap));
+					state.invitesSent![sentKey] = space.keyId;
+					dirty = true;
+					console.log(`[sync] space key #${space.keyId} gift-wrapped to ${hex.slice(0, 8)} for "${name || space.spaceId.slice(0, 8)}"`);
+				} catch (err) {
+					if (inviteFailLogged < 5) {
+						inviteFailLogged++;
+						const reasons = err instanceof AggregateError ? err.errors.map((e) => String(e).slice(0, 80)).join(" | ") : String(err).slice(0, 120);
+						console.error(`[sync] invite wrap to ${hex.slice(0, 8)} refused: ${reasons}`);
+					}
+				}
+			}
+		}
+	}
+
+	/** Full backwards pagination of freshly joined space streams. */
+	async function backfillSpaceTags(tags: string[]): Promise<void> {
+		if (tags.length === 0) return;
+		const events = new Map<string, Event>();
+		await Promise.all(
+			id!.relays.map(async (relay) => {
+				let until: number | undefined = undefined;
+				for (;;) {
+					let page: Event[];
+					try {
+						page = await pool.querySync([relay], { kinds: [CHANGE_KIND], "#h": tags, until, limit: 500 });
+					} catch {
+						return;
+					}
+					if (page.length === 0) break;
+					let fresh = 0;
+					for (const e of page) {
+						if (!events.has(e.id)) {
+							events.set(e.id, e);
+							fresh++;
+						}
+					}
+					const oldest = Math.min(...page.map((e) => e.created_at));
+					if (fresh === 0 || (until !== undefined && oldest >= until)) break;
+					until = oldest;
+				}
+			}),
+		);
+		const sorted = [...events.values()].sort((a, b) => a.created_at - b.created_at);
+		for (const event of sorted) await onRelayEvent(event);
+		if (sorted.length > 0) console.log(`[sync] joined-space backfill: ${sorted.length} event(s)`);
+	}
+
+	/** A space key arrived gift-wrapped: import it (newer keyId wins) and
+	 * start syncing that space immediately. */
+	async function importInviteKey(rumor: { pubkey: string; content: string }): Promise<void> {
+		const p = JSON.parse(rumor.content) as { t?: string; space?: string; name?: string; key?: string; keyId?: number };
+		if (p.t !== "space-invite" || !p.space || !/^[0-9a-f]{64}$/.test(p.key ?? "")) return;
+		const keyId = typeof p.keyId === "number" && p.keyId > 0 ? p.keyId : 1;
+		let keyring: { version?: number; channels?: Record<string, { key?: string; keyId?: number; createdAt?: number; owner?: string }> } = {};
+		try {
+			keyring = (await Bun.file(`${dataRoot()}/channel-keys.json`).json()) as typeof keyring;
+		} catch {
+			/* fresh */
+		}
+		keyring.channels ??= {};
+		const existing = keyring.channels[p.space];
+		if (existing?.keyId && existing.keyId >= keyId) return;
+		keyring.channels[p.space] = {
+			key: p.key,
+			keyId,
+			createdAt: Date.now(),
+			// Wrapped by ourselves (multi-device): keep prior ownership; else the sender administers.
+			owner: rumor.pubkey === id!.pk ? existing?.owner : rumor.pubkey,
+		};
+		const tmp = `${dataRoot()}/channel-keys.json.tmp`;
+		writeFileSync(tmp, JSON.stringify({ version: 1, ...keyring }));
+		renameSync(tmp, `${dataRoot()}/channel-keys.json`);
+		console.log(`[sync] joined space "${p.name || p.space.slice(0, 8)}" via gift-wrapped key #${keyId}`);
+		const before = new Set([...sharedSpaces.values()].map((sp) => sp.spaceTag));
+		await refreshShared();
+		subscribeLive();
+		const freshTags = [...sharedSpaces.values()].map((sp) => sp.spaceTag).filter((t) => !before.has(t));
+		await backfillSpaceTags(freshTags);
+	}
+
+	async function handleWrap(event: Event): Promise<void> {
+		if (state.wrapsSeen![event.id]) return;
+		state.wrapsSeen![event.id] = true;
+		dirty = true;
+		try {
+			const rumor = unwrapEvent(event, id!.sk);
+			if (rumor.kind === INVITE_RUMOR_KIND) {
+				await importInviteKey(rumor);
+			} else if (rumor.kind === JOINREQ_RUMOR_KIND) {
+				const p = JSON.parse(rumor.content) as { t?: string; space?: string };
+				if (p.t !== "join-request" || !p.space) return;
+				// Only the space's administrator collects requests.
+				const space = sharedSpaces.get(p.space);
+				const entryOwnerOk = !space?.owner || space.owner === id!.pk;
+				let holdsKey = !!space;
+				if (!holdsKey) {
+					try {
+						const keyring = (await Bun.file(`${dataRoot()}/channel-keys.json`).json()) as { channels?: Record<string, { key?: string; owner?: string }> };
+						const entry = keyring.channels?.[p.space];
+						holdsKey = !!entry?.key && (!entry.owner || entry.owner === id!.pk);
+					} catch {
+						/* no keyring */
+					}
+				}
+				if (!holdsKey || !entryOwnerOk) return;
+				// The requester's public kind-0 profile, so the owner can put a
+				// face to the knock before approving.
+				let profile: { name?: string; picture?: string } = {};
+				try {
+					const events = await pool.querySync(id!.relays, { kinds: [0], authors: [rumor.pubkey], limit: 3 });
+					events.sort((a, b) => b.created_at - a.created_at);
+					if (events[0]) {
+						const meta = JSON.parse(events[0].content) as { name?: string; display_name?: string; picture?: string };
+						profile = { name: meta.display_name || meta.name, picture: meta.picture };
+					}
+				} catch {
+					/* no profile on our relays - npub alone */
+				}
+				await recordJoinRequest({
+					space: p.space,
+					spaceName: await spaceNameOf(p.space),
+					requester: rumor.pubkey,
+					requesterNpub: nip19.npubEncode(rumor.pubkey),
+					name: profile.name,
+					picture: profile.picture,
+					at: Date.now(),
+				});
+				console.log(`[sync] join request for ${p.space.slice(0, 8)} from ${rumor.pubkey.slice(0, 8)} - awaiting approval in space settings`);
+			}
+		} catch {
+			/* not addressed to us / garbled */
+		}
+	}
+
 	/** Owner duty: publish the relay write-allowlist (writers of every owned shared space). */
 	async function publishAllowlist(): Promise<void> {
 		const writers = new Set<string>();
@@ -594,6 +843,9 @@ export async function startNostrSync(): Promise<void> {
 			if (space.owner && space.owner !== id!.pk) continue; // not mine to administer
 			owned++;
 			for (const w of space.writers) writers.add(w);
+			// Viewers too: the relay's wrap door checks the same list, and a
+			// viewer must still RECEIVE the gift-wrapped space key.
+			for (const hex of await spaceMemberHexes(space.spaceId)) writers.add(hex);
 		}
 		if (owned === 0) return;
 		writers.delete(id!.pk);
@@ -706,6 +958,16 @@ export async function startNostrSync(): Promise<void> {
 		await mergeKeyring(keyringEvents[0]);
 	}
 
+	// Gift wraps: process everything addressed to us (their created_at is
+	// randomized, so no cursor - wrapsSeen dedupes across restarts).
+	try {
+		const wraps = await pool.querySync(id.relays, { kinds: [WRAP_KIND], "#p": [id.pk] });
+		wraps.sort((a, b) => a.created_at - b.created_at);
+		for (const w of wraps) await handleWrap(w);
+	} catch {
+		/* relay unreachable; live sub + watchdog catch up */
+	}
+
 	// The backfill may have carried new vanish records from another device;
 	// re-read the ledger before deciding what to publish or chase.
 	vanished = await localVanished();
@@ -724,7 +986,11 @@ export async function startNostrSync(): Promise<void> {
 	}
 	await publishKeyring();
 	await queueSharedHistories();
+	// Allowlist BEFORE invites: delivery wraps ride ephemeral keys and are
+	// p-tagged to the new member, so the relay only admits them once the
+	// member is on the published allowlist.
 	await publishAllowlist();
+	await reconcileInvites();
 	persist();
 
 	// ── Live: both directions ──────────────────────────────────────
@@ -736,14 +1002,23 @@ export async function startNostrSync(): Promise<void> {
 				await refreshShared();
 				await queueSharedHistories();
 				await publishAllowlist();
+				await reconcileInvites();
 				void publishObject(objectId);
 			})();
 			return;
 		}
-		// New objects are absent from the cached map - refresh lazily.
+		// New objects are absent from the cached map - refresh lazily. A
+		// commit can also be a space BECOMING shared (first member added to
+		// a keyed space): it was in nobody's map, but after the refresh it
+		// needs the full owner reconcile - history, allowlist, invites.
 		if (!spaceMap.has(objectId)) {
 			void (async () => {
 				await refreshShared();
+				if (sharedSpaces.has(objectId)) {
+					await queueSharedHistories();
+					await publishAllowlist();
+					await reconcileInvites();
+				}
 				void publishObject(objectId);
 			})();
 			return;
@@ -798,6 +1073,11 @@ export async function startNostrSync(): Promise<void> {
 				onevent: (event) => void mergeKeyring(event),
 			}),
 		);
+		liveSubs.push(
+			pool.subscribeMany(id!.relays, { kinds: [WRAP_KIND], "#p": [id!.pk], since: Math.floor(Date.now() / 1000) - WRAP_LOOKBACK_S }, {
+				onevent: (event) => void handleWrap(event),
+			}),
+		);
 	}
 
 	const WATCHDOG_MS = 60_000;
@@ -830,6 +1110,16 @@ export async function startNostrSync(): Promise<void> {
 		const events = [...byId.values()].sort((a, b) => a.created_at - b.created_at);
 		for (const event of events) await onRelayEvent(event);
 		if (events.length > 0) console.log(`[sync] watchdog caught up ${events.length} event(s)`);
+		// Gift wraps have randomized created_at: re-query them all on every
+		// catchup; wrapsSeen dedupes. This is what recovers knocks and key
+		// deliveries lost to a dropped subscription.
+		try {
+			const wraps = await pool.querySync(id!.relays, { kinds: [WRAP_KIND], "#p": [id!.pk] });
+			wraps.sort((a, b) => a.created_at - b.created_at);
+			for (const w of wraps) await handleWrap(w);
+		} catch {
+			/* next watchdog tick */
+		}
 	}
 
 	let watchdogBusy = false;

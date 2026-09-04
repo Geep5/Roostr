@@ -675,43 +675,6 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		extra["key_id"] = json.Integer(key_id)
 		ok_response(sock, extra)
 
-	case "channel_invite_payload":
-		channel_id := json_str(parsed, "channel_id")
-		npub := json_str(parsed, "npub")
-		key_hex, key_id, found := channel_key_get(channel_id)
-		if !found {
-			respond_error(sock, "no local key for channel")
-			return
-		}
-		name := ""
-		Ctx :: struct {
-			id:   string,
-			name: ^string,
-		}
-		ctx := Ctx{channel_id, &name}
-		with_states(proc(states: map[string]^Object_State, user: rawptr) {
-			c := cast(^struct {
-				id:   string,
-				name: ^string,
-			})user
-			if s, ok := states[c.id]; ok {
-				if v, vok := fields_get(s.fields, "name"); vok && v.kind == .String do c.name^ = v.str
-			}
-		}, &ctx)
-		payload := jobj()
-		payload["v"] = json.Integer(1)
-		payload["type"] = json.String("glon/channel-invite")
-		payload["channel_id"] = json.String(channel_id)
-		payload["name"] = json.String(name)
-		payload["key"] = json.String(key_hex)
-		payload["key_id"] = json.Integer(key_id)
-		payload["invitee"] = json.String(npub)
-		payload["relays"] = json.Array(make([dynamic]json.Value, context.temp_allocator))
-		payload["note"] = json.String("deliver via NIP-59 gift wrap to the invitee npub (nostr sync)")
-		extra := jobj()
-		extra["payload"] = json.Object(payload)
-		ok_response(sock, extra)
-
 	case "nostr_key_export":
 		mutate_key_export(sock)
 

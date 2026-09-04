@@ -161,6 +161,16 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					const [skills, holdups] = await Promise.all([skillStatus(), listHoldups()]);
 					return json({ skills, holdups });
 				}
+				if (req.method === "GET" && url.pathname === "/join-requests") {
+					const { listJoinRequests } = await import("./nostrsync");
+					return json({ requests: await listJoinRequests() });
+				}
+				if (req.method === "POST" && url.pathname === "/join-requests/clear") {
+					const body = (await req.json()) as { key?: string };
+					const { clearJoinRequest } = await import("./nostrsync");
+					await clearJoinRequest(body.key ?? "");
+					return json({ ok: true });
+				}
 				if (req.method === "POST" && url.pathname === "/skills/holdup-clear") {
 					const body = (await req.json()) as { id?: string };
 					await clearHoldup(body.id ?? "");
