@@ -26,7 +26,7 @@
 		relations: RelationDefJSON[];
 		onchanged: () => Promise<void>;
 		onsearch?: (q: string) => void;
-		mode?: "query" | "collection";
+		mode?: "query" | "collection" | "type";
 		/** The page object's space - new records land beside it. */
 		channelId?: string;
 		/** Table views: handle the new record inline instead of navigating. */
@@ -286,7 +286,8 @@
 		if (creating) return;
 		creating = true;
 		try {
-			const typeKey = sources[0] || "note";
+			// Type pages create their own kind; queries create their source.
+			const typeKey = mode === "type" ? object.fields["key"]?.stringValue || "note" : sources[0] || "note";
 			const fields: Record<string, ValueJSON> = {};
 			if (channelId) fields["channel"] = { stringValue: channelId };
 			// Every equal/in filter seeds the matching field with a value of

@@ -9,9 +9,8 @@
 	import { goto } from "$app/navigation";
 	import type { ObjectJSON } from "$lib/types";
 	import { fieldStr } from "$lib/types";
-	import { fetchAllQuery, fetchQuery, note } from "$lib/api";
-	import { objectIcon } from "$lib/icons";
-	import { refreshAll, store } from "$lib/data.svelte";
+	import { fetchQuery, note } from "$lib/api";
+	import { refreshAll } from "$lib/data.svelte";
 
 	let { object, onchanged }: { object: ObjectJSON; onchanged: () => Promise<void> } = $props();
 
@@ -40,34 +39,6 @@
 		await onchanged();
 		await refreshAll();
 	}
-
-	// ── Objects of this type (space-scoped) ───────────────────────
-	interface Row {
-		id: string;
-		name: string;
-		icon: string;
-		updatedAt: number;
-	}
-	let objects = $state<Row[] | null>(null);
-
-	async function loadObjects() {
-		const key = fieldStr(object.fields, "key");
-		if (!key) return void (objects = []);
-		const sid = object.fields["channel"]?.stringValue || store.channels[0]?.id || "";
-		const rows = await fetchAllQuery({ type: key, filters: [{ key: "channel", condition: "equal", value: sid }] });
-		objects = rows
-			.map((r) => ({
-				id: r.id,
-				name: r.fields["name"]?.stringValue || "Untitled",
-				icon: r.fields["iconEmoji"]?.stringValue ?? "",
-				updatedAt: r.updatedAt,
-			}))
-			.toSorted((a, b) => b.updatedAt - a.updatedAt);
-	}
-	$effect(() => {
-		void object.id;
-		void loadObjects();
-	});
 
 	// ── Templates ─────────────────────────────────────────────────
 	let templates = $state<Array<{ id: string; name: string }>>([]);
@@ -147,22 +118,6 @@
 		{/if}
 	</div>
 
-	<div class="sec">
-		<div class="sec-name">Objects{objects ? ` · ${objects.length}` : ""}</div>
-		{#if objects === null}
-			<p class="muted">Loading…</p>
-		{:else if objects.length === 0}
-			<p class="muted">No {fieldStr(object.fields, "name") || "objects"} yet.</p>
-		{:else}
-			{#each objects as o (o.id)}
-				<a class="obj-row" href="/object/{o.id}">
-					<span class="obj-icon">{objectIcon(o.icon, fieldStr(object.fields, "key"))}</span>
-					<span class="obj-name">{o.name}</span>
-					<span class="obj-when">{new Date(o.updatedAt).toLocaleDateString()}</span>
-				</a>
-			{/each}
-		{/if}
-	</div>
 </div>
 
 <style>
@@ -287,28 +242,5 @@
 	.definition:focus {
 		border-color: var(--accent);
 		outline: none;
-	}
-	.obj-row {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 6px 8px;
-		border-radius: 8px;
-		color: var(--fg);
-		text-decoration: none;
-		font-size: 13.5px;
-	}
-	.obj-row:hover {
-		background: var(--hover);
-	}
-	.obj-name {
-		flex: 1;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.obj-when {
-		color: var(--muted);
-		font-size: 12px;
 	}
 </style>

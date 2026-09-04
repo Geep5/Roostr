@@ -164,6 +164,12 @@
 		// owning space's objects.
 		const spaceFilter = spaceFilterOf(object, store.channels[0]?.id ?? "");
 		if (isQuery) return { setId: object.id, filters: [...engineFilters, spaceFilter], ...text };
+		// A type page IS a set of its instances (Anytype's type view).
+		if (isType) {
+			const key = object.fields["key"]?.stringValue;
+			if (!key) return null;
+			return { type: key, filters: [...engineFilters, spaceFilter], ...text };
+		}
 		if (isCollection) {
 			if (memberIds.length === 0) return null;
 			// View filters stack on top of membership (AND semantics).
@@ -284,6 +290,31 @@
 			<Discussion {object} full onchanged={refresh} />
 		{:else if isType}
 			<TypePanel {object} onchanged={refresh} />
+			<div class="dataview">
+				<QueryControls
+					bind:this={queryControls}
+					{object}
+					relations={scopedRelations}
+					onchanged={refresh}
+					onsearch={(q) => (searchText = q)}
+					mode="type"
+					channelId={object.fields["channel"]?.stringValue ?? ""}
+					oncreated={onRecordCreated}
+					onnewinline={() => table?.beginNew()}
+				/>
+				{#if tableBody}
+					{@const viewType = object.fields["viewType"]?.stringValue || "table"}
+					{#if viewType === "gallery"}
+						<GalleryView body={tableBody} {object} relations={scopedRelations} sorts={viewSorts} />
+					{:else if viewType === "kanban"}
+						<KanbanView body={tableBody} {object} relations={scopedRelations} sorts={viewSorts} groupKey={object.fields["viewGroupKey"]?.stringValue || ""} onchanged={refresh} />
+					{:else if viewType === "calendar"}
+						<CalendarView body={tableBody} {object} dateKey={object.fields["viewDateKey"]?.stringValue || "createdDate"} />
+					{:else}
+						<SetTable bind:this={table} body={tableBody} {object} relations={scopedRelations} defaultSorts={viewSorts} onchanged={refresh} oncreate={(name) => queryControls?.createRecord(name) ?? Promise.resolve()} />
+					{/if}
+				{/if}
+			</div>
 		{:else if isRelation}
 			<PropertyPanel {object} />
 		{:else if isQuery || isCollection}
