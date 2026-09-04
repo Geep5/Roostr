@@ -88,6 +88,18 @@ let defaultChannelId = "";
 async function buildServedOne(agentId: string, defaultChannel: string): Promise<Served> {
 	const agent = await fetchObject(agentId);
 	let channelId = str(agent.fields, "channel");
+	// A bound agent lives wherever its OBJECT lives: space migrations
+	// re-stamp objects, and the agent must follow or it becomes a ghost
+	// of a vanished space.
+	const boundId = str(agent.fields, "bound_object");
+	if (boundId) {
+		const obj = await fetchObject(boundId).catch(() => null);
+		const objChannel = obj ? str(obj.fields, "channel") : "";
+		if (objChannel && objChannel !== channelId) {
+			channelId = objChannel;
+			await setField(agentId, "channel", sv(objChannel));
+		}
+	}
 	if (!channelId) {
 		// Never let an agent float on channel ordering: bind it to the
 		// current default PERMANENTLY. (An ordering flip once moved every

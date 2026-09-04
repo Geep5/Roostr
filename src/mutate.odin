@@ -526,6 +526,9 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 			respond_error(sock, "write failed", "500 Internal Server Error")
 			return
 		}
+		// The object's bound agent (and its chat) go with it.
+		cascade := bound_agent_cascade(object_id)
+		for cid in cascade do commit_ops(cid, {Operation{kind = .Object_Delete}})
 		ok_response(sock)
 
 	// Real deletion: purge the change files and record it in the synced
@@ -547,7 +550,14 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 			respond_error(sock, "the vanish ledger cannot be vanished")
 			return
 		}
-		vanished := vanish_objects(ids[:])
+		// Bound agents (and their chats) vanish with their objects.
+		expanded := make([dynamic]string, context.temp_allocator)
+		for id in ids {
+			append(&expanded, id)
+			cascade := bound_agent_cascade(id)
+			for cid in cascade do append(&expanded, cid)
+		}
+		vanished := vanish_objects(expanded[:])
 		if vanished == 0 {
 			respond_error(sock, "vanish failed", "500 Internal Server Error")
 			return
@@ -792,6 +802,47 @@ channel_key_rotate :: proc(channel_id: string) -> i64 {
 	next := found ? key_id + 1 : 1
 	channel_key_set(channel_id, next)
 	return next
+}
+
+// ── Bound-agent cascade ──────────────────────────────────────────────
+//
+// Deleting an object retires its object-bound agent and that agent's
+// holistic chat: a mind whose object is gone has nothing to be. Pair
+// chats survive - they are shared history with another agent.
+bound_agent_cascade :: proc(object_id: string) -> [dynamic]string {
+	out := make([dynamic]string, context.temp_allocator)
+	Ctx :: struct {
+		out:       ^[dynamic]string,
+		object_id: string,
+	}
+	ctx := Ctx{&out, object_id}
+	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+		c := cast(^struct {
+			out:       ^[dynamic]string,
+			object_id: string,
+		})user
+		agent_ids := make([dynamic]string, context.temp_allocator)
+		for _, s in states {
+			// Deleted rows cascade too: vanishing a binned object must
+			// take its binned agent along, not orphan the tombstone.
+			if s.type_key != "agent" do continue
+			if v, ok := fields_get(s.fields, "bound_object"); ok && v.kind == .String && v.str == c.object_id {
+				append(&agent_ids, strings.clone(s.id, context.temp_allocator))
+			}
+		}
+		for aid in agent_ids {
+			append(c.out, aid)
+			for _, s in states {
+				if s.type_key != "chat" do continue
+				// The agent's own holistic chat, not a shared pair chat.
+				if p, pok := fields_get(s.fields, "a2a_pair"); pok && p.kind == .String && p.str != "" do continue
+				if v, ok := fields_get(s.fields, "agent"); ok && v.kind == .String && v.str == aid {
+					append(c.out, strings.clone(s.id, context.temp_allocator))
+				}
+			}
+		}
+	}, &ctx)
+	return out
 }
 
 // ── Bundled relations ────────────────────────────────────────────────

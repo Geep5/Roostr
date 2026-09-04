@@ -42,6 +42,10 @@
 		turnState: string;
 		/** What the harness last actually assembled and sent, section by section. */
 		effective: SystemPart[];
+		/** Object-bound agents: the object this agent belongs to. */
+		bound: string;
+		boundName: string;
+		updatedAt: number;
 	}
 
 	let agents = $state<AgentRow[]>([]);
@@ -80,7 +84,41 @@
 				role: r.fields["role"]?.stringValue ?? "",
 				turnState: r.fields["turn_state"]?.stringValue ?? "",
 				effective: parseEffective(r.fields["system_effective"]?.stringValue ?? ""),
+				bound: r.fields["bound_object"]?.stringValue ?? "",
+				boundName: "",
+				updatedAt: r.updatedAt,
 			}));
+		// Object agents list under their object's name.
+		for (const a of agents) {
+			if (!a.bound) continue;
+			const o = store.summaries.find((x) => x.id === a.bound);
+			a.boundName = o?.name || "";
+		}
+		// Definitions nudge: how many defs in this space say nothing.
+		const [types, props] = await Promise.all([
+			fetchAllQuery({ type: "type", filters: [{ key: "channel", condition: "equal", value: channelId }] }),
+			fetchAllQuery({ type: "relation", filters: [{ key: "channel", condition: "equal", value: channelId }] }),
+		]);
+		undefinedTypes = types.filter((t) => !(t.fields["description"]?.stringValue ?? "").trim() && !(t.fields["hidden"]?.boolValue === true)).length;
+		undefinedProps = props.filter((t) => !(t.fields["description"]?.stringValue ?? "").trim() && !(t.fields["hidden"]?.boolValue === true)).length;
+	}
+
+	let undefinedTypes = $state(0);
+	let undefinedProps = $state(0);
+	const spaceAgents = $derived(agents.filter((a) => !a.bound));
+	const boundAgents = $derived(agents.filter((a) => a.bound).toSorted((a, b) => b.updatedAt - a.updatedAt));
+
+	/** Retire an object agent: the agent and its holistic chat go; the
+	 *  object and any pair chats (shared history) stay. */
+	async function retire(a: AgentRow) {
+		if (!confirm(`Retire the agent of "${a.boundName || a.name}"? Its private chat goes with it; the object and shared conversations stay.`)) return;
+		const chats = await fetchQuery({ type: "chat", filters: [{ key: "agent", condition: "equal", value: a.id }], limit: 10 });
+		for (const c of chats.records) {
+			if (c.fields["a2a_pair"]?.stringValue) continue;
+			await note.del(c.id);
+		}
+		await note.del(a.id);
+		await load();
 	}
 
 	/** The harness publishes this as a JSON string field; a stale shape must
@@ -438,7 +476,7 @@
 	agent on the machine whose harness should run it.
 </p>
 
-{#each agents as a (a.id)}
+{#each spaceAgents as a (a.id)}
 	{@const online = a.seenAt > 0 && now - a.seenAt < ONLINE_MS}
 	{@const runsHere = roster?.includes(a.id) ?? false}
 	{@const blocked = roster === null ? "" : authBlock(a.model)}
@@ -613,6 +651,30 @@
 {/if}
 
 <button class="new-agent" onclick={() => void newAgent()}>＋ New agent</button>
+
+{#if boundAgents.length > 0}
+	<details class="bound-agents">
+		<summary>Object agents · {boundAgents.length}</summary>
+		<p class="hint">Minted when you start a discussion on an object. Idle ones cost nothing.</p>
+		{#each boundAgents as a (a.id)}
+			<div class="bound-row">
+				<a class="bound-link" href="/object/{a.bound}">
+					<span class="obj-icon">{a.icon || "🛰️"}</span>{a.boundName || a.name}
+				</a>
+				<span class="bound-when">{new Date(a.updatedAt).toLocaleDateString()}</span>
+				<button class="danger" onclick={() => void retire(a)}>Retire</button>
+			</div>
+		{/each}
+	</details>
+{/if}
+
+{#if undefinedTypes + undefinedProps > 0}
+	<p class="def-nudge">
+		{undefinedTypes} type{undefinedTypes === 1 ? "" : "s"} and {undefinedProps}
+		propert{undefinedProps === 1 ? "y" : "ies"} in this space have no definition — agents guess
+		without them. Open a type or property page and fill in "what is this for".
+	</p>
+{/if}
 
 <style>
 	h3 {
@@ -875,5 +937,58 @@
 	.avatar-pop {
 		position: relative;
 		margin: 4px 0 8px 24px;
+	}
+	.bound-agents {
+		margin-top: 14px;
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 8px 12px;
+	}
+	.bound-agents summary {
+		cursor: pointer;
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--fg);
+	}
+	.bound-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 5px 0;
+		border-top: 1px solid var(--border);
+		font-size: 13px;
+	}
+	.bound-row:first-of-type {
+		border-top: none;
+	}
+	.bound-link {
+		flex: 1;
+		color: var(--fg);
+		text-decoration: none;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.bound-link:hover {
+		text-decoration: underline;
+	}
+	.bound-when {
+		color: var(--muted);
+		font-size: 12px;
+	}
+	.bound-row .danger {
+		background: none;
+		border: 1px solid var(--border);
+		border-radius: 7px;
+		color: var(--red);
+		font-size: 12px;
+		padding: 3px 9px;
+		cursor: pointer;
+	}
+	.def-nudge {
+		margin-top: 12px;
+		font-size: 12.5px;
+		color: var(--orange);
+		line-height: 1.5;
 	}
 </style>
