@@ -899,7 +899,7 @@
 			<span class="space-ico round">{#if profilePic}<img class="rail-avatar" src={profilePic} alt="" />{:else}<svg style="width:18px;height:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{/if}</span>
 			{#if railWide}<span class="space-label">{profileName ? `@${profileName.replace(/^@/, "")}` : "Settings"}</span>{/if}
 		</button>
-		<div class="rail-resize" role="separator" aria-orientation="vertical" onpointerdown={railResizeStart}></div>
+		<div class="rail-resize" role="separator" aria-orientation="vertical" onpointerdown={railResizeStart}><div class="rail-handle"></div></div>
 	</nav>
 
 	<aside class="widgets">
@@ -1355,32 +1355,53 @@
 		align-items: stretch;
 		padding: 10px 8px;
 	}
+	/* Anytype's sidebar resizer, verbatim proportions: a 12px hit zone
+	   entirely in the gap between the space rail and the nav pane, holding
+	   a small centered pill that fades in on hover and stretches while
+	   dragging. Never overlaps either panel. */
 	.rail-resize {
 		position: absolute;
 		top: 0;
 		bottom: 0;
-		right: -8px;
-		width: 15px;
+		right: -12px;
+		width: 12px;
 		cursor: col-resize;
 		z-index: 60;
 		touch-action: none;
 	}
-	/* Hover affordance: a soft vertical bar in the gutter. */
-	.rail-resize::after {
+	.rail-handle {
+		position: absolute;
+		left: 0;
+		top: 50%;
+		margin: -16px 0 0;
+		width: 100%;
+		height: 32px;
+		transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+	}
+	.rail-handle::after {
 		content: "";
 		position: absolute;
-		top: 10px;
-		bottom: 10px;
-		left: 6px;
-		width: 3px;
+		left: 50%;
+		top: 0;
+		width: 6px;
+		height: 100%;
+		margin-left: -3px;
 		border-radius: 3px;
 		background: var(--hover);
 		opacity: 0;
-		transition: opacity 0.12s ease;
+		transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 	}
-	.rail-resize:hover::after,
-	.rail-resize:active::after {
+	.rail-resize:hover .rail-handle::after,
+	.rail-resize:active .rail-handle::after {
 		opacity: 1;
+	}
+	.rail-resize:active .rail-handle {
+		height: 64px;
+		margin-top: -32px;
+	}
+	.rail-handle:hover::after,
+	.rail-handle:active::after {
+		background: #47474d;
 	}
 	.space {
 		display: flex;
