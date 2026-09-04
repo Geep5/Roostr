@@ -682,10 +682,17 @@
 		<summary>Object agents · {boundAgents.length}</summary>
 		<p class="hint">Minted when you start a discussion on an object. Idle ones cost nothing.</p>
 		{#each boundAgents as a (a.id)}
+			{@const claims = claimedBy[a.id] ?? []}
 			<div class="bound-row">
 				<a class="bound-link" href="/object/{a.bound}">
 					<span class="obj-icon">{a.icon || "🛰️"}</span>{a.boundName || a.name}
 				</a>
+				<!-- Bound agents are where a double claim actually bites: each one
+				     answers its own object's discussion, so two machines serving it
+				     answer the human twice. -->
+				<span class="claim" class:contested={claims.length > 1}>
+					{#if claims.length > 1}⚠ {claims.join(" and ")}{:else if claims.length === 1}{claims[0]}{:else}unclaimed{/if}
+				</span>
 				<span class="bound-when">{new Date(a.updatedAt).toLocaleDateString()}</span>
 				<button class="danger" onclick={() => void retire(a)}>Retire</button>
 			</div>
