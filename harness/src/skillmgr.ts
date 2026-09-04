@@ -94,10 +94,17 @@ export const CATALOG: CatalogEntry[] = [
 			"Finish when `command -v gws` fails.",
 		checkCmd: "command -v gws",
 		authCheckCmd: "gws auth status",
-		authHint: "Run `gws auth` in a terminal and sign in with your Google account, then hit Re-check.",
+		authHint: "Run `gws auth login` in a terminal and sign in with your Google account, then hit Re-check.",
 		skillBody:
-			"Google Workspace access through the `gws` CLI (already authenticated on this device).\n" +
-			"Gmail, Calendar, and Drive operations run under the signed-in account — see `gws --help` for subcommands.\n" +
+			"Google Workspace access through the `gws` CLI, under the account signed in on this device.\n" +
+			"Check auth FIRST: `gws auth status` — `auth_method` must not be `none`.\n" +
+			"An absent or under-scoped token makes Gmail list calls answer `exit 0` with `{\"resultSizeEstimate\": 0}`, which is indistinguishable from an empty mailbox. Never conclude \"no such mail\" from a zero result you did not auth-check.\n" +
+			"Shape: `gws <service> <resource> [sub-resource] <method> --params '<JSON>'`. Path parameters go INSIDE --params (`userId` for Gmail), not as flags — there is no `--user-id`, and omitting it fails with \"Required path parameter userId is missing\".\n" +
+			"Gmail has helpers; prefer them over raw methods. There is no `gws gmail search`.\n" +
+			"Search: `gws gmail +triage --query \"from:someone@example.com\" --max 10 --format table` — prints date, from, id, subject. Any Gmail query works (`from:`, `subject:`, `newer_than:7d`); default query is `is:unread`.\n" +
+			"Read one: `gws gmail +read --id <id>` for the plain-text body, `--headers` to include From/To/Subject/Date. Raw `users messages get` returns base64 — use `+read` instead.\n" +
+			"Raw search when you need message ids only: `gws gmail users messages list --params '{\"userId\":\"me\",\"q\":\"from:someone@example.com\"}'`.\n" +
+			"Write helpers: `+reply`, `+reply-all`, `+forward`, `+send` (they handle threading). Calendar and Drive follow the same shape: `gws calendar events list --params '{\"calendarId\":\"primary\"}'`, `gws drive files list --params '{\"pageSize\":10}'`.\n" +
 			"Read before you write: list/search first, and never send mail or modify events unless the task explicitly asks.",
 	},
 ];
