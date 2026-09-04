@@ -19,6 +19,12 @@ import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 interface RosterFile {
 	version: 1;
 	agents: string[];
+	/**
+	 * Stable id for THIS machine. The claim published to the DAG is keyed on
+	 * it rather than on the hostname, so renaming the Mac edits one name
+	 * instead of orphaning the claim and minting a second machine object.
+	 */
+	machineId?: string;
 }
 
 function rosterPath(): string {
@@ -26,28 +32,43 @@ function rosterPath(): string {
 	return `${root}/harness.json`;
 }
 
-export async function readRoster(): Promise<string[]> {
+async function readFile(): Promise<RosterFile> {
 	try {
 		const parsed = (await Bun.file(rosterPath()).json()) as RosterFile;
-		if (parsed?.version === 1 && Array.isArray(parsed.agents)) return parsed.agents;
+		if (parsed?.version === 1 && Array.isArray(parsed.agents)) return parsed;
 	} catch {
 		/* missing/corrupt → empty */
 	}
-	return [];
+	return { version: 1, agents: [] };
 }
 
-function writeRoster(agents: string[]): void {
+/** Whole-file write: every caller passes the file it read, so adding a key
+ *  cannot drop a sibling one. */
+function writeFile(next: RosterFile): void {
 	const path = rosterPath();
 	mkdirSync(path.slice(0, path.lastIndexOf("/")), { recursive: true });
 	const tmp = `${path}.tmp`;
-	writeFileSync(tmp, JSON.stringify({ version: 1, agents } satisfies RosterFile, null, 2));
+	writeFileSync(tmp, JSON.stringify(next, null, 2));
 	renameSync(tmp, path);
 }
 
+export async function readRoster(): Promise<string[]> {
+	return (await readFile()).agents;
+}
+
 export async function setEnabled(agentId: string, enabled: boolean): Promise<string[]> {
-	const current = await readRoster();
-	const next = enabled ? [...new Set([...current, agentId])] : current.filter((id) => id !== agentId);
-	writeRoster(next);
+	const file = await readFile();
+	const next = enabled ? [...new Set([...file.agents, agentId])] : file.agents.filter((id) => id !== agentId);
+	writeFile({ ...file, agents: next });
 	return next;
+}
+
+/** This machine's stable id, minted on first use. */
+export async function machineId(): Promise<string> {
+	const file = await readFile();
+	if (file.machineId) return file.machineId;
+	const id = crypto.randomUUID();
+	writeFile({ ...file, machineId: id });
+	return id;
 }
 

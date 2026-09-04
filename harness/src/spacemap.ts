@@ -248,7 +248,11 @@ export async function buildNeighborhood(objectId: string, spaceId: string): Prom
 
 	const lines: string[] = [];
 	// Outbound: this object's own link fields.
-	for (const [key, v] of Object.entries(obj.fields)) {
+	// Sorted throughout: field keys AND query rows both arrive in an order the
+	// daemon does not promise (see buildObjectSummary), and this text feeds the
+	// prompt's content hash.
+	const byKey = (fields: Record<string, unknown>) => Object.entries(fields).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+	for (const [key, v] of byKey(obj.fields) as Array<[string, ValueJSON]>) {
 		if (SYSTEM_FIELDS.has(key)) continue;
 		const targets: string[] = [];
 		if (v.linkValue?.targetId) targets.push(v.linkValue.targetId);
@@ -256,9 +260,9 @@ export async function buildNeighborhood(objectId: string, spaceId: string): Prom
 		for (const t of targets) lines.push(`${relLabel(key)} → ${tag(t)}`);
 	}
 	// Inbound: everything in the space that points here.
-	for (const r of rows) {
+	for (const r of [...rows].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
 		if (r.id === objectId) continue;
-		for (const [key, v] of Object.entries(r.fields)) {
+		for (const [key, v] of byKey(r.fields) as Array<[string, ValueJSON]>) {
 			if (key === "channel") continue;
 			if (key === "collectionIds") {
 				if (strItems(v).includes(objectId)) lines.push(`in collection: ${tag(r.id)}`);
@@ -287,7 +291,12 @@ export async function buildNeighborhood(objectId: string, spaceId: string): Prom
 export async function buildObjectSummary(obj: ObjectJSON, spaceId: string): Promise<string> {
 	const rels = await relationDefs(spaceId);
 	const lines: string[] = [`"${str(obj.fields, "name") || "Untitled"}" (${obj.typeKey}) — id ${obj.id}`];
-	for (const [key, v] of Object.entries(obj.fields)) {
+	// Sorted, not as-received: the daemon serialises fields into a map, so key
+	// order is randomised per daemon process and reshuffles whenever its state
+	// map rehashes. Rendering that order made this text - and therefore the
+	// published prompt's content hash - flip between identical prompts, and
+	// each flip was two permanent commits on the agent object.
+	for (const [key, v] of Object.entries(obj.fields).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
 		if (SYSTEM_FIELDS.has(key) || key === "name" || key === "iconEmoji") continue;
 		const r = rels.get(key);
 		let val = "";

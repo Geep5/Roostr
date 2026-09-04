@@ -22,6 +22,7 @@ import { convergeCatalogScope } from "./skillmgr";
 import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled } from "./roster";
 import { startNostrSync, vanishOnRelays } from "./nostrsync";
+import { MACHINE_TYPE, publishClaims } from "./machine";
 import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
 
 function argValue(flagName: string): string {
@@ -198,7 +199,7 @@ async function serve(): Promise<void> {
 	console.log(`[harness] ${boundBy.size} object-bound agent(s) known`);
 
 	/** Kinds that never get their own mind. */
-	const UNMINTABLE = new Set(["agent", "chat", "channel", "relation", "type", "template", "skill", "program", "typescript", "json", "proto", "pinned_fact", "milestone"]);
+	const UNMINTABLE = new Set(["agent", "chat", "channel", "relation", "type", "template", "skill", "program", "typescript", "json", "proto", "pinned_fact", "milestone", MACHINE_TYPE]);
 
 	/** True when the newest discussion message is human-authored - the
 	 * ONLY trigger that may mint an agent. */
@@ -244,6 +245,7 @@ async function serve(): Promise<void> {
 		// would be served by nobody after the next restart.
 		agents.add(id);
 		await setEnabled(id, true);
+		void publishClaims(agents);
 		console.log(`[harness] minted agent for "${name}" (${obj.id.slice(0, 8)}) → ${id.slice(0, 8)}`);
 		return id;
 	}
@@ -501,6 +503,7 @@ async function serve(): Promise<void> {
 	startAuthServer(agents, (next) => {
 		agents.clear();
 		for (const id of next) agents.add(id);
+		void publishClaims(agents);
 		void buildServed(agents).then((next) => {
 			served = next;
 			for (const s of served.values()) {
@@ -519,6 +522,7 @@ async function serve(): Promise<void> {
 		});
 	});
 	console.log(`[harness] serving ${agents.size} agent(s): ${[...agents].map((a) => a.slice(0, 8)).join(", ") || "(none — enable one from an agent page)"}`);
+	void publishClaims(agents);
 
 	// Catch up on chat messages that arrived while the harness was down.
 	// (Origin surfaces catch up on their next event.)

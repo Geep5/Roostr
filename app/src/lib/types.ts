@@ -101,6 +101,7 @@ export const SYSTEM_TYPE_KEYS = [
 	"agent",
 	"channel",
 	"peer",
+	"machine",
 	"pinned_fact",
 	"milestone",
 	"skill",

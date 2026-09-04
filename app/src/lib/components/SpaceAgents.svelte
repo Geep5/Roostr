@@ -46,6 +46,19 @@
 
 	let agents = $state<AgentRow[]>([]);
 	let roster = $state<string[] | null>(null); // null = no local daemon
+	/** agentId → hostnames of every machine claiming it (2+ = the bug shape). */
+	let claimedBy = $state<Record<string, string[]>>({});
+	/** agentId → newest activity in its own conversation, derived, never stored. */
+	let lastActive = $state<Record<string, number>>({});
+	let now = $state(Date.now());
+
+	function ago(ms: number): string {
+		const s = Math.floor((now - ms) / 1000);
+		if (s < 90) return `${s}s ago`;
+		if (s < 5400) return `${Math.round(s / 60)}m ago`;
+		if (s < 172_800) return `${Math.round(s / 3600)}h ago`;
+		return `${Math.round(s / 86_400)}d ago`;
+	}
 
 	let assigning = $state(""); // agent id whose responsibility editor is open
 	let avatarPick = $state(""); // agent id whose avatar picker is open
@@ -80,6 +93,29 @@
 				boundName: "",
 				updatedAt: r.updatedAt,
 			}));
+		// Claims and last-activity, both already in the DAG. Machines publish a
+		// claim when it changes; activity is the agent's own conversation's
+		// updatedAt, so neither costs a write. Two machines claiming one agent
+		// is the shape of a double-answer bug, so the row says so.
+		const [machines, chats] = await Promise.all([fetchAllQuery({ type: "machine" }), fetchAllQuery({ type: "chat" })]);
+		// Built locally, assigned once. Pushing into a nested array through the
+		// state proxy mutates the raw array without signalling, so the template
+		// keeps whatever it read first - which was nothing.
+		const claims: Record<string, string[]> = {};
+		for (const m of machines) {
+			const host = m.fields["name"]?.stringValue || "a machine";
+			for (const item of m.fields["claims"]?.valuesValue?.items ?? []) {
+				const id = item.stringValue ?? "";
+				if (id) (claims[id] ??= []).push(host);
+			}
+		}
+		claimedBy = claims;
+		const active: Record<string, number> = {};
+		for (const c of chats) {
+			const owner = c.fields["agent"]?.stringValue ?? "";
+			if (owner) active[owner] = Math.max(active[owner] ?? 0, c.updatedAt);
+		}
+		lastActive = active;
 		// Object agents list under their object's name.
 		for (const a of agents) {
 			if (!a.bound) continue;
@@ -389,9 +425,12 @@
 	onMount(() => {
 		void loadRoster();
 		void loadAuth();
-		// Credentials can expire while this page is open; nothing else here
-		// changes on its own now that presence is gone.
-		const t = setInterval(() => void loadAuth(), 15_000);
+		// Ages the "active 3m ago" labels and catches a credential expiry that
+		// lands while this page is open. Claims change too rarely to poll for.
+		const t = setInterval(() => {
+			now = Date.now();
+			void loadAuth();
+		}, 15_000);
 		return () => clearInterval(t);
 	});
 
@@ -461,6 +500,8 @@
 {#each spaceAgents as a (a.id)}
 	{@const runsHere = roster?.includes(a.id) ?? false}
 	{@const blocked = roster === null ? "" : authBlock(a.model)}
+	{@const claims = claimedBy[a.id] ?? []}
+	{@const active = lastActive[a.id] ?? 0}
 	<div class="agent-wrap">
 		<div class="agent">
 			<!-- The agent's avatar: shows in chat next to its messages. -->
@@ -468,6 +509,16 @@
 				{#if a.icon}{a.icon}{:else}🤖{/if}
 			</button>
 			<span class="name">{a.name}</span>
+			<span class="claim" class:contested={claims.length > 1}>
+				{#if claims.length > 1}
+					⚠ claimed by {claims.join(" and ")}
+				{:else if claims.length === 1}
+					{claims[0]}
+				{:else}
+					unclaimed
+				{/if}
+				{#if active > 0}· active {ago(active)}{/if}
+			</span>
 			<button class="resp" class:unset={a.types.length === 0 && agents.length > 1} onclick={() => (assigning = assigning === a.id ? "" : a.id)}>
 				{describe(a)}
 			</button>
@@ -730,9 +781,18 @@
 	.name {
 		color: var(--fg);
 		font-weight: 600;
-		/* Takes the slack the presence label used to hold, so the controls
-		   stay right-aligned. */
+	}
+	/* Holds the slack so the controls stay right-aligned. */
+	.claim {
 		flex: 1;
+		color: var(--muted);
+		font-size: 12px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.claim.contested {
+		color: var(--orange);
 	}
 	button.danger:hover {
 		border-color: #e05555;

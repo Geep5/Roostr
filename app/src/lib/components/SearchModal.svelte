@@ -27,7 +27,7 @@
 	});
 
 	/** Kernel/internal types never appear in search (they're space-less). */
-	const TYPE_EXCLUDE = { key: "type", condition: "notIn", value: ["program", "typescript", "json", "proto", "relation", "channel", "type", "template", "agent", "skill", "peer", "pinned_fact", "milestone", "vanish_log"] };
+	const TYPE_EXCLUDE = { key: "type", condition: "notIn", value: ["program", "typescript", "json", "proto", "relation", "channel", "type", "template", "agent", "skill", "peer", "machine", "pinned_fact", "milestone", "vanish_log"] };
 
 	/** Space scope filter: unassigned objects live in the default space. */
 	function scopeFilters(chip = typeChip): Array<Record<string, unknown>> {
