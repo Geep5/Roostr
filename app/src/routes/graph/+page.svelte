@@ -3,6 +3,7 @@
 	import { page } from "$app/state";
 	import { buildGraph, simStep, type ObjectGraph } from "$lib/graph";
 	import { fetchObject } from "$lib/api";
+	import { formatGlyph, spaceRelations } from "$lib/relations";
 	import { activeSpace } from "$lib/space.svelte";
 	import { store, refreshAll } from "$lib/data.svelte";
 	import { createRenderer, createProgram } from "brometal";
@@ -124,6 +125,8 @@
 				const o = await fetchObject(id);
 				const name = esc(o.fields["name"]?.stringValue || "Untitled");
 				const icon = esc(o.fields["iconEmoji"]?.stringValue ?? "");
+				// Property rows carry the property's own emoji and display name.
+				const defs = spaceRelations(store.relations, o.fields["channel"]?.stringValue || store.channels[0]?.id || "");
 				const rows: string[] = [];
 				for (const [k, v] of Object.entries(o.fields)) {
 					if (["name", "iconEmoji", "channel", "collectionIds", "viewFilters", "viewSorts", "viewRelations", "pinnedIds", "setOf", "featuredRelations"].includes(k)) continue;
@@ -133,7 +136,9 @@
 					else if (v.intValue !== undefined) val = new Date(v.intValue).getFullYear() > 1990 ? new Date(v.intValue).toLocaleDateString() : String(v.intValue);
 					else if (v.valuesValue) val = v.valuesValue.items.map((i) => i.stringValue ?? "").filter(Boolean).join(", ");
 					if (!val) continue;
-					rows.push(`<div class="gc-row"><span class="gc-k">${esc(k)}</span><span class="gc-v">${esc(val.slice(0, 60))}</span></div>`);
+					const def = defs.find((r) => r.key === k);
+					const label = def ? `${def.iconEmoji || formatGlyph(def.format)} ${def.name || k}` : k;
+					rows.push(`<div class="gc-row"><span class="gc-k">${esc(label)}</span><span class="gc-v">${esc(val.slice(0, 60))}</span></div>`);
 					if (rows.length >= 4) break;
 				}
 				const byId = new Map(o.blocks.map((b) => [b.id, b]));
