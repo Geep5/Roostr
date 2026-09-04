@@ -153,9 +153,9 @@ async function ingestSurface(s: Served, surfaceId: string): Promise<boolean> {
  * Handle a message on one surface: ingest, run the turn on the chat, reply
  * where asked.
  */
-async function handleSurface(s: Served, surfaceId: string): Promise<boolean> {
+async function handleSurface(s: Served, surfaceId: string, opts: { wake?: (t: string, c: string) => Promise<string>; a2aTurn?: boolean } = {}): Promise<boolean> {
 	if (!(await ingestSurface(s, surfaceId))) return false;
-	const reply = await runTurn(s.agentId, s.chatId, { spawn: spawnSubagent });
+	const reply = await runTurn(s.agentId, s.chatId, { spawn: spawnSubagent, wake: opts.wake, a2aTurn: opts.a2aTurn });
 	if (surfaceId !== s.chatId && reply.trim()) {
 		await chatPost(surfaceId, reply.trim(), s.agentId);
 	}
@@ -213,7 +213,57 @@ async function serve(): Promise<void> {
 	const active = new Map<string, string>(); // agentId → surface of the in-flight turn
 	const dirty = new Map<string, Set<string>>(); // agentId → surfaces awaiting a turn
 
-	async function drive(s: Served, surfaceId: string): Promise<void> {
+	// ── A2A wake: one answering turn for the target, synchronously. ──
+	// The answering turn never carries agent_ask (a2aTurn), so an agent
+	// answering an agent can only answer - depth 1 by construction.
+	const A2A_MAX_CONCURRENT = 3;
+	let a2aActive = 0;
+
+	async function wakeAgent(targetAgentId: string, pairChatId: string): Promise<string> {
+		let s = served.get(targetAgentId);
+		if (!s) {
+			try {
+				s = await buildServedOne(targetAgentId, defaultChannelId);
+				served.set(targetAgentId, s);
+			} catch (err) {
+				return `letter delivered; could not wake the target here (${err instanceof Error ? err.message : String(err)})`;
+			}
+		}
+		const queueLetter = () => {
+			let set = dirty.get(targetAgentId);
+			if (!set) dirty.set(targetAgentId, (set = new Set()));
+			set.add(pairChatId);
+		};
+		if (busy.has(targetAgentId)) {
+			queueLetter();
+			return "letter delivered; they are mid-turn and will read it when they finish";
+		}
+		if (a2aActive >= A2A_MAX_CONCURRENT) {
+			queueLetter();
+			return "letter delivered; the system is busy - they will read it on their next turn";
+		}
+		a2aActive++;
+		try {
+			const turn = drive(s, pairChatId, true);
+			const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 180_000));
+			if ((await Promise.race([turn, timeout])) === "timeout") {
+				return "they are still thinking; their reply will appear in your shared chat";
+			}
+		} finally {
+			a2aActive--;
+		}
+		// Their reply is the newest message they authored in the pair chat.
+		const chat = await fetchObject(pairChatId).catch(() => null);
+		if (!chat) return "(no reply)";
+		const msgs = chatBlocks(chat);
+		for (let i = msgs.length - 1; i >= 0; i--) {
+			const meta = msgs[i].block.content.custom?.meta ?? {};
+			if ((meta["author"] ?? "") === targetAgentId) return meta["text"] || "(empty reply)";
+		}
+		return "(no reply yet - check the shared chat later)";
+	}
+
+	async function drive(s: Served, surfaceId: string, a2aTurn = false): Promise<void> {
 		if (busy.has(s.agentId)) {
 			if (surfaceId === active.get(s.agentId) && surfaceId !== s.chatId) {
 				// Same-surface follow-up: fold into the in-flight turn (steer).
@@ -241,7 +291,7 @@ async function serve(): Promise<void> {
 		};
 		report("working");
 		try {
-			await handleSurface(s, surfaceId);
+			await handleSurface(s, surfaceId, { wake: a2aTurn ? undefined : wakeAgent, a2aTurn });
 			report("idle");
 		} catch (err) {
 			console.error(`[harness] turn failed for ${s.agentId.slice(0, 8)}:`, err);

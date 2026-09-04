@@ -15,6 +15,8 @@ import {
 	sv,
 	setField,
 	type ObjectJSON,
+	type ValueJSON,
+	addBlock,
 	API,
 } from "./api";
 import { objectText, readSkill } from "./skills";
@@ -97,6 +99,11 @@ export interface ToolContext {
 	channelId: string;
 	/** Set for object-bound agents: the object this agent belongs to. */
 	boundObject?: string;
+	/** Wired by index.ts on human-rooted turns only: wake a target
+	 *  agent on a pair chat. A2A-driven turns never get this - an agent
+	 *  answering an agent just answers, so cascade depth is 1 by
+	 *  construction. */
+	wake?: (targetAgentId: string, pairChatId: string) => Promise<string>;
 	depth: number;
 	/** Wired by spawn.ts; declared here to break the import cycle. */
 	spawn?: (task: string, template: string, ctx: ToolContext) => Promise<string>;
@@ -586,9 +593,75 @@ const EVAL_TOOLS: RegisteredTool[] = [
 	},
 ];
 
-export function toolDefs(template: string, depth: number): ToolDef[] {
+// ── A2A: only a human-rooted turn may ask ─────────────────────────
+//
+// agent_ask posts into the pair's chat object ALWAYS (the durable
+// message board the human reads), then wakes the target for one
+// answering turn. The answering turn does NOT carry this tool, so an
+// agent answering an agent just answers - cascade depth is 1 by
+// construction, no counters needed. Agents can only reach objects
+// whose agent ALREADY exists: minds are minted by humans alone.
+
+const A2A_TOOL: RegisteredTool = {
+	def: {
+		name: "agent_ask",
+		description:
+			"Ask another object's agent a question. Works ONLY on objects whose agent already exists (neighborhood/space_map show 'has agent') - agents never create minds. Your message lands in the shared pair chat the human can read, and the target answers you directly; it cannot itself ask further agents. Reads are free - query first, then ask once, well.",
+		input_schema: {
+			type: "object",
+			properties: {
+				object_id: { type: "string", description: "the object whose agent you want to ask" },
+				text: { type: "string", description: "your question or message" },
+			},
+			required: ["object_id", "text"],
+		},
+	},
+	handler: async (input, ctx) => {
+		const target = await assertInSpace(await fetchObject(S(input.object_id)), ctx);
+		const holders = await query({ type: "agent", filters: [{ key: "bound_object", condition: "equal", value: target.id }], limit: 1 });
+		if (holders.length === 0) {
+			return `no agent lives on "${str(target.fields, "name") || target.id.slice(0, 8)}" - agents cannot create minds. Read the object yourself: object_get ${target.id}`;
+		}
+		const targetAgentId = holders[0].id;
+		if (targetAgentId === ctx.agentId) throw new Error("that is your own object");
+		const me = await fetchObject(ctx.agentId);
+		const myName = str(me.fields, "name") || "agent";
+		const theirName = str(holders[0].fields, "name") || "agent";
+
+		// One durable chat per agent pair - the message board thread.
+		const pairKey = [ctx.agentId, targetAgentId].sort().join(":");
+		const existing = await query({ type: "chat", filters: [{ key: "a2a_pair", condition: "equal", value: pairKey }], limit: 1 });
+		let chatId: string;
+		if (existing.length > 0) chatId = existing[0].id;
+		else {
+			const created = await createObject(`${myName} ⇄ ${theirName}`, "chat", {
+				channel: sv(ctx.channelId),
+				a2a_pair: sv(pairKey),
+				participants: { valuesValue: { items: [sv(ctx.agentId), sv(targetAgentId)] } },
+				objects: { valuesValue: { items: [ctx.boundObject ? { linkValue: { targetId: ctx.boundObject, relationKey: "objects" } } : undefined, { linkValue: { targetId: target.id, relationKey: "objects" } }].filter(Boolean) as ValueJSON[] } },
+			});
+			chatId = created.id;
+			await addBlock(chatId, { id: "__discussion__", childrenIds: [], content: { custom: { contentType: "discussion", meta: {} } } });
+		}
+		await addBlock(
+			chatId,
+			{
+				id: crypto.randomUUID(),
+				childrenIds: [],
+				content: { custom: { contentType: "chat", meta: { author: ctx.agentId, ts: String(Date.now()), text: S(input.text) } } },
+			},
+			"__discussion__",
+			5,
+		);
+		if (!ctx.wake) return `letter delivered to ${theirName}; they will read it on their next turn`;
+		return await ctx.wake(targetAgentId, chatId);
+	},
+};
+
+export function toolDefs(template: string, depth: number, allowAsk = false): ToolDef[] {
 	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read"]);
 	let defs = [...TOOLS, ...EVAL_TOOLS].map((t) => t.def);
+	if (template === "" && depth === 0 && allowAsk) defs.push(A2A_TOOL.def);
 	if (template === "explore") defs = defs.filter((d) => READ_ONLY.has(d.name));
 	const out = [...defs];
 	if (template === "installer") {
@@ -615,7 +688,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>,
 			ctx.submitResult(S(input.content));
 			return { content: "result submitted", isError: false };
 		}
-		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS].find((t) => t.def.name === name);
+		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS, A2A_TOOL].find((t) => t.def.name === name);
 		if (!tool) return { content: `unknown tool: ${name}`, isError: true };
 		const content = await tool.handler(input, ctx);
 		return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };
