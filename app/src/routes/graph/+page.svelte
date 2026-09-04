@@ -2,6 +2,7 @@
 	import { goto } from "$app/navigation";
 	import { page } from "$app/state";
 	import { buildGraph, simStep, type ObjectGraph } from "$lib/graph";
+	import { fetchObject } from "$lib/api";
 	import { activeSpace } from "$lib/space.svelte";
 	import { store, refreshAll } from "$lib/data.svelte";
 	import { createRenderer, createProgram } from "brometal";
@@ -98,6 +99,83 @@
 				labelHost!.appendChild(div);
 				labels.push(div);
 			}
+			// Type-neighborhood captions: one per anchor, always on.
+			const anchorLabels: HTMLDivElement[] = [];
+			for (const a of graph.anchors) {
+				const div = document.createElement("div");
+				div.className = "graph-anchor-label";
+				div.textContent = `${a.label} · ${a.count}`;
+				labelHost!.appendChild(div);
+				anchorLabels.push(div);
+			}
+			// ── Hover preview: a plain HTML card over the canvas - the
+			// object's fields and first blocks, fetched once and cached. ──
+			const card = document.createElement("div");
+			card.className = "graph-card";
+			card.style.display = "none";
+			labelHost!.appendChild(card);
+			const cardCache = new Map<string, string>();
+			let cardFor = -1;
+			let cardTimer: ReturnType<typeof setTimeout> | undefined;
+			const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+			const renderCard = async (id: string): Promise<string> => {
+				const hit = cardCache.get(id);
+				if (hit) return hit;
+				const o = await fetchObject(id);
+				const name = esc(o.fields["name"]?.stringValue || "Untitled");
+				const icon = esc(o.fields["iconEmoji"]?.stringValue ?? "");
+				const rows: string[] = [];
+				for (const [k, v] of Object.entries(o.fields)) {
+					if (["name", "iconEmoji", "channel", "collectionIds", "viewFilters", "viewSorts", "viewRelations", "pinnedIds", "setOf", "featuredRelations"].includes(k)) continue;
+					let val = "";
+					if (v.stringValue !== undefined) val = v.stringValue;
+					else if (v.boolValue !== undefined) val = v.boolValue ? "\u2611" : "\u2610";
+					else if (v.intValue !== undefined) val = new Date(v.intValue).getFullYear() > 1990 ? new Date(v.intValue).toLocaleDateString() : String(v.intValue);
+					else if (v.valuesValue) val = v.valuesValue.items.map((i) => i.stringValue ?? "").filter(Boolean).join(", ");
+					if (!val) continue;
+					rows.push(`<div class="gc-row"><span class="gc-k">${esc(k)}</span><span class="gc-v">${esc(val.slice(0, 60))}</span></div>`);
+					if (rows.length >= 4) break;
+				}
+				const byId = new Map(o.blocks.map((b) => [b.id, b]));
+				const skip = new Set(["__discussion__"]);
+				const lines: string[] = [];
+				const walk = (bid: string) => {
+					if (skip.has(bid) || lines.length >= 8) return;
+					const b = byId.get(bid);
+					if (!b) return;
+					const t = b.content.text;
+					if (t?.text?.trim()) {
+						const st = t.style ?? 0;
+						const cls = st >= 1 && st <= 3 ? "gc-h" : st === 8 ? "gc-check" : st === 6 || st === 7 ? "gc-li" : "gc-p";
+						const pre = st === 8 ? (t.checked ? "\u2611 " : "\u2610 ") : st === 6 ? "\u2022 " : "";
+						lines.push(`<div class="${cls}">${pre}${esc(t.text.slice(0, 90))}</div>`);
+					}
+					for (const c of b.childrenIds ?? []) walk(c);
+				};
+				const roots = o.blocks.filter((b) => !o.blocks.some((x) => (x.childrenIds ?? []).includes(b.id)));
+				for (const r of roots) walk(r.id);
+				const html = `<div class="gc-title">${icon ? icon + " " : ""}${name}</div>${rows.join("")}${lines.length ? `<div class="gc-body">${lines.join("")}</div>` : ""}`;
+				cardCache.set(id, html);
+				return html;
+			};
+			const showCard = (i: number) => {
+				clearTimeout(cardTimer);
+				if (i < 0) {
+					cardFor = -1;
+					card.style.display = "none";
+					return;
+				}
+				if (i === cardFor) return;
+				cardTimer = setTimeout(() => {
+					cardFor = i;
+					const node = graph.nodes[i];
+					void renderCard(node.id).then((html) => {
+						if (cardFor !== i) return;
+						card.innerHTML = html;
+						card.style.display = "block";
+					});
+				}, 260);
+			};
 
 			const cssSize = () => ({ w: canvasEl!.clientWidth, h: canvasEl!.clientHeight });
 
@@ -172,6 +250,7 @@
 				} else {
 					hovered = pick(e.offsetX, e.offsetY);
 					el.style.cursor = hovered >= 0 ? "pointer" : "grab";
+					showCard(hovered);
 				}
 			});
 			el.addEventListener("pointerup", (e) => {
@@ -234,9 +313,15 @@
 				nodes.uniforms.uViewport.set([w, h]);
 				nodes.draw();
 
-				// Labels: biggest nodes first, culled to the pool (Anytype: ≤100).
+				// Labels: on-screen nodes first, then biggest - a zoomed-in view
+				// must label what you can SEE, not the vault's heavyweights.
 				const order = graph.nodes
-					.map((node, i) => ({ i, r: node.radius + (i === hovered ? 100 : 0) + (i === focused ? 200 : 0) }))
+					.map((node, i) => {
+						const sx = (node.x - offsetX) * scale + w / 2;
+						const sy = (node.y - offsetY) * scale + h / 2;
+						const vis = sx >= -40 && sx <= w + 40 && sy >= -20 && sy <= h + 20 ? 1000 : 0;
+						return { i, r: vis + node.radius + (i === hovered ? 100 : 0) + (i === focused ? 200 : 0) };
+					})
 					.sort((a, b) => b.r - a.r);
 				for (const [li, div] of labels.entries()) {
 					const entry = order[li];
@@ -255,6 +340,29 @@
 					div.style.transform = `translate(${sx}px, ${sy}px) translateX(-50%)`;
 					div.textContent = node.name;
 					div.classList.toggle("hot", entry.i === hovered);
+				}
+				for (const [ai, div] of anchorLabels.entries()) {
+					const a = graph.anchors[ai];
+					// The caption floats above its neighborhood's top edge.
+					const spread = 40 + 11 * Math.sqrt(a.count);
+					const sx = (a.x - offsetX) * scale + w / 2;
+					const sy = (a.y - spread - offsetY) * scale + h / 2 - 22;
+					if (sx < -140 || sx > w + 140 || sy < -30 || sy > h + 30) {
+						div.style.display = "none";
+						continue;
+					}
+					div.style.display = "block";
+					div.style.transform = `translate(${sx}px, ${sy}px) translateX(-50%)`;
+				}
+				if (cardFor >= 0 && cardFor === hovered) {
+					const node = graph.nodes[cardFor];
+					const sx = (node.x - offsetX) * scale + w / 2;
+					const sy = (node.y - offsetY) * scale + h / 2;
+					const left = Math.min(Math.max(8, sx + 16), w - 268);
+					const top = Math.min(Math.max(8, sy - 20), h - 180);
+					card.style.transform = `translate(${left}px, ${top}px)`;
+				} else if (cardFor >= 0) {
+					showCard(-1);
 				}
 			});
 
@@ -317,6 +425,75 @@
 	:global(.graph-label.hot) {
 		color: var(--fg);
 		font-weight: 600;
+	}
+	:global(.graph-anchor-label) {
+		position: absolute;
+		top: 0;
+		left: 0;
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted);
+		white-space: nowrap;
+		text-shadow: 0 1px 4px rgb(0 0 0 / 0.9);
+		opacity: 0.85;
+	}
+	:global(.graph-card) {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 260px;
+		max-height: 300px;
+		overflow: hidden;
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 10px 12px;
+		box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+		font-size: 12px;
+		line-height: 1.45;
+		pointer-events: none;
+	}
+	:global(.graph-card .gc-title) {
+		font-size: 13px;
+		font-weight: 700;
+		color: var(--fg);
+		margin-bottom: 4px;
+	}
+	:global(.graph-card .gc-row) {
+		display: flex;
+		gap: 8px;
+	}
+	:global(.graph-card .gc-k) {
+		color: var(--muted);
+		flex: none;
+		max-width: 90px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	:global(.graph-card .gc-v) {
+		color: var(--fg);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	:global(.graph-card .gc-body) {
+		margin-top: 6px;
+		padding-top: 6px;
+		border-top: 1px solid var(--border);
+		color: var(--muted);
+	}
+	:global(.graph-card .gc-h) {
+		font-weight: 600;
+		color: var(--fg);
+	}
+	:global(.graph-card .gc-p),
+	:global(.graph-card .gc-li),
+	:global(.graph-card .gc-check) {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.status {
 		position: absolute;

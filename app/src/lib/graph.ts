@@ -26,9 +26,19 @@ export interface GraphEdge {
 	color: [number, number, number, number];
 }
 
+/** A type's home in the layout: nodes of that kind spring toward it. */
+export interface GraphAnchor {
+	kind: string;
+	label: string;
+	x: number;
+	y: number;
+	count: number;
+}
+
 export interface ObjectGraph {
 	nodes: GraphNode[];
 	edges: GraphEdge[];
+	anchors: GraphAnchor[];
 }
 
 const HIDDEN_KINDS: Record<string, true> = {
@@ -157,15 +167,69 @@ export async function buildGraph(channelId: string, isDefaultChannel: boolean): 
 		// Small flat dots (Anytype scale): channels stand out, degree adds a little.
 		n.radius = n.kind === "channel" ? 14 : 5 + 1.6 * Math.sqrt(degree[i]);
 	}
-	return { nodes, edges };
+
+	// ── Type clustering: every kind gets a home on a ring sized by the
+	// vault, so groups read as neighborhoods instead of one soup. ─────
+	const byKind = new Map<string, number[]>();
+	for (const [i, n] of nodes.entries()) {
+		const g = byKind.get(n.kind);
+		if (g) g.push(i);
+		else byKind.set(n.kind, [i]);
+	}
+	// Type display names (emoji + name) from this space's type objects.
+	const tdefs = new Map<string, string>();
+	try {
+		const tres = await fetchQuery({ type: "type", limit: 300 });
+		for (const t of tres.records) {
+			const key = t.fields["key"]?.stringValue;
+			if (!key) continue;
+			const label = [t.fields["iconEmoji"]?.stringValue, t.fields["name"]?.stringValue || key].filter(Boolean).join(" ");
+			tdefs.set(key, label);
+		}
+	} catch {
+		/* labels fall back to the raw kind */
+	}
+	// Each kind gets an arc proportional to its spread (sqrt of count),
+	// and big clusters are interleaved with small ones so heavyweights
+	// never crowd each other. The ring grows with the vault, so a large
+	// graph gets more room instead of higher density.
+	const sorted = [...byKind.entries()].sort((a, b) => b[1].length - a[1].length);
+	const kinds: typeof sorted = [];
+	for (let lo = 0, hi = sorted.length - 1; lo <= hi; lo++, hi--) {
+		kinds.push(sorted[lo]);
+		if (lo !== hi) kinds.push(sorted[hi]);
+	}
+	const weights = kinds.map(([, m]) => 24 + 11 * Math.sqrt(m.length));
+	const totalW = weights.reduce((a, b) => a + b, 0);
+	const R = Math.max(340, totalW / Math.PI * 0.75, 46 * Math.sqrt(nodes.length));
+	const anchors: GraphAnchor[] = [];
+	let acc = 0;
+	for (const [k, [kind, members]] of kinds.entries()) {
+		const angle = ((acc + weights[k] / 2) / totalW) * Math.PI * 2 - Math.PI / 2;
+		acc += weights[k];
+		const ax = Math.cos(angle) * R;
+		const ay = Math.sin(angle) * R;
+		anchors.push({ kind, label: tdefs.get(kind) ?? kind, x: ax, y: ay, count: members.length });
+		// Seed members inside their neighborhood - convergence is instant
+		// and clusters never have to untangle from a random soup.
+		const spread = 40 + 11 * Math.sqrt(members.length);
+		for (const [j, i] of members.entries()) {
+			const a = j * 2.399963;
+			const rr = spread * Math.sqrt(j / Math.max(1, members.length));
+			nodes[i].cluster = k;
+			nodes[i].x = ax + Math.cos(a) * rr;
+			nodes[i].y = ay + Math.sin(a) * rr;
+		}
+	}
+	return { nodes, edges, anchors };
 }
 
 /** One d3-force step in 2D (velocity Verlet, decay 0.6). */
 export function simStep(g: ObjectGraph, alpha: number, pinned = -1): void {
 	const CHARGE = -600;
-	const LINK_DIST = 130;
-	const CENTER = 0.008;
-	const CLUSTER = 0.04;
+	const LINK_DIST = 110;
+	const CENTER = 0.0015;
+	const CLUSTER = 0.14;
 
 	const n = g.nodes.length;
 	for (let i = 0; i < n; i++) {
@@ -189,7 +253,9 @@ export function simStep(g: ObjectGraph, alpha: number, pinned = -1): void {
 		const dx = b.x - a.x;
 		const dy = b.y - a.y;
 		const l = Math.max(Math.hypot(dx, dy), 1);
-		const f = ((l - LINK_DIST) / l) * alpha * 0.3;
+		// Weak links: an edge is a hint, the type neighborhood is the law -
+		// cross-type links must not collapse two clusters into each other.
+		const f = ((l - LINK_DIST) / l) * alpha * 0.05;
 		a.vx += dx * f * 0.5;
 		a.vy += dy * f * 0.5;
 		b.vx -= dx * f * 0.5;
@@ -198,9 +264,9 @@ export function simStep(g: ObjectGraph, alpha: number, pinned = -1): void {
 	for (const [i, node] of g.nodes.entries()) {
 		node.vx -= node.x * CENTER * alpha;
 		node.vy -= node.y * CENTER * alpha;
-		if (node.cluster >= 0) {
-			node.vx += (g.nodes[node.cluster].x - node.x) * CLUSTER * alpha;
-			node.vy += (g.nodes[node.cluster].y - node.y) * CLUSTER * alpha;
+		if (node.cluster >= 0 && g.anchors[node.cluster]) {
+			node.vx += (g.anchors[node.cluster].x - node.x) * CLUSTER * alpha;
+			node.vy += (g.anchors[node.cluster].y - node.y) * CLUSTER * alpha;
 		}
 		node.vx *= 0.6;
 		node.vy *= 0.6;
