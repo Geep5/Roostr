@@ -855,9 +855,6 @@
 {:else}
 <div class="shell" style="grid-template-columns: {railWide ? 236 : 56}px {sideWidth}px 1fr">
 	<nav class="vault" class:wide={railWide}>
-		<button class="rail-toggle" title={railWide ? "Collapse" : "Expand"} aria-label="Toggle space names" onclick={() => setRailWide(!railWide)}>
-			<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><line x1="9.5" y1="4" x2="9.5" y2="20"/></svg>
-		</button>
 		{#each orderedSpaces as c (c.id)}
 			<button
 				class="space"
@@ -1357,27 +1354,6 @@
 	.vault.wide {
 		align-items: stretch;
 		padding: 10px 8px;
-	}
-	.rail-toggle {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 28px;
-		height: 24px;
-		flex: none;
-		align-self: center;
-		border: none;
-		background: none;
-		border-radius: 7px;
-		color: var(--muted);
-		cursor: pointer;
-	}
-	.rail-toggle:hover {
-		background: var(--hover);
-		color: var(--fg);
-	}
-	.vault.wide .rail-toggle {
-		align-self: flex-end;
 	}
 	.rail-resize {
 		position: absolute;
