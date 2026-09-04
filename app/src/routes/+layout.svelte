@@ -841,7 +841,11 @@
 		{/each}
 		<button class="space add" title="New space" onclick={() => void newSpace()}>+</button>
 		<div class="rail-spacer"></div>
-		<button class="space settings" title="Settings" onclick={() => (showSettings = true)}>⚙</button>
+		<!-- Your identity opens Settings - the avatar when the profile has
+		     one, a person glyph otherwise (the gear lives inside). -->
+		<button class="space settings" title="Settings" onclick={() => (showSettings = true)}>
+			{#if profilePic}<img class="rail-avatar" src={profilePic} alt="" />{:else}<svg style="width:18px;height:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{/if}
+		</button>
 	</nav>
 
 	<aside class="widgets">
@@ -2363,5 +2367,12 @@
 	.prop-del-row .danger:hover:not(:disabled) {
 		background: var(--red);
 		color: #fff;
+	}
+	.rail-avatar {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		border-radius: 50%;
+		display: block;
 	}
 </style>
