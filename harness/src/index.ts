@@ -371,7 +371,33 @@ async function serve(): Promise<void> {
 		} catch {
 			return;
 		}
-		if (obj.typeKey === "chat" || obj.typeKey === "agent") return; // other agents' chats/brains
+		if (obj.typeKey === "chat") {
+			// A human posting into an A2A pair chat wakes BOTH participants
+			// for one answering turn each (sequential - the second sees the
+			// first's reply). Their answering turns carry no agent_ask.
+			const pairKey = str(obj.fields, "a2a_pair");
+			if (pairKey && lastMessageIsHuman(obj)) {
+				for (const pid of list(obj.fields, "participants")) {
+					let sp = served.get(pid);
+					if (!sp) {
+						try {
+							sp = await buildServedOne(pid, defaultChannelId);
+							served.set(pid, sp);
+						} catch {
+							continue;
+						}
+					}
+					// Fresh fetch each participant: the first answer must be
+					// pending for the second, not invisible in a stale copy.
+					const fresh = await fetchObject(objectId).catch(() => null);
+					if (!fresh) break;
+					const pend = await pendingMessages(fresh, sp.agentId);
+					if (pend.length > 0) await drive(sp, objectId, true);
+				}
+			}
+			return;
+		}
+		if (obj.typeKey === "agent") return; // other agents' brains
 		const channelId = objectId === defaultChannelId || obj.typeKey === "channel" ? objectId : str(obj.fields, "channel") || defaultChannelId;
 
 		// ── Bound agent takes its own object's surface, always. ──

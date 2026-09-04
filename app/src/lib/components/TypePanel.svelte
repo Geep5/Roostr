@@ -14,6 +14,17 @@
 
 	let { object, onchanged }: { object: ObjectJSON; onchanged: () => Promise<void> } = $props();
 
+	// ── Definition: what this type MEANS - agents read it. ──────────
+	let defDraft = $state("");
+	$effect(() => {
+		defDraft = fieldStr(object.fields, "description");
+	});
+	async function saveDef() {
+		if (defDraft.trim() === fieldStr(object.fields, "description")) return;
+		await note.setField(object.id, "description", { stringValue: defDraft.trim() });
+		await onchanged();
+	}
+
 	const layout = $derived(fieldStr(object.fields, "layout") || "page");
 	const defaultTemplateId = $derived(fieldStr(object.fields, "default_template_id"));
 
@@ -73,6 +84,7 @@
 </script>
 
 <div class="type-panel">
+	<textarea class="definition" placeholder="What is this type for? Agents read this." bind:value={defDraft} onblur={() => void saveDef()} rows="2"></textarea>
 	<div class="sec">
 		<div class="sec-name">Layout</div>
 		<div class="layouts">
@@ -210,5 +222,24 @@
 	.muted {
 		color: var(--muted);
 		font-size: 13px;
+	}
+	.definition {
+		width: 100%;
+		background: none;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		color: var(--fg);
+		font: inherit;
+		font-size: 13.5px;
+		padding: 6px 8px;
+		margin: 0 0 10px -8px;
+		resize: vertical;
+	}
+	.definition:hover {
+		border-color: var(--border);
+	}
+	.definition:focus {
+		border-color: var(--accent);
+		outline: none;
 	}
 </style>

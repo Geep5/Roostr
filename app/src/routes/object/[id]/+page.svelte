@@ -19,6 +19,7 @@
 	import SpaceManage from "$lib/components/SpaceManage.svelte";
 	import TypePanel from "$lib/components/TypePanel.svelte";
 	import PropertyPanel from "$lib/components/PropertyPanel.svelte";
+	import AgentBoard from "$lib/components/AgentBoard.svelte";
 	import EmojiPicker from "$lib/components/EmojiPicker.svelte";
 	import { objectIcon } from "$lib/icons";
 
@@ -349,6 +350,7 @@
 		<!-- Anytype: queries/collections (sets) carry no discussion. -->
 		{#if !isChannel && !isChat && !isAgent && !isType && !isTemplate && !isRelation && !isQuery && !isCollection}
 			<Discussion {object} onchanged={refresh} />
+			<AgentBoard {object} />
 		{/if}
 
 	</article>

@@ -291,7 +291,7 @@
 				for (const [i, node] of graph.nodes.entries()) {
 					centers[i * 2] = node.x;
 					centers[i * 2 + 1] = node.y;
-					flags[i] = i === hovered || i === focused ? 1 : 0;
+					flags[i] = i === hovered || i === focused ? 1 : node.hasAgent ? 0.5 : 0;
 				}
 				for (const [i, e] of graph.edges.entries()) {
 					starts[i * 2] = graph.nodes[e.a].x;

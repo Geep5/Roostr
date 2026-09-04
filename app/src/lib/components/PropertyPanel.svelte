@@ -6,12 +6,22 @@
 	 */
 	import type { ObjectJSON, ValueJSON } from "$lib/types";
 	import { fieldStr } from "$lib/types";
-	import { fetchQuery, type QueryResultRow, fetchAllQuery } from "$lib/api";
+	import { fetchQuery, note, type QueryResultRow, fetchAllQuery } from "$lib/api";
 	import { objectIcon } from "$lib/icons";
 	import { store } from "$lib/data.svelte";
 	import { currentSpaceId } from "$lib/relations";
 
 	let { object }: { object: ObjectJSON } = $props();
+
+	// ── Definition: what this property MEANS - agents read it. ──────
+	let defDraft = $state("");
+	$effect(() => {
+		defDraft = fieldStr(object.fields, "description");
+	});
+	async function saveDef() {
+		if (defDraft.trim() === fieldStr(object.fields, "description")) return;
+		await note.setField(object.id, "description", { stringValue: defDraft.trim() });
+	}
 
 	const key = $derived(fieldStr(object.fields, "key"));
 	const format = $derived(fieldStr(object.fields, "format") || "shorttext");
@@ -56,6 +66,7 @@
 </script>
 
 <div class="prop-panel">
+	<textarea class="definition" placeholder="What is this property for? Agents read this." bind:value={defDraft} onblur={() => void saveDef()} rows="2"></textarea>
 	<p class="meta">
 		<span class="chip">{format}</span>
 		{loaded ? `${rows.length} object${rows.length === 1 ? "" : "s"} with a value` : "Loading…"}
@@ -131,5 +142,24 @@
 	}
 	.muted {
 		color: var(--muted);
+	}
+	.definition {
+		width: 100%;
+		background: none;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		color: var(--fg);
+		font: inherit;
+		font-size: 13.5px;
+		padding: 6px 8px;
+		margin: 0 0 8px -8px;
+		resize: vertical;
+	}
+	.definition:hover {
+		border-color: var(--border);
+	}
+	.definition:focus {
+		border-color: var(--accent);
+		outline: none;
 	}
 </style>
