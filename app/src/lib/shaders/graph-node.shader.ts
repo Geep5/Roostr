@@ -20,8 +20,11 @@ export const GraphNode = shader({
 		v.vUv = aCorner;
 		v.vTint = iTint;
 		v.vFlags = iFlags;
-		const world = iCenter.add(aCorner.scale(iRadius * 1.25));
-		const screen = world.sub(uOffset).scale(uScale).add(uViewport.scale(0.5));
+		// Clamp the on-screen radius: zoomed way out, a node stays a
+		// visible dot instead of vanishing under its own caption.
+		const rpx = max(iRadius * uScale, 3);
+		const screenC = iCenter.sub(uOffset).scale(uScale).add(uViewport.scale(0.5));
+		const screen = screenC.add(aCorner.scale(rpx * 1.25));
 		const clipX = (screen.x / uViewport.x) * 2 - 1;
 		const clipY = 1 - (screen.y / uViewport.y) * 2;
 		return vec4(vec2(clipX, clipY), 0, 1);

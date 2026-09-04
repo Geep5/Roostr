@@ -27,8 +27,9 @@ fn vs_main(bm_in : BmVSIn) -> BmVSOut {
   bm_out.vUv = bm_in.aCorner;
   bm_out.vTint = bm_in.iTint;
   bm_out.vFlags = bm_in.iFlags;
-  let world = bm_in.iCenter + bm_in.aCorner * (bm_in.iRadius * 1.25);
-  let screen = (world - bm_u.uOffset) * bm_u.uScale + bm_u.uViewport * 0.5;
+  let rpx = max(bm_in.iRadius * bm_u.uScale, 3.0);
+  let screenC = (bm_in.iCenter - bm_u.uOffset) * bm_u.uScale + bm_u.uViewport * 0.5;
+  let screen = screenC + bm_in.aCorner * (rpx * 1.25);
   let clipX = screen.x / bm_u.uViewport.x * 2.0 - 1.0;
   let clipY = 1.0 - screen.y / bm_u.uViewport.y * 2.0;
   bm_out.bm_position = vec4f(vec2f(clipX, clipY), 0.0, 1.0);

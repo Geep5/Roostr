@@ -131,14 +131,15 @@
 				for (const [k, v] of Object.entries(o.fields)) {
 					if (["name", "iconEmoji", "channel", "collectionIds", "viewFilters", "viewSorts", "viewRelations", "pinnedIds", "setOf", "featuredRelations"].includes(k)) continue;
 					let val = "";
+					let valHtml = "";
 					if (v.stringValue !== undefined) val = v.stringValue;
-					else if (v.boolValue !== undefined) val = v.boolValue ? "\u2611" : "\u2610";
+					else if (v.boolValue !== undefined) valHtml = `<span class="gc-chk${v.boolValue ? " on" : ""}"></span>`;
 					else if (v.intValue !== undefined) val = new Date(v.intValue).getFullYear() > 1990 ? new Date(v.intValue).toLocaleDateString() : String(v.intValue);
 					else if (v.valuesValue) val = v.valuesValue.items.map((i) => i.stringValue ?? "").filter(Boolean).join(", ");
-					if (!val) continue;
+					if (!val && !valHtml) continue;
 					const def = defs.find((r) => r.key === k);
 					const label = def ? `${def.iconEmoji || formatGlyph(def.format)} ${def.name || k}` : k;
-					rows.push(`<div class="gc-row"><span class="gc-k">${esc(label)}</span><span class="gc-v">${esc(val.slice(0, 60))}</span></div>`);
+					rows.push(`<div class="gc-row"><span class="gc-k">${esc(label)}</span><span class="gc-v">${valHtml || esc(val.slice(0, 60))}</span></div>`);
 					if (rows.length >= 4) break;
 				}
 				const byId = new Map(o.blocks.map((b) => [b.id, b]));
@@ -152,7 +153,7 @@
 					if (t?.text?.trim()) {
 						const st = t.style ?? 0;
 						const cls = st >= 1 && st <= 3 ? "gc-h" : st === 8 ? "gc-check" : st === 6 || st === 7 ? "gc-li" : "gc-p";
-						const pre = st === 8 ? (t.checked ? "\u2611 " : "\u2610 ") : st === 6 ? "\u2022 " : "";
+						const pre = st === 8 ? `<span class="gc-chk${t.checked ? " on" : ""}"></span> ` : st === 6 ? "\u2022 " : "";
 						lines.push(`<div class="${cls}">${pre}${esc(t.text.slice(0, 90))}</div>`);
 					}
 					for (const c of b.childrenIds ?? []) walk(c);
@@ -195,7 +196,8 @@
 				let bestD = Infinity;
 				for (const [i, node] of graph.nodes.entries()) {
 					const d = Math.hypot(node.x - p.x, node.y - p.y);
-					if (d <= node.radius + 4 / scale && d < bestD) {
+					// The shader clamps dots to >=3px on screen - pick the same.
+					if (d <= Math.max(node.radius, 3 / scale) + 4 / scale && d < bestD) {
 						bestD = d;
 						best = i;
 					}
@@ -499,6 +501,28 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+	:global(.graph-card .gc-chk) {
+		display: inline-block;
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		border: 1.5px solid var(--muted);
+		vertical-align: -1px;
+		position: relative;
+	}
+	:global(.graph-card .gc-chk.on) {
+		background: var(--green);
+		border-color: var(--green);
+	}
+	:global(.graph-card .gc-chk.on)::after {
+		content: "\2713";
+		position: absolute;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -54%);
+		font-size: 9px;
+		color: #fff;
 	}
 	.status {
 		position: absolute;
