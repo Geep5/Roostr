@@ -221,6 +221,15 @@
 		}
 	}
 
+	let showTypePick = $state(false);
+
+	/** Retype the current object in place (blocks and fields survive). */
+	async function changeType(typeKey: string) {
+		if (!objectId) return;
+		await note.setType(objectId, typeKey);
+		await refreshAll();
+	}
+
 	async function moveToBin() {
 		if (!objectId) return;
 		await note.del(objectId);
@@ -605,6 +614,14 @@
 									{#if collections.length === 0}
 										<span class="menu-none">No collections in this space</span>
 									{/if}
+								</div>
+							{/if}
+							<button onclick={() => (showTypePick = !showTypePick)}>⇄ Change type ▸</button>
+							{#if showTypePick}
+								<div class="submenu">
+									{#each sidebarTypes.filter((t) => t.key !== objectSummary?.typeKey) as t (t.id)}
+										<button onclick={() => { showMore = false; showTypePick = false; void changeType(t.key); }}>{t.icon || typeGlyph(t.key)} {t.name || t.key}</button>
+									{/each}
 								</div>
 							{/if}
 							<button onclick={() => { showMore = false; void duplicateObject(); }}>⧉ Duplicate</button>
@@ -1061,6 +1078,14 @@
 										{/if}
 									</div>
 								{/if}
+								<button onclick={() => (showTypePick = !showTypePick)}>⇄ Change type ▸</button>
+								{#if showTypePick}
+									<div class="submenu">
+										{#each sidebarTypes.filter((t) => t.key !== objectSummary?.typeKey) as t (t.id)}
+											<button onclick={() => { showMore = false; showTypePick = false; void changeType(t.key); }}>{t.icon || typeGlyph(t.key)} {t.name || t.key}</button>
+										{/each}
+									</div>
+								{/if}
 								<button onclick={() => { showMore = false; void duplicateObject(); }}>⧉ Duplicate</button>
 								{#if owningSpaceOf(objectSummary.channelId)}
 									<button onclick={() => { showMore = false; void copyObjectLink(); }}>🔗 Copy link</button>
@@ -1075,7 +1100,7 @@
 		</header>
 
 {#if showMore || showCreate}
-	<button class="menu-backdrop" aria-label="Close menu" onclick={() => { showMore = false; showCollections = false; showCreate = false; }}></button>
+	<button class="menu-backdrop" aria-label="Close menu" onclick={() => { showMore = false; showCollections = false; showTypePick = false; showCreate = false; }}></button>
 {/if}
 		<main>{@render children()}</main>
 	</div>

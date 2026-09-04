@@ -516,6 +516,21 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 		}
 		ok_response(sock)
 
+	case "set_type":
+		object_id := json_str(parsed, "object_id")
+		type_key := json_str(parsed, "type_key")
+		if object_id == "" || type_key == "" {
+			respond_error(sock, "object_id and type_key required")
+			return
+		}
+		// Replay treats a later Object_Create as "set typeKey" - the
+		// object's history, blocks, and fields all survive a retype.
+		if !commit_ops(object_id, {Operation{kind = .Object_Create, type_key = type_key}}) {
+			respond_error(sock, "write failed", "500 Internal Server Error")
+			return
+		}
+		ok_response(sock)
+
 	case "delete":
 		object_id := json_str(parsed, "object_id")
 		if object_id == "" {

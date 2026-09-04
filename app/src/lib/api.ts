@@ -87,6 +87,8 @@ export const note = {
 	deleteField: (objectId: string, key: string) =>
 		mutate("delete_field", { object_id: objectId, key }),
 	del: (objectId: string) => mutate("delete", { object_id: objectId }),
+	/** Retype in place: history, blocks, and fields survive. */
+	setType: (objectId: string, typeKey: string) => mutate("set_type", { object_id: objectId, type_key: typeKey }),
 	vanish: (objectIds: string | string[]) =>
 		mutate("vanish", Array.isArray(objectIds) ? { object_ids: objectIds } : { object_id: objectIds }),
 };
