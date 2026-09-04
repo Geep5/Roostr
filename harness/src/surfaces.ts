@@ -101,7 +101,11 @@ export async function pendingMessages(obj: ObjectJSON, agentId: string): Promise
 	const msgs = chatBlocks(obj);
 	const mark = m[obj.id];
 
-	let startAfter = mark;
+	// A mark whose block was deleted must not freeze the surface: the scan
+	// below starts only once it meets `startAfter`, so an unresolvable mark
+	// leaves nothing pending forever - one deleted message and the agent is
+	// deaf on this object for good. Fall back to the fresh-surface seed.
+	let startAfter = mark !== undefined && msgs.some((x) => x.id === mark) ? mark : undefined;
 	if (startAfter === undefined) {
 		// Fresh surface: seed at the agent's own last message.
 		for (let i = msgs.length - 1; i >= 0; i--) {
