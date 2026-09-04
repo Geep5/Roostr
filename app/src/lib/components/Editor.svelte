@@ -542,6 +542,38 @@
 			if (e.key === "Escape") { e.preventDefault(); slash = null; return; }
 		}
 
+		// Anytype markdown (editor/page.tsx): a line of exactly ---, —-
+		// (em-dash typo tolerance), or *** becomes a divider on enter/space -
+		// *** gives dots, the rest a line. Our divider is a custom block
+		// (content_type "divider"): pure presentation, no proto changes.
+		async function convertToDivider(text: string): Promise<boolean> {
+			if (!["---", "—-", "***"].includes(text.trim())) return false;
+			if ((byId.get(id)?.content.text?.style ?? Style.PARAGRAPH) !== Style.PARAGRAPH) return false;
+			const style = text.trim() === "***" ? "dots" : "line";
+			const newId = crypto.randomUUID();
+			cancelPending(id);
+			lastLocalEdit = Date.now();
+			const para: BlockJSON = { id: newId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } };
+			flushSync(() => {
+				byId.get(id)!.content = { custom: { contentType: "divider", meta: { style } } };
+				localInsertAfter(para, id);
+			});
+			focusSync(newId, 0, id);
+			await persist(async () => {
+				await note.blockUpdate(object.id, id, { custom: { contentType: "divider", meta: { style } } });
+				await note.blockAdd(object.id, { id: newId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } }, id, Pos.BOTTOM);
+			});
+			return true;
+		}
+
+		if (e.key === " " && el) {
+			const { text } = fromDom(el);
+			if (["---", "—-", "***"].includes(text.trim())) {
+				e.preventDefault();
+				if (await convertToDivider(text)) return;
+			}
+		}
+
 		if (e.key === "Enter" && !e.shiftKey) {
 			// Anytype: Enter inside a code block inserts a newline, never splits
 			// (Shift+Enter splits nothing anywhere - both fall through to the
@@ -552,6 +584,7 @@
 			const { text, marks } = fromDom(el);
 			const at = sel?.from ?? text.length;
 			const curStyle = byId.get(id)?.content.text?.style ?? Style.PARAGRAPH;
+			if (await convertToDivider(text)) return;
 			const isList = curStyle === Style.BULLET || curStyle === Style.NUMBERED || curStyle === Style.CHECKBOX;
 			const isQuoteish = curStyle === Style.QUOTE || curStyle === Style.CALLOUT;
 
@@ -875,6 +908,21 @@
 			} else {
 				await note.blockUpdate(object.id, id, contentFor(id, clean, marks));
 				await table.create(object.id, id, Pos.BOTTOM);
+			}
+		} else if (pick.kind === "divider") {
+			// Empty block: it BECOMES the divider (a fresh paragraph below
+			// keeps the caret somewhere typeable). Otherwise the text stays
+			// and the divider lands below it - Anytype's table idiom.
+			const divider = { custom: { contentType: "divider", meta: { style: pick.style } } };
+			if (clean === "") {
+				const paraId = crypto.randomUUID();
+				await note.blockUpdate(object.id, id, divider);
+				await note.blockAdd(object.id, { id: paraId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } }, id, Pos.BOTTOM);
+				focusRequest = { blockId: paraId, offset: 0 };
+			} else {
+				await note.blockUpdate(object.id, id, contentFor(id, clean, marks));
+				await note.blockAdd(object.id, { id: crypto.randomUUID(), childrenIds: [], content: divider }, id, Pos.BOTTOM);
+				focusRequest = { blockId: id, offset: start };
 			}
 		} else if (pick.kind === "relation") {
 			await insertRelationBlock(id, clean, marks, pick.key);

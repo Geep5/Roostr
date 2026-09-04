@@ -11,6 +11,7 @@
 	export type SlashPick =
 		| { kind: "style"; value: number }
 		| { kind: "table" }
+		| { kind: "divider"; style: "line" | "dots" }
 		| { kind: "relation"; key: string }
 		| { kind: "property_add" }
 		| { kind: "link_object" };
@@ -55,6 +56,8 @@
 		{ section: "Lists", label: "Toggle", desc: "Collapsible content", preview: "▸", cls: "pv-list", aliases: ["toggle", "collapse"], pick: { kind: "style", value: Style.TOGGLE } },
 		{ section: "Other", label: "Code", desc: "Monospaced snippet", preview: "</>", cls: "pv-code", aliases: ["code", "snippet"], pick: { kind: "style", value: Style.CODE } },
 		{ section: "Other", label: "Table", desc: "3×3 simple table", preview: "⊞", cls: "pv-table", aliases: ["table", "grid"], pick: { kind: "table" } },
+		{ section: "Other", label: "Line divider", desc: "Horizontal line separator", preview: "—", cls: "pv-div", aliases: ["line", "divider", "hr", "---"], pick: { kind: "divider", style: "line" } },
+		{ section: "Other", label: "Dots divider", desc: "Three dots separator", preview: "···", cls: "pv-div", aliases: ["dots", "dot divider", "***"], pick: { kind: "divider", style: "dots" } },
 		// Anytype menuBlockAdd getBlockLink: "Link to existing page" (alias "link").
 		{ section: "Other", label: "Link to object", desc: "Embed a link to an existing object", preview: "🔗", cls: "pv-link", aliases: ["link", "object", "existing", "page"], pick: { kind: "link_object" } },
 	];

@@ -335,6 +335,57 @@
 				<button class="empty-toggle" onclick={() => onemptytoggle(block.id)}>Empty toggle. Click or drop Block inside</button>
 			{/if}
 		</div>
+	{:else if block.content.custom?.contentType === "divider"}
+		<!-- Anytype blockDiv: divLine = 1px rule, divDot = three accent dots.
+		     Zero-semantics presentation block; the wrapper keeps the full
+		     drag/select/menu machinery so it moves and deletes like any block. -->
+		<div
+			class="block block-div zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
+			data-block={block.id}
+			role="presentation"
+			ondragover={(e) => {
+				if (!draggingId || draggingId === block.id) return;
+				e.preventDefault();
+				zone = computeZone(e);
+			}}
+			ondragleave={() => (zone = 0)}
+			ondrop={(e) => {
+				e.preventDefault();
+				const z = zone;
+				zone = 0;
+				ondrop(block.id, z || Pos.BOTTOM);
+			}}
+			oncontextmenu={(e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				onmenu(block.id, e.clientX, e.clientY);
+			}}
+		>
+			<div class="gutter">
+				<button
+					class="handle"
+					title="Click for actions; drag to move"
+					draggable="true"
+					ondragstart={(e) => {
+						e.dataTransfer?.setData("text/plain", block.id);
+						ondragbegin(block.id);
+					}}
+					onclick={(e) => {
+						const r = e.currentTarget.getBoundingClientRect();
+						onmenu(block.id, r.right + 8, r.top);
+					}}
+				>
+					<svg viewBox="0 0 2 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M0 1C0 0.447716 0.447715 0 1 0C1.55228 0 2 0.447716 2 1C2 1.55228 1.55228 2 1 2C0.447715 2 0 1.55228 0 1ZM0 6C0 5.44772 0.447715 5 1 5C1.55228 5 2 5.44772 2 6C2 6.55228 1.55228 7 1 7C0.447715 7 0 6.55228 0 6ZM1 10C0.447715 10 0 10.4477 0 11C0 11.5523 0.447715 12 1 12C1.55228 12 2 11.5523 2 11C2 10.4477 1.55228 10 1 10Z" fill="currentColor" /></svg>
+				</button>
+			</div>
+			<div class="div-wrap">
+				{#if block.content.custom.meta?.["style"] === "dots"}
+					<span class="div-dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+				{:else}
+					<span class="div-line"></span>
+				{/if}
+			</div>
+		</div>
 	{:else if block.content.custom?.contentType === "relation"}
 		<div
 			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
@@ -891,5 +942,43 @@
 			   x = -2 - clipped at the screen edge. */
 			right: 2px;
 		}
+	}
+	/* Anytype .blockDiv: divLine 1px rule, divDot 2px accent dots 18px apart. */
+	.block-div .div-wrap {
+		flex: 1;
+		min-width: 0;
+		height: 16px;
+		position: relative;
+		text-align: center;
+	}
+	.div-line {
+		position: absolute;
+		top: 50%;
+		left: 0;
+		width: 100%;
+		height: 1px;
+		background: var(--border);
+	}
+	.div-dots {
+		position: absolute;
+		top: 50%;
+		left: 0;
+		width: 100%;
+		height: 2px;
+		margin-top: -1px;
+		white-space: nowrap;
+		line-height: 0;
+	}
+	.div-dots .dot {
+		display: inline-block;
+		vertical-align: top;
+		width: 2px;
+		height: 2px;
+		border-radius: 50%;
+		background: var(--accent);
+		margin-right: 18px;
+	}
+	.div-dots .dot:last-child {
+		margin-right: 0;
 	}
 </style>
