@@ -3,14 +3,15 @@
  * fact, never synced — an agent is "not ours" unless it was set up or
  * enabled here. Lives in GLON_DATA/harness.json next to auth.json.
  *
- * Presence is local too, and it is NOT written to the DAG. It used to be:
- * two setField calls per agent every 120s, each one a content-addressed
- * change on disk, an SSE broadcast to every client, a relay publish, and a
- * state invalidation that replayed the agent's whole history. An idle
- * machine spent all of its commits saying "still alive" - 47% of this
- * vault's 22k changes sat on five agent objects. The harness now answers
- * presence questions live on its own localhost surface (GET /agents),
- * which costs nothing and cannot fall behind.
+ * There is no presence signal at all, by choice. It used to be two setField
+ * calls per agent every 120s, each one a content-addressed change on disk,
+ * an SSE broadcast to every client, a relay publish, and a state
+ * invalidation that replayed the agent's whole history. An idle machine
+ * spent 100% of its commits saying "still alive" - 47% of this vault's 22k
+ * changes sat on five agent objects. Liveness cannot live in the DAG
+ * cheaply, and the DAG is the only source of truth this app reads, so the
+ * answer is not to report it. What this roster still says is narrower and
+ * durable: which agents this machine will serve.
  */
 
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";

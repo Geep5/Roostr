@@ -3,9 +3,10 @@
 	 * Agents section of space settings. Agents are space infrastructure
 	 * (like members), not objects OF the space — they're hidden from every
 	 * object surface and managed only here. You TALK to an agent through its
-	 * chat or any object's discussion; you MANAGE it here. Presence is live
-	 * from this machine's harness — an agent it serves is present, with no
-	 * heartbeat to age out; "runs here" is the same machine's roster.
+	 * chat or any object's discussion; you MANAGE it here. "Runs here" is
+	 * this machine's harness roster — the one local fact this panel needs.
+	 * There is no presence indicator: liveness is not in the DAG, and this
+	 * app shows what the DAG holds.
 	 */
 	import { onMount } from "svelte";
 	import EmojiPicker from "./EmojiPicker.svelte";
@@ -17,7 +18,6 @@
 	let { channelId }: { channelId: string } = $props();
 
 	const HARNESS = "http://127.0.0.1:7334";
-	const ONLINE_MS = 300_000; // two missed 120s heartbeats
 
 	interface SystemPart {
 		label: string;
@@ -30,16 +30,12 @@
 		name: string;
 		icon: string;
 		model: string;
-		seenAt: number;
-		host: string;
 		/** Responsible type keys; "*" = everything else. */
 		types: string[];
 		/** The editable base prompt (agent field `system`). */
 		system: string;
 		/** "configurator" marks the agent that rewrites the others in this space. */
 		role: string;
-		/** "working" while a turn is in flight, published by the serving harness. */
-		turnState: string;
 		/** What the harness last actually assembled and sent, section by section. */
 		effective: SystemPart[];
 		/** Object-bound agents: the object this agent belongs to. */
@@ -50,23 +46,7 @@
 
 	let agents = $state<AgentRow[]>([]);
 	let roster = $state<string[] | null>(null); // null = no local daemon
-	/**
-	 * Presence, live from this machine's harness rather than from synced
-	 * fields. An agent listed here IS running here, so there is nothing to
-	 * age out. Agents served by another machine are simply absent - the old
-	 * heartbeat fields are read as a fallback so a machine still running the
-	 * previous harness keeps showing up.
-	 */
-	interface PresenceRow {
-		id: string;
-		state: "idle" | "working" | "error";
-		detail: string;
-		ts: number;
-	}
-	let presence = $state<Record<string, PresenceRow>>({});
-	let presenceHost = $state("");
 
-	let now = $state(Date.now());
 	let assigning = $state(""); // agent id whose responsibility editor is open
 	let avatarPick = $state(""); // agent id whose avatar picker is open
 
@@ -92,12 +72,9 @@
 				name: r.fields["name"]?.stringValue || "Agent",
 				icon: r.fields["iconEmoji"]?.stringValue ?? "",
 				model: r.fields["model"]?.stringValue ?? "",
-				seenAt: r.fields["harness_seen_at"]?.intValue ?? 0,
-				host: r.fields["harness_host"]?.stringValue ?? "",
 				types: (r.fields["responsible_types"]?.valuesValue?.items ?? []).map((i) => i.stringValue ?? "").filter(Boolean),
 				system: r.fields["system"]?.stringValue ?? "",
 				role: r.fields["role"]?.stringValue ?? "",
-				turnState: r.fields["turn_state"]?.stringValue ?? "",
 				effective: parseEffective(r.fields["system_effective"]?.stringValue ?? ""),
 				bound: r.fields["bound_object"]?.stringValue ?? "",
 				boundName: "",
@@ -364,14 +341,9 @@
 	async function loadRoster() {
 		try {
 			const res = await fetch(`${HARNESS}/agents`);
-			const body = (await res.json()) as { roster: string[]; host?: string; presence?: PresenceRow[] };
-			roster = body.roster;
-			presenceHost = body.host ?? "";
-			presence = Object.fromEntries((body.presence ?? []).map((p) => [p.id, p]));
+			roster = ((await res.json()) as { roster: string[] }).roster;
 		} catch {
 			roster = null;
-			presence = {};
-			presenceHost = "";
 		}
 	}
 
@@ -417,18 +389,10 @@
 	onMount(() => {
 		void loadRoster();
 		void loadAuth();
-		// Presence is a cheap in-memory read on the local harness, so poll it
-		// briskly enough to show a turn starting; credentials are slower to
-		// check and only need to catch an expiry that lands while this is open.
-		const fast = setInterval(() => {
-			now = Date.now();
-			void loadRoster();
-		}, 3_000);
-		const slow = setInterval(() => void loadAuth(), 15_000);
-		return () => {
-			clearInterval(fast);
-			clearInterval(slow);
-		};
+		// Credentials can expire while this page is open; nothing else here
+		// changes on its own now that presence is gone.
+		const t = setInterval(() => void loadAuth(), 15_000);
+		return () => clearInterval(t);
 	});
 
 	$effect(() => {
@@ -486,13 +450,6 @@
 		});
 		await load();
 	}
-
-	function ago(ms: number): string {
-		const s = Math.floor((now - ms) / 1000);
-		if (s < 90) return `${s}s ago`;
-		if (s < 5400) return `${Math.round(s / 60)}m ago`;
-		return `${Math.round(s / 3600)}h ago`;
-	}
 </script>
 
 <h3>Agents</h3>
@@ -502,21 +459,15 @@
 </p>
 
 {#each spaceAgents as a (a.id)}
-	{@const here = presence[a.id]}
-	{@const online = here !== undefined || (a.seenAt > 0 && now - a.seenAt < ONLINE_MS)}
 	{@const runsHere = roster?.includes(a.id) ?? false}
 	{@const blocked = roster === null ? "" : authBlock(a.model)}
 	<div class="agent-wrap">
 		<div class="agent">
-			<span class="dot" class:online></span>
 			<!-- The agent's avatar: shows in chat next to its messages. -->
 			<button class="avatar-btn" title="Set avatar" onclick={() => (avatarPick = avatarPick === a.id ? "" : a.id)}>
 				{#if a.icon}{a.icon}{:else}🤖{/if}
 			</button>
 			<span class="name">{a.name}</span>
-			<span class="meta">
-				{#if here}{presenceHost || "here"}{#if here.state !== "idle"} · {here.state}{/if}{:else if online}{a.host || "online"} · {ago(a.seenAt)}{:else if a.seenAt > 0}last seen {ago(a.seenAt)}{:else}not running here{/if}
-			</span>
 			<button class="resp" class:unset={a.types.length === 0 && agents.length > 1} onclick={() => (assigning = assigning === a.id ? "" : a.id)}>
 				{describe(a)}
 			</button>
@@ -544,7 +495,6 @@
 			</p>
 		{/if}
 		{#if promptOpen === a.id}
-			{@const working = (here?.state ?? a.turnState) === "working"}
 			{@const draft = promptDraft[a.id] ?? a.system}
 			<div class="prompt">
 				<p class="hint">
@@ -553,14 +503,12 @@
 				</p>
 				<textarea
 					rows="8"
-					disabled={working}
 					placeholder="Empty — the agent uses the built-in default prompt."
 					value={draft}
 					oninput={(e) => (promptDraft[a.id] = (e.currentTarget as HTMLTextAreaElement).value)}
 				></textarea>
 				<div class="prompt-actions">
-					{#if working}<span class="hint-inline">Mid-turn — editing paused</span>{/if}
-					<button disabled={working || draft === a.system} onclick={() => void savePrompt(a)}>
+					<button disabled={draft === a.system} onclick={() => void savePrompt(a)}>
 						{promptSaved === a.id ? "Saved" : "Save prompt"}
 					</button>
 					{#if draft !== a.system}
@@ -779,28 +727,16 @@
 		color: var(--muted);
 		font-size: 11px;
 	}
-	.dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		background: var(--muted);
-		flex: none;
-	}
-	.dot.online {
-		background: #4caf78;
-	}
 	.name {
 		color: var(--fg);
 		font-weight: 600;
+		/* Takes the slack the presence label used to hold, so the controls
+		   stay right-aligned. */
+		flex: 1;
 	}
 	button.danger:hover {
 		border-color: #e05555;
 		color: #e05555;
-	}
-	.meta {
-		color: var(--muted);
-		font-size: 12px;
-		flex: 1;
 	}
 	button {
 		background: none;
@@ -852,11 +788,6 @@
 		align-items: center;
 		gap: 8px;
 		margin: 6px 0 10px;
-	}
-	.hint-inline {
-		color: var(--orange);
-		font-size: 11.5px;
-		margin-right: auto;
 	}
 	.prompt .subtle {
 		border-color: transparent;

@@ -8,7 +8,7 @@
 import { SimplePool, finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
-import { agentTurnStatus, presenceSnapshot } from "./index";
+import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
 import { clearHoldup, disableSkill, enableSkill, listHoldups, recheckSkill, skillStatus, uninstallSkill, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { fetchObject, str } from "./api";
@@ -148,11 +148,7 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					return json({ agents: [...agentTurnStatus.values()] });
 				}
 				if (req.method === "GET" && url.pathname === "/agents") {
-					// Presence rides along: the settings panel already fetches this
-					// on a tick, and an agent served here IS present - which is why
-					// nothing heartbeats into the DAG any more.
-					const p = presenceSnapshot();
-					return json({ roster: await readRoster(), serving: [...served], host: p.host, startedAt: p.startedAt, presence: p.agents });
+					return json({ roster: await readRoster(), serving: [...served] });
 				}
 				if (req.method === "POST" && url.pathname === "/agents/toggle") {
 					const body = (await req.json()) as { id?: string; enabled?: boolean };

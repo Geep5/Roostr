@@ -14,7 +14,6 @@
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
-import { hostname } from "node:os";
 import { API, chatPost, fetchObject, list, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
 import type { ObjectJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
@@ -68,7 +67,12 @@ interface Served {
 	icon: string;
 }
 
-/** Live per-agent turn state, served to the discussion UI via /agent/status. */
+/**
+ * Live per-agent turn state, served to the discussion UI via /agent/status
+ * so an open conversation can show the agent composing. In memory only: the
+ * DAG is the single source of truth for everything that outlives a turn, and
+ * this outlives nothing.
+ */
 export interface AgentTurnStatus {
 	id: string;
 	name: string;
@@ -82,27 +86,6 @@ export interface AgentTurnStatus {
 }
 
 export const agentTurnStatus = new Map<string, AgentTurnStatus>();
-
-/**
- * Presence, answered live instead of mirrored into the DAG.
- *
- * An agent served here IS present - there is nothing to time out, so no
- * heartbeat and no `harness_seen_at`. `state` comes from the same map the
- * discussion UI already reads. Remote clients cannot reach this surface and
- * therefore no longer see presence for agents another machine serves; that
- * display was the only thing the synced heartbeat bought, and it cost every
- * idle machine a commit per agent per two minutes.
- */
-export interface Presence {
-	host: string;
-	startedAt: number;
-	agents: AgentTurnStatus[];
-}
-
-const harnessStartedAt = Date.now();
-
-/** Replaced by serve() with a closure over the live `served` map. */
-export let presenceSnapshot: () => Presence = () => ({ host: hostname(), startedAt: harnessStartedAt, agents: [] });
 
 /** Unassigned (pre-channel) objects live in the default channel — UI rule. */
 let defaultChannelId = "";
@@ -514,25 +497,6 @@ async function serve(): Promise<void> {
 			minting.delete(objectId);
 		}
 	}
-
-	// Presence answers from the live `served` map, so it can never be stale
-	// and costs nothing when nobody asks.
-	presenceSnapshot = () => ({
-		host: hostname(),
-		startedAt: harnessStartedAt,
-		agents: [...served.values()].map(
-			(s) =>
-				agentTurnStatus.get(s.agentId) ?? {
-					id: s.agentId,
-					name: s.name,
-					icon: s.icon,
-					state: "idle" as const,
-					surface: "",
-					detail: "",
-					ts: harnessStartedAt,
-				},
-		),
-	});
 
 	startAuthServer(agents, (next) => {
 		agents.clear();
