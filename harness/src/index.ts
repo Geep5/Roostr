@@ -22,7 +22,7 @@ import { convergeCatalogScope } from "./skillmgr";
 import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled, syncHeartbeats } from "./roster";
 import { startNostrSync, vanishOnRelays } from "./nostrsync";
-import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, pendingMessages, setMark } from "./surfaces";
+import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);
@@ -203,7 +203,7 @@ async function serve(): Promise<void> {
 		const last = msgs[msgs.length - 1].block.content.custom?.meta ?? {};
 		if (last["origin"]) return false;
 		const author = last["author"] ?? "";
-		return !/^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(author); // uuid author = an agent
+		return !isAgentAuthor(author);
 	}
 
 	/** Object ids with a mint in flight. Claimed synchronously by the caller,
@@ -369,7 +369,13 @@ async function serve(): Promise<void> {
 		if (explicit) return explicit;
 		const rest = inChannel.find((s) => s.types.includes("*"));
 		if (rest) return rest;
-		if (inChannel.length === 1 && inChannel[0].types.length === 0) return inChannel[0];
+		// A bound agent speaks for its own object, never for the space. When it
+		// was the only agent served here, this fallback handed it every new
+		// object in the space - so a person's agent answered a fresh task, and
+		// the task never got the agent of its own that minting would have given
+		// it. Two machines each with a different lone agent then answered the
+		// same task, and the pair talked past the human in their own thread.
+		if (inChannel.length === 1 && inChannel[0].types.length === 0 && !inChannel[0].bound) return inChannel[0];
 		return undefined;
 	}
 

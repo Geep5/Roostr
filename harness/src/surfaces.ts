@@ -91,10 +91,21 @@ export function chatBlocks(obj: ObjectJSON): Array<{ id: string; block: BlockJSO
 	return out;
 }
 
+/** A uuid author is an agent; anything else is a human's pubkey. */
+export function isAgentAuthor(author: string): boolean {
+	return /^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(author);
+}
+
 /**
  * Unhandled user messages on a surface, oldest first. Origin-tagged copies
  * (already ingested from another surface) never count. Seeding rules per
  * the bridge's seed_mark.
+ *
+ * An object's discussion is human-to-agent only: another agent's post there
+ * never wakes this one. Two agents driven onto one object otherwise answer
+ * each other forever, each seeing the other's reply as a new question, and
+ * the human's thread fills with agent chatter. Agent-to-agent exchanges
+ * belong in a pair chat, which is a `chat` object and keeps both authors.
  */
 export async function pendingMessages(obj: ObjectJSON, agentId: string): Promise<PendingMessage[]> {
 	const m = await loadMarks();
@@ -127,6 +138,7 @@ export async function pendingMessages(obj: ObjectJSON, agentId: string): Promise
 		const author = meta["author"] ?? "";
 		if (author === agentId) continue;
 		if (meta["origin"]) continue; // ingested copy, handled with its origin surface
+		if (obj.typeKey !== "chat" && isAgentAuthor(author)) continue;
 		pending.push({ blockId: id, author, text: meta["text"] ?? "" });
 	}
 
