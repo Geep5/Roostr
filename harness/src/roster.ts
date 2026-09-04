@@ -2,15 +2,18 @@
  * Local roster: which agents THIS machine serves. Assignment is a local
  * fact, never synced — an agent is "not ours" unless it was set up or
  * enabled here. Lives in GLON_DATA/harness.json next to auth.json.
- * Heartbeat fields on the agent object (harness_seen_at / harness_host)
- * are written only for presence display on other devices.
+ *
+ * Presence is local too, and it is NOT written to the DAG. It used to be:
+ * two setField calls per agent every 120s, each one a content-addressed
+ * change on disk, an SSE broadcast to every client, a relay publish, and a
+ * state invalidation that replayed the agent's whole history. An idle
+ * machine spent all of its commits saying "still alive" - 47% of this
+ * vault's 22k changes sat on five agent objects. The harness now answers
+ * presence questions live on its own localhost surface (GET /agents),
+ * which costs nothing and cannot fall behind.
  */
 
-import { hostname } from "node:os";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { iv, setField, sv } from "./api";
-
-const HEARTBEAT_MS = 120_000;
 
 interface RosterFile {
 	version: 1;
@@ -47,30 +50,3 @@ export async function setEnabled(agentId: string, enabled: boolean): Promise<str
 	return next;
 }
 
-// ── Presence heartbeat ───────────────────────────────────────────
-
-const beating = new Map<string, ReturnType<typeof setInterval>>();
-
-async function beat(agentId: string): Promise<void> {
-	try {
-		await setField(agentId, "harness_seen_at", iv(Date.now()));
-		await setField(agentId, "harness_host", sv(hostname()));
-	} catch {
-		/* server down — next tick retries */
-	}
-}
-
-/** Start/refresh heartbeats for exactly the given agents. */
-export function syncHeartbeats(agentIds: Set<string>): void {
-	for (const [id, timer] of beating) {
-		if (!agentIds.has(id)) {
-			clearInterval(timer);
-			beating.delete(id);
-		}
-	}
-	for (const id of agentIds) {
-		if (beating.has(id)) continue;
-		void beat(id);
-		beating.set(id, setInterval(() => void beat(id), HEARTBEAT_MS));
-	}
-}

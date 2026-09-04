@@ -4,14 +4,14 @@
  *   - mid-run overflow → compact → retry
  *   - steering: the view is rebuilt from a fresh fetch every iteration, so
  *     user messages that land mid-run are drained naturally
- *   - OMP lift: token-ratio calibration from actual API usage, persisted
- *     on the agent object (token_ratio field)
+ *   - OMP lift: token-ratio calibration from actual API usage, kept in
+ *     memory on the machine that measured it
  * System prompt assembly (buildEffectiveSystem): base system field +
  * <conversation-summary> + memory digest + skills listing + channel
  * instructions.
  */
 
-import { addBlock, chatPost, fetchObject, flag, fv, iv, num, setField, str, sv, type ObjectJSON } from "./api";
+import { addBlock, chatPost, fetchObject, flag, iv, num, setField, str, sv, type ObjectJSON } from "./api";
 import { boundObjectContext } from "./spacemap";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
@@ -65,8 +65,19 @@ create, and organize objects; use memory_* tools to pin durable facts and
 milestones. Be concise and concrete. When a listed skill matches the task,
 read it with skill_read before starting.`;
 
+/**
+ * Chars-per-token calibration, per agent, in memory only.
+ *
+ * It used to be a `token_ratio` field on the agent object: one permanent,
+ * replicated commit per turn to store a smoothed float that only this
+ * machine's provider mix justifies. Each turn recalibrates from actual
+ * usage at weight 0.5, so a restart costs at most one turn of slightly
+ * coarse estimation - and estimation only sizes the context window.
+ */
+const tokenRatios = new Map<string, number>();
+
 function tokenRatio(obj: ObjectJSON): number {
-	return num(obj.fields, "token_ratio") ?? 1;
+	return tokenRatios.get(obj.id) ?? 1;
 }
 
 async function persistToolUse(convId: string, use: { id: string; name: string; input: Record<string, unknown> }): Promise<void> {
@@ -160,13 +171,18 @@ async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts:
  * model receives — including the sections it could never derive itself (the
  * device note depends on which machine has which skills installed).
  *
- * Written only when the text changes, which in practice means when someone
- * edits the prompt, installs a skill, edits space instructions, or a
- * compaction lands. Steady state costs nothing.
+ * Written only when the prompt CONTENT changes, which in practice means
+ * someone edited the prompt, installed a skill, edited space instructions,
+ * or a compaction landed. Steady state costs nothing.
+ *
+ * The hash deliberately ignores the token estimates carried in the payload:
+ * they are derived from a calibration that drifts with every turn's measured
+ * usage, so hashing them rewrote both fields on turns where the prompt was
+ * byte-identical.
  */
 async function publishSystemParts(agentId: string, parts: SystemPart[], ratio: number): Promise<void> {
 	const payload = JSON.stringify(parts.map((p) => ({ ...p, tokens: estimateTokens(p.text, ratio) })));
-	const hash = Bun.hash(payload).toString(16);
+	const hash = Bun.hash(JSON.stringify(parts.map((p) => [p.label, p.text]))).toString(16);
 	const agent = await fetchObject(agentId);
 	if (str(agent.fields, "system_effective_hash") === hash) return;
 	await setField(agentId, "system_effective", sv(payload));
@@ -263,7 +279,7 @@ export async function runTurn(agentId: string, convId: string, opts: RunOptions 
 			if (estimated > 0) {
 				const newRatio = Math.min(3, Math.max(0.5, res.inputTokens / estimated));
 				const smoothed = ratio * 0.5 + newRatio * 0.5;
-				await setField(agentId, "token_ratio", fv(Math.round(smoothed * 100) / 100));
+				tokenRatios.set(agentId, Math.round(smoothed * 100) / 100);
 			}
 		}
 

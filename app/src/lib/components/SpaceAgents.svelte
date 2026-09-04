@@ -3,9 +3,9 @@
 	 * Agents section of space settings. Agents are space infrastructure
 	 * (like members), not objects OF the space — they're hidden from every
 	 * object surface and managed only here. You TALK to an agent through its
-	 * chat or any object's discussion; you MANAGE it here. Presence comes
-	 * from the synced heartbeat fields; "runs here" is this machine's
-	 * harness roster.
+	 * chat or any object's discussion; you MANAGE it here. Presence is live
+	 * from this machine's harness — an agent it serves is present, with no
+	 * heartbeat to age out; "runs here" is the same machine's roster.
 	 */
 	import { onMount } from "svelte";
 	import EmojiPicker from "./EmojiPicker.svelte";
@@ -50,6 +50,21 @@
 
 	let agents = $state<AgentRow[]>([]);
 	let roster = $state<string[] | null>(null); // null = no local daemon
+	/**
+	 * Presence, live from this machine's harness rather than from synced
+	 * fields. An agent listed here IS running here, so there is nothing to
+	 * age out. Agents served by another machine are simply absent - the old
+	 * heartbeat fields are read as a fallback so a machine still running the
+	 * previous harness keeps showing up.
+	 */
+	interface PresenceRow {
+		id: string;
+		state: "idle" | "working" | "error";
+		detail: string;
+		ts: number;
+	}
+	let presence = $state<Record<string, PresenceRow>>({});
+	let presenceHost = $state("");
 
 	let now = $state(Date.now());
 	let assigning = $state(""); // agent id whose responsibility editor is open
@@ -349,9 +364,14 @@
 	async function loadRoster() {
 		try {
 			const res = await fetch(`${HARNESS}/agents`);
-			roster = ((await res.json()) as { roster: string[] }).roster;
+			const body = (await res.json()) as { roster: string[]; host?: string; presence?: PresenceRow[] };
+			roster = body.roster;
+			presenceHost = body.host ?? "";
+			presence = Object.fromEntries((body.presence ?? []).map((p) => [p.id, p]));
 		} catch {
 			roster = null;
+			presence = {};
+			presenceHost = "";
 		}
 	}
 
@@ -397,13 +417,18 @@
 	onMount(() => {
 		void loadRoster();
 		void loadAuth();
-		// The same tick that ages the presence labels re-checks credentials,
-		// so an expiry that lands while this page is open shows up.
-		const t = setInterval(() => {
+		// Presence is a cheap in-memory read on the local harness, so poll it
+		// briskly enough to show a turn starting; credentials are slower to
+		// check and only need to catch an expiry that lands while this is open.
+		const fast = setInterval(() => {
 			now = Date.now();
-			void loadAuth();
-		}, 15_000);
-		return () => clearInterval(t);
+			void loadRoster();
+		}, 3_000);
+		const slow = setInterval(() => void loadAuth(), 15_000);
+		return () => {
+			clearInterval(fast);
+			clearInterval(slow);
+		};
 	});
 
 	$effect(() => {
@@ -477,7 +502,8 @@
 </p>
 
 {#each spaceAgents as a (a.id)}
-	{@const online = a.seenAt > 0 && now - a.seenAt < ONLINE_MS}
+	{@const here = presence[a.id]}
+	{@const online = here !== undefined || (a.seenAt > 0 && now - a.seenAt < ONLINE_MS)}
 	{@const runsHere = roster?.includes(a.id) ?? false}
 	{@const blocked = roster === null ? "" : authBlock(a.model)}
 	<div class="agent-wrap">
@@ -489,7 +515,7 @@
 			</button>
 			<span class="name">{a.name}</span>
 			<span class="meta">
-				{#if online}{a.host || "online"} · {ago(a.seenAt)}{:else if a.seenAt > 0}last seen {ago(a.seenAt)}{:else}never ran{/if}
+				{#if here}{presenceHost || "here"}{#if here.state !== "idle"} · {here.state}{/if}{:else if online}{a.host || "online"} · {ago(a.seenAt)}{:else if a.seenAt > 0}last seen {ago(a.seenAt)}{:else}not running here{/if}
 			</span>
 			<button class="resp" class:unset={a.types.length === 0 && agents.length > 1} onclick={() => (assigning = assigning === a.id ? "" : a.id)}>
 				{describe(a)}
@@ -518,7 +544,7 @@
 			</p>
 		{/if}
 		{#if promptOpen === a.id}
-			{@const working = a.turnState === "working"}
+			{@const working = (here?.state ?? a.turnState) === "working"}
 			{@const draft = promptDraft[a.id] ?? a.system}
 			<div class="prompt">
 				<p class="hint">

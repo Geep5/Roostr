@@ -14,13 +14,14 @@
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
+import { hostname } from "node:os";
 import { API, chatPost, fetchObject, list, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
 import type { ObjectJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { convergeCatalogScope } from "./skillmgr";
 import { startAuthServer } from "./authserver";
-import { readRoster, setEnabled, syncHeartbeats } from "./roster";
+import { readRoster, setEnabled } from "./roster";
 import { startNostrSync, vanishOnRelays } from "./nostrsync";
 import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
 
@@ -81,6 +82,27 @@ export interface AgentTurnStatus {
 }
 
 export const agentTurnStatus = new Map<string, AgentTurnStatus>();
+
+/**
+ * Presence, answered live instead of mirrored into the DAG.
+ *
+ * An agent served here IS present - there is nothing to time out, so no
+ * heartbeat and no `harness_seen_at`. `state` comes from the same map the
+ * discussion UI already reads. Remote clients cannot reach this surface and
+ * therefore no longer see presence for agents another machine serves; that
+ * display was the only thing the synced heartbeat bought, and it cost every
+ * idle machine a commit per agent per two minutes.
+ */
+export interface Presence {
+	host: string;
+	startedAt: number;
+	agents: AgentTurnStatus[];
+}
+
+const harnessStartedAt = Date.now();
+
+/** Replaced by serve() with a closure over the live `served` map. */
+export let presenceSnapshot: () => Presence = () => ({ host: hostname(), startedAt: harnessStartedAt, agents: [] });
 
 /** Unassigned (pre-channel) objects live in the default channel — UI rule. */
 let defaultChannelId = "";
@@ -239,7 +261,6 @@ async function serve(): Promise<void> {
 		// would be served by nobody after the next restart.
 		agents.add(id);
 		await setEnabled(id, true);
-		syncHeartbeats(agents);
 		console.log(`[harness] minted agent for "${name}" (${obj.id.slice(0, 8)}) → ${id.slice(0, 8)}`);
 		return id;
 	}
@@ -314,15 +335,13 @@ async function serve(): Promise<void> {
 		}
 		busy.add(s.agentId);
 		active.set(s.agentId, surfaceId);
-		// Local status drives /agent/status; the same transition is written to
-		// the agent object so remote clients (which cannot reach this
-		// machine's harness) can tell a turn is in flight — e.g. to disable
-		// prompt editing while the agent is mid-run.
+		// Turn state is local: /agents and /agent/status read this map. It used
+		// to be mirrored onto the agent object for remote clients, at two or
+		// three permanent commits per turn; a local surface answers the same
+		// question for free, and only the machine running the turn can answer
+		// it truthfully anyway.
 		const report = (state: "idle" | "working" | "error", detail = "") => {
 			agentTurnStatus.set(s.agentId, { id: s.agentId, name: s.name, icon: s.icon, state, surface: surfaceId, detail, ts: Date.now() });
-			void setField(s.agentId, "turn_state", sv(state)).catch(() => {
-				/* server down; the next transition re-reports */
-			});
 		};
 		report("working");
 		try {
@@ -496,10 +515,28 @@ async function serve(): Promise<void> {
 		}
 	}
 
+	// Presence answers from the live `served` map, so it can never be stale
+	// and costs nothing when nobody asks.
+	presenceSnapshot = () => ({
+		host: hostname(),
+		startedAt: harnessStartedAt,
+		agents: [...served.values()].map(
+			(s) =>
+				agentTurnStatus.get(s.agentId) ?? {
+					id: s.agentId,
+					name: s.name,
+					icon: s.icon,
+					state: "idle" as const,
+					surface: "",
+					detail: "",
+					ts: harnessStartedAt,
+				},
+		),
+	});
+
 	startAuthServer(agents, (next) => {
 		agents.clear();
 		for (const id of next) agents.add(id);
-		syncHeartbeats(agents);
 		void buildServed(agents).then((next) => {
 			served = next;
 			for (const s of served.values()) {
@@ -518,7 +555,7 @@ async function serve(): Promise<void> {
 		});
 	});
 	console.log(`[harness] serving ${agents.size} agent(s): ${[...agents].map((a) => a.slice(0, 8)).join(", ") || "(none — enable one from an agent page)"}`);
-	syncHeartbeats(agents);
+
 	// Catch up on chat messages that arrived while the harness was down.
 	// (Origin surfaces catch up on their next event.)
 	// Publishing the prompt here rather than only mid-turn is what lets a
