@@ -13,7 +13,7 @@
 	import { tagStyle } from "$lib/options";
 	import CheckboxIcon from "./CheckboxIcon.svelte";
 	import { fetchQuery, note, type QueryResultRow } from "$lib/api";
-	import { store } from "$lib/data.svelte";
+	import { store, layoutOf } from "$lib/data.svelte";
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
 	import { fieldStr } from "$lib/types";
 	import { objectIcon } from "$lib/icons";
@@ -298,6 +298,14 @@
 		void load();
 	});
 
+	/** Task-layout rows show a checkbox instead of the icon (Anytype task
+	 * layout): clicking toggles the bundled `done` relation in place. */
+	async function toggleDone(r: QueryResultRow, e: MouseEvent) {
+		e.stopPropagation();
+		await note.setField(r.id, "done", { boolValue: !(r.fields["done"]?.boolValue === true) });
+		await reload();
+	}
+
 	export function reload(): Promise<void> {
 		return load();
 	}
@@ -438,7 +446,15 @@
 		<tbody>
 			{#each rows as r (r.id)}
 				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} onmousedown={(e) => onRowMouseDown(e, r.id)} onmouseenter={() => onRowEnter(r.id)} oncontextmenu={(e) => onRowContext(e, r.id)}>
-					<td class="name"><span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span> {fieldStr(r.fields, "name") || "Untitled"}</td>
+					<td class="name">
+						{#if layoutOf(r.typeKey) === "task"}
+							<button class="task-check" class:on={r.fields["done"]?.boolValue === true} aria-label="done" onclick={(e) => void toggleDone(r, e)}>
+								<CheckboxIcon checked={r.fields["done"]?.boolValue === true} size={18} />
+							</button>
+						{:else}
+							<span class="row-icon">{objectIcon(r.fields["iconEmoji"]?.stringValue, r.typeKey)}</span>
+						{/if}
+						{fieldStr(r.fields, "name") || "Untitled"}</td>
 					{#each columns as c (c)}
 						{#if isEditable(c)}
 							{@const rel = relations.find((x) => x.key === c)}
@@ -758,5 +774,23 @@
 	.head-icon {
 		margin-right: 5px;
 		font-size: 12px;
+	}
+	.task-check {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		vertical-align: -4px;
+		margin-right: 6px;
+		padding: 0;
+		border: none;
+		background: none;
+		color: var(--muted);
+		cursor: pointer;
+	}
+	.task-check:hover {
+		color: var(--fg);
+	}
+	.task-check.on {
+		color: var(--accent);
 	}
 </style>
