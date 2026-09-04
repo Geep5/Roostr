@@ -496,19 +496,23 @@
 		railWide = v;
 		localStorage.setItem("rail-wide", v ? "1" : "0");
 	}
-	/** Dragging the rail's edge past the threshold snaps it open/closed. */
+	/** The rail gutter: a plain click toggles; a drag past the threshold
+	 * snaps open/closed. Both land in the same two states. */
 	function railResizeStart(e: PointerEvent) {
 		e.preventDefault();
 		const startX = e.clientX;
 		const startWide = railWide;
+		let moved = false;
 		const move = (ev: PointerEvent) => {
 			const dx = ev.clientX - startX;
-			if (!startWide && dx > 48) setRailWide(true);
-			else if (startWide && dx < -48) setRailWide(false);
+			if (Math.abs(dx) > 4) moved = true;
+			if (!startWide && dx > 40) setRailWide(true);
+			else if (startWide && dx < -40) setRailWide(false);
 		};
 		const up = () => {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", up);
+			if (!moved) setRailWide(!startWide);
 		};
 		window.addEventListener("pointermove", move);
 		window.addEventListener("pointerup", up);
@@ -1349,7 +1353,6 @@
 		margin: 6px 0 6px 6px;
 		background: var(--panel);
 		border-radius: 16px;
-		overflow: hidden;
 	}
 	.vault.wide {
 		align-items: stretch;
@@ -1380,11 +1383,28 @@
 		position: absolute;
 		top: 0;
 		bottom: 0;
-		right: 0;
-		width: 7px;
+		right: -8px;
+		width: 15px;
 		cursor: col-resize;
-		z-index: 40;
+		z-index: 60;
 		touch-action: none;
+	}
+	/* Hover affordance: a soft vertical bar in the gutter. */
+	.rail-resize::after {
+		content: "";
+		position: absolute;
+		top: 10px;
+		bottom: 10px;
+		left: 6px;
+		width: 3px;
+		border-radius: 3px;
+		background: var(--hover);
+		opacity: 0;
+		transition: opacity 0.12s ease;
+	}
+	.rail-resize:hover::after,
+	.rail-resize:active::after {
+		opacity: 1;
 	}
 	.space {
 		display: flex;
