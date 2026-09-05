@@ -251,6 +251,12 @@
 			if (page.params.id === id) discussionUI.convCount = rows.length + 1;
 		});
 	});
+	let drawerTop = $state(0);
+	$effect(() => {
+		if (!discussionUI.open) return;
+		const h = document.querySelector(".main-col > header");
+		drawerTop = h ? Math.max(0, Math.round(h.getBoundingClientRect().bottom)) : 0;
+	});
 	let drawerW = $state(typeof localStorage === "undefined" ? 380 : parseInt(localStorage.getItem("disc-drawer-w") ?? "380") || 380);
 	function drawerResizeStart(e: PointerEvent) {
 		e.preventDefault();
@@ -437,20 +443,13 @@
 			{#if isMobileVp}
 				<Discussion {object} onchanged={refresh} />
 				<AgentBoard {object} />
-			{:else}
-				<div class="disc-opener-row">
-					<button class="disc-opener" onclick={() => (discussionUI.open = true)}>
-						<span>💬</span>
-						<span>{discussionUI.count > 0 ? `${discussionUI.count} comment${discussionUI.count === 1 ? "" : "s"}` : "Start a discussion"}</span>
-					</button>
-				</div>
 			{/if}
 		{/if}
 
 	</article>
 
 	{#if hasDiscussion && !isMobileVp && discussionUI.open}
-		<aside class="disc-drawer" style="width: {drawerW}px">
+		<aside class="disc-drawer" style="width: {drawerW}px; top: {drawerTop}px">
 			<div class="dd-resize" role="separator" aria-orientation="vertical" onpointerdown={drawerResizeStart}></div>
 			<ConversationDrawer {object} onchanged={refresh} />
 		</aside>
@@ -636,30 +635,8 @@
 			height: 72px;
 		}
 	}
-	.disc-opener-row {
-		display: flex;
-		justify-content: center;
-		margin: 28px 0 12px;
-	}
-	.disc-opener {
-		display: inline-flex;
-		align-items: center;
-		gap: 8px;
-		background: var(--panel);
-		border: 1px solid var(--border);
-		border-radius: 999px;
-		color: var(--muted);
-		font-size: 13px;
-		padding: 7px 16px;
-		cursor: pointer;
-	}
-	.disc-opener:hover {
-		color: var(--fg);
-		border-color: var(--muted);
-	}
 	.disc-drawer {
 		position: fixed;
-		top: 0;
 		right: 0;
 		bottom: 0;
 		z-index: 90;

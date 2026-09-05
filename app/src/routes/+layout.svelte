@@ -1877,6 +1877,12 @@
 		border-bottom: 1px solid var(--border);
 		max-width: 920px;
 		margin: 0 auto;
+		/* Stays put while content scrolls - the 💬 chip doubles as the
+		   drawer's close, so it must remain reachable. */
+		position: sticky;
+		top: 0;
+		z-index: 95;
+		background: var(--bg);
 	}
 	.path {
 		display: flex;
