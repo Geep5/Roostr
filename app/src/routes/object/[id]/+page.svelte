@@ -21,7 +21,6 @@
 	import SpaceManage from "$lib/components/SpaceManage.svelte";
 	import TypePanel from "$lib/components/TypePanel.svelte";
 	import PropertyPanel from "$lib/components/PropertyPanel.svelte";
-	import AgentBoard from "$lib/components/AgentBoard.svelte";
 	import EmojiPicker from "$lib/components/EmojiPicker.svelte";
 	import { objectIcon } from "$lib/icons";
 
@@ -232,7 +231,7 @@
 		!!object && !isChannel && !isChat && !isAgent && !isType && !isTemplate && !isRelation && !isQuery && !isCollection,
 	);
 	$effect(() => {
-		discussionUI.available = hasDiscussion && !isMobileVp;
+		discussionUI.available = hasDiscussion;
 		if (!object) {
 			discussionUI.count = 0;
 			return;
@@ -438,17 +437,9 @@
 			<Editor bind:this={editor} {object} onchanged={refresh} />
 		{/if}
 
-		<!-- Anytype: queries/collections (sets) carry no discussion. -->
-		{#if hasDiscussion}
-			{#if isMobileVp}
-				<Discussion {object} onchanged={refresh} />
-				<AgentBoard {object} />
-			{/if}
-		{/if}
-
 	</article>
 
-	{#if hasDiscussion && !isMobileVp && discussionUI.open}
+	{#if hasDiscussion && discussionUI.open}
 		<aside class="disc-drawer" style="width: {drawerW}px; top: {drawerTop + 10}px">
 			<div class="dd-resize" role="separator" aria-orientation="vertical" onpointerdown={drawerResizeStart}></div>
 			<ConversationDrawer {object} onchanged={refresh} />
@@ -662,4 +653,20 @@
 	}
 	/* The full-variant Discussion fills the drawer: messages scroll,
 	   composer pinned at the bottom. */
+	/* Mobile: the drawer IS the screen - a full sheet, no float. */
+	@media (max-width: 720px) {
+		.disc-drawer {
+			top: 0 !important;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			width: 100% !important;
+			border: none;
+			border-radius: 0;
+			padding-top: env(safe-area-inset-top);
+		}
+		.dd-resize {
+			display: none;
+		}
+	}
 </style>

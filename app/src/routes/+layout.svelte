@@ -615,6 +615,11 @@
 			{:else if objectSummary}
 				<div class="m-actions">
 				<span class="m-sync" class:ok={store.connected} data-tip={store.connected ? "Local daemon live" : "Daemon offline"}><span class="m-sync-dot"></span></span>
+				{#if discussionUI.available}
+					<button class="m-btn disc-chip" class:active={discussionUI.open} data-tip="Conversations" onclick={() => (discussionUI.open = !discussionUI.open)}>
+						💬{#if discussionUI.convCount > 1}<span class="disc-n">{discussionUI.convCount}</span>{:else if discussionUI.count > 0}<span class="disc-n">{discussionUI.count}</span>{/if}
+					</button>
+				{/if}
 				<div class="more-wrap">
 					<button class="m-btn" data-tip="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
 					{#if showMore}
