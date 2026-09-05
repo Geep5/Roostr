@@ -22,7 +22,7 @@ import { convergeCatalogScope } from "./skillmgr";
 import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled } from "./roster";
 import { startNostrSync, vanishOnRelays } from "./nostrsync";
-import { MACHINE_TYPE, publishClaims } from "./machine";
+import { MACHINE_TYPE, convergeSpaceServing, invalidateSpaceServing, publishClaims, spaceMine } from "./machine";
 import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
 
 function argValue(flagName: string): string {
@@ -135,7 +135,14 @@ async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
 	defaultChannelId = defaultChannel;
 	for (const agentId of agents) {
 		try {
-			out.set(agentId, await buildServedOne(agentId, defaultChannel));
+			const one = await buildServedOne(agentId, defaultChannel);
+			// One machine per space: an agent whose space is served elsewhere
+			// stands down here, however it got into the local roster.
+			if (!(await spaceMine(one.channelId))) {
+				console.log(`[harness] standing down for ${one.name} - space served by another machine`);
+				continue;
+			}
+			out.set(agentId, one);
 		} catch (err) {
 			console.error(`[harness] failed to prepare agent ${agentId.slice(0, 8)}:`, err);
 		}
@@ -184,6 +191,7 @@ async function handleSurface(s: Served, surfaceId: string, opts: { wake?: (t: st
 
 async function serve(): Promise<void> {
 	await convergeCatalogScope();
+	await convergeSpaceServing();
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
 
@@ -416,6 +424,13 @@ async function serve(): Promise<void> {
 		} catch {
 			return;
 		}
+		if (obj.typeKey === "channel") {
+			// served_by edits (takeovers) and brand-new spaces sync as channel
+			// commits: refresh the gate now, stamp unclaimed spaces.
+			invalidateSpaceServing();
+			void convergeSpaceServing();
+			return;
+		}
 		if (obj.typeKey === "chat") {
 			// A human posting into an A2A pair chat wakes BOTH participants
 			// for one answering turn each (sequential - the second sees the
@@ -448,11 +463,18 @@ async function serve(): Promise<void> {
 		// ── Bound agent takes its own object's surface - if it is ours. ──
 		const boundAgent = boundBy.get(objectId);
 		if (boundAgent) {
-			// Assignment is a local fact (roster.ts): not ours unless set up or
-			// enabled here. Adopting on every machine that merely saw the object
-			// event made two harnesses answer the same message once each, since
-			// the answered-mark lives in a machine-local file.
-			if (!agents.has(boundAgent)) return;
+			// One machine per space: the space's server answers, nobody else -
+			// this replaces per-agent adoption races with one synced fact.
+			if (!(await spaceMine(channelId))) return;
+			// Serving the space means serving ALL its bound agents: a takeover
+			// adopts them into the local roster on first contact, so transfer
+			// needs no per-agent toggling.
+			if (!agents.has(boundAgent)) {
+				agents.add(boundAgent);
+				await setEnabled(boundAgent, true);
+				void publishClaims(agents);
+				console.log(`[harness] adopted bound agent ${boundAgent.slice(0, 8)} - this machine serves its space`);
+			}
 			let s2 = served.get(boundAgent);
 			if (!s2) {
 				try {
@@ -470,6 +492,7 @@ async function serve(): Promise<void> {
 
 		// ── Explicitly responsible space agent answers, as before. ──
 		const s = responsibleFor(channelId, obj.typeKey);
+		if (s && !(await spaceMine(channelId))) return;
 		if (s) {
 			const pending = await pendingMessages(obj, s.agentId);
 			if (pending.length > 0) void drive(s, objectId);
@@ -479,6 +502,9 @@ async function serve(): Promise<void> {
 		// ── Nobody claims it: a HUMAN message on a discussable object
 		// mints the object's own agent and serves this very message. ──
 		if (UNMINTABLE.has(obj.typeKey)) return;
+		// Only the space's server mints - the other machine stays silent, so
+		// a brand-new object in a brand-new space gets exactly one agent.
+		if (!(await spaceMine(channelId))) return;
 		// A stub read (no type) would mint a nameless agent stamped to the
 		// default space instead of the object's own - and a bound agent in
 		// the wrong space cannot even read the object it speaks for.

@@ -72,6 +72,7 @@
 	onMount(() => {
 		void loadBin();
 		void loadIdentity();
+		void loadServing();
 	});
 
 	async function restoreObject(id: string) {
@@ -143,6 +144,44 @@
 		at: number;
 	}
 	let joinRequests = $state<JoinRequestRow[]>([]);
+
+	// ── Serving: one machine per space (served_by on the channel). ──
+	interface MachineRow {
+		id: string;
+		machine_id: string;
+		name: string;
+	}
+	let machines = $state<MachineRow[]>([]);
+	let thisMachine = $state<{ id: string; host: string } | null>(null);
+	const servedBy = $derived(object.fields["served_by"]?.stringValue ?? "");
+	const servedByName = $derived(machines.find((m) => m.machine_id === servedBy)?.name || (servedBy ? servedBy.slice(0, 8) + "…" : "nobody yet"));
+	const servedHere = $derived(!!thisMachine && servedBy === thisMachine.id);
+
+	async function loadServing() {
+		try {
+			const res = await fetchAllQuery({ type: "machine" });
+			machines = res.map((r) => ({
+				id: r.id,
+				machine_id: r.fields["machine_id"]?.stringValue ?? "",
+				name: r.fields["name"]?.stringValue ?? "",
+			}));
+		} catch {
+			machines = [];
+		}
+		try {
+			const res = await fetch("http://127.0.0.1:7334/machine");
+			if (res.ok) thisMachine = (await res.json()) as { id: string; host: string };
+		} catch {
+			thisMachine = null;
+		}
+	}
+
+	async function takeOverServing() {
+		if (!thisMachine) return;
+		if (servedBy && !confirm(`Serve this space from ${thisMachine.host}? ${servedByName} will stand down once it syncs.`)) return;
+		await note.setField(object.id, "served_by", { stringValue: thisMachine.id });
+		await onchanged();
+	}
 
 	async function loadIdentity() {
 		try {
@@ -222,6 +261,20 @@
 
 <section class="manage">
 	<SpaceAgents channelId={object.id} />
+
+	<h3>Serving</h3>
+	<p class="hint">
+		One machine serves a space: it minds the agents, mints new ones, and answers. The claim is synced
+		data — if this machine breaks, take over from any other; it stands down when it syncs.
+	</p>
+	<div class="serving-row">
+		<span class="serving-name">🖥️ {servedByName}{servedHere ? " (this machine)" : ""}</span>
+		{#if thisMachine && !servedHere}
+			<button onclick={() => void takeOverServing()}>Serve from this machine</button>
+		{:else if !thisMachine}
+			<span class="hint-inline">— manage from a machine running the harness</span>
+		{/if}
+	</div>
 
 	<h3>Members</h3>
 	<p class="hint">
@@ -581,5 +634,18 @@
 	}
 	.bin-check.on {
 		color: var(--accent);
+	}
+	.serving-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		margin-bottom: 6px;
+	}
+	.serving-name {
+		font-size: 13.5px;
+	}
+	.hint-inline {
+		color: var(--muted);
+		font-size: 12px;
 	}
 </style>

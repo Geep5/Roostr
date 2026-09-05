@@ -134,8 +134,23 @@
 		await loadSkills();
 	}
 
+	// ── Spaces this machine serves (served_by on channel objects) ──
+	let servedSpaces = $state<Array<{ id: string; name: string }>>([]);
+	async function loadServedSpaces() {
+		try {
+			const me = (await (await fetch(`${HARNESS}/machine`)).json()) as { id: string };
+			const chans = await fetchAllQuery({ type: "channel" });
+			servedSpaces = chans
+				.filter((c) => (c.fields["served_by"]?.stringValue ?? "") === me.id)
+				.map((c) => ({ id: c.id, name: c.fields["name"]?.stringValue || "Untitled" }));
+		} catch {
+			servedSpaces = [];
+		}
+	}
+
 	onMount(() => {
 		void loadSkills();
+		void loadServedSpaces();
 		return () => {
 			if (skillPoll) clearInterval(skillPoll);
 		};
@@ -169,6 +184,18 @@
 						</div>
 						<p class="holdup-err">{h.error}</p>
 					</div>
+				{/each}
+			{/if}
+		</section>
+
+		<section>
+			<h3>Serving</h3>
+			{#if servedSpaces.length === 0}
+				<p class="hint">This machine serves no spaces — take over from any space's settings.</p>
+			{:else}
+				<p class="hint">Spaces whose agents run here. Transfer from the space's settings on another machine.</p>
+				{#each servedSpaces as sp (sp.id)}
+					<div class="served-space">🖥️ {sp.name}</div>
 				{/each}
 			{/if}
 		</section>
@@ -570,5 +597,9 @@
 	}
 	.danger-btn {
 		color: var(--red);
+	}
+	.served-space {
+		font-size: 13px;
+		padding: 4px 0;
 	}
 </style>

@@ -161,6 +161,11 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					const [skills, holdups] = await Promise.all([skillStatus(), listHoldups()]);
 					return json({ skills, holdups });
 				}
+				if (req.method === "GET" && url.pathname === "/machine") {
+					const { machineId } = await import("./roster");
+					const { hostname } = await import("node:os");
+					return json({ id: await machineId(), host: hostname() });
+				}
 				if (req.method === "GET" && url.pathname === "/join-requests") {
 					const { listJoinRequests } = await import("./nostrsync");
 					return json({ requests: await listJoinRequests() });
