@@ -449,7 +449,7 @@
 	</article>
 
 	{#if hasDiscussion && !isMobileVp && discussionUI.open}
-		<aside class="disc-drawer" style="width: {drawerW}px; top: {drawerTop}px">
+		<aside class="disc-drawer" style="width: {drawerW}px; top: {drawerTop + 10}px">
 			<div class="dd-resize" role="separator" aria-orientation="vertical" onpointerdown={drawerResizeStart}></div>
 			<ConversationDrawer {object} onchanged={refresh} />
 		</aside>
@@ -635,16 +635,20 @@
 			height: 72px;
 		}
 	}
+	/* A floating card OVER the object area, not a flush dock: inset from
+	   every edge, rounded, bordered all around, sitting on a deep shadow. */
 	.disc-drawer {
 		position: fixed;
-		right: 0;
-		bottom: 0;
+		right: 12px;
+		bottom: 12px;
 		z-index: 90;
 		display: flex;
 		flex-direction: column;
 		background: var(--panel);
-		border-left: 1px solid var(--border);
-		box-shadow: -16px 0 48px rgb(0 0 0 / 0.35);
+		border: 1px solid var(--border);
+		border-radius: 14px;
+		overflow: hidden;
+		box-shadow: 0 18px 60px rgb(0 0 0 / 0.5);
 	}
 	.dd-resize {
 		position: absolute;
