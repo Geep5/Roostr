@@ -86,7 +86,7 @@ export async function refreshAll(): Promise<void> {
 /** Discussion drawer: the object page publishes availability + count; the
  * header chip (layout) toggles it. Open state survives navigation so you
  * can browse objects with the drawer docked. */
-export const discussionUI = $state({ open: false, available: false, count: 0 });
+export const discussionUI = $state({ open: false, available: false, count: 0, convCount: 0 });
 
 /** Layout for a typeKey: the type object's layout, else legacy fallback. */
 export function layoutOf(typeKey: string): string {

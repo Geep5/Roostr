@@ -11,6 +11,8 @@
 	import Editor from "$lib/components/Editor.svelte";
 	import FeaturedProps from "$lib/components/FeaturedProps.svelte";
 	import Discussion from "$lib/components/Discussion.svelte";
+	import ConversationDrawer from "$lib/components/ConversationDrawer.svelte";
+	import { loadAgentThreads } from "$lib/conversations";
 	import SetTable from "$lib/components/SetTable.svelte";
 	import QueryControls from "$lib/components/QueryControls.svelte";
 	import KanbanView from "$lib/components/KanbanView.svelte";
@@ -242,6 +244,13 @@
 	$effect(() => () => {
 		discussionUI.available = false;
 	});
+	$effect(() => {
+		if (!object || !hasDiscussion) return;
+		const id = object.id;
+		void loadAgentThreads(id).then((rows) => {
+			if (page.params.id === id) discussionUI.convCount = rows.length + 1;
+		});
+	});
 	let drawerW = $state(typeof localStorage === "undefined" ? 380 : parseInt(localStorage.getItem("disc-drawer-w") ?? "380") || 380);
 	function drawerResizeStart(e: PointerEvent) {
 		e.preventDefault();
@@ -272,7 +281,6 @@
 	);
 </script>
 
-<svelte:window onkeydown={(e) => { if (e.key === "Escape" && discussionUI.open && !isMobileVp) discussionUI.open = false; }} />
 <svelte:head><title>{object ? fieldStr(object.fields, "name") || "Untitled" : "Loading…"} — glon</title></svelte:head>
 
 {#if object}
@@ -428,6 +436,7 @@
 		{#if hasDiscussion}
 			{#if isMobileVp}
 				<Discussion {object} onchanged={refresh} />
+				<AgentBoard {object} />
 			{:else}
 				<div class="disc-opener-row">
 					<button class="disc-opener" onclick={() => (discussionUI.open = true)}>
@@ -436,7 +445,6 @@
 					</button>
 				</div>
 			{/if}
-			<AgentBoard {object} />
 		{/if}
 
 	</article>
@@ -444,18 +452,7 @@
 	{#if hasDiscussion && !isMobileVp && discussionUI.open}
 		<aside class="disc-drawer" style="width: {drawerW}px">
 			<div class="dd-resize" role="separator" aria-orientation="vertical" onpointerdown={drawerResizeStart}></div>
-			<header class="dd-head">
-				<span class="dd-icon">💬</span>
-				<div class="dd-titles">
-					<span class="dd-title">Discussion</span>
-					<span class="dd-sub">{fieldStr(object.fields, "name") || "Untitled"}</span>
-				</div>
-				<span class="dd-count">{discussionUI.count || ""}</span>
-				<button class="dd-close" data-tip="Close (Esc)" onclick={() => (discussionUI.open = false)}>»</button>
-			</header>
-			<div class="dd-body">
-				<Discussion {object} full onchanged={refresh} />
-			</div>
+			<ConversationDrawer {object} onchanged={refresh} />
 		</aside>
 	{/if}
 {:else}
@@ -682,74 +679,6 @@
 		z-index: 5;
 		touch-action: none;
 	}
-	.dd-head {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 12px 14px;
-		border-bottom: 1px solid var(--border);
-		flex: none;
-	}
-	.dd-icon {
-		font-size: 16px;
-	}
-	.dd-titles {
-		flex: 1;
-		min-width: 0;
-		display: flex;
-		flex-direction: column;
-	}
-	.dd-title {
-		font-size: 13.5px;
-		font-weight: 600;
-	}
-	.dd-sub {
-		font-size: 11.5px;
-		color: var(--muted);
-		overflow: hidden;
-		white-space: nowrap;
-		text-overflow: ellipsis;
-	}
-	.dd-count {
-		font-size: 12px;
-		color: var(--muted);
-		flex: none;
-	}
-	.dd-close {
-		background: none;
-		border: 1px solid var(--border);
-		border-radius: 7px;
-		color: var(--muted);
-		font-size: 14px;
-		width: 26px;
-		height: 26px;
-		cursor: pointer;
-		flex: none;
-	}
-	.dd-close:hover {
-		color: var(--fg);
-		border-color: var(--muted);
-	}
-	.dd-body {
-		flex: 1;
-		min-height: 0;
-		display: flex;
-		flex-direction: column;
-	}
 	/* The full-variant Discussion fills the drawer: messages scroll,
 	   composer pinned at the bottom. */
-	.dd-body :global(.discussion.full) {
-		flex: 1;
-		min-height: 0;
-		display: flex;
-		flex-direction: column;
-		margin: 0;
-		padding: 0 14px 12px;
-	}
-	.dd-body :global(.discussion.full .messages) {
-		flex: 1;
-		min-height: 0;
-		overflow-y: auto;
-		max-height: none;
-	}
 </style>

@@ -1065,7 +1065,7 @@
 				<a class="hbtn" data-tip="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}><GraphIcon size={16} /></a>
 				{#if discussionUI.available}
 					<button class="hbtn disc-chip" class:active={discussionUI.open} data-tip="Discussion" onclick={() => (discussionUI.open = !discussionUI.open)}>
-						💬{#if discussionUI.count > 0}<span class="disc-n">{discussionUI.count}</span>{/if}
+						💬{#if discussionUI.convCount > 1}<span class="disc-n">{discussionUI.convCount}</span>{:else if discussionUI.count > 0}<span class="disc-n">{discussionUI.count}</span>{/if}
 					</button>
 				{/if}
 				{#if objectRelation}
