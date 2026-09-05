@@ -90,7 +90,7 @@
 		<div class="layouts">
 			{#each LAYOUTS as l (l.id)}
 				<button class="layout" class:active={layout === l.id} onclick={() => void setLayout(l.id)}>
-					<span class="l-name">{l.id === "task" ? "☑" : "▤"} {l.name}</span>
+					<span class="l-name">{l.id === "task" ? "✅" : "📄"} {l.name}</span>
 					<span class="l-hint">{l.hint}</span>
 				</button>
 			{/each}
@@ -226,18 +226,22 @@
 	}
 	.definition {
 		width: 100%;
-		background: none;
-		border: 1px solid transparent;
+		box-sizing: border-box;
+		background: var(--hover, rgba(255, 255, 255, 0.04));
+		border: 1px solid var(--border);
 		border-radius: 8px;
 		color: var(--fg);
 		font: inherit;
 		font-size: 13.5px;
-		padding: 6px 8px;
-		margin: 0 0 10px -8px;
+		padding: 8px 10px;
+		margin: 0 0 10px;
 		resize: vertical;
 	}
+	.definition::placeholder {
+		color: var(--muted);
+	}
 	.definition:hover {
-		border-color: var(--border);
+		border-color: var(--muted);
 	}
 	.definition:focus {
 		border-color: var(--accent);
