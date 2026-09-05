@@ -117,17 +117,6 @@
 		return d.toLocaleDateString([], { month: "short", day: "numeric" });
 	}
 
-	/** Per-type expansion in the Types widget (Anytype v0.50 Objects sections). */
-	let expandedTypes = $state<Record<string, boolean>>({});
-
-	/** Objects of a type in this channel, newest first (sidebar preview, capped). */
-	function typeObjects(typeKey: string) {
-		const ch = activeSpace.id || defaultChannelId;
-		return store.summaries
-			.filter((s) => s.typeKey === typeKey && s.channelId === ch)
-			.sort((a, b) => b.updatedAt - a.updatedAt)
-			.slice(0, 6);
-	}
 	let showCollections = $state(false);
 	let showCreate = $state(false);
 
@@ -1019,32 +1008,13 @@
 				{#if !sectionCollapsed["types"]}
 					<div class="section-body">
 						{#each sidebarTypes as t (t.id)}
-							{@const objs = typeObjects(t.key)}
+							<!-- A type row is just a link to its page - the objects live
+							     THERE (the type page's set view), not in the nav. -->
 							<div class="type-row" class:current={page.url.pathname === `/object/${t.id}`}>
-								<button
-									class="type-chev"
-									class:open={expandedTypes[t.key]}
-									data-tip={expandedTypes[t.key] ? "Collapse" : `${objs.length} object${objs.length === 1 ? "" : "s"}`}
-									onclick={() => (expandedTypes[t.key] = !expandedTypes[t.key])}
-								>
-									▶
-								</button>
 								<a class="item type-link" href="/object/{t.id}">
 									<span class="obj-icon">{t.icon || typeGlyph(t.key)}</span>{t.name || t.key}
 								</a>
 							</div>
-							{#if expandedTypes[t.key]}
-								<div class="type-objs">
-									{#each objs as o (o.id)}
-										<a class="item sub" class:current={page.url.pathname === `/object/${o.id}`} href="/object/{o.id}">
-											<span class="obj-icon">{o.icon || typeGlyph(o.typeKey)}</span>{o.name || "Untitled"}
-										</a>
-									{/each}
-									{#if objs.length === 0}
-										<span class="type-empty">No {t.name || t.key} objects yet</span>
-									{/if}
-								</div>
-							{/if}
 						{/each}
 					</div>
 				{/if}
@@ -1668,31 +1638,9 @@
 	.type-row.current {
 		background: var(--hover);
 	}
-	.type-chev {
-		flex: none;
-		width: 18px;
-		font-size: 8px;
-		color: var(--muted);
-		background: none;
-		border: none;
-		cursor: pointer;
-		transition: transform 0.12s;
-	}
-	.type-chev.open {
-		transform: rotate(90deg);
-	}
 	.type-link {
 		flex: 1;
 		min-width: 0;
-	}
-	.type-objs .item.sub {
-		padding-left: 32px;
-	}
-	.type-empty {
-		display: block;
-		padding: 3px 8px 3px 32px;
-		font-size: 11px;
-		color: var(--muted);
 	}
 	.section-body {
 		background: var(--hl-light);
