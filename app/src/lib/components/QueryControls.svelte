@@ -4,7 +4,9 @@
 	import LayoutIcon from "./LayoutIcon.svelte";
 	import { createRelation } from "$lib/relations";
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
-	import { note } from "$lib/api";
+	import { fetchQuery, note } from "$lib/api";
+	import { applyTemplate } from "$lib/create";
+	import { store } from "$lib/data.svelte";
 
 	/**
 	 * View configuration for a query object — source types, filter rules,
@@ -282,7 +284,7 @@
 	/** Create a record inheriting the view (filters seed fields, calendar
 	 *  seeds the date, the page's space is stamped). Exported so the
 	 *  table's "+ New Object" row shares one implementation. */
-	export async function createRecord(name = ""): Promise<void> {
+	export async function createRecord(name = "", templateId?: string | null): Promise<void> {
 		if (creating) return;
 		creating = true;
 		try {
@@ -318,6 +320,16 @@
 				fields[dateKey] = { intValue: Date.now() };
 			}
 			const { id } = await note.create(name, typeKey, fields);
+			// Templates: an explicit pick wins (null = Blank, skip); else the
+			// type's default pre-fills - type pages read their own field,
+			// queries resolve the source type's default from the store.
+			const tplId =
+				templateId !== undefined
+					? (templateId ?? "")
+					: mode === "type"
+						? (object.fields["default_template_id"]?.stringValue ?? "")
+						: (store.types.find((t) => t.key === typeKey)?.defaultTemplateId ?? "");
+			if (tplId) await applyTemplate(id, tplId).catch(() => {});
 			await onchanged();
 			// Anytype's table New edits the record in place; other views open it.
 			if (oncreated && viewType === "table") await oncreated(id);
@@ -325,6 +337,26 @@
 		} finally {
 			creating = false;
 		}
+	}
+
+	// ── Template picker on New (type pages): ▾ lists Blank + templates. ──
+	let typeTemplates = $state<Array<{ id: string; name: string }>>([]);
+	let tplPickOpen = $state(false);
+	$effect(() => {
+		void object.id;
+		if (mode !== "type") return;
+		void fetchQuery({
+			type: "template",
+			filters: [{ key: "target_type", condition: "equal", value: object.id }],
+			limit: 50,
+		}).then((res) => {
+			typeTemplates = res.records.map((r) => ({ id: r.id, name: r.fields["name"]?.stringValue ?? "" }));
+		});
+	});
+
+	async function newFromTemplate(tplId: string | null) {
+		tplPickOpen = false;
+		await createRecord("", tplId);
 	}
 
 	const newRecord = () => {
@@ -493,7 +525,22 @@
 			</div>
 		{/if}
 	</span>
-	<button class="new-btn" disabled={creating} onclick={() => void newRecord()}>New</button>
+	<span class="new-wrap">
+		<button class="new-btn" class:split={mode === "type" && typeTemplates.length > 0} disabled={creating} onclick={() => void newRecord()}>New</button>
+		{#if mode === "type" && typeTemplates.length > 0}
+			<button class="new-chev" disabled={creating} title="New from template…" onclick={() => (tplPickOpen = !tplPickOpen)}>▾</button>
+			{#if tplPickOpen}
+				<div class="tpl-pick">
+					<button onclick={() => void newFromTemplate(null)}>Blank</button>
+					{#each typeTemplates as t (t.id)}
+						<button onclick={() => void newFromTemplate(t.id)}>
+							{t.name || "Untitled"}{object.fields["default_template_id"]?.stringValue === t.id ? " ★" : ""}
+						</button>
+					{/each}
+				</div>
+			{/if}
+		{/if}
+	</span>
 </div>
 
 {#if open === "source" && mode === "query"}
@@ -979,5 +1026,53 @@
 	}
 	.new-btn:disabled {
 		opacity: 0.5;
+	}
+	.new-wrap {
+		position: relative;
+		align-self: center;
+		display: inline-flex;
+	}
+	.new-btn.split {
+		border-top-right-radius: 0;
+		border-bottom-right-radius: 0;
+	}
+	.new-chev {
+		background: var(--accent);
+		color: #fff;
+		border: none;
+		border-left: 1px solid rgb(255 255 255 / 0.25);
+		border-top-right-radius: 8px;
+		border-bottom-right-radius: 8px;
+		height: 28px;
+		padding: 0 6px;
+		font-size: 11px;
+		cursor: pointer;
+	}
+	.tpl-pick {
+		position: absolute;
+		top: 32px;
+		right: 0;
+		z-index: 60;
+		display: flex;
+		flex-direction: column;
+		min-width: 160px;
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 4px;
+		box-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
+	}
+	.tpl-pick button {
+		background: none;
+		border: none;
+		color: var(--fg);
+		font-size: 13px;
+		text-align: left;
+		padding: 6px 10px;
+		border-radius: 7px;
+		cursor: pointer;
+	}
+	.tpl-pick button:hover {
+		background: var(--hover);
 	}
 </style>

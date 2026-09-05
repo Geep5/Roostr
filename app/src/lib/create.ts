@@ -36,7 +36,7 @@ export function typeGlyph(typeKey: string): string {
  * with type.defaultTemplateId). Ids are remapped; the discussion subtree and
  * template-identity fields stay behind.
  */
-async function applyTemplate(objectId: string, templateId: string): Promise<void> {
+export async function applyTemplate(objectId: string, templateId: string): Promise<void> {
 	const tpl = await fetchObject(templateId);
 	// Everything reachable from __discussion__ is conversation, not content.
 	const byId = new Map(tpl.blocks.map((b) => [b.id, b]));
