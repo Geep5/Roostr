@@ -56,6 +56,8 @@ export interface ObjectSummary {
 	channelId: string;
 	/** Object's emoji icon ("" = none, render the type glyph). */
 	icon: string;
+	/** The bundled done relation - drives the task-layout checkbox in lists. */
+	done?: boolean;
 }
 
 export interface SpaceJSON {

@@ -297,6 +297,10 @@ handle_list_objects :: proc(sock: net.TCP_Socket) {
 			emoji := ""
 			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do emoji = v.str
 			o["icon"] = json.String(emoji)
+			// Task-layout rows render a live checkbox in lists; ship the state.
+			done := false
+			if v, ok := fields_get(s.fields, "done"); ok && v.kind == .Bool do done = v.b
+			o["done"] = json.Boolean(done)
 			append(&arr, json.Object(o))
 		}
 		// Newest first.

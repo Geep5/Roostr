@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { activeSpace } from "$lib/space.svelte";
 	import { objectIcon } from "$lib/icons";
-	import { store, refreshAll } from "$lib/data.svelte";
+	import { store, refreshAll, layoutOf } from "$lib/data.svelte";
+	import { note } from "$lib/api";
+	import CheckboxIcon from "$lib/components/CheckboxIcon.svelte";
 	import { createTyped, creatableTypes, createCollection as libCreateCollection, createQuery as libCreateQuery } from "$lib/create";
 
 	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
@@ -17,6 +19,14 @@
 	async function createObject(typeKey: string) {
 		picking = false;
 		await createTyped(typeKey, channelId);
+	}
+
+	/** Task-layout rows: the list checkbox toggles the bundled done relation. */
+	async function toggleDone(e: MouseEvent, id: string, cur: boolean) {
+		e.preventDefault();
+		e.stopPropagation();
+		await note.setField(id, "done", { boolValue: !cur });
+		await refreshAll();
 	}
 
 	async function createCollection() {
@@ -48,7 +58,13 @@
 	{#each objects as o (o.id)}
 		<li>
 			<a href="/object/{o.id}">
-				<span class="icon">{objectIcon(o.icon, o.typeKey)}</span>
+				{#if layoutOf(o.typeKey) === "task"}
+					<button class="task-check" class:on={o.done === true} aria-label="done" onclick={(e) => void toggleDone(e, o.id, o.done === true)}>
+						<CheckboxIcon checked={o.done === true} size={18} />
+					</button>
+				{:else}
+					<span class="icon">{objectIcon(o.icon, o.typeKey)}</span>
+				{/if}
 				<span class="name">{o.name || "Untitled"}</span>
 				<span class="type">{o.typeKey}</span>
 				<span class="when">{o.updatedAt ? new Date(o.updatedAt).toLocaleString() : ""}</span>
@@ -143,5 +159,23 @@
 	}
 	.empty {
 		color: var(--muted);
+	}
+	.task-check {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		flex: none;
+		padding: 0;
+		border: none;
+		background: none;
+		color: var(--muted);
+		cursor: pointer;
+	}
+	.task-check:hover {
+		color: var(--fg);
+	}
+	.task-check.on {
+		color: var(--accent);
 	}
 </style>
