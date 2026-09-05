@@ -7,7 +7,7 @@
 	import { engineFiltersOf, spaceFilterOf } from "$lib/filters";
 	import { spaceRelations } from "$lib/relations";
 	import { fetchObject, fetchQuery, note } from "$lib/api";
-	import { store, refreshAll, onObjectEvent, layoutOf } from "$lib/data.svelte";
+	import { discussionUI, store, refreshAll, onObjectEvent, layoutOf } from "$lib/data.svelte";
 	import Editor from "$lib/components/Editor.svelte";
 	import FeaturedProps from "$lib/components/FeaturedProps.svelte";
 	import Discussion from "$lib/components/Discussion.svelte";
@@ -103,6 +103,8 @@
 	// ── Query / collection tables ─────────────────────────────────
 	const isQuery = $derived(object?.typeKey === "query" || object?.typeKey === "set");
 	const isCollection = $derived(object?.typeKey === "collection");
+
+
 	const isChat = $derived(object?.typeKey === "chat");
 	const isAgent = $derived(object?.typeKey === "agent");
 	const isType = $derived(object?.typeKey === "type");
@@ -213,6 +215,49 @@
 
 	// ── Channel + pinning ─────────────────────────────────────────
 	const isChannel = $derived(object?.typeKey === "channel");
+
+	// ── Discussion drawer (desktop): the page publishes availability +
+	// count to the shared store; the header chip toggles it; the drawer
+	// docks right so the doc stays readable beside the thread. ──
+	let isMobileVp = $state(typeof matchMedia === "undefined" ? false : matchMedia("(max-width: 720px)").matches);
+	$effect(() => {
+		const mq = matchMedia("(max-width: 720px)");
+		const fn = () => (isMobileVp = mq.matches);
+		mq.addEventListener("change", fn);
+		return () => mq.removeEventListener("change", fn);
+	});
+	const hasDiscussion = $derived(
+		!!object && !isChannel && !isChat && !isAgent && !isType && !isTemplate && !isRelation && !isQuery && !isCollection,
+	);
+	$effect(() => {
+		discussionUI.available = hasDiscussion && !isMobileVp;
+		if (!object) {
+			discussionUI.count = 0;
+			return;
+		}
+		const root = object.blocks.find((b) => b.id === "__discussion__");
+		const byId = new Map(object.blocks.map((b) => [b.id, b]));
+		discussionUI.count = (root?.childrenIds ?? []).filter((c) => byId.get(c)?.content.custom?.contentType === "chat").length;
+	});
+	$effect(() => () => {
+		discussionUI.available = false;
+	});
+	let drawerW = $state(typeof localStorage === "undefined" ? 380 : parseInt(localStorage.getItem("disc-drawer-w") ?? "380") || 380);
+	function drawerResizeStart(e: PointerEvent) {
+		e.preventDefault();
+		const startX = e.clientX;
+		const startW = drawerW;
+		const move = (ev: PointerEvent) => {
+			drawerW = Math.min(640, Math.max(300, startW + (startX - ev.clientX)));
+		};
+		const up = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", up);
+			localStorage.setItem("disc-drawer-w", String(drawerW));
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", up);
+	}
 	const spaceInfo = $derived(store.channels.find((c) => c.id === object?.id));
 
 
@@ -227,6 +272,7 @@
 	);
 </script>
 
+<svelte:window onkeydown={(e) => { if (e.key === "Escape" && discussionUI.open && !isMobileVp) discussionUI.open = false; }} />
 <svelte:head><title>{object ? fieldStr(object.fields, "name") || "Untitled" : "Loading…"} — glon</title></svelte:head>
 
 {#if object}
@@ -379,12 +425,39 @@
 		{/if}
 
 		<!-- Anytype: queries/collections (sets) carry no discussion. -->
-		{#if !isChannel && !isChat && !isAgent && !isType && !isTemplate && !isRelation && !isQuery && !isCollection}
-			<Discussion {object} onchanged={refresh} />
+		{#if hasDiscussion}
+			{#if isMobileVp}
+				<Discussion {object} onchanged={refresh} />
+			{:else}
+				<div class="disc-opener-row">
+					<button class="disc-opener" onclick={() => (discussionUI.open = true)}>
+						<span>💬</span>
+						<span>{discussionUI.count > 0 ? `${discussionUI.count} comment${discussionUI.count === 1 ? "" : "s"}` : "Start a discussion"}</span>
+					</button>
+				</div>
+			{/if}
 			<AgentBoard {object} />
 		{/if}
 
 	</article>
+
+	{#if hasDiscussion && !isMobileVp && discussionUI.open}
+		<aside class="disc-drawer" style="width: {drawerW}px">
+			<div class="dd-resize" role="separator" aria-orientation="vertical" onpointerdown={drawerResizeStart}></div>
+			<header class="dd-head">
+				<span class="dd-icon">💬</span>
+				<div class="dd-titles">
+					<span class="dd-title">Discussion</span>
+					<span class="dd-sub">{fieldStr(object.fields, "name") || "Untitled"}</span>
+				</div>
+				<span class="dd-count">{discussionUI.count || ""}</span>
+				<button class="dd-close" data-tip="Close (Esc)" onclick={() => (discussionUI.open = false)}>»</button>
+			</header>
+			<div class="dd-body">
+				<Discussion {object} full onchanged={refresh} />
+			</div>
+		</aside>
+	{/if}
 {:else}
 	<p class="muted">Loading…</p>
 {/if}
@@ -565,5 +638,118 @@
 			width: 72px;
 			height: 72px;
 		}
+	}
+	.disc-opener-row {
+		display: flex;
+		justify-content: center;
+		margin: 28px 0 12px;
+	}
+	.disc-opener {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		color: var(--muted);
+		font-size: 13px;
+		padding: 7px 16px;
+		cursor: pointer;
+	}
+	.disc-opener:hover {
+		color: var(--fg);
+		border-color: var(--muted);
+	}
+	.disc-drawer {
+		position: fixed;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		z-index: 90;
+		display: flex;
+		flex-direction: column;
+		background: var(--panel);
+		border-left: 1px solid var(--border);
+		box-shadow: -16px 0 48px rgb(0 0 0 / 0.35);
+	}
+	.dd-resize {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: -6px;
+		width: 12px;
+		cursor: col-resize;
+		z-index: 5;
+		touch-action: none;
+	}
+	.dd-head {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 12px 14px;
+		border-bottom: 1px solid var(--border);
+		flex: none;
+	}
+	.dd-icon {
+		font-size: 16px;
+	}
+	.dd-titles {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+	}
+	.dd-title {
+		font-size: 13.5px;
+		font-weight: 600;
+	}
+	.dd-sub {
+		font-size: 11.5px;
+		color: var(--muted);
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+	.dd-count {
+		font-size: 12px;
+		color: var(--muted);
+		flex: none;
+	}
+	.dd-close {
+		background: none;
+		border: 1px solid var(--border);
+		border-radius: 7px;
+		color: var(--muted);
+		font-size: 14px;
+		width: 26px;
+		height: 26px;
+		cursor: pointer;
+		flex: none;
+	}
+	.dd-close:hover {
+		color: var(--fg);
+		border-color: var(--muted);
+	}
+	.dd-body {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+	/* The full-variant Discussion fills the drawer: messages scroll,
+	   composer pinned at the bottom. */
+	.dd-body :global(.discussion.full) {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+		margin: 0;
+		padding: 0 14px 12px;
+	}
+	.dd-body :global(.discussion.full .messages) {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		max-height: none;
 	}
 </style>

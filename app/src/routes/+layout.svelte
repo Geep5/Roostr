@@ -5,7 +5,7 @@
 	import { activeSpace } from "$lib/space.svelte";
 	import { space as spaceApi, note, fetchObject, fetchQuery } from "$lib/api";
 	import { objectIcon } from "$lib/icons";
-	import { store, refreshAll, connectEvents } from "$lib/data.svelte";
+	import { discussionUI, store, refreshAll, connectEvents } from "$lib/data.svelte";
 	import GraphIcon from "$lib/components/GraphIcon.svelte";
 	import PinnedWidget from "$lib/components/PinnedWidget.svelte";
 	import { creatableTypes, typeGlyph, createTyped, createCollection, createQuery, seedSpaceDefaults } from "$lib/create";
@@ -1063,6 +1063,11 @@
 			</button>
 			<div class="header-side right">
 				<a class="hbtn" data-tip="Graph" href={objectId ? `/graph?focus=${objectId}` : "/graph"}><GraphIcon size={16} /></a>
+				{#if discussionUI.available}
+					<button class="hbtn disc-chip" class:active={discussionUI.open} data-tip="Discussion" onclick={() => (discussionUI.open = !discussionUI.open)}>
+						💬{#if discussionUI.count > 0}<span class="disc-n">{discussionUI.count}</span>{/if}
+					</button>
+				{/if}
 				{#if objectRelation}
 					<div class="more-wrap">
 						<button class="hbtn" data-tip="More" onclick={() => { showMore = !showMore; showCollections = false; }}>⋯</button>
@@ -2506,5 +2511,20 @@
 		object-fit: cover;
 		border-radius: 50%;
 		display: block;
+	}
+	.disc-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+	.disc-chip.active {
+		color: var(--accent);
+	}
+	.disc-n {
+		font-size: 11px;
+		color: var(--muted);
+	}
+	.disc-chip.active .disc-n {
+		color: var(--accent);
 	}
 </style>
