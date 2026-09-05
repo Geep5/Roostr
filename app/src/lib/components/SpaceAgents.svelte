@@ -480,15 +480,6 @@
 		await load();
 	}
 
-	async function newAgent() {
-		const name = prompt("Agent name:");
-		if (!name?.trim()) return;
-		await note.create(name.trim(), "agent", {
-			channel: { stringValue: channelId },
-			model: { stringValue: "claude-sonnet-4-5" },
-		});
-		await load();
-	}
 </script>
 
 <h3>Agents</h3>
@@ -674,8 +665,6 @@
 {#if agents.length === 0}
 	<p class="hint">No agents in this space yet.</p>
 {/if}
-
-<button class="new-agent" onclick={() => void newAgent()}>＋ New agent</button>
 
 {#if boundAgents.length > 0}
 	<details class="bound-agents">
@@ -936,9 +925,6 @@
 		margin: 6px 0 2px;
 		font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
 		color: var(--muted);
-	}
-	.new-agent {
-		margin-top: 2px;
 	}
 	.avatar-btn {
 		background: var(--hl-light, rgba(255, 255, 255, 0.06));
