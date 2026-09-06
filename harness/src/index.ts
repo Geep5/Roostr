@@ -23,7 +23,7 @@ import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled } from "./roster";
 import { startNostrSync, vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, convergeSpaceServing, invalidateSpaceServing, publishClaims, spaceMine } from "./machine";
-import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
+import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, ingestedOriginBlocks, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);
@@ -166,8 +166,16 @@ async function ingestSurface(s: Served, surfaceId: string): Promise<boolean> {
 		if (pending.length === 0) return false;
 		await setMark(surfaceId, pending[pending.length - 1].blockId);
 		if (surfaceId !== s.chatId) {
-			const framed = frameMessage(surface, pending);
-			await ingestIntoChat(s.chatId, surfaceId, pending[pending.length - 1].author || "user", framed);
+			// Idempotence by identity, not marks: a message whose copy is
+			// already in the chat was handled - by this machine before a mark
+			// was lost, or by ANOTHER machine whose reply hasn't synced into
+			// our view yet (the spirit-dragon double-ingest). Skip it; an
+			// empty remainder means no turn at all.
+			const copied = ingestedOriginBlocks(await fetchObject(s.chatId).catch(() => ({ blocks: [] })));
+			const fresh = pending.filter((p) => !copied.has(p.blockId));
+			if (fresh.length === 0) return false;
+			const framed = frameMessage(surface, fresh);
+			await ingestIntoChat(s.chatId, surfaceId, fresh[fresh.length - 1].author || "user", framed, fresh[fresh.length - 1].blockId);
 		}
 		return true;
 	} finally {

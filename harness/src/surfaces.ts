@@ -248,16 +248,28 @@ export function frameMessage(surface: ObjectJSON, pending: PendingMessage[]): st
 	return parts.join("\n");
 }
 
-/** Copy an origin-surface message into the holistic chat, origin-tagged. */
-export async function ingestIntoChat(chatId: string, surfaceId: string, author: string, text: string): Promise<void> {
+/** Copy an origin-surface message into the holistic chat, origin-tagged.
+ * `originBlock` is the source message's block id - the identity that makes
+ * ingestion idempotent across machines and lost marks. */
+export async function ingestIntoChat(chatId: string, surfaceId: string, author: string, text: string, originBlock = ""): Promise<void> {
 	await addBlock(
 		chatId,
 		{
 			id: crypto.randomUUID(),
 			childrenIds: [],
-			content: { custom: { contentType: "chat", meta: { author, text, origin: surfaceId, ts: String(Date.now()) } } },
+			content: { custom: { contentType: "chat", meta: { author, text, origin: surfaceId, origin_block: originBlock, ts: String(Date.now()) } } },
 		},
 		"__discussion__",
 		5, // INNER
 	);
+}
+
+/** Origin block ids already copied into a chat - the dedupe set. */
+export function ingestedOriginBlocks(chat: { blocks: Array<{ content: { custom?: { meta?: Record<string, string> } } }> }): Set<string> {
+	const out = new Set<string>();
+	for (const b of chat.blocks) {
+		const ob = b.content.custom?.meta?.["origin_block"];
+		if (ob) out.add(ob);
+	}
+	return out;
 }
