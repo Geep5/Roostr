@@ -900,7 +900,6 @@
 			<div class="space-head-row">
 				<a class="space-head" href="/object/{current.id}" title="Space settings">
 					<span class="space-name">{current.name}</span>
-					<svg class="head-chev" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 9.5l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
 				</a>
 				<button class="head-search" data-tip="Search (⌘K)" aria-label="Search" onclick={() => (showSearch = true)}>
 					<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><line x1="16.6" y1="16.6" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -1548,13 +1547,6 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-	}
-	.head-chev {
-		width: 12px;
-		height: 12px;
-		flex: none;
-		margin-top: 2px;
-		color: var(--muted);
 	}
 	/* Anytype widget: each pinned object is its own card; the header is
 	   the 600-weight clickable row with hover highlight. */
