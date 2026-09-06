@@ -897,18 +897,19 @@
 
 	<aside class="widgets">
 		{#if current}
-			<a class="space-head" href="/object/{current.id}" title="Space settings">
-				<span class="space-name">{current.name}</span>
-				<span class="gear">⚙</span>
-			</a>
-
-			<div class="search-row">
-				<button class="search-entry" onclick={() => (showSearch = true)}>
-					<span class="search-icon">⌕</span> Search
-					<span class="kbd">⌘K</span>
+			<div class="space-head-row">
+				<a class="space-head" href="/object/{current.id}" title="Space settings">
+					<span class="space-name">{current.name}</span>
+					<svg class="head-chev" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 9.5l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+				</a>
+				<button class="head-search" data-tip="Search (⌘K)" aria-label="Search" onclick={() => (showSearch = true)}>
+					<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><line x1="16.6" y1="16.6" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
 				</button>
 				<div class="create-wrap">
-					<button class="create-btn" title="New object" aria-expanded={showCreate} onclick={() => (showCreate = !showCreate)}>＋</button>
+					<button class="create-btn" title="New object" aria-expanded={showCreate} onclick={() => (showCreate = !showCreate)}>
+						<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18.4 2.6a2 2 0 0 1 2.8 2.8L13 13.6 9 14.6l1-4Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+						<svg class="pill-chev" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 9.5l6 6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+					</button>
 					{#if showCreate}
 						<div class="create-menu" role="menu">
 							{#each creatableTypes() as t (t.key)}
@@ -1216,50 +1217,60 @@
 		height: 0;
 	}
 
-	.search-row {
+	.space-head-row {
 		display: flex;
 		align-items: center;
-		gap: 4px;
+		gap: 2px;
 	}
-	.search-entry {
-		flex: 1;
+	.head-search {
 		display: flex;
 		align-items: center;
-		gap: 6px;
+		justify-content: center;
+		width: 30px;
+		height: 30px;
+		flex: none;
 		background: none;
 		border: none;
+		border-radius: 8px;
 		color: var(--muted);
-		border-radius: 6px;
-		height: 28px;
-		padding: 0 8px;
-		font-size: 14px;
-		line-height: 22px;
+		padding: 0;
 		cursor: pointer;
-		text-align: left;
 	}
-	.search-entry:hover {
+	.head-search:hover {
 		background: var(--hl-med);
 		color: var(--fg);
+	}
+	.head-search svg {
+		width: 17px;
+		height: 17px;
 	}
 	.create-wrap {
 		position: relative;
 	}
+	/* Anytype's compose pill: pencil-square + tiny chevron in a rounded chip. */
 	.create-btn {
 		display: flex;
 		align-items: center;
-		justify-content: center;
-		width: 28px;
-		height: 28px;
-		background: none;
+		gap: 3px;
+		height: 30px;
+		padding: 0 7px;
+		background: var(--hl-med);
 		border: none;
-		border-radius: 6px;
+		border-radius: 9px;
 		color: var(--muted);
-		font-size: 15px;
 		cursor: pointer;
 	}
 	.create-btn:hover {
-		background: var(--hl-med);
+		background: var(--hover);
 		color: var(--fg);
+	}
+	.create-btn svg {
+		width: 15px;
+		height: 15px;
+	}
+	.create-btn .pill-chev {
+		width: 11px;
+		height: 11px;
 	}
 	.create-menu {
 		position: absolute;
@@ -1295,16 +1306,6 @@
 		height: 1px;
 		background: var(--border);
 		margin: 4px 2px;
-	}
-	.search-icon {
-		font-size: 14px;
-	}
-	.kbd {
-		margin-left: auto;
-		font-size: 10px;
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		padding: 1px 5px;
 	}
 	:global(body) {
 		margin: 0;
@@ -1529,11 +1530,13 @@
 	/* Anytype spaceHead: 600-weight name, 6px radius, highlight hover,
 	   settings affordance revealed on hover. */
 	.space-head {
+		flex: 1;
+		min-width: 0;
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		gap: 4px;
 		font-weight: 600;
-		font-size: 14px;
+		font-size: 15px;
 		line-height: 22px;
 		padding: 4px 6px;
 		border-radius: 6px;
@@ -1541,14 +1544,17 @@
 	.space-head:hover {
 		background: var(--hl-med);
 	}
-	.gear {
-		color: var(--muted);
-		font-size: 13px;
-		opacity: 0;
-		transition: opacity 0.15s;
+	.space-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
-	.space-head:hover .gear {
-		opacity: 1;
+	.head-chev {
+		width: 12px;
+		height: 12px;
+		flex: none;
+		margin-top: 2px;
+		color: var(--muted);
 	}
 	/* Anytype widget: each pinned object is its own card; the header is
 	   the 600-weight clickable row with hover highlight. */
