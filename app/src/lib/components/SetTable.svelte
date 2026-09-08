@@ -480,7 +480,7 @@
 		</thead>
 		<tbody>
 			{#each rows as r (r.id)}
-				<tr data-id={r.id} class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} oncontextmenu={(e) => onRowContext(e, r.id)} ondragstart={(e) => e.preventDefault()}>
+				<tr data-id={r.id} class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} onauxclick={(e) => { if (e.button === 1) { e.preventDefault(); window.open(`/object/${r.id}`, "_blank"); } }} oncontextmenu={(e) => onRowContext(e, r.id)} ondragstart={(e) => e.preventDefault()}>
 					<td class="name">
 						{#if layoutOf(r.typeKey) === "task"}
 							<button class="task-check" class:on={r.fields["done"]?.boolValue === true} aria-label="done" onclick={(e) => void toggleDone(r, e)}>

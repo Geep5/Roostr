@@ -105,10 +105,17 @@
 	<button
 		role="menuitem"
 		onclick={() => {
-			const id = ids[0];
+			const targets = [...ids];
 			onclose();
-			location.href = `/object/${id}`;
-		}}>Open</button
+			// One object opens in place; a multi-selection opens Anytype-style
+			// as tabs - here, real browser tabs. (Browsers may ask once to
+			// allow multiple popups from this site.)
+			if (targets.length === 1) {
+				location.href = `/object/${targets[0]}`;
+				return;
+			}
+			for (const id of targets) window.open(`/object/${id}`, "_blank");
+		}}>Open{suffix}</button
 	>
 	<button role="menuitem" onclick={() => { showTypes = !showTypes; showCols = false; }}>⇄ Change type{suffix} ▸</button>
 	{#if showTypes}
