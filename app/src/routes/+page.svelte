@@ -4,6 +4,7 @@
 	import { store, refreshAll, layoutOf } from "$lib/data.svelte";
 	import { note } from "$lib/api";
 	import CheckboxIcon from "$lib/components/CheckboxIcon.svelte";
+	import RowContextMenu from "$lib/components/RowContextMenu.svelte";
 	import { createTyped, creatableTypes, createCollection as libCreateCollection, createQuery as libCreateQuery } from "$lib/create";
 
 	const defaultChannelId = $derived(store.channels[0]?.id ?? "");
@@ -36,7 +37,73 @@
 	async function createQuery() {
 		await libCreateQuery(channelId);
 	}
+
+	// ── Marquee multi-select + row context menu, matching the set tables:
+	// press anywhere over the list (rows included - the 4px threshold
+	// keeps clicks navigating) and rubber-band rows into the selection. ──
+	let listEl = $state<HTMLElement>();
+	let selected = $state<string[]>([]);
+	let marquee = $state<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+	let dragMoved = $state(false);
+	let ctxMenu = $state<{ x: number; y: number; id: string } | null>(null);
+
+	function onPageMouseDown(e: MouseEvent) {
+		if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+		const t = e.target as HTMLElement;
+		if (!listEl) return;
+		const inList = listEl.contains(t);
+		if (!inList) {
+			const article = listEl.closest("article") ?? listEl.parentElement;
+			if (!article || !article.contains(t)) return;
+		}
+		if (t.closest("button, input, textarea, select, [contenteditable]")) return;
+		marquee = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
+		dragMoved = false;
+	}
+
+	function onMarqueeMove(e: MouseEvent) {
+		if (!marquee) return;
+		marquee = { ...marquee, x1: e.clientX, y1: e.clientY };
+		if (Math.abs(marquee.x1 - marquee.x0) + Math.abs(marquee.y1 - marquee.y0) < 4) return;
+		dragMoved = true;
+		const left = Math.min(marquee.x0, marquee.x1);
+		const right = Math.max(marquee.x0, marquee.x1);
+		const top = Math.min(marquee.y0, marquee.y1);
+		const bottom = Math.max(marquee.y0, marquee.y1);
+		const hit: string[] = [];
+		for (const li of listEl?.querySelectorAll<HTMLElement>("li[data-id]") ?? []) {
+			const r = li.getBoundingClientRect();
+			if (r.bottom >= top && r.top <= bottom && r.right >= left && r.left <= right) hit.push(li.dataset.id ?? "");
+		}
+		selected = hit;
+	}
+
+	function endMarquee() {
+		if (marquee && !dragMoved && selected.length && !ctxMenu) selected = [];
+		marquee = null;
+	}
+
+	function onRowClick(e: MouseEvent, _id: string) {
+		// The click ending a drag, or a click while a selection exists,
+		// must not navigate - same contract as the table rows.
+		if (dragMoved || selected.length) {
+			e.preventDefault();
+			dragMoved = false;
+		}
+	}
+
+	function onRowContext(e: MouseEvent, id: string) {
+		e.preventDefault();
+		ctxMenu = { x: e.clientX, y: e.clientY, id };
+	}
+
+	function ctxTargets(): string[] {
+		if (!ctxMenu) return [];
+		return selected.includes(ctxMenu.id) ? [...selected] : [ctxMenu.id];
+	}
 </script>
+
+<svelte:window onmousedown={onPageMouseDown} onmousemove={onMarqueeMove} onmouseup={endMarquee} onkeydown={(e) => { if (e.key === "Escape") { selected = []; ctxMenu = null; } }} />
 
 <div class="actions">
 	<div class="picker-wrap">
@@ -54,10 +121,16 @@
 	<button class="ghost" onclick={() => void refreshAll()}>↻</button>
 </div>
 
-<ul class="objects">
+{#if marquee && dragMoved}
+	<div
+		class="marquee"
+		style="left: {Math.min(marquee.x0, marquee.x1)}px; top: {Math.min(marquee.y0, marquee.y1)}px; width: {Math.abs(marquee.x1 - marquee.x0)}px; height: {Math.abs(marquee.y1 - marquee.y0)}px"
+	></div>
+{/if}
+<ul class="objects" bind:this={listEl}>
 	{#each objects as o (o.id)}
-		<li>
-			<a href="/object/{o.id}">
+		<li data-id={o.id} class:selected={selected.includes(o.id)} oncontextmenu={(e) => onRowContext(e, o.id)}>
+			<a href="/object/{o.id}" onclick={(e) => onRowClick(e, o.id)} ondragstart={(e) => e.preventDefault()}>
 				{#if layoutOf(o.typeKey) === "task"}
 					<button class="task-check" class:on={o.done === true} aria-label="done" onclick={(e) => void toggleDone(e, o.id, o.done === true)}>
 						<CheckboxIcon checked={o.done === true} size={18} />
@@ -75,8 +148,64 @@
 {#if objects.length === 0}
 	<p class="empty">Nothing yet — create an object.</p>
 {/if}
+{#if selected.length}
+	<div class="sel-bar">
+		<span>{selected.length} selected</span>
+		<button class="clear" onclick={() => (selected = [])}>✕</button>
+	</div>
+{/if}
+{#if ctxMenu}
+	<RowContextMenu
+		x={ctxMenu.x}
+		y={ctxMenu.y}
+		ids={ctxTargets()}
+		spaceId={channelId}
+		onchanged={refreshAll}
+		onclose={() => {
+			ctxMenu = null;
+			selected = [];
+		}}
+	/>
+{/if}
 
 <style>
+	.marquee {
+		position: fixed;
+		z-index: 80;
+		pointer-events: none;
+		background: rgba(55, 122, 255, 0.12);
+		border: 1px solid rgba(55, 122, 255, 0.55);
+		border-radius: 2px;
+	}
+	.objects li.selected > a {
+		background: rgba(55, 122, 255, 0.22);
+	}
+	.objects li {
+		user-select: none;
+	}
+	.sel-bar {
+		position: fixed;
+		left: 50%;
+		bottom: 26px;
+		transform: translateX(-50%);
+		z-index: 85;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		background: var(--panel);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		padding: 8px 14px;
+		font-size: 13px;
+		box-shadow: 0 12px 36px rgb(0 0 0 / 0.45);
+	}
+	.sel-bar .clear {
+		background: none;
+		border: none;
+		color: var(--muted);
+		cursor: pointer;
+		padding: 2px 4px;
+	}
 	.actions {
 		display: flex;
 		gap: 10px;
