@@ -260,12 +260,15 @@
 		margin: 0;
 		padding: 0;
 	}
+	/* Rows match the set tables: flat, hairline-separated, no card look. */
+	.objects li {
+		border-bottom: 1px solid var(--border);
+	}
 	.objects a {
 		display: flex;
 		align-items: center;
 		gap: 12px;
-		padding: 9px 10px;
-		border-radius: 8px;
+		padding: 7px 10px;
 		font-size: 14px;
 	}
 	.objects a:hover {
