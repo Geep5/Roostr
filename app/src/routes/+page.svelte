@@ -53,10 +53,13 @@
 		if (!listEl) return;
 		const inList = listEl.contains(t);
 		if (!inList) {
-			const article = listEl.closest("article") ?? listEl.parentElement;
-			if (!article || !article.contains(t)) return;
+			// The home <main> hugs its content, so "below the list" fell
+			// outside it. The whole content column arms - like the object
+			// pages' <article> - with the header keeping its own gestures.
+			const col = listEl.closest(".main-col") ?? listEl.parentElement;
+			if (!col || !col.contains(t)) return;
 		}
-		if (t.closest("button, input, textarea, select, [contenteditable]")) return;
+		if (t.closest("button, input, textarea, select, [contenteditable], header, .tab-strip")) return;
 		marquee = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
 		dragMoved = false;
 	}
