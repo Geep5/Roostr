@@ -295,9 +295,11 @@
 		top: calc(100% + 6px);
 		left: 0;
 		z-index: 90;
-		min-width: 220px;
-		max-height: 300px;
-		overflow-y: auto;
+		min-width: 280px;
+		max-width: 380px;
+		/* No overflow clipping here: the object picker and calendar are
+		   absolutely-positioned INSIDE - a scroll container amputated them
+		   (the too-small-to-use modal). Long lists scroll themselves. */
 		background: var(--panel, #1a1d23);
 		border: 1px solid var(--border);
 		border-radius: 10px;
@@ -328,6 +330,10 @@
 	}
 	.pop-rm:hover {
 		color: var(--red);
+	}
+	.pop :global(.opts) {
+		max-height: 300px;
+		overflow-y: auto;
 	}
 	.backdrop {
 		position: fixed;

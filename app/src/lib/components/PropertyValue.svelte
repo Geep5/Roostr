@@ -146,7 +146,7 @@
 							onclick={() => {
 								objectOpen = false;
 								void toggleObject(c.id);
-							}}>{objectIcon(undefined, c.typeKey)} {c.name || "Untitled"} <span class="tk">{c.typeKey}</span></button
+							}}><span class="obj-name">{objectIcon(undefined, c.typeKey)} {c.name || "Untitled"}</span> <span class="tk">{c.typeKey}</span></button
 						>
 					{/each}
 					{#if candidates.length === 0}<span class="tk pad">No matches</span>{/if}
@@ -254,7 +254,9 @@
 		top: calc(100% + 6px);
 		left: 0;
 		z-index: 95;
-		min-width: 240px;
+		width: 320px;
+		max-height: 320px;
+		overflow-y: auto;
 		background: var(--panel, #1a1d23);
 		border: 1px solid var(--border);
 		border-radius: 10px;
@@ -276,6 +278,14 @@
 		display: flex;
 		gap: 6px;
 		align-items: baseline;
+		min-width: 0;
+	}
+	.obj-name {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.obj-item:hover {
 		background: var(--hover);
