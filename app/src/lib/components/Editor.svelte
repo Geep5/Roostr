@@ -610,32 +610,38 @@
 				return;
 			}
 
-			// Anytype onEnterBlock canToggle rules: Enter at the end of an OPEN
-			// toggle creates the first INNER child; a closed toggle gets a
-			// plain sibling below (the default split handles that).
-			if (curStyle === Style.TOGGLE && isToggleOpen(object.id, id) && at === text.length) {
-				const innerId = crypto.randomUUID();
-				cancelPending(id);
-				lastLocalEdit = Date.now();
-				// Optimistic: state + caret move NOW, the write catches up -
-				// otherwise everything typed during the round trip lands in
-				// the old block (Anytype applies model-side first too).
-				const inner: BlockJSON = { id: innerId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } };
-				flushSync(() => {
-					object.blocks.push(inner);
-					byId.get(id)!.childrenIds.unshift(innerId);
-				});
-				focusSync(innerId, 0, id);
-				await persist(() => note.blockAdd(object.id, { id: innerId, childrenIds: [], content: { text: { text: "", style: Style.PARAGRAPH } } }, id, Pos.INNER_FIRST));
-				return;
-			}
-
 			// Anytype blockSplit style rules: lists continue their style in the
 			// new block; quote/callout continue only when splitting mid-text;
 			// headers and everything else yield a paragraph.
 			let newStyle: number = Style.PARAGRAPH;
 			if (isList) newStyle = curStyle;
 			else if (isQuoteish && at < text.length) newStyle = curStyle;
+
+			// Anytype onEnterBlock canToggle rules: Enter at the end of a block
+			// whose children are on screen creates the first INNER child, so the
+			// new line appears directly below the one you were on. A sibling
+			// would land under the whole subtree instead - you arrive past the
+			// children, which reads as being dropped two lines down with a
+			// blank one in between whenever a child is empty. A closed toggle
+			// hides its children, so that keeps the plain sibling below.
+			const openToggle = curStyle === Style.TOGGLE && isToggleOpen(object.id, id);
+			const hasKids = (byId.get(id)?.childrenIds.length ?? 0) > 0;
+			if (at === text.length && (openToggle || (hasKids && curStyle !== Style.TOGGLE))) {
+				const innerId = crypto.randomUUID();
+				cancelPending(id);
+				lastLocalEdit = Date.now();
+				// Optimistic: state + caret move NOW, the write catches up -
+				// otherwise everything typed during the round trip lands in
+				// the old block (Anytype applies model-side first too).
+				const inner: BlockJSON = { id: innerId, childrenIds: [], content: { text: { text: "", style: newStyle } } };
+				flushSync(() => {
+					object.blocks.push(inner);
+					byId.get(id)!.childrenIds.unshift(innerId);
+				});
+				focusSync(innerId, 0, id);
+				await persist(() => note.blockAdd(object.id, { id: innerId, childrenIds: [], content: { text: { text: "", style: newStyle } } }, id, Pos.INNER_FIRST));
+				return;
+			}
 
 			const newId = crypto.randomUUID();
 			cancelPending(id);
