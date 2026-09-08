@@ -74,12 +74,26 @@
 	let marquee = $state<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
 	let dragMoved = $state(false);
 
+	let marqueeFromOutside = false;
+
 	function onSetMouseDown(e: MouseEvent) {
 		if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
 		const t = e.target as HTMLElement;
+		if (!setEl) return;
+		// Anytype starts the rubber band from the page around the table
+		// too, so the arm is window-level: a press inside the table always
+		// arms; a press outside arms only within the same content column
+		// (<article>) - the sidebar, drawers, and modals stay untouched.
+		const inSet = setEl.contains(t);
+		if (!inSet) {
+			const article = setEl.closest("article");
+			if (!article || !article.contains(t)) return;
+		}
 		// Interactive targets own their gestures; the header row owns
-		// sort/resize/reorder; the entry row owns its input.
-		if (t.closest("a, button, input, textarea, .cell-pop, thead, tr.new-row")) return;
+		// sort/resize/reorder; the entry row owns its input; text
+		// editors (title, description) keep native text selection.
+		if (t.closest("a, button, input, textarea, select, [contenteditable], .cell-pop, thead, tr.new-row")) return;
+		marqueeFromOutside = !inSet;
 		marquee = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
 		dragMoved = false;
 	}
@@ -102,6 +116,9 @@
 	}
 
 	function endRowDrag() {
+		// A plain click on surrounding whitespace clears, mirroring the
+		// plain-click-on-a-row behavior.
+		if (marquee && marqueeFromOutside && !dragMoved && selectedRows.length) selectedRows = [];
 		marquee = null;
 	}
 
@@ -393,10 +410,9 @@
 	}
 </script>
 
-<svelte:window onkeydown={(e) => { if (e.key === "Escape") { cellEdit = null; selectedRows = []; ctxMenu = null; } }} onmousedown={(e) => { if (cellEdit && !(e.target as HTMLElement).closest(".cell-pop, td.editable")) cellEdit = null; }} onmousemove={onMarqueeMove} onmouseup={endRowDrag} />
+<svelte:window onkeydown={(e) => { if (e.key === "Escape") { cellEdit = null; selectedRows = []; ctxMenu = null; } }} onmousedown={(e) => { if (cellEdit && !(e.target as HTMLElement).closest(".cell-pop, td.editable")) cellEdit = null; onSetMouseDown(e); }} onmousemove={onMarqueeMove} onmouseup={endRowDrag} />
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="set-table" bind:this={setEl} onmousedown={onSetMouseDown}>
+<div class="set-table" bind:this={setEl}>
 	{#if marquee && dragMoved}
 		<div
 			class="marquee"
