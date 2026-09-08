@@ -135,6 +135,11 @@
 					class:empty={display(rel) === ""}
 					title={rel.name || rel.key}
 					onclick={() => {
+						// Checkbox cells toggle in place, like the table's - no popover.
+						if (rel.format === "checkbox") {
+							void saveValue(rel.key, { boolValue: plain(object.fields[rel.key], "checkbox") !== true });
+							return;
+						}
 						editing = editing === rel.key ? null : rel.key;
 					}}
 				>
@@ -148,8 +153,9 @@
 						{@const opt = rel.options.find((o) => o.text === display(rel))}
 						<span style={opt?.color ? `color:${colorHex(opt.color)}` : ""}>{display(rel)}</span>
 					{:else if rel.format === "checkbox"}
-						<!-- The real checkbox glyph; clicking the cell still opens the editor. -->
-						<span class="prop-check" class:on={plain(v, "checkbox") === true}><CheckboxIcon checked={plain(v, "checkbox") === true} size={15} /></span>
+						<!-- Anytype cellContent.c-checkbox, same as the table cells:
+						     20px icon, secondary until checked, click toggles. -->
+						<span class="cell-check" class:on={plain(v, "checkbox") === true}><CheckboxIcon checked={plain(v, "checkbox") === true} size={20} /></span>
 						{rel.name || rel.key}
 					{:else if rel.format === "object" && (plain(v, "object") as string[]).length > 0}
 						{#each plain(v, "object") as string[] as id (id)}
@@ -246,13 +252,13 @@
 		color: var(--border);
 		font-size: 10px;
 	}
-	.prop-check {
+	/* Anytype cellContent.c-checkbox: 20px icon, secondary until checked. */
+	.cell-check {
 		display: inline-flex;
-		align-items: center;
 		color: var(--muted);
 	}
-	.prop-check.on {
-		color: var(--accent);
+	.cell-check.on {
+		color: var(--fg);
 	}
 	/* Anytype's object-relation cell: icon + name chip. */
 	.obj-chip {
