@@ -121,7 +121,6 @@
 	</div>
 	<button onclick={() => void createCollection()}>+ New collection</button>
 	<button onclick={() => void createQuery()}>+ New query</button>
-	<button class="ghost" onclick={() => void refreshAll()}>↻</button>
 </div>
 
 {#if marquee && dragMoved}
@@ -142,7 +141,7 @@
 					<span class="icon">{objectIcon(o.icon, o.typeKey)}</span>
 				{/if}
 				<span class="name">{o.name || "Untitled"}</span>
-				<span class="type">{o.typeKey}</span>
+				<span class="type">{store.types.find((t) => t.key === o.typeKey)?.name || (o.typeKey.charAt(0).toUpperCase() + o.typeKey.slice(1)).replaceAll("_", " ")}</span>
 				<span class="when">{o.updatedAt ? new Date(o.updatedAt).toLocaleString() : ""}</span>
 			</a>
 		</li>
@@ -228,11 +227,6 @@
 	}
 	button:hover {
 		border-color: var(--accent);
-	}
-	.ghost {
-		border-color: transparent;
-		background: none;
-		color: var(--muted);
 	}
 	.picker {
 		position: absolute;

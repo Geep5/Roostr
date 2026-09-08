@@ -387,7 +387,7 @@
 			// Display name, never the raw key: "finance_task" reads as its
 			// type's name (or at worst the key with spaces).
 			const t = store.types.find((x) => x.key === r.typeKey);
-			return t?.name || r.typeKey.replaceAll("_", " ");
+			return t?.name || (r.typeKey.charAt(0).toUpperCase() + r.typeKey.slice(1)).replaceAll("_", " ");
 		}
 		if (key === "createdAt") return r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "";
 		if (key === "updatedAt") return r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "";
