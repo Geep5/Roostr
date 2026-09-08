@@ -112,6 +112,8 @@ export interface ToolContext {
 	submitResult?: (content: string) => void;
 	/** Compaction carryover: object ids touched by tools this run. */
 	touched: Set<string>;
+	/** The space's checkout on this machine - shell_exec's cwd when set. */
+	workspacePath?: string;
 }
 
 type Handler = (input: Record<string, unknown>, ctx: ToolContext) => Promise<string>;
@@ -580,17 +582,18 @@ const SHELL_OUTPUT_CAP = 16_000;
 const SHELL_TOOL: RegisteredTool = {
 	def: {
 		name: "shell_exec",
-		description: "Run a shell command on this machine (sh -lc, cwd=home, 5min timeout). Use for installs and verification commands.",
+		description:
+			"Run a shell command on this machine (sh -lc, 5min timeout). cwd is the space's project checkout when one is bound, else home. Use for repo work, installs, and verification commands.",
 		input_schema: {
 			type: "object",
 			properties: { command: { type: "string", description: "the shell command to run" } },
 			required: ["command"],
 		},
 	},
-	handler: async (input) => {
+	handler: async (input, ctx) => {
 		const command = S(input.command);
 		if (!command) return "error: command required";
-		const proc = Bun.spawn(["sh", "-lc", command], { cwd: process.env.HOME, stdout: "pipe", stderr: "pipe" });
+		const proc = Bun.spawn(["sh", "-lc", command], { cwd: ctx.workspacePath || process.env.HOME, stdout: "pipe", stderr: "pipe" });
 		const timer = setTimeout(() => proc.kill(), SHELL_TIMEOUT_MS);
 		const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
 		const code = await proc.exited;

@@ -18,6 +18,7 @@ import { buildConversationView, estimateAskTokens, estimateTokens, type Conversa
 import { callLLM, isContextOverflowError } from "./llm";
 import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
+import { workspaceContext, workspacePromptSection } from "./workspace";
 import { digest } from "./memory";
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
 
@@ -163,6 +164,15 @@ async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts:
 	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
 	const instructions = await channelInstructions(str(agent.fields, "channel"));
 	if (instructions) parts.push({ label: "Space instructions", text: instructions });
+	// Machine-local by design: this section exists only on the machine
+	// holding the checkout - which the serving gate guarantees is the one
+	// running this turn.
+	try {
+		const ws = await workspaceContext(str(agent.fields, "channel"));
+		if (ws) parts.push({ label: "Workspace", text: workspacePromptSection(ws) });
+	} catch (err) {
+		console.error("[harness] workspace context failed:", err instanceof Error ? err.message : err);
+	}
 	return parts;
 }
 
@@ -234,6 +244,7 @@ export async function runTurn(agentId: string, convId: string, opts: RunOptions 
 		const conv = convId === agentId ? agent : await fetchObject(convId);
 		ctx.channelId = str(agent.fields, "channel");
 		ctx.boundObject = str(agent.fields, "bound_object") || undefined;
+		ctx.workspacePath = (await workspaceContext(ctx.channelId).catch(() => null))?.path;
 		ctx.wake = opts.a2aTurn ? undefined : opts.wake;
 		const ratio = tokenRatio(agent);
 		const cfg = compactionConfig(agent);

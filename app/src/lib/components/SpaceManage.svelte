@@ -150,6 +150,10 @@
 		id: string;
 		machine_id: string;
 		name: string;
+		/** spaceId -> local checkout path on that machine (its own JSON field). */
+		paths: Record<string, string>;
+		/** spaceId -> binding status, written by that machine's harness. */
+		pathsStatus: Record<string, string>;
 	}
 	let machines = $state<MachineRow[]>([]);
 	let thisMachine = $state<{ id: string; host: string } | null>(null);
@@ -160,10 +164,19 @@
 	async function loadServing() {
 		try {
 			const res = await fetchAllQuery({ type: "machine" });
+			const parseMap = (v?: string): Record<string, string> => {
+				try {
+					return v ? (JSON.parse(v) as Record<string, string>) : {};
+				} catch {
+					return {};
+				}
+			};
 			machines = res.map((r) => ({
 				id: r.id,
 				machine_id: r.fields["machine_id"]?.stringValue ?? "",
 				name: r.fields["name"]?.stringValue ?? "",
+				paths: parseMap(r.fields["paths"]?.stringValue),
+				pathsStatus: parseMap(r.fields["paths_status"]?.stringValue),
 			}));
 		} catch {
 			machines = [];
@@ -178,9 +191,62 @@
 
 	async function takeOverServing() {
 		if (!thisMachine) return;
-		if (servedBy && !confirm(`Serve this space from ${thisMachine.host}? ${servedByName} will stand down once it syncs.`)) return;
+		const noCheckout =
+			repoUrl.trim() && !machines.find((m) => m.machine_id === thisMachine?.id)?.paths[object.id]
+				? " This machine has no checkout of the project yet - bind a path after taking over."
+				: "";
+		if (servedBy && !confirm(`Serve this space from ${thisMachine.host}? ${servedByName} will stand down once it syncs.${noCheckout}`)) return;
 		await note.setField(object.id, "served_by", { stringValue: thisMachine.id });
 		await onchanged();
+	}
+
+	// ── Project: repo identity is synced truth; the checkout path is a
+	// per-machine fact that ONLY the serving machine sets, through its own
+	// harness (which validates and writes the status). ──
+	let repoUrl = $state("");
+	let bindPath = $state("");
+	let bindBusy = $state(false);
+	let bindResult = $state("");
+	let bindSeeded = false;
+	const myRow = $derived(machines.find((m) => m.machine_id === thisMachine?.id));
+	const checkoutRows = $derived(machines.filter((m) => m.paths[object.id] || m.machine_id === servedBy));
+	let repoSeeded = false;
+	$effect(() => {
+		if (!repoSeeded) {
+			repoSeeded = true;
+			repoUrl = object.fields["repo_url"]?.stringValue ?? "";
+		}
+		if (bindSeeded || !myRow) return;
+		bindSeeded = true;
+		bindPath = myRow.paths[object.id] ?? "";
+	});
+
+	async function saveRepoUrl() {
+		const v = repoUrl.trim();
+		if (v === (object.fields["repo_url"]?.stringValue ?? "")) return;
+		await note.setField(object.id, "repo_url", { stringValue: v });
+		await onchanged();
+	}
+
+	async function bindWorkspace(path: string) {
+		bindBusy = true;
+		bindResult = "";
+		try {
+			const res = await fetch("http://127.0.0.1:7334/workspace", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ space: object.id, path }),
+			});
+			const out = (await res.json()) as { status?: string; error?: string };
+			bindResult = out.status ?? out.error ?? "";
+			if (!path) bindPath = "";
+			// The harness wrote the machine object; re-read once it lands.
+			setTimeout(() => void loadServing(), 900);
+		} catch {
+			bindResult = "harness unreachable";
+		} finally {
+			bindBusy = false;
+		}
 	}
 
 	async function loadIdentity() {
@@ -275,6 +341,53 @@
 			<span class="hint-inline">— manage from a machine running the harness</span>
 		{/if}
 	</div>
+
+	<h3>Project</h3>
+	<p class="hint">
+		A space can manage a local repo. The remote URL is synced everywhere; the checkout path is a
+		machine fact — only the machine serving this space sets where its working copy lives, and its
+		harness verifies the path. Agents here get the workspace in their prompt and run shell commands
+		inside it.
+	</p>
+	<input
+		class="repo-url"
+		placeholder="git remote URL (optional, e.g. git@github.com:you/repo.git)"
+		bind:value={repoUrl}
+		onblur={() => void saveRepoUrl()}
+		onkeydown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+	/>
+	{#each checkoutRows as m (m.id)}
+		<div class="checkout">
+			<span class="checkout-host">🖥️ {m.name || m.machine_id.slice(0, 8)}</span>
+			{#if servedHere && m.machine_id === thisMachine?.id}
+				<input
+					class="checkout-path"
+					placeholder="/absolute/path/to/checkout"
+					bind:value={bindPath}
+					onkeydown={(e) => { if (e.key === "Enter") void bindWorkspace(bindPath.trim()); }}
+				/>
+				<button disabled={bindBusy || !bindPath.trim()} onclick={() => void bindWorkspace(bindPath.trim())}>Bind</button>
+				{#if m.paths[object.id]}
+					<button class="danger" disabled={bindBusy} onclick={() => void bindWorkspace("")}>Unbind</button>
+				{/if}
+			{:else}
+				<span class="checkout-ro">{m.paths[object.id] || "no checkout"}</span>
+			{/if}
+			{#if m.paths[object.id] && m.pathsStatus[object.id]}
+				<span
+					class="ws-status"
+					class:ok={m.pathsStatus[object.id] === "ok"}
+					title={m.pathsStatus[object.id]}>{m.pathsStatus[object.id] === "ok" ? "✓" : "✗"}</span
+				>
+			{/if}
+		</div>
+	{/each}
+	{#if bindResult}
+		<p class="hint">{bindResult === "ok" ? "Bound and verified." : bindResult === "unbound" ? "Unbound." : `Bound with warning: ${bindResult}`}</p>
+	{/if}
+	{#if !servedHere}
+		<p class="hint">The checkout path is set from the machine serving this space.</p>
+	{/if}
 
 	<h3>Members</h3>
 	<p class="hint">
@@ -640,6 +753,58 @@
 		align-items: center;
 		gap: 12px;
 		margin-bottom: 6px;
+	}
+	.repo-url {
+		width: 100%;
+		box-sizing: border-box;
+		background: var(--hl-light);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		color: var(--fg);
+		font: inherit;
+		font-size: 13px;
+		padding: 7px 10px;
+		margin-bottom: 8px;
+	}
+	.checkout {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 4px 0;
+		font-size: 13px;
+	}
+	.checkout-host {
+		flex: none;
+		color: var(--muted);
+	}
+	.checkout-path {
+		flex: 1;
+		min-width: 0;
+		background: var(--hl-light);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		color: var(--fg);
+		font: inherit;
+		font-size: 13px;
+		padding: 5px 10px;
+	}
+	.checkout-ro {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--muted);
+		font-family: ui-monospace, monospace;
+		font-size: 12px;
+	}
+	.ws-status {
+		flex: none;
+		color: #e05555;
+		font-weight: 600;
+	}
+	.ws-status.ok {
+		color: #4caf7d;
 	}
 	.serving-name {
 		font-size: 13.5px;

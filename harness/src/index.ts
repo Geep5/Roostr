@@ -23,6 +23,7 @@ import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled } from "./roster";
 import { startNostrSync, vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, convergeSpaceServing, invalidateSpaceServing, publishClaims, spaceMine } from "./machine";
+import { validateBindings } from "./workspace";
 import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, ingestedOriginBlocks, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
 
 function argValue(flagName: string): string {
@@ -200,6 +201,8 @@ async function handleSurface(s: Served, surfaceId: string, opts: { wake?: (t: st
 async function serve(): Promise<void> {
 	await convergeCatalogScope();
 	await convergeSpaceServing();
+	// Checkout bindings: statuses refresh at boot and on every UI write.
+	validateBindings().catch((err) => console.error("[harness] binding validation failed:", err?.message ?? err));
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
 

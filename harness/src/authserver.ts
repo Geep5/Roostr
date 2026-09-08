@@ -161,6 +161,18 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					const [skills, holdups] = await Promise.all([skillStatus(), listHoldups()]);
 					return json({ skills, holdups });
 				}
+				if (req.method === "GET" && url.pathname === "/workspace") {
+					const { readBindings } = await import("./workspace");
+					const space = url.searchParams.get("space") ?? "";
+					const paths = await readBindings();
+					return json({ path: paths[space] ?? "" });
+				}
+				if (req.method === "POST" && url.pathname === "/workspace") {
+					const body = (await req.json()) as { space?: string; path?: string };
+					if (!body.space) return json({ error: "space required" }, 400);
+					const { setBinding } = await import("./workspace");
+					return json(await setBinding(body.space, (body.path ?? "").trim()));
+				}
 				if (req.method === "GET" && url.pathname === "/machine") {
 					const { machineId } = await import("./roster");
 					const { hostname } = await import("node:os");
