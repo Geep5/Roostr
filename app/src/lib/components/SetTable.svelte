@@ -561,6 +561,7 @@
 		x={ctxMenu.x}
 		y={ctxMenu.y}
 		ids={ctxTargets()}
+		spaceId={fieldStr(object.fields, "channel")}
 		{onremove}
 		onchanged={reload}
 		onclose={() => {
