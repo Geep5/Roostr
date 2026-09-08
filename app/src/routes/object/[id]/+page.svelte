@@ -70,7 +70,7 @@
 	}
 
 	let nameDraft = $state("");
-	let titleEl = $state<HTMLInputElement>();
+	let titleEl = $state<HTMLTextAreaElement>();
 	let nameDraftFor = "";
 	$effect(() => {
 		const id = object?.id ?? "";
@@ -82,6 +82,17 @@
 			nameDraftFor = id;
 			nameDraft = name;
 		}
+	});
+
+	/** Anytype titles wrap: the "input" is an auto-growing textarea. */
+	function sizeTitle() {
+		if (!titleEl) return;
+		titleEl.style.height = "auto";
+		titleEl.style.height = `${titleEl.scrollHeight}px`;
+	}
+	$effect(() => {
+		void nameDraft;
+		sizeTitle();
 	});
 
 	async function saveName() {
@@ -430,16 +441,26 @@
 					{done ? "✓" : ""}
 				</button>
 			{/if}
-			<input
+			<textarea
 				class="title"
 				placeholder="Untitled"
+				rows="1"
 				bind:value={nameDraft}
 				bind:this={titleEl}
+				oninput={() => {
+					// Titles are single logical lines that WRAP - pasted
+					// newlines collapse to spaces.
+					if (nameDraft.includes("\n")) nameDraft = nameDraft.replaceAll("\n", " ");
+					sizeTitle();
+				}}
 				onblur={() => void saveName()}
 				onkeydown={(e) => {
-					if (e.key === "Enter") e.currentTarget.blur();
+					if (e.key === "Enter") {
+						e.preventDefault();
+						e.currentTarget.blur();
+					}
 				}}
-			/>
+			></textarea>
 		</div>
 		{#if isTemplate}
 			<p class="tpl-note">Template{templateTargetName ? ` of ${templateTargetName}` : ""} — new objects copy these blocks.</p>
@@ -652,8 +673,12 @@
 		color: var(--fg);
 		font-size: 34px;
 		font-weight: 750;
+		line-height: 1.25;
 		padding: 8px 0 16px;
 		font-family: inherit;
+		resize: none;
+		overflow: hidden;
+		display: block;
 	}
 	.title::placeholder {
 		color: var(--muted);
