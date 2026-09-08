@@ -178,7 +178,56 @@ export async function pendingMessages(obj: ObjectJSON, agentId: string): Promise
 const HOST_BODY_LIMIT = 2000;
 const STYLE_PREFIX: Record<number, string> = { 1: "# ", 2: "## ", 3: "### ", 4: "> ", 6: "- ", 7: "1. ", 8: "- [ ] " };
 
-/** Serialize an object's text blocks to markdown-ish, line-boundary capped. */
+/**
+ * One block, as a line an agent can read.
+ *
+ * Text blocks are not the only content. A page whose body is a bookmark, an
+ * embed or a link card used to serialise to nothing, so the framing told the
+ * agent "this page is empty" and `object_get` agreed - and the agent said so
+ * to a human looking straight at the link. It was answering honestly from a
+ * blind input.
+ *
+ * A link block carries only its target's id, and this stays synchronous, so
+ * the id is what gets printed: the agent can resolve it with object_get.
+ * Conversation blocks are never reached (they hang under __discussion__,
+ * which the walk skips) and are excluded here too, so a future caller that
+ * walks them cannot leak the thread into the body.
+ */
+export function blockLine(b: BlockJSON): string {
+	const t = b.content.text;
+	if (t?.text) return (STYLE_PREFIX[t.style ?? 0] ?? "") + t.text;
+	const custom = b.content.custom;
+	if (!custom) return "";
+	const meta = custom.meta ?? {};
+	switch (custom.contentType) {
+		case "bookmark": {
+			const url = meta["url"] ?? "";
+			if (!url) return "";
+			const title = meta["title"] ?? "";
+			return title ? `[bookmark] ${title} — ${url}` : `[bookmark] ${url}`;
+		}
+		case "embed": {
+			const url = meta["url"] ?? meta["src"] ?? "";
+			if (!url) return "";
+			const kind = meta["processor"] ? `${meta["processor"]} ` : "";
+			return `[${kind}embed] ${url}`;
+		}
+		case "link": {
+			const target = meta["target"] ?? "";
+			return target ? `[link] object ${target}` : "";
+		}
+		case "divider":
+			return meta["style"] === "dots" ? "* * *" : "---";
+		case "relation": {
+			const key = meta["key"] ?? "";
+			return key ? `[property shown here] ${key}` : "";
+		}
+		default:
+			return "";
+	}
+}
+
+/** Serialize an object's blocks to markdown-ish, line-boundary capped. */
 export function serializeBody(obj: ObjectJSON): { body: string; truncated: boolean } {
 	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
 	const referenced = new Set<string>();
@@ -188,8 +237,9 @@ export function serializeBody(obj: ObjectJSON): { body: string; truncated: boole
 		for (const id of ids) {
 			const b = byId.get(id);
 			if (!b) continue;
-			const t = b.content.text;
-			if (t?.text) lines.push((STYLE_PREFIX[t.style ?? 0] ?? "") + t.text);
+			if (b.content.custom?.contentType === "chat" || b.content.custom?.contentType === "discussion") continue;
+			const line = blockLine(b);
+			if (line) lines.push(line);
 			if (b.childrenIds.length) walk(b.childrenIds);
 		}
 	};

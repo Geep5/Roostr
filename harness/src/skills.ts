@@ -9,8 +9,16 @@
  */
 
 import { fetchObject, query, queryAll, str, type ObjectJSON } from "./api";
+import { blockLine } from "./surfaces";
 
-/** Serialize an object's text blocks in tree order. */
+/**
+ * Serialize an object's blocks in tree order.
+ *
+ * Shares one renderer with the host framing. It used to have its own
+ * text-only copy, so `object_get` - the tool an agent reaches for to check
+ * what the framing told it - was blind to bookmarks and link cards in
+ * exactly the same way, and confirmed the emptiness instead of correcting it.
+ */
 export function objectText(obj: ObjectJSON): string {
 	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
 	const referenced = new Set<string>();
@@ -20,8 +28,10 @@ export function objectText(obj: ObjectJSON): string {
 	const walk = (id: string) => {
 		const b = byId.get(id);
 		if (!b) return;
-		const t = b.content.text?.text;
-		if (t) out.push(t);
+		const kind = b.content.custom?.contentType;
+		if (kind === "chat" || kind === "discussion") return;
+		const line = blockLine(b);
+		if (line) out.push(line);
 		for (const c of b.childrenIds) walk(c);
 	};
 	for (const r of roots) walk(r.id);
