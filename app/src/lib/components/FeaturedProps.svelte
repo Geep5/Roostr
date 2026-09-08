@@ -11,7 +11,9 @@
 	import { store } from "$lib/data.svelte";
 	import { RESERVED_KEYS, emptyValueFor } from "$lib/relations";
 	import PropertyValue from "./PropertyValue.svelte";
-	import { tagStyle } from "$lib/options";
+	import CheckboxIcon from "./CheckboxIcon.svelte";
+	import { objectIcon } from "$lib/icons";
+	import { tagStyle, colorHex } from "$lib/options";
 	import { fetchBacklinks, type Backlink } from "$lib/backlinks";
 
 	let {
@@ -141,6 +143,21 @@
 							{@const opt = rel.options.find((o) => o.text === t)}
 							<span class="tag" style={tagStyle(opt?.color ?? "")}>{t}</span>
 						{/each}
+					{:else if rel.format === "status" && display(rel)}
+						<!-- Anytype status: colored text, no pill. -->
+						{@const opt = rel.options.find((o) => o.text === display(rel))}
+						<span style={opt?.color ? `color:${colorHex(opt.color)}` : ""}>{display(rel)}</span>
+					{:else if rel.format === "checkbox"}
+						<!-- The real checkbox glyph; clicking the cell still opens the editor. -->
+						<span class="prop-check" class:on={plain(v, "checkbox") === true}><CheckboxIcon checked={plain(v, "checkbox") === true} size={15} /></span>
+						{rel.name || rel.key}
+					{:else if rel.format === "object" && (plain(v, "object") as string[]).length > 0}
+						{#each plain(v, "object") as string[] as id (id)}
+							{@const o = store.summaries.find((x) => x.id === id)}
+							<span class="obj-chip"><span class="chip-icon">{objectIcon(o?.icon, o?.typeKey ?? "")}</span>{o?.name || "Untitled"}</span>
+						{/each}
+					{:else if (rel.format === "url" || rel.format === "email" || rel.format === "phone") && display(rel)}
+						<span class="linkish">{display(rel)}</span>
 					{:else}
 						{display(rel) || rel.name || rel.key}
 					{/if}
@@ -228,6 +245,34 @@
 	.bullet {
 		color: var(--border);
 		font-size: 10px;
+	}
+	.prop-check {
+		display: inline-flex;
+		align-items: center;
+		color: var(--muted);
+	}
+	.prop-check.on {
+		color: var(--accent);
+	}
+	/* Anytype's object-relation cell: icon + name chip. */
+	.obj-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		background: rgba(255, 255, 255, 0.07);
+		border-radius: 6px;
+		padding: 1px 7px 1px 4px;
+		font-size: 12.5px;
+		color: var(--fg);
+	}
+	.chip-icon {
+		font-size: 12px;
+	}
+	.linkish {
+		color: var(--accent);
+		text-decoration: underline;
+		text-decoration-color: rgba(120, 150, 255, 0.4);
+		text-underline-offset: 2px;
 	}
 	/* Anytype tagItem.isSmall: filled pill, pale text, no border. */
 	.tag {
