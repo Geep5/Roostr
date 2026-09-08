@@ -880,6 +880,30 @@
 	{/if}
 </div>
 {:else}
+<div class="desk">
+{#if tabs.list.length > 1}
+	<div class="tab-strip" role="tablist">
+		{#each tabs.list as t, i (t.uid)}
+			{@const info = tabInfo(t.path)}
+			<div
+				class="tab"
+				class:active={i === tabs.active}
+				role="tab"
+				tabindex="0"
+				aria-selected={i === tabs.active}
+				onclick={() => tabs.activate(i)}
+				onkeydown={(e) => { if (e.key === "Enter") tabs.activate(i); }}
+				onauxclick={(e) => { if (e.button === 1) { e.preventDefault(); tabs.close(i); } }}
+			>
+				<span class="tab-icon">{info.icon}</span>
+				<span class="tab-name">{info.name}</span>
+				<button class="tab-x" aria-label="Close tab" onclick={(e) => { e.stopPropagation(); tabs.close(i); }}>×</button>
+			</div>
+			{#if i !== tabs.active && i + 1 !== tabs.active && i < tabs.list.length - 1}<span class="tab-sep"></span>{/if}
+		{/each}
+		<button class="tab-new" data-tip="New tab" aria-label="New tab" onclick={() => tabs.open("/", false)}>＋</button>
+	</div>
+{/if}
 <div class="shell" style="grid-template-columns: {railWidth}px {sideWidth}px 1fr;{railDragging ? ' transition: none;' : ''}">
 	<nav class="vault" class:wide={railWide}>
 		{#each orderedSpaces as c (c.id)}
@@ -1088,26 +1112,6 @@
 	</aside>
 
 	<div class="main-col">
-		<div class="tab-strip">
-			{#each tabs.list as t, i (t.uid)}
-				{@const info = tabInfo(t.path)}
-				<div
-					class="tab"
-					class:active={i === tabs.active}
-					role="tab"
-					tabindex="0"
-					aria-selected={i === tabs.active}
-					onclick={() => tabs.activate(i)}
-					onkeydown={(e) => { if (e.key === "Enter") tabs.activate(i); }}
-					onauxclick={(e) => { if (e.button === 1) { e.preventDefault(); tabs.close(i); } }}
-				>
-					<span class="tab-icon">{info.icon}</span>
-					<span class="tab-name">{info.name}</span>
-					<button class="tab-x" aria-label="Close tab" onclick={(e) => { e.stopPropagation(); tabs.close(i); }}>×</button>
-				</div>
-			{/each}
-			<button class="tab-new" data-tip="New tab" aria-label="New tab" onclick={() => tabs.open(HOME_PATH, false)}>＋</button>
-		</div>
 		<header>
 			<div class="header-side left">
 				<button class="hbtn" data-tip="Back" aria-label="Back" onclick={() => history.back()}><svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 6L9 12l5.5 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -1184,6 +1188,7 @@
 {/if}
 		<main>{@render children()}</main>
 	</div>
+</div>
 </div>
 {/if}
 
@@ -1384,7 +1389,8 @@
 	.shell {
 		display: grid;
 		grid-template-columns: 56px 220px 1fr;
-		height: 100vh;
+		flex: 1;
+		min-height: 0;
 		transition: grid-template-columns 0.16s ease;
 	}
 	/* Anytype pageVault: a rounded solid card, no border — panes separate
@@ -1827,18 +1833,23 @@
 		overflow-y: auto;
 		padding: 0 32px;
 	}
-	/* Anytype's tab bar: a slim strip above the header. */
+.desk {
+		display: flex;
+		flex-direction: column;
+		height: 100vh;
+	}
+	/* Anytype's titlebar tabs: full-width dark strip, active tab is a
+	   lighter rounded card, neighbors separated by hairline dividers. */
 	.tab-strip {
 		display: flex;
-		align-items: stretch;
-		gap: 2px;
+		align-items: center;
 		flex: none;
-		height: 34px;
-		padding: 4px 8px 0;
+		height: 40px;
+		padding: 5px 8px;
+		gap: 0;
 		overflow-x: auto;
 		scrollbar-width: none;
 		background: var(--panel);
-		border-bottom: 1px solid var(--border);
 	}
 	.tab-strip::-webkit-scrollbar {
 		display: none;
@@ -1846,27 +1857,36 @@
 	.tab {
 		display: flex;
 		align-items: center;
-		gap: 6px;
+		gap: 7px;
 		min-width: 0;
-		max-width: 190px;
-		padding: 0 6px 0 10px;
-		border-radius: 8px 8px 0 0;
+		max-width: 200px;
+		flex: 0 1 auto;
+		height: 30px;
+		padding: 0 10px;
+		border-radius: 7px;
 		color: var(--muted);
-		font-size: 12.5px;
+		font-size: 13px;
 		cursor: pointer;
 		user-select: none;
 		white-space: nowrap;
 	}
 	.tab.active {
-		background: var(--bg);
+		background: var(--hl-med);
 		color: var(--fg);
 	}
 	.tab:not(.active):hover {
 		background: var(--hl-light);
 	}
+	.tab-sep {
+		flex: none;
+		width: 1px;
+		height: 16px;
+		margin: 0 2px;
+		background: var(--border);
+	}
 	.tab-icon {
 		flex: none;
-		font-size: 13px;
+		font-size: 13.5px;
 	}
 	.tab-name {
 		overflow: hidden;
@@ -1875,29 +1895,29 @@
 	}
 	.tab-x {
 		flex: none;
+		display: none;
 		background: none;
 		border: none;
 		color: var(--muted);
-		font-size: 14px;
+		font-size: 15px;
 		line-height: 1;
-		padding: 2px 4px;
+		padding: 1px 3px;
 		border-radius: 4px;
 		cursor: pointer;
-		opacity: 0;
 	}
-	.tab:hover .tab-x,
-	.tab.active .tab-x {
-		opacity: 1;
+	.tab.active .tab-x,
+	.tab:hover .tab-x {
+		display: block;
 	}
 	.tab-x:hover {
-		background: var(--hl-med);
+		background: var(--hover);
 		color: var(--fg);
 	}
 	.tab-new {
 		flex: none;
-		align-self: center;
-		width: 24px;
-		height: 24px;
+		width: 26px;
+		height: 26px;
+		margin-left: 4px;
 		background: none;
 		border: none;
 		border-radius: 6px;
