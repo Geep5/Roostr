@@ -383,7 +383,12 @@
 	}
 
 	function cell(r: QueryResultRow, key: string): string {
-		if (key === "type") return r.typeKey;
+		if (key === "type") {
+			// Display name, never the raw key: "finance_task" reads as its
+			// type's name (or at worst the key with spaces).
+			const t = store.types.find((x) => x.key === r.typeKey);
+			return t?.name || r.typeKey.replaceAll("_", " ");
+		}
 		if (key === "createdAt") return r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "";
 		if (key === "updatedAt") return r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "";
 		const v: ValueJSON | undefined = r.fields[key];
