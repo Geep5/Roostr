@@ -600,7 +600,11 @@
 		line-height: 1;
 		cursor: pointer;
 		flex: none;
-		align-self: center;
+		/* Anytype pins the checkbox to the FIRST title line - wrapped lines
+		   flow past it. 8px textarea padding + half the 42.5px line box,
+		   minus half the box. */
+		align-self: flex-start;
+		margin-top: 19px;
 	}
 	.done-check:hover {
 		border-color: var(--accent);
@@ -759,6 +763,9 @@
 		.title {
 			font-size: 32px;
 			padding: 4px 0 6px;
+		}
+		.done-check {
+			margin-top: 14px;
 		}
 		.obj-emoji {
 			width: 56px;
