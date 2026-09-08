@@ -78,12 +78,47 @@
 		open = true;
 	}
 
-	// Page mode: keep the newest message in view like a chat app.
+	// Land on the newest message, the way any chat does. This used to apply
+	// only to the phone's full-page mode, so the drawer opened at the top of
+	// the thread and a long history hid the very message you came to read.
 	let messagesEl = $state<HTMLDivElement>();
+	/** Within a message or so of the end - the reader is following along. */
+	function atBottom(el: HTMLDivElement): boolean {
+		return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+	}
+	function toBottom(el: HTMLDivElement) {
+		el.scrollTop = el.scrollHeight;
+	}
+	/**
+	 * Land at the end once per opened thread.
+	 *
+	 * Tracked by id rather than by depending on the prop: `object` is replaced
+	 * wholesale every time the parent refetches after a commit, so an effect
+	 * that merely reads it re-ran on each arriving message and dragged the
+	 * reader back down mid-history. Cleared on close so reopening lands again.
+	 */
+	let landedOn = "";
 	$effect(() => {
-		if (!pagemode || !messagesEl) return;
+		const id = object.id;
+		if (!isOpen) {
+			landedOn = "";
+			return;
+		}
+		if (landedOn === id) return;
+		const el = messagesEl;
+		if (!el) return; // container not bound yet; this re-runs when it is
+		landedOn = id;
+		// After paint, or scrollHeight is still the previous thread's.
+		requestAnimationFrame(() => toBottom(el));
+	});
+	// On new messages: pagemode always follows, as it did. The drawer follows
+	// only when the reader is already at the end, so scrolling back through
+	// history is not yanked away by an arriving reply.
+	$effect(() => {
 		void messages.length;
-		messagesEl.scrollTop = messagesEl.scrollHeight;
+		const el = messagesEl;
+		if (!el) return;
+		if (pagemode || atBottom(el)) requestAnimationFrame(() => toBottom(el));
 	});
 	$effect(() => {
 		if (isOpen) composerEl?.focus();
