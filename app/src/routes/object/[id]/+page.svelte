@@ -298,6 +298,21 @@
 		if (drawerPos) localStorage.setItem("disc-drawer-pos", JSON.stringify(drawerPos));
 		else localStorage.removeItem("disc-drawer-pos");
 	}
+	/**
+	 * Hold off text selection for the length of a drag.
+	 *
+	 * The handle itself is user-select: none, but that only stops the header's
+	 * own text going blue - Chrome still extends a selection into whatever the
+	 * pointer travels over, so moving the card smeared a highlight across the
+	 * document underneath. The clean fix is a flag on <html> for the duration,
+	 * since the alternative - cancelling pointerdown - takes the dblclick that
+	 * docks the card with it. Any selection already on the page is dropped, or
+	 * it would sit there looking like the drag made it.
+	 */
+	function suppressSelection(on: boolean) {
+		document.documentElement.classList.toggle("dragging-ui", on);
+		if (on) window.getSelection()?.removeAllRanges();
+	}
 	function drawerDragStart(e: PointerEvent) {
 		if (isMobileVp) return; // mobile is a full sheet, nothing to move
 		const t = e.target as HTMLElement | null;
@@ -309,15 +324,14 @@
 		const grabY = e.clientY - r.top;
 		// Pin the geometry it already had, so the first move does not jump.
 		drawerPos = clampPos({ x: r.left, y: r.top, h: r.height });
-		// Deliberately NOT preventDefault: cancelling pointerdown suppresses the
-		// compatibility mouse events, and with them the dblclick that docks the
-		// card again. Text selection is held off by user-select on the header.
+		suppressSelection(true);
 		const move = (ev: PointerEvent) => {
 			drawerPos = clampPos({ x: ev.clientX - grabX, y: ev.clientY - grabY, h: drawerPos?.h ?? r.height });
 		};
 		const up = () => {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", up);
+			suppressSelection(false);
 			savePos();
 		};
 		window.addEventListener("pointermove", move);
@@ -337,7 +351,12 @@
 	});
 
 	function drawerResizeStart(e: PointerEvent) {
+		// Cancelling pointerdown is safe here - the resize edge has no
+		// dblclick to lose - but the flag still goes on: preventDefault stops
+		// a selection starting on the edge, not one already in progress
+		// elsewhere, and the pointer leaves the edge as soon as it moves.
 		e.preventDefault();
+		suppressSelection(true);
 		const startX = e.clientX;
 		const startW = drawerW;
 		const startLeft = drawerPos?.x ?? 0;
@@ -351,6 +370,7 @@
 		const up = () => {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", up);
+			suppressSelection(false);
 			localStorage.setItem("disc-drawer-w", String(drawerW));
 			savePos();
 		};
@@ -758,6 +778,15 @@
 	}
 	/* The handle reads as one. Scoped styles cannot see the child's header,
 	   hence :global - the selector stays anchored to this card. */
+	/* While a card drag or resize is in flight, nothing anywhere is
+	   selectable: the pointer travels over the document and would otherwise
+	   paint a highlight behind the card it is carrying. Set on <html>, so it
+	   has to be :global. */
+	:global(html.dragging-ui),
+	:global(html.dragging-ui *) {
+		user-select: none !important;
+		-webkit-user-select: none !important;
+	}
 	.disc-drawer :global(.dd-head) {
 		cursor: grab;
 		touch-action: none;
