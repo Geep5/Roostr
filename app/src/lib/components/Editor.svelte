@@ -334,7 +334,12 @@
 		// Anytype's provider wraps the whole window, this is our analog.
 		const scopes = [editorEl.closest(".main-col"), editorEl.closest(".m-main"), editorEl.closest("article")];
 		if (!scopes.some((sc) => sc?.contains(t))) return;
-		if (t.closest("input, textarea, select, button, a, [contenteditable], [role='dialog'], .block-menu, .flyout, .toolbar, .spell-menu")) return;
+		// `.disc-drawer` is the conversation card: chrome floating OVER the
+		// page, but a DOM sibling of the article inside .main-col - so a
+		// mousedown on it passed the scope test above and armed a rubber-band
+		// selection that followed the card as it was dragged, painting the
+		// selection rect across the document behind it.
+		if (t.closest("input, textarea, select, button, a, [contenteditable], [role='dialog'], .block-menu, .flyout, .toolbar, .spell-menu, .disc-drawer")) return;
 		armDrag(e, false);
 	}
 
