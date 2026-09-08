@@ -149,8 +149,10 @@
 	}
 	input,
 	select {
-		background: var(--bg, #101216);
-		border: 1px solid var(--border);
+		background: var(--hl-light);
+		border: none;
+		border-radius: 10px;
+		padding: 8px 12px;
 		border-radius: 6px;
 		color: inherit;
 		padding: 6px 8px;

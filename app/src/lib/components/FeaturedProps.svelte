@@ -8,7 +8,7 @@
 	 */
 	import type { ObjectJSON, RelationDefJSON, ValueJSON } from "$lib/types";
 	import { note } from "$lib/api";
-	import { store } from "$lib/data.svelte";
+	import { layoutOf, store } from "$lib/data.svelte";
 	import { RESERVED_KEYS, emptyValueFor } from "$lib/relations";
 	import PropertyValue from "./PropertyValue.svelte";
 	import CheckboxIcon from "./CheckboxIcon.svelte";
@@ -160,7 +160,7 @@
 					{:else if rel.format === "object" && (plain(v, "object") as string[]).length > 0}
 						{#each plain(v, "object") as string[] as id (id)}
 							{@const o = store.summaries.find((x) => x.id === id)}
-							<span class="obj-chip"><span class="chip-icon">{objectIcon(o?.icon, o?.typeKey ?? "")}</span>{o?.name || "Untitled"}</span>
+							<span class="obj-chip"><span class="chip-icon">{#if o && layoutOf(o.typeKey) === "task"}<span class="li-check" class:on={o.done === true}><CheckboxIcon checked={o.done === true} size={13} /></span>{:else}{objectIcon(o?.icon, o?.typeKey ?? "")}{/if}</span>{o?.name || "Untitled"}</span>
 						{/each}
 					{:else if (rel.format === "url" || rel.format === "email" || rel.format === "phone") && display(rel)}
 						<span class="linkish">{display(rel)}</span>
@@ -269,6 +269,13 @@
 		border-radius: 6px;
 		padding: 1px 7px 1px 4px;
 		font-size: 12.5px;
+		color: var(--fg);
+	}
+	.li-check {
+		display: inline-flex;
+		color: var(--muted);
+	}
+	.li-check.on {
 		color: var(--fg);
 	}
 	.chip-icon {

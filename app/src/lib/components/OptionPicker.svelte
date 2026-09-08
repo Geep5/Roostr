@@ -124,14 +124,21 @@
 		min-width: 220px;
 	}
 	input {
-		background: var(--bg);
-		border: 1px solid var(--border);
-		border-radius: 8px;
+		background: var(--hl-light);
+		border: none;
+		border-radius: 10px;
 		color: var(--fg);
 		font-size: 13px;
-		padding: 5px 9px;
+		font-family: inherit;
+		padding: 8px 12px;
 		outline: none;
 		margin-bottom: 2px;
+	}
+	input::placeholder {
+		color: var(--muted);
+	}
+	input:focus {
+		background: var(--hl-med);
 	}
 	input:focus {
 		border-color: var(--accent);

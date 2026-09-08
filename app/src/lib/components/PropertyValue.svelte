@@ -10,7 +10,7 @@
 	 * Emits complete ValueJSON via onsave; the caller owns persistence.
 	 */
 	import type { RelationDefJSON, ValueJSON } from "$lib/types";
-	import { store } from "$lib/data.svelte";
+	import { layoutOf, store } from "$lib/data.svelte";
 	import { objectIcon } from "$lib/icons";
 	import CalendarPicker from "./CalendarPicker.svelte";
 	import OptionPicker from "./OptionPicker.svelte";
@@ -131,7 +131,7 @@
 		{#each items as id (id)}
 			{@const s = store.summaries.find((x) => x.id === id)}
 			<span class="obj-chip">
-				<a href="/object/{id}">{objectIcon(undefined, s?.typeKey ?? "note")} {nameOf(id)}</a>
+				<a href="/object/{id}">{#if s && layoutOf(s.typeKey) === "task"}<span class="li-check" class:on={s.done === true}><CheckboxIcon checked={s.done === true} size={14} /></span>{:else}{objectIcon(undefined, s?.typeKey ?? "note")}{/if} {nameOf(id)}</a>
 				<button title="Remove" onclick={() => void toggleObject(id)}>×</button>
 			</span>
 		{/each}
@@ -139,14 +139,14 @@
 			<button class="pill" onclick={() => (objectOpen = !objectOpen)}>+ link object</button>
 			{#if objectOpen}
 				<div class="obj-menu">
-					<input bind:value={objectQuery} placeholder="Search objects…" />
+									<input class="search" bind:value={objectQuery} placeholder="Search objects…" />
 					{#each candidates as c (c.id)}
 						<button
 							class="obj-item"
 							onclick={() => {
 								objectOpen = false;
 								void toggleObject(c.id);
-							}}><span class="obj-name">{objectIcon(undefined, c.typeKey)} {c.name || "Untitled"}</span> <span class="tk">{c.typeKey}</span></button
+							}}><span class="obj-name">{#if layoutOf(c.typeKey) === "task"}<span class="li-check" class:on={c.done === true}><CheckboxIcon checked={c.done === true} size={15} /></span>{:else}{objectIcon(undefined, c.typeKey)}{/if} {c.name || "Untitled"}</span> <span class="tk">{c.typeKey}</span></button
 						>
 					{/each}
 					{#if candidates.length === 0}<span class="tk pad">No matches</span>{/if}
@@ -248,6 +248,32 @@
 		color: var(--muted);
 		cursor: pointer;
 		font-size: 11px;
+	}
+	/* Anytype's filter field: filled, rounded, borderless. */
+	.obj-menu .search {
+		background: var(--hl-light);
+		border: none;
+		border-radius: 10px;
+		color: var(--fg);
+		font-size: 13px;
+		font-family: inherit;
+		padding: 8px 12px;
+		outline: none;
+		margin-bottom: 4px;
+	}
+	.obj-menu .search::placeholder {
+		color: var(--muted);
+	}
+	.obj-menu .search:focus {
+		background: var(--hl-med);
+	}
+	.li-check {
+		display: inline-flex;
+		vertical-align: -2px;
+		color: var(--muted);
+	}
+	.li-check.on {
+		color: var(--fg);
 	}
 	.obj-menu {
 		position: absolute;

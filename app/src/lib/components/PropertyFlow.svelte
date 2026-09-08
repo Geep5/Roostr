@@ -378,12 +378,13 @@
 		background: var(--hl-med);
 	}
 	input {
-		background: var(--bg);
-		border: 1px solid var(--border);
-		border-radius: 8px;
+		background: var(--hl-light);
+		border: none;
+		border-radius: 10px;
 		color: var(--fg);
 		font-size: 13px;
-		padding: 6px 10px;
+		font-family: inherit;
+		padding: 8px 12px;
 		outline: none;
 		flex: none;
 	}
