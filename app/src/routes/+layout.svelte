@@ -907,7 +907,9 @@
 				<span class="tab-name">{info.name}</span>
 				<button class="tab-x" aria-label="Close tab" onclick={(e) => { e.stopPropagation(); tabs.close(i); }}>×</button>
 			</div>
-			{#if i !== tabs.active && i + 1 !== tabs.active && i < tabs.list.length - 1}<span class="tab-sep"></span>{/if}
+			<!-- Always in the layout; hiding beside the active tab is visual
+			     only, so switching tabs never reflows the strip. -->
+			{#if i < tabs.list.length - 1}<span class="tab-sep" class:hidden={i === tabs.active || i + 1 === tabs.active}></span>{/if}
 		{/each}
 		<button class="tab-new" data-tip="New tab" aria-label="New tab" onclick={() => tabs.open("/", false)}>＋</button>
 	</div>
@@ -1891,6 +1893,9 @@
 		height: 16px;
 		margin: 0 2px;
 		background: var(--border);
+	}
+	.tab-sep.hidden {
+		opacity: 0;
 	}
 	.tab-icon {
 		flex: none;
