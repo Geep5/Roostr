@@ -5,7 +5,8 @@
 	import { activeSpace } from "$lib/space.svelte";
 	import { space as spaceApi, note, fetchObject, fetchQuery } from "$lib/api";
 	import { objectIcon } from "$lib/icons";
-	import { discussionUI, store, refreshAll, connectEvents } from "$lib/data.svelte";
+	import { layoutOf, discussionUI, store, refreshAll, connectEvents } from "$lib/data.svelte";
+	import CheckboxIcon from "$lib/components/CheckboxIcon.svelte";
 	import GraphIcon from "$lib/components/GraphIcon.svelte";
 	import PinnedWidget from "$lib/components/PinnedWidget.svelte";
 	import { creatableTypes, typeGlyph, createTyped, createCollection, createQuery, seedSpaceDefaults } from "$lib/create";
@@ -379,6 +380,14 @@
 			.filter((s) => !pinnedSet.has(s.id) && !["type", "template", "agent", "pinned_fact", "milestone"].includes(s.typeKey) && s.channelId === current.id)
 			.slice(0, 8);
 	});
+
+	/** Task-layout rows: the list checkbox toggles the bundled done relation. */
+	async function toggleRowDone(e: MouseEvent, id: string, cur: boolean) {
+		e.preventDefault();
+		e.stopPropagation();
+		await note.setField(id, "done", { boolValue: !cur });
+		await refreshAll();
+	}
 
 	function selectSpace(id: string) {
 		activeSpace.id = id;
@@ -787,7 +796,13 @@
 						<div class="m-section-body">
 							{#each mobileRecents as o (o.id)}
 								<a class="m-row" href="/object/{o.id}">
-									<span class="obj-icon">{o.icon || typeGlyph(o.typeKey)}</span>{o.name || "Untitled"}
+									{#if layoutOf(o.typeKey) === "task"}
+										<button class="row-check" class:on={o.done === true} aria-label="done" onclick={(e) => void toggleRowDone(e, o.id, o.done === true)}>
+											<CheckboxIcon checked={o.done === true} size={17} />
+										</button>
+									{:else}
+										<span class="obj-icon">{o.icon || typeGlyph(o.typeKey)}</span>
+									{/if}{o.name || "Untitled"}
 								</a>
 							{/each}
 						</div>
@@ -986,7 +1001,13 @@
 					<div class="section-body">
 						{#each recent as r (r.id)}
 							<a class="item" class:current={page.url.pathname === `/object/${r.id}`} href="/object/{r.id}">
-								<span class="obj-icon">{icon(r)}</span>{r.name || "Untitled"}
+								{#if layoutOf(r.typeKey) === "task"}
+									<button class="row-check" class:on={r.done === true} aria-label="done" onclick={(e) => void toggleRowDone(e, r.id, r.done === true)}>
+										<CheckboxIcon checked={r.done === true} size={16} />
+									</button>
+								{:else}
+									<span class="obj-icon">{icon(r)}</span>
+								{/if}{r.name || "Untitled"}
 							</a>
 						{/each}
 						{#if recent.length === 0}
@@ -1736,6 +1757,23 @@
 		flex: none;
 		width: 20px;
 		text-align: center;
+	}
+	.row-check {
+		display: inline-flex;
+		align-items: center;
+		flex: none;
+		background: none;
+		border: none;
+		padding: 0;
+		margin-right: 6px;
+		color: var(--muted);
+		cursor: pointer;
+	}
+	.row-check.on {
+		color: var(--accent);
+	}
+	.row-check:hover {
+		color: var(--fg);
 	}
 	.none {
 		color: var(--muted);
