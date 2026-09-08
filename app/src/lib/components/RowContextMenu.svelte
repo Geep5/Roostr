@@ -12,6 +12,7 @@
 	 * no membership to sever.
 	 */
 	import { note, fetchObject } from "$lib/api";
+	import { tabs } from "$lib/tabs.svelte";
 	import { store } from "$lib/data.svelte";
 	import { objectIcon } from "$lib/icons";
 	import { typeGlyph } from "$lib/create";
@@ -107,15 +108,22 @@
 		onclick={() => {
 			const targets = [...ids];
 			onclose();
-			// One object opens in place; a multi-selection opens Anytype-style
-			// as tabs - here, real browser tabs. (Browsers may ask once to
-			// allow multiple popups from this site.)
+			// One object opens in place; a multi-selection opens Anytype-style:
+			// each object becomes an in-app tab in the strip.
 			if (targets.length === 1) {
 				location.href = `/object/${targets[0]}`;
 				return;
 			}
-			for (const id of targets) window.open(`/object/${id}`, "_blank");
+			for (const id of targets) tabs.open(`/object/${id}`);
 		}}>Open{suffix}</button
+	>
+	<button
+		role="menuitem"
+		onclick={() => {
+			const targets = [...ids];
+			onclose();
+			for (const id of targets) tabs.open(`/object/${id}`);
+		}}>Open in new tab{suffix}</button
 	>
 	<button role="menuitem" onclick={() => { showTypes = !showTypes; showCols = false; }}>⇄ Change type{suffix} ▸</button>
 	{#if showTypes}
