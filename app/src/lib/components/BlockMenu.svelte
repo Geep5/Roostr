@@ -94,26 +94,84 @@
 	/** The space's creatable types (same list as the sidebar + button). */
 	const TURN_TYPES = creatableTypes();
 	let sub = $state<{ kind: SubKind; top: number } | null>(null);
+	/**
+	 * Set when a hover opened the current flyout.
+	 *
+	 * A mouse click is always preceded by pointerenter, so the hover opened
+	 * the submenu and the click then toggled it straight back shut - the row
+	 * looked dead and took a second click to work. The touch case was already
+	 * guarded below; this is the same collision with a real mouse, in the
+	 * other order.
+	 */
+	let hoverOpened = false;
 
 	function toggleSub(kind: SubKind, e: MouseEvent) {
 		if (sub?.kind === kind) {
-			sub = null;
+			// The click that follows the hover: leave open. A second click,
+			// with the flag spent, closes as it always did.
+			if (hoverOpened) {
+				hoverOpened = false;
+				return;
+			}
+			closeSub();
 			return;
 		}
+		cancelClose(); // a queued switch must not fire over a deliberate click
+		hoverOpened = false;
 		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
 		sub = { kind, top: r.top };
 	}
 
-	/** Hover-open (mouse only - a tap synthesizes pointerenter AND click,
-	 *  which would open-then-toggle-shut on touch). */
+	/**
+	 * Hover behaviour, mouse only (a tap synthesizes pointerenter AND click,
+	 * which would open-then-toggle-shut on touch).
+	 *
+	 * One pending action at a time. The flyout hangs to the RIGHT, so any
+	 * natural sweep toward an item crosses the rows in between: acting on the
+	 * first row crossed either dismissed the flyout before the pointer
+	 * arrived, or swapped it for that row's own - so the click landed on
+	 * whatever had taken its place. Both read as "it did the wrong thing, do
+	 * it again". Crossing is now given 220ms to prove itself; reaching the
+	 * flyout cancels it, and a deliberate rest on another row still switches.
+	 */
+	let pending: ReturnType<typeof setTimeout> | null = null;
+	function cancelClose() {
+		if (pending === null) return;
+		clearTimeout(pending);
+		pending = null;
+	}
+
+	/** Every close goes through here, so the hover flag never outlives the
+	 *  flyout it describes. */
+	function closeSub() {
+		cancelClose();
+		sub = null;
+		hoverOpened = false;
+	}
+
+	function openSub(kind: SubKind, top: number) {
+		cancelClose();
+		sub = { kind, top };
+		hoverOpened = true;
+	}
+
 	function hoverSub(kind: SubKind, e: PointerEvent) {
-		if (e.pointerType !== "mouse" || sub?.kind === kind) return;
-		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		sub = { kind, top: r.top };
+		if (e.pointerType !== "mouse") return;
+		cancelClose(); // arriving back on the row keeps its flyout
+		if (sub?.kind === kind) return;
+		const top = (e.currentTarget as HTMLElement).getBoundingClientRect().top;
+		// Nothing open yet: open at once, so the menu still feels immediate.
+		if (!sub) {
+			openSub(kind, top);
+			return;
+		}
+		pending = setTimeout(() => openSub(kind, top), 220);
 	}
 
 	function hoverPlain(e: PointerEvent) {
-		if (e.pointerType === "mouse") sub = null;
+		if (e.pointerType !== "mouse") return;
+		cancelClose();
+		pending = setTimeout(closeSub, 220);
 	}
 
 	const SUB_W = 220;
@@ -199,14 +257,14 @@
 	onmousedown={onWindowMousedown}
 	onkeydown={(e) => {
 		if (e.key === "Escape") {
-			if (sub) sub = null;
+			if (sub) closeSub();
 			else onclose();
 		}
 	}}
 />
 
 <div class="block-menu" bind:this={menuEl} style="left:{pos.left}px; top:{pos.top}px" role="menu" tabindex="-1">
-	<input bind:this={filterEl} bind:value={filter} placeholder="Filter actions…" oninput={() => (sub = null)} />
+	<input bind:this={filterEl} bind:value={filter} placeholder="Filter actions…" oninput={closeSub} />
 	{#if groupCount > 1}
 		<div class="group-note">Applies to {groupCount} selected blocks</div>
 	{/if}
@@ -285,7 +343,16 @@
 </div>
 
 {#if sub && subPos}
-	<div class="flyout" bind:this={flyoutEl} style="left:{subPos.left}px; top:{subPos.top}px" role="menu" tabindex="-1">
+	<!-- Reaching the flyout cancels the pending close from the rows crossed
+	     on the way. -->
+	<div
+		class="flyout"
+		bind:this={flyoutEl}
+		style="left:{subPos.left}px; top:{subPos.top}px"
+		role="menu"
+		tabindex="-1"
+		onpointerenter={cancelClose}
+	>
 		{#if sub.kind === "style" && t}
 			{#each STYLES as s (s.value)}
 				<button class:active={t.style === s.value} onclick={() => fire({ kind: "style", value: s.value })}>
