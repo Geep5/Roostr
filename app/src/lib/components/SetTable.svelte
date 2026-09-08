@@ -75,10 +75,14 @@
 	let dragging = false;
 
 	function onRowMouseDown(e: MouseEvent, id: string) {
-		// Modifier clicks are the existing toggle/range gestures, and
-		// editable cells own their own mouse handling.
+		// Modifier clicks are the existing toggle/range gestures. Buttons,
+		// inputs, and open cell editors keep their own mouse handling, but
+		// any CELL - name or editable relation - can start a drag: whether
+		// it was a drag or a click is decided by crossing into another row
+		// (dragMoved), not by where the press landed. A query whose columns
+		// are all relations was otherwise un-draggable.
 		if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
-		if ((e.target as HTMLElement).closest("td.editable, a, button, input")) return;
+		if ((e.target as HTMLElement).closest("a, button, input, .cell-pop")) return;
 		dragFrom = id;
 		dragMoved = false;
 		dragging = true;
@@ -141,6 +145,10 @@
 	}
 
 	function onCellClick(e: MouseEvent, recordId: string, key: string) {
+		// The mouseup ending a row-drag fires a click on the cell under the
+		// cursor - that must not open an editor. Bubble on (without the
+		// stopPropagation) so onRowClick clears the dragMoved flag.
+		if (dragMoved) return;
 		e.stopPropagation();
 		if (formatOf(key) === "checkbox") {
 			// Anytype checkbox cells toggle on click, no menu.
@@ -445,7 +453,7 @@
 		</thead>
 		<tbody>
 			{#each rows as r (r.id)}
-				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} onmousedown={(e) => onRowMouseDown(e, r.id)} onmouseenter={() => onRowEnter(r.id)} oncontextmenu={(e) => onRowContext(e, r.id)}>
+				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} onmousedown={(e) => onRowMouseDown(e, r.id)} onmouseenter={() => onRowEnter(r.id)} oncontextmenu={(e) => onRowContext(e, r.id)} ondragstart={(e) => e.preventDefault()}>
 					<td class="name">
 						{#if layoutOf(r.typeKey) === "task"}
 							<button class="task-check" class:on={r.fields["done"]?.boolValue === true} aria-label="done" onclick={(e) => void toggleDone(r, e)}>
