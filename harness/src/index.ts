@@ -436,7 +436,9 @@ async function serve(): Promise<void> {
 			// served_by edits (takeovers) and brand-new spaces sync as channel
 			// commits: refresh the gate now, stamp unclaimed spaces.
 			invalidateSpaceServing();
-			void convergeSpaceServing();
+			// A daemon blip (ECONNRESET mid-restart) must not kill the harness -
+			// the next channel event or boot reconcile converges again.
+			convergeSpaceServing().catch((err) => console.error("[harness] converge failed:", err?.message ?? err));
 			return;
 		}
 		if (obj.typeKey === "chat") {
