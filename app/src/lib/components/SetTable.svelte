@@ -65,40 +65,44 @@
 		selectedRows = rows.slice(Math.min(a, b), Math.max(a, b) + 1).map((r) => r.id);
 	}
 
-	// ── Drag across rows paints the selection ───────────────────────
-	// A bare drag over a table highlights cell TEXT by default, which is
-	// meaningless here — records are the unit. tbody opts out of text
-	// selection in CSS, freeing the drag to mean "select these records"
-	// the way Anytype (and the block editor's marquee) behaves.
-	let dragFrom = "";
-	let dragMoved = false;
-	let dragging = false;
+	// ── Marquee: drag anywhere in the set area rubber-bands records ──
+	// Anytype's selection/provider.tsx idiom: press on a row OR the
+	// whitespace around the table, drag a visible rectangle, and every
+	// row it touches joins the selection. Drag-vs-click is a 4px
+	// threshold, so plain clicks keep navigating and editing.
+	let setEl = $state<HTMLElement>();
+	let marquee = $state<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+	let dragMoved = $state(false);
 
-	function onRowMouseDown(e: MouseEvent, id: string) {
-		// Modifier clicks are the existing toggle/range gestures. Buttons,
-		// inputs, and open cell editors keep their own mouse handling, but
-		// any CELL - name or editable relation - can start a drag: whether
-		// it was a drag or a click is decided by crossing into another row
-		// (dragMoved), not by where the press landed. A query whose columns
-		// are all relations was otherwise un-draggable.
+	function onSetMouseDown(e: MouseEvent) {
 		if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
-		if ((e.target as HTMLElement).closest("a, button, input, .cell-pop")) return;
-		dragFrom = id;
+		const t = e.target as HTMLElement;
+		// Interactive targets own their gestures; the header row owns
+		// sort/resize/reorder; the entry row owns its input.
+		if (t.closest("a, button, input, textarea, .cell-pop, thead, tr.new-row")) return;
+		marquee = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
 		dragMoved = false;
-		dragging = true;
 	}
 
-	/** Extend the painted range as the cursor crosses into another row. */
-	function onRowEnter(id: string) {
-		if (!dragging || id === dragFrom) return;
+	function onMarqueeMove(e: MouseEvent) {
+		if (!marquee) return;
+		marquee = { ...marquee, x1: e.clientX, y1: e.clientY };
+		if (Math.abs(marquee.x1 - marquee.x0) + Math.abs(marquee.y1 - marquee.y0) < 4) return;
 		dragMoved = true;
-		rowAnchor = dragFrom;
-		rangeRows(id);
+		const left = Math.min(marquee.x0, marquee.x1);
+		const right = Math.max(marquee.x0, marquee.x1);
+		const top = Math.min(marquee.y0, marquee.y1);
+		const bottom = Math.max(marquee.y0, marquee.y1);
+		const hit: string[] = [];
+		for (const tr of setEl?.querySelectorAll<HTMLElement>("tbody tr[data-id]") ?? []) {
+			const r = tr.getBoundingClientRect();
+			if (r.bottom >= top && r.top <= bottom && r.right >= left && r.left <= right) hit.push(tr.dataset.id ?? "");
+		}
+		selectedRows = hit;
 	}
 
 	function endRowDrag() {
-		dragging = false;
-		dragFrom = "";
+		marquee = null;
 	}
 
 	function onRowClick(e: MouseEvent, id: string) {
@@ -389,9 +393,16 @@
 	}
 </script>
 
-<svelte:window onkeydown={(e) => { if (e.key === "Escape") { cellEdit = null; selectedRows = []; ctxMenu = null; } }} onmousedown={(e) => { if (cellEdit && !(e.target as HTMLElement).closest(".cell-pop, td.editable")) cellEdit = null; }} onmouseup={endRowDrag} />
+<svelte:window onkeydown={(e) => { if (e.key === "Escape") { cellEdit = null; selectedRows = []; ctxMenu = null; } }} onmousedown={(e) => { if (cellEdit && !(e.target as HTMLElement).closest(".cell-pop, td.editable")) cellEdit = null; }} onmousemove={onMarqueeMove} onmouseup={endRowDrag} />
 
-<div class="set-table">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="set-table" bind:this={setEl} onmousedown={onSetMouseDown}>
+	{#if marquee && dragMoved}
+		<div
+			class="marquee"
+			style="left: {Math.min(marquee.x0, marquee.x1)}px; top: {Math.min(marquee.y0, marquee.y1)}px; width: {Math.abs(marquee.x1 - marquee.x0)}px; height: {Math.abs(marquee.y1 - marquee.y0)}px"
+		></div>
+	{/if}
 	<table>
 		<colgroup>
 			<col />
@@ -453,7 +464,7 @@
 		</thead>
 		<tbody>
 			{#each rows as r (r.id)}
-				<tr class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} onmousedown={(e) => onRowMouseDown(e, r.id)} onmouseenter={() => onRowEnter(r.id)} oncontextmenu={(e) => onRowContext(e, r.id)} ondragstart={(e) => e.preventDefault()}>
+				<tr data-id={r.id} class:selected={selectedRows.includes(r.id)} onclick={(e) => onRowClick(e, r.id)} oncontextmenu={(e) => onRowContext(e, r.id)} ondragstart={(e) => e.preventDefault()}>
 					<td class="name">
 						{#if layoutOf(r.typeKey) === "task"}
 							<button class="task-check" class:on={r.fields["done"]?.boolValue === true} aria-label="done" onclick={(e) => void toggleDone(r, e)}>
@@ -671,6 +682,14 @@
 	tbody td {
 		user-select: none;
 		-webkit-user-select: none;
+	}
+	.marquee {
+		position: fixed;
+		z-index: 80;
+		pointer-events: none;
+		background: rgba(55, 122, 255, 0.12);
+		border: 1px solid rgba(55, 122, 255, 0.55);
+		border-radius: 2px;
 	}
 	tr.selected td {
 		background: rgba(55, 122, 255, 0.25);
