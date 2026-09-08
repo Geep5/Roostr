@@ -731,7 +731,12 @@
 		position: fixed;
 		right: 12px;
 		bottom: 12px;
-		z-index: 90;
+		/* Above every piece of page chrome, so a card dragged upward covers
+		   the sticky header (95) rather than sliding under it, and clears the
+		   editor's popovers (120-140) it now floats over. Deliberately below
+		   the 200+ overlays - Settings, Search, This-machine, the type panel:
+		   a modal the human just opened must not open behind the card. */
+		z-index: 150;
 		/* Border-box so an explicit width/height means the whole card. With
 		   content-box the 1px border sat outside the number, so each drag
 		   re-measured 2px taller than it had just been told to be and the
