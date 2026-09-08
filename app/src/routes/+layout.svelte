@@ -397,14 +397,17 @@
 		tabs.sync(page.url.pathname);
 	});
 
-	function tabInfo(path: string): { icon: string; name: string } {
+	function tabInfo(path: string): { icon: string; name: string; task?: boolean; done?: boolean } {
 		if (!path.startsWith("/object/")) {
 			const sp = store.channels.find((c) => c.id === activeSpace.id);
 			return { icon: "🏠", name: sp?.name || "Home" };
 		}
 		const id = path.slice("/object/".length).split("/")[0];
 		const o = store.summaries.find((x) => x.id === id);
-		if (o) return { icon: objectIcon(o.icon, o.typeKey), name: o.name || "Untitled" };
+		if (o) {
+			if (layoutOf(o.typeKey) === "task") return { icon: "", name: o.name || "Untitled", task: true, done: o.done === true };
+			return { icon: objectIcon(o.icon, o.typeKey), name: o.name || "Untitled" };
+		}
 		const t = store.types.find((x) => x.id === id);
 		if (t) return { icon: t.icon || typeGlyph(t.key), name: t.name || t.key };
 		const c = store.channels.find((x) => x.id === id);
@@ -895,7 +898,12 @@
 				onkeydown={(e) => { if (e.key === "Enter") tabs.activate(i); }}
 				onauxclick={(e) => { if (e.button === 1) { e.preventDefault(); tabs.close(i); } }}
 			>
-				<span class="tab-icon">{info.icon}</span>
+				{#if info.task}
+					<!-- Display-only: the whole tab opens; the done state just shows. -->
+					<span class="tab-check" class:on={info.done}><CheckboxIcon checked={info.done === true} size={14} /></span>
+				{:else}
+					<span class="tab-icon">{info.icon}</span>
+				{/if}
 				<span class="tab-name">{info.name}</span>
 				<button class="tab-x" aria-label="Close tab" onclick={(e) => { e.stopPropagation(); tabs.close(i); }}>×</button>
 			</div>
@@ -1887,6 +1895,15 @@
 	.tab-icon {
 		flex: none;
 		font-size: 13.5px;
+	}
+	.tab-check {
+		flex: none;
+		display: inline-flex;
+		align-items: center;
+		color: var(--muted);
+	}
+	.tab-check.on {
+		color: var(--accent);
 	}
 	.tab-name {
 		overflow: hidden;
