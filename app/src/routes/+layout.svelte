@@ -291,6 +291,35 @@
 	let spaceOverId = $state("");
 	let spaceOverAfter = $state(false);
 
+	// ── Tab strip reorder ───────────────────────────────────────────
+	// Same gesture as the space rail, turned on its side: the drop line sits
+	// before or after the tab under the pointer, decided by its midpoint. The
+	// strip is local (localStorage), so there is no order field to write - the
+	// store splices and re-derives `active` from the tab that had it.
+	let tabDragUid = $state(0);
+	let tabOverUid = $state(0);
+	let tabOverAfter = $state(false);
+
+	function tabDragOver(e: DragEvent, uid: number) {
+		if (!tabDragUid || tabDragUid === uid) return;
+		e.preventDefault();
+		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		tabOverUid = uid;
+		tabOverAfter = e.clientX > r.left + r.width / 2;
+	}
+
+	function tabDrop() {
+		const dragged = tabDragUid;
+		const target = tabOverUid;
+		const after = tabOverAfter;
+		tabDragUid = tabOverUid = 0;
+		if (!dragged || !target || dragged === target) return;
+		const from = tabs.list.findIndex((t) => t.uid === dragged);
+		const rest = tabs.list.filter((t) => t.uid !== dragged);
+		const at = rest.findIndex((t) => t.uid === target) + (after ? 1 : 0);
+		if (from >= 0 && at >= 0) tabs.move(from, at);
+	}
+
 	/** Midpoint between the drop neighbours — or a step beyond the edge. */
 	async function commitSpaceMove(draggedId: string, targetId: string, after: boolean) {
 		if (!draggedId || !targetId || draggedId === targetId) return;
@@ -891,9 +920,30 @@
 			<div
 				class="tab"
 				class:active={i === tabs.active}
+				class:drag-src={tabDragUid === t.uid}
+				class:over-before={tabOverUid === t.uid && !tabOverAfter}
+				class:over-after={tabOverUid === t.uid && tabOverAfter}
 				role="tab"
 				tabindex="0"
 				aria-selected={i === tabs.active}
+				draggable="true"
+				ondragstart={(e) => {
+					tabDragUid = t.uid;
+					e.dataTransfer?.setData("text/plain", String(t.uid));
+					if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+				}}
+				ondragover={(e) => tabDragOver(e, t.uid)}
+				ondragleave={() => {
+					if (tabOverUid === t.uid) tabOverUid = 0;
+				}}
+				ondrop={(e) => {
+					e.preventDefault();
+					tabDrop();
+				}}
+				ondragend={() => {
+					tabDragUid = 0;
+					tabOverUid = 0;
+				}}
 				onclick={() => tabs.activate(i)}
 				onkeydown={(e) => { if (e.key === "Enter") tabs.activate(i); }}
 				onauxclick={(e) => { if (e.button === 1) { e.preventDefault(); tabs.close(i); } }}
@@ -1865,6 +1915,7 @@
 		display: none;
 	}
 	.tab {
+		position: relative; /* anchors the drop line */
 		display: flex;
 		align-items: center;
 		gap: 7px;
@@ -1883,6 +1934,25 @@
 	.tab.active {
 		background: var(--hl-med);
 		color: var(--fg);
+	}
+	.tab.drag-src {
+		opacity: 0.4;
+	}
+	.tab.over-before::before,
+	.tab.over-after::after {
+		content: "";
+		position: absolute;
+		top: 3px;
+		bottom: 3px;
+		width: 2px;
+		border-radius: 2px;
+		background: var(--accent);
+	}
+	.tab.over-before::before {
+		left: -3px;
+	}
+	.tab.over-after::after {
+		right: -3px;
 	}
 	.tab:not(.active):hover {
 		background: var(--hl-light);

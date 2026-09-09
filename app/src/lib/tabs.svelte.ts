@@ -73,6 +73,21 @@ class TabStrip {
 		void goto(this.list[i].path);
 	}
 
+	/**
+	 * Reorder by drag. `active` is an index, so it is re-derived from the
+	 * moved-to position of the tab that was active - the strip rearranges
+	 * without switching what you are looking at.
+	 */
+	move(from: number, to: number): void {
+		if (from < 0 || from >= this.list.length) return;
+		const activeUid = this.list[this.active]?.uid;
+		const [moved] = this.list.splice(from, 1);
+		this.list.splice(Math.max(0, Math.min(to, this.list.length)), 0, moved);
+		const at = this.list.findIndex((t) => t.uid === activeUid);
+		if (at >= 0) this.active = at;
+		this.save();
+	}
+
 	close(i: number): void {
 		if (this.list.length === 0) return;
 		const wasActive = i === this.active;
