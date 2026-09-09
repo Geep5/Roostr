@@ -17,12 +17,13 @@ import "core:crypto"
 import "core:path/filepath"
 import "core:encoding/json"
 import "core:encoding/hex"
-
+import "../core"
 // ── SSE hub ──────────────────────────────────────────────────────────
 
+Sse_Client :: struct { sock: net.TCP_Socket, expires: i64 }
 Sse_Hub :: struct {
 	mu:      sync.Mutex,
-	clients: [dynamic]net.TCP_Socket,
+	clients: [dynamic]Sse_Client,
 }
 
 g_sse: Sse_Hub
@@ -32,9 +33,9 @@ sse_broadcast :: proc(object_id: string) {
 	sync.lock(&g_sse.mu)
 	defer sync.unlock(&g_sse.mu)
 	for i := len(g_sse.clients) - 1; i >= 0; i -= 1 {
-		_, err := net.send_tcp(g_sse.clients[i], transmute([]byte)msg)
-		if err != nil {
-			net.close(g_sse.clients[i])
+		client := g_sse.clients[i]
+		if client.expires <= unix_ms() || !send_all(client.sock, transmute([]byte)msg) {
+			net.close(client.sock)
 			unordered_remove(&g_sse.clients, i)
 		}
 	}
@@ -49,9 +50,9 @@ sse_ping_loop :: proc() {
 		ping := ": ping\n\n"
 		sync.lock(&g_sse.mu)
 		for i := len(g_sse.clients) - 1; i >= 0; i -= 1 {
-			_, err := net.send_tcp(g_sse.clients[i], transmute([]byte)ping)
-			if err != nil {
-				net.close(g_sse.clients[i])
+			client := g_sse.clients[i]
+			if client.expires <= unix_ms() || !send_all(client.sock, transmute([]byte)ping) {
+				net.close(client.sock)
 				unordered_remove(&g_sse.clients, i)
 			}
 		}
@@ -69,9 +70,10 @@ Request :: struct {
 	method: string,
 	path:   string,
 	body:   []byte,
+	host, origin, authorization: string,
 }
 
-CORS :: "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n"
+// Response CORS is set per connection only after origin authorization.
 
 /** send_tcp may write fewer bytes than asked; loop until done or error.
  * A short write silently truncates an HTTP response — the client then
@@ -88,8 +90,8 @@ send_all :: proc(sock: net.TCP_Socket, data: []byte) -> bool {
 
 respond :: proc(sock: net.TCP_Socket, status: string, content_type: string, body: []byte) {
 	head := fmt.tprintf(
-		"HTTP/1.1 %s\r\n%sContent-Type: %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n",
-		status, CORS, content_type, len(body),
+		"HTTP/1.1 %s\r\n%sContent-Type: %s\r\nContent-Length: %d\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+		status, g_response_cors, content_type, len(body),
 	)
 	hok := send_all(sock, transmute([]byte)head)
 	bok := hok && send_all(sock, body)
@@ -99,17 +101,18 @@ respond :: proc(sock: net.TCP_Socket, status: string, content_type: string, body
 }
 
 respond_json :: proc(sock: net.TCP_Socket, v: json.Value, status := "200 OK") {
-	respond(sock, status, "application/json", marshal(v))
+	respond(sock, status, "application/json", core.marshal(v))
 }
 
 respond_error :: proc(sock: net.TCP_Socket, message: string, status := "400 Bad Request") {
-	o := jobj()
+	o := core.jobj()
 	o["ok"] = json.Boolean(false)
 	o["error"] = json.String(message)
 	respond_json(sock, json.Object(o), status)
 }
 
 serve :: proc(port: int) {
+	local_auth_init(port)
 	endpoint := net.Endpoint{address = net.IP4_Address{127, 0, 0, 1}, port = port}
 	sock, err := net.listen_tcp(endpoint)
 	if err != nil {
@@ -148,8 +151,7 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 		return
 	}
 
-	if req.method == "OPTIONS" {
-		respond(sock, "204 No Content", "text/plain", {})
+	if !local_authorize(sock, req) {
 		net.close(sock)
 		return
 	}
@@ -159,17 +161,17 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 		when #config(GLON_HTTP_TRACE, false) {
 			fmt.eprintfln("[trace] SSE subscribe")
 		}
-		head := fmt.tprintf("HTTP/1.1 200 OK\r\n%sContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\ndata: {{\"hello\":true}}\n\n", CORS)
+		head := fmt.tprintf("HTTP/1.1 200 OK\r\n%sContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\ndata: {{\"hello\":true}}\n\n", g_response_cors)
 		if send_all(sock, transmute([]byte)head) {
 			sync.lock(&g_sse.mu)
 			// Bound zombie pileup: a client that stops reading but keeps the
 			// socket open (abandoned headless pages) is indistinguishable from
 			// a healthy idle one - evict the oldest past a sane cap.
 			if len(g_sse.clients) >= 64 {
-				net.close(g_sse.clients[0])
+				net.close(g_sse.clients[0].sock)
 				ordered_remove(&g_sse.clients, 0)
 			}
-			append(&g_sse.clients, sock)
+			append(&g_sse.clients, Sse_Client{sock, g_session_expires})
 			sync.unlock(&g_sse.mu)
 		} else {
 			net.close(sock)
@@ -187,6 +189,41 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 	}
 }
 
+parse_request_head :: proc(head: string) -> (req: Request, content_length: int, ok: bool) {
+	lines := strings.split(head, "\r\n", context.temp_allocator)
+	if len(lines) == 0 do return {}, 0, false
+	parts := strings.split(lines[0], " ", context.temp_allocator)
+	if len(parts) != 3 || parts[2] != "HTTP/1.1" || !strings.has_prefix(parts[1], "/") || strings.has_prefix(parts[1], "//") do return {}, 0, false
+	if parts[0] != "GET" && parts[0] != "POST" && parts[0] != "OPTIONS" do return {}, 0, false
+	req.method = parts[0]
+	req.path = parts[1]
+	if qi := strings.index_byte(req.path, '?'); qi >= 0 do req.path = req.path[:qi]
+	seen := make(map[string]bool, context.temp_allocator)
+	for line in lines[1:] {
+		colon := strings.index_byte(line, ':')
+		if colon <= 0 do return {}, 0, false
+		name := strings.to_lower(line[:colon], context.temp_allocator)
+		for c in name do if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') do return {}, 0, false
+		value := strings.trim_space(line[colon+1:])
+		for c in value do if c < 32 || c == 127 do return {}, 0, false
+		if seen[name] do return {}, 0, false
+		seen[name] = true
+		switch name {
+		case "host": req.host = value
+		case "origin": req.origin = value
+		case "authorization": req.authorization = value
+		case "transfer-encoding": return {}, 0, false
+		case "content-length":
+			if value == "" do return {}, 0, false
+			for c in value do if c < '0' || c > '9' do return {}, 0, false
+			length_ok: bool
+			content_length, length_ok = strconv.parse_int(value)
+			if !length_ok || content_length < 0 || content_length > 16 << 20 do return {}, 0, false
+		}
+	}
+	return req, content_length, req.host != "" && (req.method != "POST" || seen["content-length"])
+}
+
 read_request :: proc(sock: net.TCP_Socket) -> (Request, bool) {
 	buf := make([dynamic]byte, context.temp_allocator)
 	chunk: [8192]byte
@@ -196,38 +233,19 @@ read_request :: proc(sock: net.TCP_Socket) -> (Request, bool) {
 		if err != nil || n == 0 do return {}, false
 		append(&buf, ..chunk[:n])
 		header_end = strings.index(string(buf[:]), "\r\n\r\n")
-		if len(buf) > 1 << 20 do return {}, false
+		if header_end > 16 << 10 || header_end < 0 && len(buf) > 16 << 10 do return {}, false
 	}
-
-	head := string(buf[:header_end])
-	lines := strings.split_lines(head, context.temp_allocator)
-	if len(lines) == 0 do return {}, false
-	parts := strings.split(lines[0], " ", context.temp_allocator)
-	if len(parts) < 2 do return {}, false
-
-	content_length := 0
-	for line in lines[1:] {
-		lower := strings.to_lower(line, context.temp_allocator)
-		if strings.has_prefix(lower, "content-length:") {
-			v := strings.trim_space(line[len("content-length:"):])
-			content_length, _ = strconv.parse_int(v)
-		}
-	}
-
+	// Clone before appending a body: dynamic-buffer growth invalidates slices.
+	head := strings.clone(string(buf[:header_end]), context.temp_allocator)
+	req, content_length, ok := parse_request_head(head)
+	if !ok do return {}, false
 	body_start := header_end + 4
 	for len(buf) - body_start < content_length {
-		n, err := net.recv_tcp(sock, chunk[:])
-		if err != nil || n == 0 do break
+		n, err := net.recv_tcp(sock, chunk[:min(len(chunk), content_length - (len(buf) - body_start))])
+		if err != nil || n == 0 do return {}, false
 		append(&buf, ..chunk[:n])
 	}
-
-	req: Request
-	req.method = parts[0]
-	// Strip query string.
-	path := parts[1]
-	if qi := strings.index_byte(path, '?'); qi >= 0 do path = path[:qi]
-	req.path = path
-	req.body = buf[body_start:min(len(buf), body_start + content_length)]
+	req.body = buf[body_start:body_start + content_length]
 	return req, true
 }
 
@@ -271,7 +289,7 @@ handle_list_objects :: proc(sock: net.TCP_Socket) {
 		sock: net.TCP_Socket,
 	}
 	ctx := Ctx{sock}
-	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+	with_states(proc(states: map[string]^core.Object_State, user: rawptr) {
 		sock := (cast(^struct {
 				sock: net.TCP_Socket,
 			})user).sock
@@ -284,27 +302,26 @@ handle_list_objects :: proc(sock: net.TCP_Socket) {
 				break
 			}
 			if hidden do continue
-			o := jobj()
+			o := core.jobj()
 			o["id"] = json.String(s.id)
 			o["typeKey"] = json.String(s.type_key)
 			name := ""
-			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
+			if v, ok := core.fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
 			o["name"] = json.String(name)
 			o["updatedAt"] = json.Integer(s.updated_at)
 			channel_id := ""
-			if v, ok := fields_get(s.fields, "channel"); ok && v.kind == .String do channel_id = v.str
+			if v, ok := core.fields_get(s.fields, "channel"); ok && v.kind == .String do channel_id = v.str
 			o["channelId"] = json.String(channel_id)
 			emoji := ""
-			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do emoji = v.str
+			if v, ok := core.fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do emoji = v.str
 			o["icon"] = json.String(emoji)
 			// Task-layout rows render a live checkbox in lists; ship the state.
 			done := false
-			if v, ok := fields_get(s.fields, "done"); ok && v.kind == .Bool do done = v.b
+			if v, ok := core.fields_get(s.fields, "done"); ok && v.kind == .Bool do done = v.b
 			o["done"] = json.Boolean(done)
 			append(&arr, json.Object(o))
 		}
 		// Newest first.
-		g_sorts = make([dynamic]Sort_Spec, context.temp_allocator)
 		sort_summaries(&arr)
 		respond_json(sock, json.Array(arr))
 	}, &ctx)
@@ -319,12 +336,12 @@ sort_summaries :: proc(arr: ^[dynamic]json.Value) {
 	for i in 1 ..< len(arr) {
 		j := i
 		for j > 0 {
-			a, _ := json_int(arr[j - 1], "updatedAt")
-			b, _ := json_int(arr[j], "updatedAt")
+			a, _ := core.json_int(arr[j - 1], "updatedAt")
+			b, _ := core.json_int(arr[j], "updatedAt")
 			if a != b {
 				if a > b do break
 			} else {
-				if json_str(arr[j - 1], "id") <= json_str(arr[j], "id") do break
+				if core.json_str(arr[j - 1], "id") <= core.json_str(arr[j], "id") do break
 			}
 			arr[j - 1], arr[j] = arr[j], arr[j - 1]
 			j -= 1
@@ -338,7 +355,7 @@ handle_get_object :: proc(sock: net.TCP_Socket, id: string) {
 		id:   string,
 	}
 	ctx := Ctx{sock, id}
-	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+	with_states(proc(states: map[string]^core.Object_State, user: rawptr) {
 		c := cast(^struct {
 			sock: net.TCP_Socket,
 			id:   string,
@@ -348,7 +365,7 @@ handle_get_object :: proc(sock: net.TCP_Socket, id: string) {
 			respond_error(c.sock, "no object", "404 Not Found")
 			return
 		}
-		respond_json(c.sock, object_to_json_value(s))
+		respond_json(c.sock, core.object_to_json_value(s))
 	}, &ctx)
 }
 
@@ -357,17 +374,17 @@ handle_relations :: proc(sock: net.TCP_Socket) {
 		sock: net.TCP_Socket,
 	}
 	ctx := Ctx{sock}
-	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+	with_states(proc(states: map[string]^core.Object_State, user: rawptr) {
 		sock := (cast(^struct {
 				sock: net.TCP_Socket,
 			})user).sock
 		arr := make([dynamic]json.Value, context.temp_allocator)
 		for _, s in states {
 			if s.type_key != "relation" || s.deleted do continue
-			o := jobj()
+			o := core.jobj()
 			o["id"] = json.String(s.id)
-			str := proc(s: ^Object_State, k: string) -> string {
-				if v, ok := fields_get(s.fields, k); ok && v.kind == .String do return v.str
+			str := proc(s: ^core.Object_State, k: string) -> string {
+				if v, ok := core.fields_get(s.fields, k); ok && v.kind == .String do return v.str
 				return ""
 			}
 			o["key"] = json.String(str(s, "key"))
@@ -376,19 +393,19 @@ handle_relations :: proc(sock: net.TCP_Socket) {
 			o["iconEmoji"] = json.String(str(s, "iconEmoji"))
 			o["space"] = json.String(str(s, "channel"))
 			hidden := false
-			if v, ok := fields_get(s.fields, "hidden"); ok && v.kind == .Bool do hidden = v.b
+			if v, ok := core.fields_get(s.fields, "hidden"); ok && v.kind == .Bool do hidden = v.b
 			o["hidden"] = json.Boolean(hidden)
 			read_only := false
-			if v, ok := fields_get(s.fields, "readOnly"); ok && v.kind == .Bool do read_only = v.b
+			if v, ok := core.fields_get(s.fields, "readOnly"); ok && v.kind == .Bool do read_only = v.b
 			o["readOnly"] = json.Boolean(read_only)
 			max_count: i64 = 0
-			if v, ok := fields_get(s.fields, "maxCount"); ok && v.kind == .Int do max_count = v.i
+			if v, ok := core.fields_get(s.fields, "maxCount"); ok && v.kind == .Int do max_count = v.i
 			o["maxCount"] = json.Integer(max_count)
 			options := make([dynamic]json.Value, context.temp_allocator)
-			if v, ok := fields_get(s.fields, "options"); ok && v.kind == .List {
+			if v, ok := core.fields_get(s.fields, "options"); ok && v.kind == .List {
 				for item in v.items {
 					if item.kind != .Map do continue
-					oo := jobj()
+					oo := core.jobj()
 					for e in item.entries {
 						if e.value.kind == .String do oo[e.key] = json.String(e.value.str)
 					}
@@ -407,7 +424,7 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 		sock: net.TCP_Socket,
 	}
 	ctx := Ctx{sock}
-	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+	with_states(proc(states: map[string]^core.Object_State, user: rawptr) {
 		sock := (cast(^struct {
 				sock: net.TCP_Socket,
 			})user).sock
@@ -415,36 +432,36 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 		keys := make([dynamic]i64, context.temp_allocator)
 		for _, s in states {
 			if s.type_key != "channel" || s.deleted do continue
-			o := jobj()
+			o := core.jobj()
 			o["id"] = json.String(s.id)
 			name := ""
-			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
+			if v, ok := core.fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
 			o["name"] = json.String(name)
 		// Anytype precedence: image wins over emoji, else caller falls back
 		// to the first letter (their generated-tile equivalent).
 		icon := ""
-		if v, ok := fields_get(s.fields, "iconImage"); ok && v.kind == .String do icon = v.str
+		if v, ok := core.fields_get(s.fields, "iconImage"); ok && v.kind == .String do icon = v.str
 		if icon == "" {
-			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do icon = v.str
+			if v, ok := core.fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do icon = v.str
 		}
 		o["icon"] = json.String(icon)
 			pinned := make([dynamic]json.Value, context.temp_allocator)
-			if v, ok := fields_get(s.fields, "pinnedIds"); ok && v.kind == .List {
+			if v, ok := core.fields_get(s.fields, "pinnedIds"); ok && v.kind == .List {
 				for item in v.items do if item.kind == .String do append(&pinned, json.String(item.str))
 			}
 			o["pinnedIds"] = json.Array(pinned)
 			members := make([dynamic]json.Value, context.temp_allocator)
-			if v, ok := fields_get(s.fields, "members"); ok && v.kind == .List {
+			if v, ok := core.fields_get(s.fields, "members"); ok && v.kind == .List {
 				for item in v.items {
 					if item.kind != .Map do continue
-					mo := jobj()
+					mo := core.jobj()
 					for e in item.entries do if e.value.kind == .String do mo[e.key] = json.String(e.value.str)
 					append(&members, json.Object(mo))
 				}
 			}
 			o["members"] = json.Array(members)
 			key_id: i64 = 0
-			if v, ok := fields_get(s.fields, "keyId"); ok && v.kind == .Int do key_id = v.i
+			if v, ok := core.fields_get(s.fields, "keyId"); ok && v.kind == .Int do key_id = v.i
 			o["keyId"] = json.Integer(key_id)
 			o["createdAt"] = json.Integer(s.created_at)
 			// Display order for the space rail, set by drag-reorder. Absent
@@ -452,7 +469,7 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 			// an unordered vault needs no migration. Deliberately does NOT
 			// affect the sort below: this payload's order is the protocol's
 			// (oldest first), and the UI applies the user's on top.
-			if v, ok := fields_get(s.fields, "order"); ok {
+			if v, ok := core.fields_get(s.fields, "order"); ok {
 				if v.kind == .Float do o["order"] = json.Float(v.f)
 				else if v.kind == .Int do o["order"] = json.Float(f64(v.i))
 			}
@@ -466,7 +483,7 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 			j := i
 			for j > 0 &&
 			    (keys[j - 1] > keys[j] ||
-					    (keys[j - 1] == keys[j] && strings.compare(json_str(arr[j - 1], "id"), json_str(arr[j], "id")) > 0)) {
+					    (keys[j - 1] == keys[j] && strings.compare(core.json_str(arr[j - 1], "id"), core.json_str(arr[j], "id")) > 0)) {
 				arr[j - 1], arr[j] = arr[j], arr[j - 1]
 				keys[j - 1], keys[j] = keys[j], keys[j - 1]
 				j -= 1
@@ -487,7 +504,7 @@ handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
 		body: json.Value,
 	}
 	ctx := Ctx{sock, parsed}
-	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+	with_states(proc(states: map[string]^core.Object_State, user: rawptr) {
 		c := cast(^struct {
 			sock: net.TCP_Socket,
 			body: json.Value,
@@ -495,35 +512,35 @@ handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
 
 		// setId: resolve the set's sources into an extra filter.
 		extra: json.Value
-		set_id := json_str(c.body, "setId")
+		set_id := core.json_str(c.body, "setId")
 		if set_id != "" {
 			if set_obj, ok := states[set_id]; ok {
-				extra = resolve_set_filter(states, set_obj)
+				extra = core.resolve_set_filter(states, set_obj)
 			}
 		}
 
 		total := 0
-		matched := run_query(states, c.body, extra, context.temp_allocator, &total)
-		text := json_str(c.body, "textQuery")
+		matched := core.run_query(states, c.body, f64(unix_ms()), extra, context.temp_allocator, &total)
+		text := core.json_str(c.body, "textQuery")
 		records := make([dynamic]json.Value, context.temp_allocator)
 		for s in matched {
-			o := jobj()
+			o := core.jobj()
 			o["id"] = json.String(s.id)
 			o["typeKey"] = json.String(s.type_key)
 			name := ""
-			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
+			if v, ok := core.fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
 			o["name"] = json.String(name)
-			o["fields"] = fields_to_json(s.fields)
+			o["fields"] = core.fields_to_json(s.fields)
 			o["createdAt"] = json.Integer(s.created_at)
 			o["updatedAt"] = json.Integer(s.updated_at)
 			if s.deleted do o["deleted"] = json.Boolean(true)
 			if text != "" {
-				snippet := text_snippet(s, text)
+				snippet := core.text_snippet(s, text)
 				if snippet != "" do o["snippet"] = json.String(snippet)
 			}
 			append(&records, json.Object(o))
 		}
-		out := jobj()
+		out := core.jobj()
 		// The count of everything that matched, not of this page: a client
 		// asking for one page needs it to know whether more exist.
 		out["total"] = json.Integer(i64(total))
@@ -532,42 +549,3 @@ handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
 	}, &ctx)
 }
 
-/** Anytype resolveSources: type keys → type-in; relation keys → exists; OR. */
-resolve_set_filter :: proc(states: map[string]^Object_State, set_obj: ^Object_State) -> json.Value {
-	sources := make([dynamic]string, context.temp_allocator)
-	if v, ok := fields_get(set_obj.fields, "setOf"); ok && v.kind == .List {
-		for item in v.items do if item.kind == .String do append(&sources, item.str)
-	}
-	if len(sources) == 0 do return nil
-
-	relation_keys := make(map[string]bool, allocator = context.temp_allocator)
-	for _, s in states {
-		if s.type_key != "relation" do continue
-		if v, ok := fields_get(s.fields, "key"); ok && v.kind == .String do relation_keys[v.str] = true
-	}
-
-	parts := make([dynamic]json.Value, context.temp_allocator)
-	type_values := make([dynamic]json.Value, context.temp_allocator)
-	for src in sources {
-		if relation_keys[src] {
-			f := jobj()
-			f["key"] = json.String(src)
-			f["condition"] = json.String("exists")
-			append(&parts, json.Object(f))
-		} else {
-			append(&type_values, json.String(src))
-		}
-	}
-	if len(type_values) > 0 {
-		f := jobj()
-		f["key"] = json.String("type")
-		f["condition"] = json.String("in")
-		f["value"] = json.Array(type_values)
-		append(&parts, json.Object(f))
-	}
-	if len(parts) == 1 do return parts[0]
-	group := jobj()
-	group["operator"] = json.String("or")
-	group["nested"] = json.Array(parts)
-	return json.Object(group)
-}

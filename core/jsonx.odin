@@ -1,0 +1,395 @@
+package core
+
+// JSON bridge: Object_State/Value/Block ⇄ the wire shapes the Svelte
+// app already speaks (ValueJSON/BlockJSON/ObjectJSON in types.ts).
+
+import "core:encoding/json"
+import "core:encoding/base64"
+import "core:fmt"
+import "core:strings"
+
+// ── Model → json.Value ───────────────────────────────────────────────
+
+jobj :: proc(allocator := context.temp_allocator) -> map[string]json.Value {
+	return make(map[string]json.Value, allocator = allocator)
+}
+
+value_to_json :: proc(v: Value, allocator := context.temp_allocator, ordered := false) -> json.Value {
+	o := jobj(allocator)
+	switch v.kind {
+	case .None:
+	case .String:
+		o["stringValue"] = json.String(v.str)
+	case .Int:
+		o["intValue"] = json.Integer(v.i)
+	case .Float:
+		o["floatValue"] = json.Float(v.f)
+	case .Bool:
+		o["boolValue"] = json.Boolean(v.b)
+	case .Bytes:
+		o["bytesValue"] = json.String(base64.encode(v.bytes, allocator = allocator))
+	case .String_List:
+		values := make([dynamic]json.Value, allocator)
+		for s in v.strings do append(&values, json.String(s))
+		inner := jobj(allocator)
+		inner["values"] = json.Array(values)
+		o["listValue"] = json.Object(inner)
+	case .Map:
+		inner := jobj(allocator)
+		inner["entries"] = fields_to_json(v.entries, allocator, ordered)
+		o["mapValue"] = json.Object(inner)
+	case .List:
+		items := make([dynamic]json.Value, allocator)
+		for item in v.items do append(&items, value_to_json(item, allocator, ordered))
+		inner := jobj(allocator)
+		inner["items"] = json.Array(items)
+		o["valuesValue"] = json.Object(inner)
+	case .Link:
+		inner := jobj(allocator)
+		inner["targetId"] = json.String(v.link_target)
+		inner["relationKey"] = json.String(v.link_relation)
+		o["linkValue"] = json.Object(inner)
+	}
+	return json.Object(o)
+}
+
+fields_to_json :: proc(fields: [dynamic]Value_Entry, allocator := context.temp_allocator, ordered := false) -> json.Value {
+	if ordered {
+		pairs := make([dynamic]json.Value, allocator)
+		for e in fields {
+			pair := make([dynamic]json.Value, allocator)
+			append(&pair, json.String(e.key), value_to_json(e.value, allocator, true))
+			append(&pairs, json.Array(pair))
+		}
+		return json.Array(pairs)
+	}
+	o := jobj(allocator)
+	for e in fields do o[e.key] = value_to_json(e.value, allocator)
+	return json.Object(o)
+}
+
+block_to_json :: proc(b: Block, allocator := context.temp_allocator, ordered := false, wire := false) -> json.Value {
+	o := jobj(allocator)
+	o["id"] = json.String(b.id)
+	kids := make([dynamic]json.Value, allocator)
+	for c in b.children_ids do append(&kids, json.String(c))
+	o["childrenIds"] = json.Array(kids)
+
+	content := jobj(allocator)
+	switch b.content.kind {
+	case .None:
+	case .Text:
+		t := jobj(allocator)
+		t["text"] = json.String(b.content.text.text)
+		t["style"] = json.Integer(b.content.text.style)
+		marks := make([dynamic]json.Value, allocator)
+		for m in b.content.text.marks {
+			mo := jobj(allocator)
+			mo["from"] = json.Integer(m.from)
+			mo["to"] = json.Integer(m.to)
+			mo["type"] = json.Integer(m.type)
+			if m.param != "" do mo["param"] = json.String(m.param)
+			append(&marks, json.Object(mo))
+		}
+		t["marks"] = json.Array(marks)
+		t["checked"] = json.Boolean(b.content.text.checked)
+		t["color"] = json.String(b.content.text.color)
+		content["text"] = json.Object(t)
+	case .Custom:
+		c := jobj(allocator)
+		c["contentType"] = json.String(b.content.custom.content_type)
+		if wire do c["data"] = json.String(base64.encode(b.content.custom.data, allocator = allocator))
+		meta := jobj(allocator)
+		for p in b.content.custom.meta do meta[p.key] = json.String(p.value)
+		c["meta"] = json.Object(meta)
+		if ordered {
+			pairs := make([dynamic]json.Value, allocator)
+			for p in b.content.custom.meta {
+				pair := make([dynamic]json.Value, allocator)
+				append(&pair, json.String(p.key), json.String(p.value))
+				append(&pairs, json.Array(pair))
+			}
+			c["meta"] = json.Array(pairs)
+		}
+		content["custom"] = json.Object(c)
+	case .Layout:
+		l := jobj(allocator)
+		l["style"] = json.Integer(b.content.layout_style)
+		content["layout"] = json.Object(l)
+	case .Table:
+		content["table"] = json.Object(jobj(allocator))
+	case .Table_Column:
+		content["tableColumn"] = json.Object(jobj(allocator))
+	case .Table_Row:
+		r := jobj(allocator)
+		r["isHeader"] = json.Boolean(b.content.is_header)
+		content["tableRow"] = json.Object(r)
+	}
+	if !wire || b.has_content || b.content.kind != .None do o["content"] = json.Object(content)
+
+	if (wire && b.has_fields) || len(b.fields) > 0 {
+		fw := jobj(allocator)
+		fw["entries"] = fields_to_json(b.fields, allocator, ordered)
+		o["fields"] = json.Object(fw)
+	}
+	if b.align != 0 do o["align"] = json.Integer(b.align)
+	if b.background_color != "" do o["backgroundColor"] = json.String(b.background_color)
+	return json.Object(o)
+}
+
+object_to_json_value :: proc(s: ^Object_State, allocator := context.temp_allocator) -> json.Value {
+	o := jobj(allocator)
+	o["id"] = json.String(s.id)
+	o["typeKey"] = json.String(s.type_key)
+	o["fields"] = fields_to_json(s.fields, allocator)
+	blocks := make([dynamic]json.Value, allocator)
+	for b in s.blocks {
+		if b.id == "__content__" do continue // legacy primary-content block stays internal
+		append(&blocks, block_to_json(b, allocator))
+	}
+	o["blocks"] = json.Array(blocks)
+	o["deleted"] = json.Boolean(s.deleted)
+	o["createdAt"] = json.Integer(s.created_at)
+	o["updatedAt"] = json.Integer(s.updated_at)
+	return json.Object(o)
+}
+
+/**
+ * Key order must not depend on which process serialised the state.
+ * `json.Object` is an Odin map, so iteration order is randomised per process
+ * and reshuffles as the map grows. That leaked into every API response: it
+ * left `dump` unable to reproduce its own output - the one job the README
+ * gives it, parity testing against the TS engine - and it made the harness
+ * render a different prompt from identical inputs, rewriting two fields on
+ * the agent object every time the daemon restarted.
+ */
+DETERMINISTIC_JSON :: json.Marshal_Options {
+	sort_maps_by_key = true,
+}
+
+object_to_json :: proc(s: ^Object_State, allocator := context.temp_allocator) -> []byte {
+	out, err := json.marshal(object_to_json_value(s, allocator), DETERMINISTIC_JSON, allocator)
+	if err != nil do return transmute([]byte)string("{}")
+	return out
+}
+
+marshal :: proc(v: json.Value, allocator := context.temp_allocator) -> []byte {
+	out, err := json.marshal(v, DETERMINISTIC_JSON, allocator)
+	if err != nil do return transmute([]byte)string("null")
+	return out
+}
+
+// ── json.Value → model ───────────────────────────────────────────────
+
+json_str :: proc(v: json.Value, key: string) -> string {
+	obj, ok := v.(json.Object)
+	if !ok do return ""
+	field, fok := obj[key]
+	if !fok do return ""
+	s, sok := field.(json.String)
+	return sok ? string(s) : ""
+}
+
+json_int :: proc(v: json.Value, key: string) -> (i64, bool) {
+	obj, ok := v.(json.Object)
+	if !ok do return 0, false
+	field, fok := obj[key]
+	if !fok do return 0, false
+	#partial switch x in field {
+	case json.Integer:
+		return i64(x), true
+	case json.Float:
+		return i64(x), true
+	}
+	return 0, false
+}
+
+json_bool :: proc(v: json.Value, key: string) -> (bool, bool) {
+	obj, ok := v.(json.Object)
+	if !ok do return false, false
+	field, fok := obj[key]
+	if !fok do return false, false
+	b, bok := field.(json.Boolean)
+	return bool(b), bok
+}
+
+json_field :: proc(v: json.Value, key: string) -> (json.Value, bool) {
+	obj, ok := v.(json.Object)
+	if !ok do return nil, false
+	field, fok := obj[key]
+	return field, fok
+}
+
+/** Parse a ValueJSON object into a proto Value. */
+value_from_json :: proc(v: json.Value, allocator := context.allocator) -> Value {
+	out: Value
+	obj, ok := v.(json.Object)
+	if !ok do return out
+	if s, sok := obj["stringValue"]; sok {
+		out.kind = .String
+		if str, isok := s.(json.String); isok do out.str = string(str)
+		return out
+	}
+	if x, xok := obj["intValue"]; xok {
+		out.kind = .Int
+		#partial switch n in x {
+		case json.Integer:
+			out.i = i64(n)
+		case json.Float:
+			out.i = i64(n)
+		}
+		return out
+	}
+	if x, xok := obj["floatValue"]; xok {
+		out.kind = .Float
+		#partial switch n in x {
+		case json.Integer:
+			out.f = f64(n)
+		case json.Float:
+			out.f = f64(n)
+		}
+		return out
+	}
+	if x, xok := obj["boolValue"]; xok {
+		out.kind = .Bool
+		if b, bok := x.(json.Boolean); bok do out.b = bool(b)
+		return out
+	}
+	if x, xok := obj["bytesValue"]; xok {
+		out.kind = .Bytes
+		if s, sok := x.(json.String); sok do out.bytes, _ = bytes_from_base64(string(s), allocator)
+		return out
+	}
+	if x, xok := obj["listValue"]; xok {
+		out.kind = .String_List
+		out.strings = make([dynamic]string, allocator)
+		if inner, iok := json_field(x, "values"); iok {
+			if arr, aok := inner.(json.Array); aok {
+				for item in arr {
+					if s, sok := item.(json.String); sok do append(&out.strings, string(s))
+				}
+			}
+		}
+		return out
+	}
+	if x, xok := obj["mapValue"]; xok {
+		out.kind = .Map
+		if inner, iok := json_field(x, "entries"); iok do out.entries = fields_from_json(inner, allocator)
+		return out
+	}
+	if x, xok := obj["valuesValue"]; xok {
+		out.kind = .List
+		out.items = make([dynamic]Value, allocator)
+		if inner, iok := json_field(x, "items"); iok {
+			if arr, aok := inner.(json.Array); aok {
+				for item in arr do append(&out.items, value_from_json(item, allocator))
+			}
+		}
+		return out
+	}
+	if x, xok := obj["linkValue"]; xok {
+		out.kind = .Link
+		out.link_target = json_str(x, "targetId")
+		out.link_relation = json_str(x, "relationKey")
+		return out
+	}
+	return out
+}
+
+/** Parse a BlockContent JSON object. */
+content_from_json :: proc(v: json.Value, allocator := context.allocator) -> Block_Content {
+	c: Block_Content
+	if t, ok := json_field(v, "text"); ok {
+		c.kind = .Text
+		c.text.text = json_str(t, "text")
+		c.text.style, _ = json_int(t, "style")
+		c.text.checked, _ = json_bool(t, "checked")
+		c.text.color = json_str(t, "color")
+		c.text.marks = make([dynamic]Mark, allocator)
+		if marks, mok := json_field(t, "marks"); mok {
+			if arr, aok := marks.(json.Array); aok {
+				for m in arr {
+					mark: Mark
+					mark.from, _ = json_int(m, "from")
+					mark.to, _ = json_int(m, "to")
+					mark.type, _ = json_int(m, "type")
+					mark.param = json_str(m, "param")
+					append(&c.text.marks, mark)
+				}
+			}
+		}
+		return c
+	}
+	if l, ok := json_field(v, "layout"); ok {
+		c.kind = .Layout
+		c.layout_style, _ = json_int(l, "style")
+		return c
+	}
+	if t, ok := json_field(v, "table"); ok {
+		c.kind = .Table
+		_ = t
+		return c
+	}
+	if t, ok := json_field(v, "tableColumn"); ok {
+		c.kind = .Table_Column
+		_ = t
+		return c
+	}
+	if t, ok := json_field(v, "tableRow"); ok {
+		c.kind = .Table_Row
+		if h, hok := json_field(t, "isHeader"); hok {
+			if b, bok := h.(json.Boolean); bok do c.is_header = bool(b)
+		}
+		return c
+	}
+	if cu, ok := json_field(v, "custom"); ok {
+		c.kind = .Custom
+		c.custom.content_type = json_str(cu, "contentType")
+		c.custom.data, _ = bytes_from_base64(json_str(cu, "data"), allocator)
+		c.custom.meta = make([dynamic]Str_Pair, allocator)
+		if m, mok := json_field(cu, "meta"); mok {
+			for pair in json_map_pairs(m, allocator) {
+				if s, sok := pair.value.(json.String); sok {
+					append(&c.custom.meta, Str_Pair{key = strings.clone(pair.key, allocator), value = strings.clone(string(s), allocator)})
+				}
+			}
+		}
+		return c
+	}
+	return c
+}
+
+/** Parse a BlockJSON object (content + attrs; children from JSON). */
+block_from_json :: proc(v: json.Value, allocator := context.allocator) -> Block {
+	b: Block
+	b.id = json_str(v, "id")
+	b.children_ids = make([dynamic]string, allocator)
+	if kids, ok := json_field(v, "childrenIds"); ok {
+		if arr, aok := kids.(json.Array); aok {
+			for k in arr {
+				if s, sok := k.(json.String); sok do append(&b.children_ids, string(s))
+			}
+		}
+	}
+	if content, ok := json_field(v, "content"); ok {
+		b.content = content_from_json(content, allocator)
+		_, b.has_content = content.(json.Object)
+	}
+	b.align, _ = json_int(v, "align")
+	b.background_color = json_str(v, "backgroundColor")
+	b.fields = make([dynamic]Value_Entry, allocator)
+	if fw, ok := json_field(v, "fields"); ok {
+		_, b.has_fields = fw.(json.Object)
+		if entries, eok := json_field(fw, "entries"); eok do b.fields = fields_from_json(entries, allocator)
+	}
+	return b
+}
+
+/** Parse a fields map {key: ValueJSON}. */
+fields_from_json :: proc(v: json.Value, allocator := context.allocator) -> [dynamic]Value_Entry {
+	out := make([dynamic]Value_Entry, allocator)
+	for pair in json_map_pairs(v, allocator) {
+		append(&out, Value_Entry{key = strings.clone(pair.key, allocator), value = value_from_json(pair.value, allocator)})
+	}
+	return out
+}

@@ -12,7 +12,7 @@ import "core:strconv"
 import "core:path/filepath"
 import "core:encoding/hex"
 import "core:slice"
-
+import "../core"
 main :: proc() {
 	data_root := os.get_env_alloc("GLON_DATA", context.allocator)
 	if data_root == "" {
@@ -33,6 +33,12 @@ main :: proc() {
 			os.exit(1)
 		}
 		cli_dump(args[2])
+	case "key-export":
+		// Explicit local terminal operation; never available to paired browser sessions.
+		s := nostr_ensure()
+		raw, ok := hex.decode(transmute([]byte)s.privkey_hex, context.temp_allocator)
+		if !ok { fmt.eprintln("invalid local key"); os.exit(1) }
+		fmt.println(bech32_encode("nsec", raw))
 	case "bech32-test":
 		// NIP-19 test vector.
 		raw, _ := hex.decode(transmute([]byte)string("67dea2ed018072d675f5415ecfaed7d2597555e202d85b3d65ea4e58d2d92ffa"), context.temp_allocator)
@@ -51,7 +57,7 @@ main :: proc() {
 		bootstrap_space_defaults()
 		serve(port)
 	case:
-		fmt.eprintln("usage: glon-odin [serve [port] | list | dump <objectId>]")
+		fmt.eprintln("usage: glon-odin [serve [port] | list | dump <objectId> | key-export]")
 		os.exit(1)
 	}
 }
@@ -60,14 +66,14 @@ cli_list :: proc() {
 	// Sorted by id: `list` is a parity-testing tool, and the state map
 	// iterates in a different order in every process, so an unsorted walk
 	// could not reproduce its own output.
-	with_states(proc(states: map[string]^Object_State, _: rawptr) {
+	with_states(proc(states: map[string]^core.Object_State, _: rawptr) {
 		ids := make([dynamic]string, context.temp_allocator)
 		for id in states do append(&ids, id)
 		slice.sort(ids[:])
 		for id in ids {
 			s := states[id]
 			name := ""
-			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
+			if v, ok := core.fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
 			fmt.printfln("%-38s %-12s %-24s blocks=%d deleted=%v", id, s.type_key, name, len(s.blocks), s.deleted)
 		}
 	})
@@ -77,7 +83,7 @@ cli_dump :: proc(object_id: string) {
 	ctx := struct {
 		id: string,
 	}{object_id}
-	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+	with_states(proc(states: map[string]^core.Object_State, user: rawptr) {
 		id := (cast(^struct {
 				id: string,
 			})user).id
@@ -86,6 +92,6 @@ cli_dump :: proc(object_id: string) {
 			fmt.eprintln("no object", id)
 			return
 		}
-		fmt.println(string(object_to_json(s, context.temp_allocator)))
+		fmt.println(string(core.object_to_json(s, context.temp_allocator)))
 	}, &ctx)
 }

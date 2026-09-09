@@ -18,6 +18,7 @@ import {
 	type ValueJSON,
 	addBlock,
 	API,
+	apiFetch,
 } from "./api";
 import { fileHoldup, skillReady } from "./skillmgr";
 import { objectText, readSkill } from "./skills";
@@ -148,7 +149,7 @@ function summarizeObject(obj: ObjectJSON): string {
 let defaultSpaceCache: string | null = null;
 async function defaultSpaceId(): Promise<string> {
 	if (defaultSpaceCache !== null) return defaultSpaceCache;
-	const res = await fetch(`${API}/api/channels`);
+	const res = await apiFetch(`${API}/api/channels`);
 	const chans = (await res.json()) as Array<{ id: string }>;
 	defaultSpaceCache = chans[0]?.id ?? "";
 	return defaultSpaceCache;

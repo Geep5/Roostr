@@ -25,6 +25,7 @@ import stbi "vendor:stb/image"
 import "vendor:glfw"
 import "vendor:wgpu"
 import "vendor:wgpu/glfwglue"
+import "../core"
 
 // ── Graph model ──────────────────────────────────────────────────────
 
@@ -87,7 +88,7 @@ build_graph :: proc(allocator := context.allocator) -> Graph {
 	}
 	ctx := Ctx{&g, allocator}
 
-	with_states(proc(states: map[string]^Object_State, user: rawptr) {
+	with_states(proc(states: map[string]^core.Object_State, user: rawptr) {
 		c := cast(^struct {
 			g:         ^Graph,
 			allocator: runtime.Allocator,
@@ -105,7 +106,7 @@ build_graph :: proc(allocator := context.allocator) -> Graph {
 			}
 			if hidden do continue
 			name := id[:8]
-			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String && v.str != "" do name = v.str
+			if v, ok := core.fields_get(s.fields, "name"); ok && v.kind == .String && v.str != "" do name = v.str
 			is_channel := s.type_key == "channel"
 			radius: f32 = is_channel ? 22 : 10 + 2 * math.sqrt(f32(len(s.blocks)))
 			index[id] = len(g.nodes)
@@ -160,9 +161,9 @@ build_graph :: proc(allocator := context.allocator) -> Graph {
 			}
 			// queries → edges to current matches
 			if s.type_key == "query" || s.type_key == "set" {
-				filter := resolve_set_filter(states, s)
+				filter := core.resolve_set_filter(states, s)
 				if filter != nil {
-					matched := run_query(states, nil, filter)
+					matched := core.run_query(states, nil, f64(unix_ms()), filter)
 					count := 0
 					for m in matched {
 						if mi, ok := index[m.id]; ok && mi != ni {

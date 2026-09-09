@@ -5,7 +5,8 @@
  * state that the DAG doesn't.
  */
 
-export const API = process.env.GLON_API ?? "http://127.0.0.1:7333";
+import { API, apiFetch } from "./local-api-auth";
+export { API, apiFetch } from "./local-api-auth";
 
 export interface ValueJSON {
 	stringValue?: string;
@@ -48,13 +49,13 @@ export interface QueryRow {
 }
 
 export async function fetchObject(id: string): Promise<ObjectJSON> {
-	const res = await fetch(`${API}/api/objects/${id}`);
+	const res = await apiFetch(`${API}/api/objects/${id}`);
 	if (!res.ok) throw new Error(`objects/${id}: ${res.status}`);
 	return res.json() as Promise<ObjectJSON>;
 }
 
 export async function query(body: Record<string, unknown>): Promise<QueryRow[]> {
-	const res = await fetch(`${API}/api/query`, { method: "POST", body: JSON.stringify(body) });
+	const res = await apiFetch(`${API}/api/query`, { method: "POST", body: JSON.stringify(body) });
 	if (!res.ok) throw new Error(`query: ${res.status}`);
 	const out = (await res.json()) as { records: QueryRow[] };
 	return out.records;
@@ -70,7 +71,7 @@ export async function query(body: Record<string, unknown>): Promise<QueryRow[]> 
  */
 export async function queryAll(body: Record<string, unknown>, page = 500): Promise<QueryRow[]> {
 	const fetchPage = async (offset: number): Promise<{ total: number; records: QueryRow[] }> => {
-		const res = await fetch(`${API}/api/query`, {
+		const res = await apiFetch(`${API}/api/query`, {
 			method: "POST",
 			body: JSON.stringify({ ...body, offset, limit: page }),
 		});
@@ -89,7 +90,7 @@ export async function queryAll(body: Record<string, unknown>, page = 500): Promi
 }
 
 export async function mutate(action: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
-	const res = await fetch(`${API}/api/mutate`, {
+	const res = await apiFetch(`${API}/api/mutate`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ action, ...params }),
@@ -141,7 +142,8 @@ export function subscribe(onObject: (objectId: string) => void): void {
 	void (async () => {
 		for (;;) {
 			try {
-				const res = await fetch(`${API}/api/events`);
+				const res = await apiFetch(`${API}/api/events`);
+				if (!res.ok) throw new Error(`events: ${res.status}`);
 				const reader = res.body?.getReader();
 				if (!reader) throw new Error("no SSE body");
 				const decoder = new TextDecoder();

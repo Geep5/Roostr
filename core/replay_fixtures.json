@@ -1,0 +1,1090 @@
+[
+  {
+    "name": "empty history",
+    "changes": [],
+    "expected": null
+  },
+  {
+    "name": "FIFO Kahn ordering retains queued roots before newly freed smaller ids",
+    "changes": [
+      {
+        "id": "0101010101010101010101010101010101010101010101010101010101010101",
+        "objectId": "fixture-object",
+        "parentIds": [
+          "2020202020202020202020202020202020202020202020202020202020202020"
+        ],
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "winner",
+              "value": {
+                "stringValue": "child"
+              }
+            }
+          }
+        ],
+        "timestamp": 9,
+        "author": "fixture-author"
+      },
+      {
+        "id": "3030303030303030303030303030303030303030303030303030303030303030",
+        "objectId": "fixture-object",
+        "parentIds": [],
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "winner",
+              "value": {
+                "stringValue": "root"
+              }
+            }
+          }
+        ],
+        "timestamp": 4,
+        "author": "fixture-author"
+      },
+      {
+        "id": "2020202020202020202020202020202020202020202020202020202020202020",
+        "objectId": "fixture-object",
+        "parentIds": [],
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "page"
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "fixture-author"
+      }
+    ],
+    "expected": {
+      "id": "fixture-object",
+      "typeKey": "page",
+      "fields": {
+        "winner": {
+          "stringValue": "child"
+        }
+      },
+      "blocks": [],
+      "deleted": false,
+      "createdAt": 1,
+      "updatedAt": 9
+    }
+  },
+  {
+    "name": "snapshot-only keeps legacy zero updatedAt and hides primary content",
+    "changes": [
+      {
+        "id": "1010101010101010101010101010101010101010101010101010101010101010",
+        "objectId": "fixture-object",
+        "parentIds": [],
+        "ops": [
+          {
+            "objectDelete": {}
+          }
+        ],
+        "timestamp": 50,
+        "author": "fixture-author",
+        "snapshot": {
+          "id": "fixture-object",
+          "typeKey": "page",
+          "fields": {
+            "kept": {
+              "intValue": 7
+            }
+          },
+          "content": "aGVsbG8=",
+          "blocks": [
+            {
+              "id": "a",
+              "childrenIds": [],
+              "content": {
+                "table": {}
+              }
+            }
+          ],
+          "createdAt": 3,
+          "updatedAt": 49
+        }
+      }
+    ],
+    "expected": {
+      "id": "fixture-object",
+      "typeKey": "page",
+      "fields": {
+        "kept": {
+          "intValue": 7
+        }
+      },
+      "blocks": [
+        {
+          "id": "a",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        }
+      ],
+      "deleted": false,
+      "createdAt": 3,
+      "updatedAt": 0
+    }
+  },
+  {
+    "name": "highest timestamp snapshot skips prefix and ignores later older snapshot state",
+    "changes": [
+      {
+        "id": "1010101010101010101010101010101010101010101010101010101010101010",
+        "objectId": "fixture-object",
+        "parentIds": [],
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "discarded"
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "fixture-author"
+      },
+      {
+        "id": "2020202020202020202020202020202020202020202020202020202020202020",
+        "objectId": "fixture-object",
+        "parentIds": [
+          "1010101010101010101010101010101010101010101010101010101010101010"
+        ],
+        "ops": [
+          {
+            "objectDelete": {}
+          }
+        ],
+        "timestamp": 200,
+        "author": "fixture-author",
+        "snapshot": {
+          "typeKey": "page",
+          "fields": {
+            "base": {
+              "boolValue": true
+            }
+          },
+          "createdAt": 2
+        }
+      },
+      {
+        "id": "3030303030303030303030303030303030303030303030303030303030303030",
+        "objectId": "fixture-object",
+        "parentIds": [
+          "2020202020202020202020202020202020202020202020202020202020202020"
+        ],
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "suffix",
+              "value": {
+                "intValue": 1
+              }
+            }
+          }
+        ],
+        "timestamp": 100,
+        "author": "fixture-author",
+        "snapshot": {
+          "typeKey": "ignored",
+          "deleted": true
+        }
+      }
+    ],
+    "expected": {
+      "id": "fixture-object",
+      "typeKey": "page",
+      "fields": {
+        "base": {
+          "boolValue": true
+        },
+        "suffix": {
+          "intValue": 1
+        }
+      },
+      "blocks": [],
+      "deleted": false,
+      "createdAt": 2,
+      "updatedAt": 100
+    }
+  },
+  {
+    "name": "delete and recreate revives without erasing fields or blocks",
+    "changes": [
+      {
+        "id": "1010101010101010101010101010101010101010101010101010101010101010",
+        "objectId": "fixture-object",
+        "parentIds": [],
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "old"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "kept",
+              "value": {
+                "stringValue": "yes"
+              }
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "a",
+                "childrenIds": [],
+                "content": {
+                  "table": {}
+                }
+              }
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "fixture-author"
+      },
+      {
+        "id": "2020202020202020202020202020202020202020202020202020202020202020",
+        "objectId": "fixture-object",
+        "parentIds": [
+          "1010101010101010101010101010101010101010101010101010101010101010"
+        ],
+        "ops": [
+          {
+            "objectDelete": {}
+          }
+        ],
+        "timestamp": 2,
+        "author": "fixture-author"
+      },
+      {
+        "id": "3030303030303030303030303030303030303030303030303030303030303030",
+        "objectId": "fixture-object",
+        "parentIds": [
+          "2020202020202020202020202020202020202020202020202020202020202020"
+        ],
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "page"
+            }
+          }
+        ],
+        "timestamp": 3,
+        "author": "fixture-author"
+      }
+    ],
+    "expected": {
+      "id": "fixture-object",
+      "typeKey": "page",
+      "fields": {
+        "kept": {
+          "stringValue": "yes"
+        }
+      },
+      "blocks": [
+        {
+          "id": "a",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        }
+      ],
+      "deleted": false,
+      "createdAt": 3,
+      "updatedAt": 3
+    }
+  },
+  {
+    "name": "replace inherits target children and attrs remain on replacement",
+    "changes": [
+      {
+        "id": "1010101010101010101010101010101010101010101010101010101010101010",
+        "objectId": "fixture-object",
+        "parentIds": [],
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "page"
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "a",
+                "childrenIds": [],
+                "content": {
+                  "table": {}
+                }
+              }
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "kid",
+                "childrenIds": [],
+                "content": {
+                  "table": {}
+                }
+              },
+              "parentId": "a"
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "z",
+                "childrenIds": [],
+                "content": {
+                  "table": {}
+                },
+                "align": 2,
+                "backgroundColor": "red"
+              },
+              "targetId": "a",
+              "position": 6
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "fixture-author"
+      }
+    ],
+    "expected": {
+      "id": "fixture-object",
+      "typeKey": "page",
+      "fields": {},
+      "blocks": [
+        {
+          "id": "z",
+          "childrenIds": [
+            "kid"
+          ],
+          "content": {
+            "table": {}
+          },
+          "align": 2,
+          "backgroundColor": "red"
+        },
+        {
+          "id": "kid",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        }
+      ],
+      "deleted": false,
+      "createdAt": 1,
+      "updatedAt": 1
+    }
+  },
+  {
+    "name": "legacy add ignores after while legacy move honors after",
+    "changes": [
+      {
+        "id": "1010101010101010101010101010101010101010101010101010101010101010",
+        "objectId": "fixture-object",
+        "parentIds": [],
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "page"
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "a",
+                "childrenIds": [],
+                "content": {
+                  "table": {}
+                }
+              }
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "b",
+                "childrenIds": [],
+                "content": {
+                  "table": {}
+                }
+              },
+              "afterId": "missing"
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "c",
+                "childrenIds": [],
+                "content": {
+                  "table": {}
+                }
+              },
+              "afterId": "a"
+            }
+          },
+          {
+            "blockMove": {
+              "blockId": "c",
+              "afterId": "a"
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "fixture-author"
+      }
+    ],
+    "expected": {
+      "id": "fixture-object",
+      "typeKey": "page",
+      "fields": {},
+      "blocks": [
+        {
+          "id": "a",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        },
+        {
+          "id": "c",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        },
+        {
+          "id": "b",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        }
+      ],
+      "deleted": false,
+      "createdAt": 1,
+      "updatedAt": 1
+    }
+  },
+  {
+    "name": "side insertion makes deterministic row and columns",
+    "changes": [
+      {
+        "id": "1010101010101010101010101010101010101010101010101010101010101010",
+        "objectId": "fixture-object",
+        "parentIds": [],
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "page"
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "a",
+                "childrenIds": [],
+                "content": {
+                  "table": {}
+                }
+              }
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "b",
+                "childrenIds": [],
+                "content": {
+                  "table": {}
+                }
+              },
+              "targetId": "a",
+              "position": 4
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "fixture-author"
+      }
+    ],
+    "expected": {
+      "id": "fixture-object",
+      "typeKey": "page",
+      "fields": {},
+      "blocks": [
+        {
+          "id": "r-1010101010101010-2",
+          "childrenIds": [
+            "ct-1010101010101010-2",
+            "cd-1010101010101010-2"
+          ],
+          "content": {
+            "layout": {
+              "style": 0
+            }
+          }
+        },
+        {
+          "id": "ct-1010101010101010-2",
+          "childrenIds": [
+            "a"
+          ],
+          "content": {
+            "layout": {
+              "style": 1
+            }
+          }
+        },
+        {
+          "id": "a",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        },
+        {
+          "id": "cd-1010101010101010-2",
+          "childrenIds": [
+            "b"
+          ],
+          "content": {
+            "layout": {
+              "style": 1
+            }
+          }
+        },
+        {
+          "id": "b",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        }
+      ],
+      "deleted": false,
+      "createdAt": 1,
+      "updatedAt": 1
+    }
+  },
+  {
+    "name": "row count change resets column widths preserving other fields",
+    "changes": [
+      {
+        "id": "1010101010101010101010101010101010101010101010101010101010101010",
+        "objectId": "fixture-object",
+        "parentIds": [],
+        "ops": [],
+        "timestamp": 1,
+        "author": "fixture-author",
+        "snapshot": {
+          "typeKey": "page",
+          "createdAt": 1,
+          "blocks": [
+            {
+              "id": "row",
+              "childrenIds": [
+                "ca",
+                "cb"
+              ],
+              "content": {
+                "layout": {
+                  "style": 0
+                }
+              }
+            },
+            {
+              "id": "ca",
+              "childrenIds": [
+                "a"
+              ],
+              "content": {
+                "layout": {
+                  "style": 1
+                }
+              },
+              "fields": {
+                "entries": {
+                  "width": {
+                    "floatValue": 0.4
+                  },
+                  "kept": {
+                    "boolValue": true
+                  }
+                }
+              }
+            },
+            {
+              "id": "a",
+              "childrenIds": [],
+              "content": {
+                "table": {}
+              }
+            },
+            {
+              "id": "cb",
+              "childrenIds": [
+                "b"
+              ],
+              "content": {
+                "layout": {
+                  "style": 1
+                }
+              },
+              "fields": {
+                "entries": {
+                  "width": {
+                    "floatValue": 0.6
+                  }
+                }
+              }
+            },
+            {
+              "id": "b",
+              "childrenIds": [],
+              "content": {
+                "table": {}
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "2020202020202020202020202020202020202020202020202020202020202020",
+        "objectId": "fixture-object",
+        "parentIds": [
+          "1010101010101010101010101010101010101010101010101010101010101010"
+        ],
+        "ops": [
+          {
+            "blockAdd": {
+              "block": {
+                "id": "c",
+                "childrenIds": [],
+                "content": {
+                  "table": {}
+                }
+              },
+              "targetId": "b",
+              "position": 4
+            }
+          }
+        ],
+        "timestamp": 2,
+        "author": "fixture-author"
+      }
+    ],
+    "expected": {
+      "id": "fixture-object",
+      "typeKey": "page",
+      "fields": {},
+      "blocks": [
+        {
+          "id": "row",
+          "childrenIds": [
+            "ca",
+            "cb",
+            "cd-2020202020202020-0"
+          ],
+          "content": {
+            "layout": {
+              "style": 0
+            }
+          }
+        },
+        {
+          "id": "ca",
+          "childrenIds": [
+            "a"
+          ],
+          "content": {
+            "layout": {
+              "style": 1
+            }
+          },
+          "fields": {
+            "entries": {
+              "kept": {
+                "boolValue": true
+              }
+            }
+          }
+        },
+        {
+          "id": "a",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        },
+        {
+          "id": "cb",
+          "childrenIds": [
+            "b"
+          ],
+          "content": {
+            "layout": {
+              "style": 1
+            }
+          }
+        },
+        {
+          "id": "b",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        },
+        {
+          "id": "cd-2020202020202020-0",
+          "childrenIds": [
+            "c"
+          ],
+          "content": {
+            "layout": {
+              "style": 1
+            }
+          }
+        },
+        {
+          "id": "c",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        }
+      ],
+      "deleted": false,
+      "createdAt": 1,
+      "updatedAt": 2
+    }
+  },
+  {
+    "name": "empty column deletion unwraps single-column row",
+    "changes": [
+      {
+        "id": "1010101010101010101010101010101010101010101010101010101010101010",
+        "objectId": "fixture-object",
+        "parentIds": [],
+        "ops": [],
+        "timestamp": 1,
+        "author": "fixture-author",
+        "snapshot": {
+          "typeKey": "page",
+          "createdAt": 1,
+          "blocks": [
+            {
+              "id": "row",
+              "childrenIds": [
+                "ca",
+                "cb"
+              ],
+              "content": {
+                "layout": {
+                  "style": 0
+                }
+              }
+            },
+            {
+              "id": "ca",
+              "childrenIds": [
+                "a"
+              ],
+              "content": {
+                "layout": {
+                  "style": 1
+                }
+              },
+              "fields": {
+                "entries": {
+                  "width": {
+                    "floatValue": 0.4
+                  },
+                  "kept": {
+                    "boolValue": true
+                  }
+                }
+              }
+            },
+            {
+              "id": "a",
+              "childrenIds": [],
+              "content": {
+                "table": {}
+              }
+            },
+            {
+              "id": "cb",
+              "childrenIds": [
+                "b"
+              ],
+              "content": {
+                "layout": {
+                  "style": 1
+                }
+              },
+              "fields": {
+                "entries": {
+                  "width": {
+                    "floatValue": 0.6
+                  }
+                }
+              }
+            },
+            {
+              "id": "b",
+              "childrenIds": [],
+              "content": {
+                "table": {}
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "2020202020202020202020202020202020202020202020202020202020202020",
+        "objectId": "fixture-object",
+        "parentIds": [
+          "1010101010101010101010101010101010101010101010101010101010101010"
+        ],
+        "ops": [
+          {
+            "blockRemove": {
+              "blockId": "b"
+            }
+          }
+        ],
+        "timestamp": 2,
+        "author": "fixture-author"
+      }
+    ],
+    "expected": {
+      "id": "fixture-object",
+      "typeKey": "page",
+      "fields": {},
+      "blocks": [
+        {
+          "id": "a",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        }
+      ],
+      "deleted": false,
+      "createdAt": 1,
+      "updatedAt": 2
+    }
+  },
+  {
+    "name": "nested single-column rows normalize in insertion order",
+    "changes": [
+      {
+        "id": "1010101010101010101010101010101010101010101010101010101010101010",
+        "objectId": "fixture-object",
+        "parentIds": [],
+        "ops": [],
+        "timestamp": 1,
+        "author": "fixture-author",
+        "snapshot": {
+          "typeKey": "page",
+          "createdAt": 1,
+          "blocks": [
+            {
+              "id": "outer",
+              "childrenIds": [
+                "oc"
+              ],
+              "content": {
+                "layout": {
+                  "style": 0
+                }
+              }
+            },
+            {
+              "id": "oc",
+              "childrenIds": [
+                "inner"
+              ],
+              "content": {
+                "layout": {
+                  "style": 1
+                }
+              }
+            },
+            {
+              "id": "inner",
+              "childrenIds": [
+                "ic"
+              ],
+              "content": {
+                "layout": {
+                  "style": 0
+                }
+              }
+            },
+            {
+              "id": "ic",
+              "childrenIds": [
+                "leaf"
+              ],
+              "content": {
+                "layout": {
+                  "style": 1
+                }
+              }
+            },
+            {
+              "id": "leaf",
+              "childrenIds": [],
+              "content": {
+                "table": {}
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "2020202020202020202020202020202020202020202020202020202020202020",
+        "objectId": "fixture-object",
+        "parentIds": [
+          "1010101010101010101010101010101010101010101010101010101010101010"
+        ],
+        "ops": [
+          {
+            "blockRemove": {
+              "blockId": "missing"
+            }
+          }
+        ],
+        "timestamp": 2,
+        "author": "fixture-author"
+      }
+    ],
+    "expected": {
+      "id": "fixture-object",
+      "typeKey": "page",
+      "fields": {},
+      "blocks": [
+        {
+          "id": "leaf",
+          "childrenIds": [],
+          "content": {
+            "table": {}
+          }
+        }
+      ],
+      "deleted": false,
+      "createdAt": 1,
+      "updatedAt": 2
+    }
+  },
+  {
+    "name": "legacy child root remains repeated under later parent; UI hides custom binary data",
+    "changes": [
+      {
+        "id": "1111111111111111111111111111111111111111111111111111111111111111",
+        "objectId": "legacy-graph",
+        "parentIds": [],
+        "timestamp": 1,
+        "author": "fixture",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "page"
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "leaf",
+                "childrenIds": [],
+                "content": {
+                  "custom": {
+                    "contentType": "opaque",
+                    "data": "AAE=",
+                    "meta": {}
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "2222222222222222222222222222222222222222222222222222222222222222",
+        "objectId": "legacy-graph",
+        "parentIds": [
+          "1111111111111111111111111111111111111111111111111111111111111111"
+        ],
+        "timestamp": 2,
+        "author": "fixture",
+        "ops": [
+          {
+            "blockAdd": {
+              "block": {
+                "id": "parent",
+                "childrenIds": [
+                  "leaf"
+                ],
+                "content": {
+                  "table": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expected": {
+      "id": "legacy-graph",
+      "typeKey": "page",
+      "fields": {},
+      "blocks": [
+        {
+          "id": "leaf",
+          "childrenIds": [],
+          "content": {
+            "custom": {
+              "contentType": "opaque",
+              "meta": {}
+            }
+          }
+        },
+        {
+          "id": "parent",
+          "childrenIds": [
+            "leaf"
+          ],
+          "content": {
+            "table": {}
+          }
+        },
+        {
+          "id": "leaf",
+          "childrenIds": [],
+          "content": {
+            "custom": {
+              "contentType": "opaque",
+              "meta": {}
+            }
+          }
+        }
+      ],
+      "deleted": false,
+      "createdAt": 1,
+      "updatedAt": 2
+    }
+  }
+]

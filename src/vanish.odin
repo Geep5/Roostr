@@ -28,6 +28,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:sync"
+import "../core"
 
 VANISH_LOG_ID :: "__vanished__"
 VANISH_LOG_TYPE :: "vanish_log"
@@ -99,8 +100,6 @@ enforce_vanished_locked :: proc() -> int {
  * other change. Returns the number of objects recorded.
  */
 vanish_objects :: proc(object_ids: []string) -> int {
-	ops := make([dynamic]Operation, context.temp_allocator)
-	// First write bootstraps the ledger object.
 	exists := false
 	{
 		sync.lock(&g_store.mu)
@@ -108,21 +107,16 @@ vanish_objects :: proc(object_ids: []string) -> int {
 		_, exists = g_store.states[VANISH_LOG_ID]
 		sync.unlock(&g_store.mu)
 	}
-	if !exists {
-		append(&ops, Operation{kind = .Object_Create, type_key = VANISH_LOG_TYPE})
-		append(&ops, Operation{kind = .Field_Set, key = "name", value = string_value("Vanished objects")})
-	}
 
 	accepted := make([dynamic]string, context.temp_allocator)
 	now := unix_ms()
 	for object_id in object_ids {
 		if object_id == "" || object_id == VANISH_LOG_ID do continue
 		if strings.contains(object_id, "/") || strings.contains(object_id, "..") do continue
-		key := strings.concatenate({VANISH_KEY_PREFIX, object_id}, context.temp_allocator)
-		append(&ops, Operation{kind = .Field_Set, key = key, value = int_value(now)})
 		append(&accepted, object_id)
 	}
 	if len(accepted) == 0 do return 0
+	ops := core.mutation_vanish_ops(accepted[:], now, exists)
 	if !commit_ops(VANISH_LOG_ID, ops[:]) do return 0
 
 	for object_id in accepted do purge_object_files(object_id)
@@ -139,12 +133,12 @@ handle_vanished :: proc(sock: net.TCP_Socket) {
 	ids := vanished_ids()
 	arr := make([dynamic]json.Value, context.temp_allocator)
 	for object_id, at in ids {
-		o := jobj()
+		o := core.jobj()
 		o["objectId"] = json.String(object_id)
 		o["at"] = json.Integer(at)
 		append(&arr, json.Object(o))
 	}
-	out := jobj()
+	out := core.jobj()
 	out["vanished"] = json.Array(arr)
 	out["count"] = json.Integer(i64(len(arr)))
 	respond_json(sock, json.Object(out))

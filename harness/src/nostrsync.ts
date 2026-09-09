@@ -16,9 +16,9 @@
  * unpublished) then live (SSE commit → publish; relay event → import).
  */
 
-import { SimplePool, finalizeEvent, getPublicKey, nip19, nip44, type Event } from "nostr-tools";
+import { SimplePool, finalizeEvent, getPublicKey, nip19, nip44, verifyEvent, type Event, type Filter } from "nostr-tools";
 import { unwrapEvent, wrapEvent } from "nostr-tools/nip59";
-import { API, subscribe } from "./api";
+import { API, apiFetch, subscribe } from "./api";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 
 const CHANGE_KIND = 1078;
@@ -47,8 +47,14 @@ interface SyncState {
 	published: Record<string, true>;
 	/** newest relay event created_at we've processed, per subscription. */
 	cursor: number;
+	/** Inclusive replay floor retained for fragments or failed native imports. */
+	replaySince?: number;
+	/** Unresolved group identity -> earliest fragment, retained across buffer loss/restarts. */
+	pendingChunkGroups?: Record<string, number>;
 	/** object ids we have already asked the relays to delete (NIP-09). */
 	vanishRequested: Record<string, true>;
+	/** Version 2 completion requires a successful scan and deletion on every relay. */
+	vanishScanVersion?: 2;
 	/** "spaceId/keyId/changeHex" published under space-key encryption. */
 	publishedSpace?: Record<string, true>;
 	/** spaceId -> keyId whose full history has been (re)queued shared. */
@@ -66,11 +72,11 @@ function statePath(): string {
 async function readState(): Promise<SyncState> {
 	try {
 		const parsed = (await Bun.file(statePath()).json()) as SyncState;
-		if (parsed?.version === 1) return { ...parsed, vanishRequested: parsed.vanishRequested ?? {}, publishedSpace: parsed.publishedSpace ?? {}, sharedQueued: parsed.sharedQueued ?? {}, invitesSent: parsed.invitesSent ?? {}, wrapsSeen: parsed.wrapsSeen ?? {} };
+		if (parsed?.version === 1) return { ...parsed, pendingChunkGroups: parsed.pendingChunkGroups ?? {}, vanishScanVersion: 2, vanishRequested: parsed.vanishScanVersion === 2 ? (parsed.vanishRequested ?? {}) : {}, publishedSpace: parsed.publishedSpace ?? {}, sharedQueued: parsed.sharedQueued ?? {}, invitesSent: parsed.invitesSent ?? {}, wrapsSeen: parsed.wrapsSeen ?? {} };
 	} catch {
 		/* fresh */
 	}
-	return { version: 1, published: {}, cursor: 0, vanishRequested: {}, publishedSpace: {}, sharedQueued: {}, invitesSent: {}, wrapsSeen: {} };
+	return { version: 1, published: {}, cursor: 0, pendingChunkGroups: {}, vanishScanVersion: 2, vanishRequested: {}, publishedSpace: {}, sharedQueued: {}, invitesSent: {}, wrapsSeen: {} };
 }
 
 function writeState(state: SyncState): void {
@@ -97,6 +103,59 @@ export interface JoinRequest {
 	name?: string;
 	picture?: string;
 	at: number;
+}
+
+export interface SpaceJoinLink {
+	v: 2;
+	t: "space-join";
+	space: string;
+	name?: string;
+	owner: string;
+	relays: string[];
+}
+
+/** Send the same NIP-59 request as the browser, using only the service identity. */
+export async function sendJoinRequest(input: SpaceJoinLink): Promise<void> {
+	if (!input || typeof input !== "object" || input.v !== 2 || input.t !== "space-join") throw new Error("Invalid space join link");
+	if (typeof input.space !== "string" || !/^[A-Za-z0-9_-]{1,256}$/.test(input.space)) throw new Error("Invalid space id in join link");
+	if (input.name !== undefined && typeof input.name !== "string") throw new Error("Invalid space name in join link");
+	if (typeof input.owner !== "string") throw new Error("Invalid owner npub in join link");
+	let ownerHex: string;
+	try {
+		const owner = nip19.decode(input.owner.trim());
+		if (owner.type !== "npub") throw new Error("Expected npub");
+		ownerHex = owner.data;
+	} catch {
+		throw new Error("Invalid owner npub in join link");
+	}
+	if (!Array.isArray(input.relays) || input.relays.length > 32) throw new Error("Invalid relay list in join link");
+	const identity = await loadIdentity();
+	if (!identity) throw new Error("No local identity configured");
+	const relays = new Set<string>();
+	for (const value of input.relays.length > 0 ? input.relays : identity.relays) {
+		if (typeof value !== "string" || value.length > 2048) throw new Error("Invalid relay URL in join link");
+		let url: URL;
+		try {
+			url = new URL(value);
+		} catch {
+			throw new Error("Invalid relay URL in join link");
+		}
+		if ((url.protocol !== "wss:" && url.protocol !== "ws:") || !url.hostname || url.username || url.password || url.hash) throw new Error("Relay URL must use ws or wss without credentials or fragments");
+		relays.add(url.toString());
+	}
+	if (relays.size === 0) throw new Error("No relays configured for the join request");
+	const targets = [...relays];
+	const pool = new SimplePool();
+	try {
+		const wrap = wrapEvent(
+			{ kind: JOINREQ_RUMOR_KIND, tags: [], content: JSON.stringify({ t: "join-request", space: input.space }) },
+			identity.sk,
+			ownerHex,
+		);
+		await Promise.any(pool.publish(targets, wrap));
+	} finally {
+		pool.close(targets);
+	}
 }
 
 function joinReqPath(): string {
@@ -133,6 +192,7 @@ async function recordJoinRequest(r: Omit<JoinRequest, "key">): Promise<void> {
 interface Identity {
 	sk: Uint8Array;
 	pk: string;
+	identityHash: string;
 	conversationKey: Uint8Array;
 	relays: string[];
 }
@@ -143,9 +203,12 @@ async function loadIdentity(): Promise<Identity | null> {
 		if (!parsed.privkey || parsed.privkey.length !== 64) return null;
 		const sk = Uint8Array.from(Buffer.from(parsed.privkey, "hex"));
 		const pk = getPublicKey(sk);
+		const identityHasher = new Bun.CryptoHasher("sha256");
+		identityHasher.update(sk);
 		return {
 			sk,
 			pk,
+			identityHash: identityHasher.digest("hex"),
 			// Self-encryption: conversation key with our own pubkey.
 			conversationKey: nip44.getConversationKey(sk, pk),
 			relays: parsed.relays ?? [],
@@ -207,20 +270,28 @@ function npubToHex(npub: string): string | null {
 	return /^[0-9a-f]{64}$/.test(t) ? t : null;
 }
 
-async function loadSharedSpaces(myPk: string): Promise<Map<string, SharedSpace>> {
+async function loadSharedSpaces(identity: Identity): Promise<Map<string, SharedSpace>> {
+	const myPk = identity.pk;
 	const out = new Map<string, SharedSpace>();
-	let keyring: { channels?: Record<string, { key?: string; keyId?: number; owner?: string }> } = {};
+	let keyring: { localPubkey?: string; localIdentityHash?: string; channels?: Record<string, { key?: string; keyId?: number; owner?: string }> } = {};
 	try {
 		keyring = (await Bun.file(`${dataRoot()}/channel-keys.json`).json()) as typeof keyring;
 	} catch {
 		return out;
 	}
+	if (keyring.localPubkey !== myPk || keyring.localIdentityHash !== identity.identityHash) {
+		keyring.localPubkey = myPk;
+		keyring.localIdentityHash = identity.identityHash;
+		const path = `${dataRoot()}/channel-keys.json`;
+		writeFileSync(`${path}.tmp`, JSON.stringify(keyring), { mode: 0o600 });
+		renameSync(`${path}.tmp`, path);
+	}
 	for (const [spaceId, entry] of Object.entries(keyring.channels ?? {})) {
-		if (!entry.key || entry.key.length !== 64) continue;
+		if (!entry.key || !/^[0-9a-f]{64}$/i.test(entry.key) || !Number.isSafeInteger(entry.keyId ?? 1) || (entry.keyId ?? 1) < 1) continue;
 		const writers = new Set<string>([entry.owner ?? myPk]);
 		let memberCount = 0;
 		try {
-			const obj = (await (await fetch(`${API}/api/objects/${spaceId}`)).json()) as {
+			const obj = (await (await apiFetch(`${API}/api/objects/${spaceId}`)).json()) as {
 				fields?: Record<string, { valuesValue?: { items?: Array<{ mapValue?: { entries?: Record<string, { stringValue?: string }> } }> } }>;
 			};
 			const items = obj.fields?.["members"]?.valuesValue?.items ?? [];
@@ -255,7 +326,7 @@ async function loadSharedSpaces(myPk: string): Promise<Map<string, SharedSpace>>
 async function loadSpaceMap(): Promise<Map<string, string>> {
 	const out = new Map<string, string>();
 	try {
-		const objs = (await (await fetch(`${API}/api/objects`)).json()) as Array<{ id: string; typeKey?: string; channelId?: string }>;
+		const objs = (await (await apiFetch(`${API}/api/objects`)).json()) as Array<{ id: string; typeKey?: string; channelId?: string }>;
 		for (const o of objs) out.set(o.id, o.typeKey === "channel" ? o.id : (o.channelId ?? ""));
 	} catch {
 		/* daemon down; publish falls back to self path */
@@ -266,25 +337,32 @@ async function loadSpaceMap(): Promise<Map<string, string>> {
 // ── Local server I/O ─────────────────────────────────────────────
 
 async function localManifest(): Promise<Record<string, string[]>> {
-	const res = await fetch(`${API}/api/changes`);
+	const res = await apiFetch(`${API}/api/changes`);
 	return (await res.json()) as Record<string, string[]>;
 }
 
 async function localChanges(objectId: string): Promise<Array<{ id: string; b64: string }>> {
-	const res = await fetch(`${API}/api/changes/${objectId}`);
+	const res = await apiFetch(`${API}/api/changes/${objectId}`);
 	const out = (await res.json()) as { changes: Array<{ id: string; b64: string }> };
 	return out.changes;
 }
 
-async function localImport(b64s: string[]): Promise<{ imported: number; rejected: number; ids: string[] }> {
-	const res = await fetch(`${API}/api/changes`, { method: "POST", body: JSON.stringify({ changes: b64s }) });
+interface SharedProvenance {
+	spaceId: string;
+	keyId: number;
+	signer: string;
+}
+
+async function localImport(b64s: string[], provenance?: SharedProvenance): Promise<{ imported: number; rejected: number; ids: string[] }> {
+	const res = await apiFetch(`${API}/api/changes`, { method: "POST", body: JSON.stringify({ changes: b64s, provenance }) });
+	if (!res.ok) throw new Error(`Change import failed: ${res.status}`);
 	return (await res.json()) as { imported: number; rejected: number; ids: string[] };
 }
 
 /** Object ids the local ledger says are vanished (src/vanish.odin). */
 async function localVanished(): Promise<Set<string>> {
 	try {
-		const res = await fetch(`${API}/api/vanished`);
+		const res = await apiFetch(`${API}/api/vanished`);
 		const out = (await res.json()) as { vanished: Array<{ objectId: string }> };
 		return new Set(out.vanished.map((v) => v.objectId));
 	} catch {
@@ -303,35 +381,89 @@ async function localVanished(): Promise<Set<string>> {
 /** `#h` values per filter: one round trip covers this many objects. */
 const HTAG_BATCH = 100;
 
-async function collectEventIds(pool: SimplePool, id: Identity, objectIds: string[]): Promise<string[]> {
-	const found = new Set<string>();
-	for (let i = 0; i < objectIds.length; i += HTAG_BATCH) {
-		const tags = objectIds.slice(i, i + HTAG_BATCH).map((objectId) => blindObjectId(id, objectId));
-		await Promise.all(
-			id.relays.map(async (relay) => {
-				let until: number | undefined = undefined;
-				for (;;) {
-					let page: Event[];
-					try {
-						page = await pool.querySync([relay], { kinds: [CHANGE_KIND], authors: [id.pk], "#h": tags, until, limit: 500 });
-					} catch {
-						return; // relay down; the others still answer
-					}
-					if (page.length === 0) return;
-					for (const e of page) found.add(e.id);
-					const oldest = Math.min(...page.map((e) => e.created_at));
-					if (until !== undefined && oldest >= until) return; // no progress
-					until = oldest;
-				}
-			}),
-		);
-	}
-	return [...found];
+// 128 maximum-sized 40k-character NIP-44 chunks fit the relay's 8 MiB
+// response budget; a 500-event page can exceed it during code/history import.
+const HISTORY_PAGE_SIZE = 128;
+
+/** Unlike querySync, a failed subscription is not a successful empty page. */
+async function relayHistoryPage(pool: SimplePool, relay: string, filter: Filter): Promise<Event[]> {
+	const connection = await pool.ensureRelay(relay, { connectionTimeout: 15_000 });
+	return new Promise<Event[]>((resolve, reject) => {
+		const events: Event[] = [];
+		let settled = false;
+		let sub: { close(): void } | undefined;
+		const finish = (ok: boolean, close = true) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			if (ok) resolve(events);
+			else reject(new Error("Relay history scan incomplete"));
+			if (close) sub?.close();
+		};
+		const timer = setTimeout(() => finish(false), 15_000);
+		try {
+			sub = connection.subscribe([filter], {
+				onevent: (event) => events.push(event),
+				oneose: () => finish(true),
+				onclose: () => finish(false, false),
+				// nostr-tools synthesizes EOSE on timeout; ours closes first.
+				eoseTimeout: 60_000,
+			});
+		} catch {
+			finish(false);
+		}
+	});
 }
 
-/** Publish kind-5 requests for `eventIds`. Returns requests accepted somewhere. */
-async function publishDeleteRequests(pool: SimplePool, id: Identity, eventIds: string[], reason: string): Promise<number> {
+/** Every relay/filter has its own cursor; merging pages before advancing loses events. */
+async function scanRelayHistory(pool: SimplePool, relays: string[], filters: Filter[], receive: (event: Event) => void): Promise<boolean> {
+	let complete = relays.length > 0;
+	await Promise.all(relays.map(async (relay) => {
+		for (const filter of filters) {
+			let until: number | undefined;
+			try {
+				for (;;) {
+					const page = await relayHistoryPage(pool, relay, { ...filter, until, limit: HISTORY_PAGE_SIZE });
+					for (const event of page) receive(event);
+					if (page.length < HISTORY_PAGE_SIZE) break;
+					const oldest = Math.min(...page.map((event) => event.created_at));
+					if (until !== undefined && oldest >= until) {
+						// Nostr has no event-id continuation token. A saturated second
+						// cannot be skipped without silently dropping unknown events.
+						throw new Error(`History capped within timestamp ${oldest}; replay remains pending`);
+					}
+					until = oldest;
+				}
+			} catch (error) {
+				complete = false;
+				console.warn(`[sync] incomplete history from ${relay}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+	}));
+	return complete;
+}
+
+async function collectEventIds(pool: SimplePool, id: Identity, objectIds: string[]): Promise<{ eventIds: string[]; complete: boolean }> {
+	const found = new Set<string>();
+	const spaces = await loadSharedSpaces(id);
+	const allTags = new Set<string>();
+	for (const objectId of objectIds) {
+		allTags.add(blindObjectId(id, objectId));
+		for (const space of spaces.values()) allTags.add(blindShared(space.keyHex, objectId));
+	}
+	const tagList = [...allTags];
+	const filters: Filter[] = [];
+	for (let i = 0; i < tagList.length; i += HTAG_BATCH) {
+		filters.push({ kinds: [CHANGE_KIND], authors: [id.pk], "#h": tagList.slice(i, i + HTAG_BATCH) });
+	}
+	const complete = await scanRelayHistory(pool, id.relays, filters, (event) => found.add(event.id));
+	return { eventIds: [...found], complete };
+}
+
+/** Count requests accepted somewhere; completion requires every relay to accept every batch. */
+async function publishDeleteRequests(pool: SimplePool, id: Identity, eventIds: string[], reason: string): Promise<{ requests: number; complete: boolean }> {
 	let sent = 0;
+	let complete = id.relays.length > 0;
 	for (let i = 0; i < eventIds.length; i += DELETE_BATCH) {
 		const batch = eventIds.slice(i, i + DELETE_BATCH);
 		const event = finalizeEvent(
@@ -343,17 +475,14 @@ async function publishDeleteRequests(pool: SimplePool, id: Identity, eventIds: s
 			},
 			id.sk,
 		);
-		try {
-			await Promise.any(pool.publish(id.relays, event));
-			sent++;
-		} catch {
-			/* every relay refused this batch; the ledger still suppresses it locally */
-		}
+		const results = await Promise.allSettled(pool.publish(id.relays, event));
+		if (results.some((result) => result.status === "fulfilled")) sent++;
+		if (results.length !== id.relays.length || results.some((result) => result.status === "rejected")) complete = false;
 		const { promise, resolve } = Promise.withResolvers<void>();
 		setTimeout(resolve, 120);
 		await promise;
 	}
-	return sent;
+	return { requests: sent, complete };
 }
 
 // ── Sync engine ──────────────────────────────────────────────────
@@ -374,8 +503,8 @@ export async function startNostrSync(): Promise<void> {
 	let dirty = false;
 	const persist = () => {
 		if (!dirty) return;
-		dirty = false;
 		writeState(state);
+		dirty = false;
 	};
 	setInterval(persist, 5000);
 
@@ -422,15 +551,24 @@ export async function startNostrSync(): Promise<void> {
 		queue.push({ objectId, changeHex, b64, attempts: 0, notBefore: 0, space });
 	}
 
-	/** Ask the relays to drop the events of every newly vanished object, once. */
+	/** Retry until every configured relay was scanned and accepted every deletion batch. */
+	let vanishBusy = false;
 	async function chaseVanished(): Promise<void> {
+		if (vanishBusy) return;
 		const pending = [...vanished].filter((objectId) => !state.vanishRequested[objectId]);
 		if (pending.length === 0) return;
-		const eventIds = await collectEventIds(pool, id!, pending);
-		const sent = eventIds.length > 0 ? await publishDeleteRequests(pool, id!, eventIds, "object vanished by its owner") : 0;
-		console.log(`[sync] vanish: ${pending.length} object(s), ${eventIds.length} relay event(s), ${sent} delete request(s)`);
-		for (const objectId of pending) state.vanishRequested[objectId] = true;
-		dirty = true;
+		vanishBusy = true;
+		try {
+			const scan = await collectEventIds(pool, id!, pending);
+			const deletion = await publishDeleteRequests(pool, id!, scan.eventIds, "object vanished by its owner");
+			console.log(`[sync] vanish: ${pending.length} object(s), ${scan.eventIds.length} relay event(s), ${deletion.requests} delete request(s)`);
+			if (scan.complete && deletion.complete) {
+				for (const objectId of pending) state.vanishRequested[objectId] = true;
+				dirty = true;
+			}
+		} finally {
+			vanishBusy = false;
+		}
 	}
 
 	/** Relay + NIP-44 limits: chunk big changes into ≤CHUNK_CHARS parts.
@@ -524,11 +662,32 @@ export async function startNostrSync(): Promise<void> {
 		}
 	}
 
-	/** Reassembly buffer for chunked changes: gid → parts. */
-	const chunkGroups = new Map<string, { total: number; parts: Map<number, string> }>();
+	/** Only bounded, short-lived transport fragments live here; canonical events have no TTL. */
+	const MAX_CHUNK_GROUPS = 128;
+	const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
+	const CHUNK_TTL_MS = 5 * 60_000;
+	const chunkGroups = new Map<string, { total: number; parts: Map<number, string>; bytes: number; expires: number; since: number }>();
+	let chunkBytes = 0;
+	function dropChunkGroup(key: string): void {
+		const group = chunkGroups.get(key);
+		if (!group) return;
+		chunkBytes -= group.bytes;
+		chunkGroups.delete(key);
+	}
+	function expireChunkGroups(): void {
+		const now = Date.now();
+		for (const [key, group] of chunkGroups) {
+			if (group.expires > now) continue;
+			recordReplayFault(group.since);
+			dropChunkGroup(key);
+		}
+	}
+	setInterval(expireChunkGroups, 60_000);
 
-	async function importB64(b64: string, space: SharedSpace | null): Promise<void> {
-		const res = await localImport([b64]);
+	async function importB64(b64: string, space: SharedSpace | null, signer: string): Promise<void> {
+		const provenance = space ? { spaceId: space.spaceId, keyId: space.keyId, signer } : undefined;
+		const res = await localImport([b64], provenance);
+		if (res.rejected > 0) throw new Error("Change import rejected");
 		// Anything the relay already holds must never be echoed back.
 		for (const hex of res.ids) {
 			if (space) state.publishedSpace![`${space.spaceId}/${space.keyId}/${hex}`] = true;
@@ -539,12 +698,15 @@ export async function startNostrSync(): Promise<void> {
 
 	/** Try self key, then every shared-space key. */
 	function decryptEvent(event: Event): { part: string; space: SharedSpace | null } | null {
-		try {
-			return { part: nip44.decrypt(event.content, id!.conversationKey), space: null };
-		} catch {
-			/* not self-encrypted */
+		if (event.pubkey === id!.pk) {
+			try {
+				return { part: nip44.decrypt(event.content, id!.conversationKey), space: null };
+			} catch {
+				/* not self-encrypted */
+			}
 		}
 		for (const space of sharedSpaces.values()) {
+			if (!event.tags.some((tag) => tag[0] === "h" && tag[1] === space.spaceTag)) continue;
 			try {
 				const part = nip44.decrypt(event.content, space.convKey);
 				// Writer gate: a viewer (or stranger holding a leaked key)
@@ -559,37 +721,142 @@ export async function startNostrSync(): Promise<void> {
 		return null;
 	}
 
+	function retainReplaySince(createdAt: number): void {
+		if (state.replaySince === undefined || createdAt < state.replaySince) {
+			state.replaySince = createdAt;
+			dirty = true;
+		}
+	}
+
+	let replayFaultGeneration = 0;
+	let replayScanGeneration = 0;
+	let activeReplayScans = 0;
+	let activeImports = 0;
+	// Like published change IDs, receipt identities live for this daemon's
+	// lifetime. Expiring one could turn an inclusive-cursor suffix replay
+	// into an unresolved group whose prefix is outside the requested range.
+	const completedChunkGroups = new Set<string>();
+	function recordReplayFault(since: number): void {
+		replayFaultGeneration++;
+		retainReplaySince(since);
+	}
+	interface ReplayScan {
+		since: number;
+		faults: number;
+		generation: number;
+	}
+	function beginReplayScan(since: number): ReplayScan {
+		// Persist the in-flight range too: a crash must not advance past it.
+		retainReplaySince(since);
+		activeReplayScans++;
+		return { since, faults: replayFaultGeneration, generation: ++replayScanGeneration };
+	}
+	function finishReplayScan(scan: ReplayScan, complete: boolean, allStreams: boolean): void {
+		activeReplayScans--;
+		if (!complete) recordReplayFault(scan.since);
+		expireChunkGroups();
+		// A partial-space scan cannot retire the global floor. Neither can a
+		// scan overtaken by another scan, new faults, imports, or older gaps.
+		if (!complete || !allStreams || activeReplayScans > 0 || activeImports > 0 || chunkGroups.size > 0
+			|| Object.keys(state.pendingChunkGroups!).length > 0
+			|| scan.generation !== replayScanGeneration || scan.faults !== replayFaultGeneration
+			|| state.replaySince === undefined || scan.since > state.replaySince) return;
+		delete state.replaySince;
+		dirty = true;
+	}
+
 	async function onRelayEvent(event: Event): Promise<void> {
+		let importing = false;
+		activeImports++;
 		try {
+			if (event.kind !== CHANGE_KIND || !verifyEvent(event)) return;
 			const dec = decryptEvent(event);
 			if (!dec) return;
 			const { part, space } = dec;
-			const chunkTag = event.tags.find((t) => t[0] === "c");
+			const chunkTags = event.tags.filter((t) => t[0] === "c");
+			if (chunkTags.length > 1) return;
+			if (chunkTags.length === 0) {
+				importing = true;
+				await importB64(part, space, event.pubkey);
+			} else {
+				const [, gid, idxStr, totalStr] = chunkTags[0];
+				if (!gid || !/^[0-9a-f]{16}$/.test(gid) || !/^(0|[1-9][0-9]*)$/.test(idxStr ?? "") || !/^[1-9][0-9]*$/.test(totalStr ?? "")) return;
+				const index = Number(idxStr);
+				const total = Number(totalStr);
+				if (!Number.isSafeInteger(total) || total < 2 || total > 64 || !Number.isSafeInteger(index) || index >= total) return;
+				if (part.length === 0 || part.length > CHUNK_CHARS || !/^[A-Za-z0-9+/=]+$/.test(part)) return;
+				const groupKey = JSON.stringify([event.pubkey, space?.spaceId ?? null, space?.keyId ?? null, gid]);
+				if (completedChunkGroups.has(groupKey)) {
+					if (event.created_at > state.cursor) {
+						state.cursor = event.created_at;
+						dirty = true;
+					}
+					return;
+				}
+				// Eviction/expiry never implies receipt: keep the durable replay floor.
+				retainReplaySince(event.created_at);
+				const pendingSince = state.pendingChunkGroups![groupKey];
+				if (pendingSince === undefined || event.created_at < pendingSince) {
+					state.pendingChunkGroups![groupKey] = event.created_at;
+					dirty = true;
+				}
+				expireChunkGroups();
+				let group = chunkGroups.get(groupKey);
+				if (group && (group.total !== total || (group.parts.has(index) && group.parts.get(index) !== part))) {
+					recordReplayFault(Math.min(group.since, event.created_at));
+					dropChunkGroup(groupKey);
+					return;
+				}
+				if (!group) {
+					if (chunkGroups.size >= MAX_CHUNK_GROUPS || chunkBytes + part.length > MAX_CHUNK_BYTES) {
+						recordReplayFault(event.created_at);
+						return;
+					}
+					group = { total, parts: new Map(), bytes: 0, expires: Date.now() + CHUNK_TTL_MS, since: event.created_at };
+					chunkGroups.set(groupKey, group);
+				}
+				group.since = Math.min(group.since, event.created_at);
+				if (!group.parts.has(index)) {
+					if (chunkBytes + part.length > MAX_CHUNK_BYTES) {
+						recordReplayFault(group.since);
+						return;
+					}
+					group.parts.set(index, part);
+					group.bytes += part.length;
+					chunkBytes += part.length;
+				}
+				if (group.parts.size !== group.total) return;
+				const parts: string[] = [];
+				for (let i = 0; i < group.total; i++) parts.push(group.parts.get(i)!);
+				const full = parts.join("");
+				if (chunkGroupId(full) !== gid) {
+					recordReplayFault(group.since);
+					dropChunkGroup(groupKey);
+					return;
+				}
+				importing = true;
+				try {
+					await importB64(full, space, event.pubkey);
+					if (chunkGroups.get(groupKey) === group) {
+						completedChunkGroups.add(groupKey);
+						delete state.pendingChunkGroups![groupKey];
+						dirty = true;
+					}
+				} finally {
+					// A concurrent expiry/conflict may have replaced this group while
+					// native import awaited; do not discard its pending fragments.
+					if (chunkGroups.get(groupKey) === group) dropChunkGroup(groupKey);
+				}
+			}
 			if (event.created_at > state.cursor) {
 				state.cursor = event.created_at;
 				dirty = true;
 			}
-			if (!chunkTag) {
-				await importB64(part, space);
-				return;
-			}
-			const [, gid, idxStr, totalStr] = chunkTag;
-			const total = parseInt(totalStr, 10);
-			if (!gid || !Number.isFinite(total) || total < 2 || total > 64) return;
-			let group = chunkGroups.get(gid);
-			if (!group) {
-				group = { total, parts: new Map() };
-				chunkGroups.set(gid, group);
-			}
-			group.parts.set(parseInt(idxStr, 10), part);
-			if (group.parts.size === group.total) {
-				chunkGroups.delete(gid);
-				let full = "";
-				for (let i = 0; i < group.total; i++) full += group.parts.get(i) ?? "";
-				await importB64(full, space);
-			}
 		} catch {
-			/* not ours / garbled — ignore */
+			if (importing) recordReplayFault(event.created_at);
+			/* not ours / garbled / unavailable native import — leave unpublished */
+		} finally {
+			activeImports--;
 		}
 	}
 
@@ -616,6 +883,7 @@ export async function startNostrSync(): Promise<void> {
 
 	async function mergeKeyring(event: Event): Promise<void> {
 		try {
+			if (event.pubkey !== id!.pk || !verifyEvent(event)) return;
 			const remote = JSON.parse(nip44.decrypt(event.content, id!.conversationKey)) as { channels?: Record<string, unknown> };
 			let local: { channels?: Record<string, unknown> } = {};
 			try {
@@ -640,7 +908,7 @@ export async function startNostrSync(): Promise<void> {
 
 	async function refreshShared(): Promise<void> {
 		spaceMap = await loadSpaceMap();
-		sharedSpaces = await loadSharedSpaces(id!.pk);
+		sharedSpaces = await loadSharedSpaces(id!);
 		// Channel objects are filtered out of /api/objects - map every
 		// shared space to itself so its own changes (name, members) ride
 		// the space stream too; a joiner needs them.
@@ -652,7 +920,7 @@ export async function startNostrSync(): Promise<void> {
 	/** ALL member hexes of a space (any role - viewers need the key too). */
 	async function spaceMemberHexes(spaceId: string): Promise<string[]> {
 		try {
-			const obj = (await (await fetch(`${API}/api/objects/${spaceId}`)).json()) as {
+			const obj = (await (await apiFetch(`${API}/api/objects/${spaceId}`)).json()) as {
 				fields?: Record<string, { stringValue?: string; valuesValue?: { items?: Array<{ mapValue?: { entries?: Record<string, { stringValue?: string }> } }> } }>;
 			};
 			const out: string[] = [];
@@ -668,7 +936,7 @@ export async function startNostrSync(): Promise<void> {
 
 	async function spaceNameOf(spaceId: string): Promise<string> {
 		try {
-			const obj = (await (await fetch(`${API}/api/objects/${spaceId}`)).json()) as { fields?: Record<string, { stringValue?: string }> };
+			const obj = (await (await apiFetch(`${API}/api/objects/${spaceId}`)).json()) as { fields?: Record<string, { stringValue?: string }> };
 			return obj.fields?.["name"]?.stringValue ?? "";
 		} catch {
 			return "";
@@ -719,32 +987,11 @@ export async function startNostrSync(): Promise<void> {
 	async function backfillSpaceTags(tags: string[]): Promise<void> {
 		if (tags.length === 0) return;
 		const events = new Map<string, Event>();
-		await Promise.all(
-			id!.relays.map(async (relay) => {
-				let until: number | undefined = undefined;
-				for (;;) {
-					let page: Event[];
-					try {
-						page = await pool.querySync([relay], { kinds: [CHANGE_KIND], "#h": tags, until, limit: 500 });
-					} catch {
-						return;
-					}
-					if (page.length === 0) break;
-					let fresh = 0;
-					for (const e of page) {
-						if (!events.has(e.id)) {
-							events.set(e.id, e);
-							fresh++;
-						}
-					}
-					const oldest = Math.min(...page.map((e) => e.created_at));
-					if (fresh === 0 || (until !== undefined && oldest >= until)) break;
-					until = oldest;
-				}
-			}),
-		);
+		const scan = beginReplayScan(0);
+		const complete = await scanRelayHistory(pool, id!.relays, [{ kinds: [CHANGE_KIND], "#h": tags }], (event) => events.set(event.id, event));
 		const sorted = [...events.values()].sort((a, b) => a.created_at - b.created_at);
 		for (const event of sorted) await onRelayEvent(event);
+		finishReplayScan(scan, complete, false);
 		if (sorted.length > 0) console.log(`[sync] joined-space backfill: ${sorted.length} event(s)`);
 	}
 
@@ -753,8 +1000,9 @@ export async function startNostrSync(): Promise<void> {
 	async function importInviteKey(rumor: { pubkey: string; content: string }): Promise<void> {
 		const p = JSON.parse(rumor.content) as { t?: string; space?: string; name?: string; key?: string; keyId?: number };
 		if (p.t !== "space-invite" || !p.space || !/^[0-9a-f]{64}$/.test(p.key ?? "")) return;
-		const keyId = typeof p.keyId === "number" && p.keyId > 0 ? p.keyId : 1;
-		let keyring: { version?: number; channels?: Record<string, { key?: string; keyId?: number; createdAt?: number; owner?: string }> } = {};
+		if (p.keyId !== undefined && (!Number.isSafeInteger(p.keyId) || p.keyId < 1)) return;
+		const keyId = p.keyId ?? 1;
+		let keyring: { version?: number; localPubkey?: string; localIdentityHash?: string; channels?: Record<string, { key?: string; keyId?: number; createdAt?: number; owner?: string }> } = {};
 		try {
 			keyring = (await Bun.file(`${dataRoot()}/channel-keys.json`).json()) as typeof keyring;
 		} catch {
@@ -762,6 +1010,7 @@ export async function startNostrSync(): Promise<void> {
 		}
 		keyring.channels ??= {};
 		const existing = keyring.channels[p.space];
+		if (existing && rumor.pubkey !== id!.pk && rumor.pubkey !== (existing.owner ?? id!.pk)) return;
 		if (existing?.keyId && existing.keyId >= keyId) return;
 		keyring.channels[p.space] = {
 			key: p.key,
@@ -771,7 +1020,7 @@ export async function startNostrSync(): Promise<void> {
 			owner: rumor.pubkey === id!.pk ? existing?.owner : rumor.pubkey,
 		};
 		const tmp = `${dataRoot()}/channel-keys.json.tmp`;
-		writeFileSync(tmp, JSON.stringify({ version: 1, ...keyring }));
+		writeFileSync(tmp, JSON.stringify({ ...keyring, version: 1, localPubkey: id!.pk, localIdentityHash: id!.identityHash }), { mode: 0o600 });
 		renameSync(tmp, `${dataRoot()}/channel-keys.json`);
 		console.log(`[sync] joined space "${p.name || p.space.slice(0, 8)}" via gift-wrapped key #${keyId}`);
 		const before = new Set([...sharedSpaces.values()].map((sp) => sp.spaceTag));
@@ -897,49 +1146,15 @@ export async function startNostrSync(): Promise<void> {
 	// Anything in the local manifest the relays didn't return gets
 	// re-published below. Negentropy can replace this scan later.
 	state.published = {};
-	const backfill: Event[] = [];
-	const seenIds = new Set<string>();
-	// Per-relay backwards pagination. Paging the MERGED pool with
-	// `until = min(page)` is a gap machine: each relay truncates its 500
-	// at a different timestamp, so the merged min (from the deepest
-	// relay) jumps past events the fuller relays still held - they were
-	// skipped forever (this is how duplicate republishes happened: the
-	// rebuilt published-set missed relay-held events). Each relay now
-	// walks its own timeline; ids dedupe across relays; a failing relay
-	// never aborts its siblings.
+	state.publishedSpace = {};
+	state.sharedQueued = {};
+	const backfillById = new Map<string, Event>();
 	const spaceTags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
-	await Promise.all(
-		id.relays.map(async (relay) => {
-			let until: number | undefined = undefined;
-			for (;;) {
-				let page: Event[];
-				try {
-					const pages = await Promise.all([
-						pool.querySync([relay], { kinds: [CHANGE_KIND], authors: [id.pk], until, limit: 500 }),
-						spaceTags.length > 0
-							? pool.querySync([relay], { kinds: [CHANGE_KIND], "#h": spaceTags, until, limit: 500 })
-							: Promise.resolve([] as Event[]),
-					]);
-					page = [...pages[0], ...pages[1]];
-				} catch {
-					return; // this relay is down; others continue
-				}
-				if (page.length === 0) break;
-				let freshCount = 0;
-				for (const e of page) {
-					if (!seenIds.has(e.id)) {
-						seenIds.add(e.id);
-						backfill.push(e);
-						freshCount++;
-					}
-				}
-				const oldest = Math.min(...page.map((e) => e.created_at));
-				if (freshCount === 0 && until !== undefined && oldest >= until) break;
-				if (until !== undefined && oldest >= until) break; // no progress
-				until = oldest;
-			}
-		}),
-	);
+	const backfillFilters: Filter[] = [{ kinds: [CHANGE_KIND], authors: [id.pk] }];
+	if (spaceTags.length > 0) backfillFilters.push({ kinds: [CHANGE_KIND], "#h": spaceTags });
+	const backfillScan = beginReplayScan(0);
+	const backfillComplete = await scanRelayHistory(pool, id.relays, backfillFilters, (event) => backfillById.set(event.id, event));
+	const backfill = [...backfillById.values()];
 	console.log(`[sync] backfill: ${backfill.length} event(s) from relays`);
 	// Route every event through the chunk-aware path (sorted so multi-part
 	// groups assemble in one pass); onRelayEvent advances the cursor.
@@ -949,6 +1164,7 @@ export async function startNostrSync(): Promise<void> {
 		await onRelayEvent(event);
 		assembled++;
 	}
+	finishReplayScan(backfillScan, backfillComplete, true);
 	if (assembled > 0) console.log(`[sync] backfill processed ${assembled} event(s)`);
 	dirty = true;
 
@@ -995,6 +1211,16 @@ export async function startNostrSync(): Promise<void> {
 
 	// ── Live: both directions ──────────────────────────────────────
 	subscribe((objectId) => {
+		if (objectId === VANISH_LOG_ID) {
+			// A vanish happened here or arrived from a peer: re-read the ledger,
+			// publish the record itself, then chase the relay copies.
+			void (async () => {
+				vanished = await localVanished();
+				await publishObject(objectId);
+				await chaseVanished();
+			})();
+			return;
+		}
 		// A commit on a space object can change members/keys: refresh the
 		// shared view, then reconcile allowlist + history publication.
 		if (spaceMap.get(objectId) === objectId || sharedSpaces.has(objectId)) {
@@ -1023,16 +1249,6 @@ export async function startNostrSync(): Promise<void> {
 			})();
 			return;
 		}
-		if (objectId === VANISH_LOG_ID) {
-			// A vanish happened here or arrived from a peer: re-read the ledger,
-			// publish the record itself, then chase the relay copies.
-			void (async () => {
-				vanished = await localVanished();
-				await publishObject(objectId);
-				await chaseVanished();
-			})();
-			return;
-		}
 		void publishObject(objectId);
 	});
 	// ── Live subscriptions + deafness watchdog ─────────────────────
@@ -1056,14 +1272,14 @@ export async function startNostrSync(): Promise<void> {
 		}
 		liveSubs = [];
 		liveSubs.push(
-			pool.subscribeMany(id!.relays, { kinds: [CHANGE_KIND], authors: [id!.pk], since: state.cursor + 1 }, {
+			pool.subscribeMany(id!.relays, { kinds: [CHANGE_KIND], authors: [id!.pk], since: Math.min(state.cursor, state.replaySince ?? state.cursor) }, {
 				onevent: (event) => void onRelayEvent(event),
 			}),
 		);
 		const tags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
 		if (tags.length > 0) {
 			liveSubs.push(
-				pool.subscribeMany(id!.relays, { kinds: [CHANGE_KIND], "#h": tags, since: state.cursor + 1 }, {
+				pool.subscribeMany(id!.relays, { kinds: [CHANGE_KIND], "#h": tags, since: Math.min(state.cursor, state.replaySince ?? state.cursor) }, {
 					onevent: (event) => void onRelayEvent(event),
 				}),
 			);
@@ -1096,19 +1312,19 @@ export async function startNostrSync(): Promise<void> {
 
 	async function catchup(): Promise<void> {
 		const tags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
-		const since = state.cursor + 1;
+		// Observed suffix timestamps do not bound an unseen prefix: writers
+		// timestamp each part separately. Only unresolved groups need this
+		// full-history repair; successful groups are deduplicated above.
+		const since = Object.keys(state.pendingChunkGroups!).length > 0 ? 0 : Math.min(state.cursor, state.replaySince ?? state.cursor);
 		const byId = new Map<string, Event>();
-		const filters: Array<Record<string, unknown>> = [{ kinds: [CHANGE_KIND], authors: [id!.pk], since }];
+		const filters: Filter[] = [{ kinds: [CHANGE_KIND], authors: [id!.pk], since }];
 		if (tags.length > 0) filters.push({ kinds: [CHANGE_KIND], "#h": tags, since });
-		for (const filter of filters) {
-			try {
-				for (const e of await pool.querySync(id!.relays, filter as never)) byId.set(e.id, e);
-			} catch {
-				/* relay unreachable; the watchdog fires again */
-			}
-		}
+		const scan = beginReplayScan(since);
+		const complete = await scanRelayHistory(pool, id!.relays, filters, (event) => byId.set(event.id, event));
 		const events = [...byId.values()].sort((a, b) => a.created_at - b.created_at);
 		for (const event of events) await onRelayEvent(event);
+		const currentTags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
+		finishReplayScan(scan, complete, currentTags.length === tags.length && currentTags.every((tag) => tags.includes(tag)));
 		if (events.length > 0) console.log(`[sync] watchdog caught up ${events.length} event(s)`);
 		// Gift wraps have randomized created_at: re-query them all on every
 		// catchup; wrapsSeen dedupes. This is what recovers knocks and key
@@ -1128,6 +1344,7 @@ export async function startNostrSync(): Promise<void> {
 		watchdogBusy = true;
 		void (async () => {
 			try {
+				await chaseVanished();
 				const head = await relayHead();
 				if (head === null) {
 					console.log("[sync] watchdog: relay unresponsive - rebuilding pool");
@@ -1139,8 +1356,8 @@ export async function startNostrSync(): Promise<void> {
 					pool = new SimplePool();
 					await catchup();
 					subscribeLive();
-				} else if (head > state.cursor) {
-					console.log(`[sync] watchdog: relay head ${head} > cursor ${state.cursor} - catching up`);
+				} else if (head >= state.cursor || state.replaySince !== undefined) {
+					console.log(`[sync] watchdog: relay head ${head}, cursor ${state.cursor} - catching up`);
 					await catchup();
 					subscribeLive();
 				}
@@ -1169,11 +1386,14 @@ export async function vanishOnRelays(objectIds: string[]): Promise<{ events: num
 	const pool = new SimplePool();
 	const state = await readState();
 	try {
-		const eventIds = await collectEventIds(pool, id, objectIds);
-		const requests = eventIds.length > 0 ? await publishDeleteRequests(pool, id, eventIds, "object vanished by its owner") : 0;
-		for (const objectId of objectIds) state.vanishRequested[objectId] = true;
+		const scan = await collectEventIds(pool, id, objectIds);
+		const deletion = await publishDeleteRequests(pool, id, scan.eventIds, "object vanished by its owner");
+		for (const objectId of objectIds) {
+			if (scan.complete && deletion.complete) state.vanishRequested[objectId] = true;
+			else delete state.vanishRequested[objectId];
+		}
 		writeState(state);
-		return { events: eventIds.length, requests };
+		return { events: scan.eventIds.length, requests: deletion.requests };
 	} finally {
 		pool.close(id.relays);
 	}

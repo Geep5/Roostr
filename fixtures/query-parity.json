@@ -1,0 +1,1675 @@
+{
+  "nowMs": 1704715200000,
+  "objects": [
+    {
+      "id": "a",
+      "typeKey": "page",
+      "fields": {
+        "name": {
+          "stringValue": "Alpha"
+        },
+        "tags": {
+          "listValue": {
+            "values": [
+              "red",
+              "blue"
+            ]
+          }
+        },
+        "active": {
+          "boolValue": true
+        },
+        "when": {
+          "intValue": 1704672000000
+        },
+        "score": {
+          "intValue": 10
+        }
+      },
+      "blocks": [
+        {
+          "id": "a-text",
+          "childrenIds": [],
+          "content": {
+            "text": {
+              "text": "A needle in the block"
+            }
+          }
+        }
+      ],
+      "heads": [],
+      "createdAt": 1704672000000,
+      "updatedAt": 1704672000000,
+      "deleted": false
+    },
+    {
+      "id": "b",
+      "typeKey": "page",
+      "fields": {
+        "name": {
+          "stringValue": "beta"
+        },
+        "tags": {
+          "listValue": {
+            "values": [
+              "blue"
+            ]
+          }
+        },
+        "active": {
+          "boolValue": false
+        },
+        "when": {
+          "intValue": 1704671999999
+        },
+        "score": {
+          "intValue": 20
+        }
+      },
+      "blocks": [],
+      "heads": [],
+      "createdAt": 1704672000000,
+      "updatedAt": 1704672000000,
+      "deleted": false
+    },
+    {
+      "id": "c",
+      "typeKey": "page",
+      "fields": {
+        "name": {
+          "stringValue": ""
+        },
+        "tags": {
+          "listValue": {
+            "values": []
+          }
+        },
+        "active": {
+          "boolValue": false
+        },
+        "when": {
+          "intValue": 1704758400000
+        },
+        "score": {
+          "intValue": 0
+        }
+      },
+      "blocks": [],
+      "heads": [],
+      "createdAt": 1704672000000,
+      "updatedAt": 1704672000000,
+      "deleted": false
+    },
+    {
+      "id": "d",
+      "typeKey": "page",
+      "fields": {
+        "name": {
+          "stringValue": "Delta"
+        },
+        "tags": {
+          "listValue": {
+            "values": [
+              "red"
+            ]
+          }
+        },
+        "active": {
+          "boolValue": true
+        },
+        "when": {
+          "intValue": 1705276800000
+        },
+        "nil": {},
+        "link": {
+          "linkValue": {
+            "targetId": "a"
+          }
+        }
+      },
+      "blocks": [],
+      "heads": [],
+      "createdAt": 1704672000000,
+      "updatedAt": 1704672000000,
+      "deleted": false
+    },
+    {
+      "id": "e",
+      "typeKey": "page",
+      "fields": {
+        "name": {
+          "stringValue": "Echo"
+        },
+        "tags": {
+          "listValue": {
+            "values": [
+              "red",
+              "blue"
+            ]
+          }
+        },
+        "active": {
+          "boolValue": true
+        },
+        "when": {
+          "intValue": 1704067200000
+        },
+        "score": {
+          "intValue": 30
+        }
+      },
+      "blocks": [],
+      "heads": [],
+      "createdAt": 1704672000000,
+      "updatedAt": 1704672000000,
+      "deleted": true
+    },
+    {
+      "id": "ledger",
+      "typeKey": "vanish_log",
+      "fields": {},
+      "blocks": [],
+      "heads": [],
+      "createdAt": 1704672000000,
+      "updatedAt": 1704672000000,
+      "deleted": false
+    },
+    {
+      "id": "relation",
+      "typeKey": "relation",
+      "fields": {
+        "key": {
+          "stringValue": "score"
+        }
+      },
+      "blocks": [],
+      "heads": [],
+      "createdAt": 1704672000000,
+      "updatedAt": 1704672000000,
+      "deleted": false
+    },
+    {
+      "id": "set",
+      "typeKey": "set",
+      "fields": {
+        "setOf": {
+          "valuesValue": {
+            "items": [
+              {
+                "stringValue": "page"
+              },
+              {
+                "stringValue": "score"
+              }
+            ]
+          }
+        }
+      },
+      "blocks": [],
+      "heads": [],
+      "createdAt": 1704672000000,
+      "updatedAt": 1704672000000,
+      "deleted": false
+    },
+    {
+      "id": "other",
+      "typeKey": "task",
+      "fields": {
+        "score": {
+          "intValue": 5
+        }
+      },
+      "blocks": [],
+      "heads": [],
+      "createdAt": 1704672000000,
+      "updatedAt": 1704672000000,
+      "deleted": false
+    }
+  ],
+  "cases": [
+    {
+      "name": "condition-equal",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "condition": "equal",
+            "value": 10
+          }
+        ]
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 1
+    },
+    {
+      "name": "condition-notEqual",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "condition": "notEqual",
+            "value": 10
+          }
+        ]
+      },
+      "ids": [
+        "b",
+        "c",
+        "d"
+      ],
+      "total": 3
+    },
+    {
+      "name": "condition-greater",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "condition": "greater",
+            "value": 10
+          }
+        ]
+      },
+      "ids": [
+        "b"
+      ],
+      "total": 1
+    },
+    {
+      "name": "condition-less",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "condition": "less",
+            "value": 10
+          }
+        ]
+      },
+      "ids": [
+        "c"
+      ],
+      "total": 1
+    },
+    {
+      "name": "condition-greaterOrEqual",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "condition": "greaterOrEqual",
+            "value": 10
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "b"
+      ],
+      "total": 2
+    },
+    {
+      "name": "condition-lessOrEqual",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "condition": "lessOrEqual",
+            "value": 10
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "c"
+      ],
+      "total": 2
+    },
+    {
+      "name": "condition-like",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "name",
+            "condition": "like",
+            "value": "PH"
+          }
+        ]
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 1
+    },
+    {
+      "name": "condition-notLike",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "name",
+            "condition": "notLike",
+            "value": "PH"
+          }
+        ]
+      },
+      "ids": [
+        "b",
+        "c",
+        "d"
+      ],
+      "total": 3
+    },
+    {
+      "name": "condition-in",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "tags",
+            "condition": "in",
+            "value": [
+              "red"
+            ]
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "d"
+      ],
+      "total": 2
+    },
+    {
+      "name": "condition-notIn",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "tags",
+            "condition": "notIn",
+            "value": [
+              "red"
+            ]
+          }
+        ]
+      },
+      "ids": [
+        "b",
+        "c"
+      ],
+      "total": 2
+    },
+    {
+      "name": "condition-allIn",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "tags",
+            "condition": "allIn",
+            "value": [
+              "red",
+              "blue"
+            ]
+          }
+        ]
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 1
+    },
+    {
+      "name": "condition-notAllIn",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "tags",
+            "condition": "notAllIn",
+            "value": [
+              "red",
+              "blue"
+            ]
+          }
+        ]
+      },
+      "ids": [
+        "b",
+        "c",
+        "d"
+      ],
+      "total": 3
+    },
+    {
+      "name": "condition-exactIn",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "tags",
+            "condition": "exactIn",
+            "value": [
+              "blue",
+              "red"
+            ]
+          }
+        ]
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 1
+    },
+    {
+      "name": "condition-notExactIn",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "tags",
+            "condition": "notExactIn",
+            "value": [
+              "blue",
+              "red"
+            ]
+          }
+        ]
+      },
+      "ids": [
+        "b",
+        "c",
+        "d"
+      ],
+      "total": 3
+    },
+    {
+      "name": "condition-empty",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "condition": "empty",
+            "value": null
+          }
+        ]
+      },
+      "ids": [
+        "c",
+        "d"
+      ],
+      "total": 2
+    },
+    {
+      "name": "condition-notEmpty",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "condition": "notEmpty",
+            "value": null
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "b"
+      ],
+      "total": 2
+    },
+    {
+      "name": "condition-exists",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "condition": "exists",
+            "value": null
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "b",
+        "c"
+      ],
+      "total": 3
+    },
+    {
+      "name": "default-equality",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "value": 10
+          }
+        ]
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 1
+    },
+    {
+      "name": "unknown-condition",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "condition": "unknown"
+          }
+        ]
+      },
+      "ids": [],
+      "total": 0
+    },
+    {
+      "name": "null-value-exists",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "nil",
+            "condition": "exists"
+          }
+        ]
+      },
+      "ids": [
+        "d"
+      ],
+      "total": 1
+    },
+    {
+      "name": "builtin-exists",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "deleted",
+            "condition": "exists"
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "total": 4
+    },
+    {
+      "name": "empty-false",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "active",
+            "condition": "empty"
+          }
+        ]
+      },
+      "ids": [
+        "b",
+        "c"
+      ],
+      "total": 2
+    },
+    {
+      "name": "empty-list",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "tags",
+            "condition": "empty"
+          }
+        ]
+      },
+      "ids": [
+        "c"
+      ],
+      "total": 1
+    },
+    {
+      "name": "all-in-empty",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "tags",
+            "condition": "allIn",
+            "value": []
+          }
+        ]
+      },
+      "ids": [],
+      "total": 0
+    },
+    {
+      "name": "exact-in-empty",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "tags",
+            "condition": "exactIn",
+            "value": []
+          }
+        ]
+      },
+      "ids": [
+        "c"
+      ],
+      "total": 1
+    },
+    {
+      "name": "ordered-list-equality",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "tags",
+            "value": [
+              "blue",
+              "red"
+            ]
+          }
+        ]
+      },
+      "ids": [],
+      "total": 0
+    },
+    {
+      "name": "ordered-list-equality-match",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "tags",
+            "value": [
+              "red",
+              "blue"
+            ]
+          }
+        ]
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 1
+    },
+    {
+      "name": "wrapped-value",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "value": {
+              "intValue": 10
+            }
+          }
+        ]
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 1
+    },
+    {
+      "name": "scalar-singleton-equality",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "score",
+            "value": [
+              10
+            ]
+          }
+        ]
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 1
+    },
+    {
+      "name": "link-value",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "link",
+            "value": "a"
+          }
+        ]
+      },
+      "ids": [
+        "d"
+      ],
+      "total": 1
+    },
+    {
+      "name": "nested-or-and",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "operator": "or",
+            "nested": [
+              {
+                "operator": "and",
+                "nested": [
+                  {
+                    "key": "score",
+                    "condition": "greater",
+                    "value": 15
+                  },
+                  {
+                    "key": "tags",
+                    "condition": "in",
+                    "value": [
+                      "blue"
+                    ]
+                  }
+                ]
+              },
+              {
+                "key": "name",
+                "value": "Delta"
+              }
+            ]
+          }
+        ]
+      },
+      "ids": [
+        "b",
+        "d"
+      ],
+      "total": 2
+    },
+    {
+      "name": "date-today",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "equal",
+            "quickOption": "today",
+            "value": null
+          }
+        ]
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 1
+    },
+    {
+      "name": "date-yesterday",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "equal",
+            "quickOption": "yesterday",
+            "value": null
+          }
+        ]
+      },
+      "ids": [
+        "b"
+      ],
+      "total": 1
+    },
+    {
+      "name": "date-tomorrow",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "equal",
+            "quickOption": "tomorrow",
+            "value": null
+          }
+        ]
+      },
+      "ids": [
+        "c"
+      ],
+      "total": 1
+    },
+    {
+      "name": "date-currentWeek",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "equal",
+            "quickOption": "currentWeek",
+            "value": null
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "c"
+      ],
+      "total": 2
+    },
+    {
+      "name": "date-lastWeek",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "equal",
+            "quickOption": "lastWeek",
+            "value": null
+          }
+        ]
+      },
+      "ids": [
+        "b"
+      ],
+      "total": 1
+    },
+    {
+      "name": "date-nextWeek",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "equal",
+            "quickOption": "nextWeek",
+            "value": null
+          }
+        ]
+      },
+      "ids": [
+        "d"
+      ],
+      "total": 1
+    },
+    {
+      "name": "date-numberOfDaysAgo",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "equal",
+            "quickOption": "numberOfDaysAgo",
+            "value": 2
+          }
+        ]
+      },
+      "ids": [
+        "b"
+      ],
+      "total": 1
+    },
+    {
+      "name": "date-numberOfDaysNow",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "equal",
+            "quickOption": "numberOfDaysNow",
+            "value": 2
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "c"
+      ],
+      "total": 2
+    },
+    {
+      "name": "date-exactDate",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "equal",
+            "quickOption": "exactDate",
+            "value": 1704758400000
+          }
+        ]
+      },
+      "ids": [
+        "c"
+      ],
+      "total": 1
+    },
+    {
+      "name": "date-condition-notEqual",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "notEqual",
+            "quickOption": "today"
+          }
+        ]
+      },
+      "ids": [
+        "b",
+        "c",
+        "d"
+      ],
+      "total": 3
+    },
+    {
+      "name": "date-condition-greater",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "greater",
+            "quickOption": "today"
+          }
+        ]
+      },
+      "ids": [
+        "c",
+        "d"
+      ],
+      "total": 2
+    },
+    {
+      "name": "date-condition-greaterOrEqual",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "greaterOrEqual",
+            "quickOption": "today"
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "c",
+        "d"
+      ],
+      "total": 3
+    },
+    {
+      "name": "date-condition-less",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "less",
+            "quickOption": "today"
+          }
+        ]
+      },
+      "ids": [
+        "b"
+      ],
+      "total": 1
+    },
+    {
+      "name": "date-condition-lessOrEqual",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "condition": "lessOrEqual",
+            "quickOption": "today"
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "b"
+      ],
+      "total": 2
+    },
+    {
+      "name": "date-unknown-fallback",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "when",
+            "quickOption": "unknown",
+            "value": 1704672000000
+          }
+        ]
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 1
+    },
+    {
+      "name": "date-nonnumeric-not-equal",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "filters": [
+          {
+            "key": "name",
+            "condition": "notEqual",
+            "quickOption": "today"
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "total": 4
+    },
+    {
+      "name": "text-name",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "textQuery": "BETA"
+      },
+      "ids": [
+        "b"
+      ],
+      "total": 1
+    },
+    {
+      "name": "text-block",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "textQuery": "NEEDLE"
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 1,
+      "snippet": "A needle in the block"
+    },
+    {
+      "name": "text-list",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "textQuery": "BLUE"
+      },
+      "ids": [
+        "a",
+        "b"
+      ],
+      "total": 2
+    },
+    {
+      "name": "text-link",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "textQuery": "a",
+        "filters": [
+          {
+            "key": "id",
+            "value": "d"
+          }
+        ]
+      },
+      "ids": [
+        "d"
+      ],
+      "total": 1
+    },
+    {
+      "name": "include-deleted",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "includeDeleted": true
+      },
+      "ids": [
+        "a",
+        "b",
+        "c",
+        "d",
+        "e"
+      ],
+      "total": 5
+    },
+    {
+      "name": "hidden-ledger",
+      "body": {
+        "type": "vanish_log"
+      },
+      "ids": [
+        "ledger"
+      ],
+      "total": 1
+    },
+    {
+      "name": "untyped-hidden",
+      "body": {
+        "sorts": [
+          {
+            "key": "id"
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "b",
+        "c",
+        "d",
+        "other",
+        "relation",
+        "set"
+      ],
+      "total": 7
+    },
+    {
+      "name": "set-sources",
+      "body": {
+        "setId": "set",
+        "sorts": [
+          {
+            "key": "id"
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "b",
+        "c",
+        "d",
+        "other"
+      ],
+      "total": 5
+    },
+    {
+      "name": "missing-set",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "id",
+            "type": "asc"
+          }
+        ],
+        "setId": "missing"
+      },
+      "ids": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "total": 4
+    },
+    {
+      "name": "sort-asc-empty-last",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "score",
+            "type": "asc"
+          }
+        ]
+      },
+      "ids": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "total": 4
+    },
+    {
+      "name": "sort-desc-empty-first",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "score",
+            "type": "desc",
+            "emptyPlacement": "start"
+          }
+        ]
+      },
+      "ids": [
+        "c",
+        "d",
+        "b",
+        "a"
+      ],
+      "total": 4
+    },
+    {
+      "name": "sort-hierarchy",
+      "body": {
+        "type": "page",
+        "sorts": [
+          {
+            "key": "active",
+            "type": "desc"
+          },
+          {
+            "key": "name",
+            "type": "desc"
+          }
+        ]
+      },
+      "ids": [
+        "d",
+        "a",
+        "b",
+        "c"
+      ],
+      "total": 4
+    },
+    {
+      "name": "paging-stable",
+      "body": {
+        "type": "page",
+        "offset": 1,
+        "limit": 2
+      },
+      "ids": [
+        "b",
+        "c"
+      ],
+      "total": 4
+    },
+    {
+      "name": "zero-limit",
+      "body": {
+        "type": "page",
+        "limit": 0
+      },
+      "ids": [],
+      "total": 4
+    },
+    {
+      "name": "past-end",
+      "body": {
+        "type": "page",
+        "offset": 999
+      },
+      "ids": [],
+      "total": 4
+    },
+    {
+      "name": "negative-offset",
+      "body": {
+        "type": "page",
+        "offset": -3,
+        "limit": 1
+      },
+      "ids": [
+        "a"
+      ],
+      "total": 4
+    },
+    {
+      "name": "negative-limit",
+      "body": {
+        "type": "page",
+        "limit": -1
+      },
+      "ids": [],
+      "total": 4
+    },
+    {
+      "name": "fractional-page",
+      "body": {
+        "type": "page",
+        "offset": 1.9,
+        "limit": 1.9
+      },
+      "ids": [
+        "b"
+      ],
+      "total": 4
+    }
+  ]
+}

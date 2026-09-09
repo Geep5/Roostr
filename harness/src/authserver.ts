@@ -12,6 +12,9 @@ import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
 import { clearHoldup, disableSkill, enableSkill, listHoldups, recheckSkill, skillStatus, uninstallSkill, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { fetchObject, str } from "./api";
+import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
+import { WorkspaceAccessError } from "./workspace";
+import type { SpaceJoinLink } from "./nostrsync";
 
 /** Public identity (npub + hex pubkey) derived from the local nostr key. */
 async function identity(): Promise<{ npub: string; pubkeyHex: string } | { error: string }> {
@@ -94,15 +97,6 @@ async function writeProfile(patch: NostrProfile): Promise<NostrProfile> {
 
 export const AUTH_PORT = Number(process.env.GLON_AUTH_PORT ?? 7334);
 
-const CORS = {
-	"Access-Control-Allow-Origin": "*",
-	"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-	"Access-Control-Allow-Headers": "Content-Type",
-};
-
-function json(body: unknown, status = 200): Response {
-	return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...CORS } });
-}
 
 /**
  * @param served live set of currently-served agent ids (reported by /agents)
@@ -114,7 +108,18 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 		hostname: "127.0.0.1",
 		fetch: async (req) => {
 			const url = new URL(req.url);
-			if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+			let authorization;
+			try {
+				if (req.method === "OPTIONS") return await localPreflight(req, AUTH_PORT);
+				authorization = await authorizeLocalRequest(req, AUTH_PORT);
+			} catch {
+				return new Response("authentication unavailable", { status: 503 });
+			}
+			if (!authorization) return new Response("authentication required", { status: 401 });
+			const cors = localCors(authorization.origin);
+			const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
+				status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...cors },
+			});
 			try {
 				if (req.method === "GET" && url.pathname === "/auth/status") {
 					return json(await authStatus());
@@ -162,10 +167,9 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					return json({ skills, holdups });
 				}
 				if (req.method === "GET" && url.pathname === "/workspace") {
-					const { readBindings } = await import("./workspace");
+					const { readBinding } = await import("./workspace");
 					const space = url.searchParams.get("space") ?? "";
-					const paths = await readBindings();
-					return json({ path: paths[space] ?? "" });
+					return json({ path: await readBinding(space) });
 				}
 				if (req.method === "POST" && url.pathname === "/workspace") {
 					const body = (await req.json()) as { space?: string; path?: string };
@@ -181,6 +185,11 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 				if (req.method === "GET" && url.pathname === "/join-requests") {
 					const { listJoinRequests } = await import("./nostrsync");
 					return json({ requests: await listJoinRequests() });
+				}
+				if (req.method === "POST" && url.pathname === "/join-requests/send") {
+					const { sendJoinRequest } = await import("./nostrsync");
+					await sendJoinRequest(await req.json() as SpaceJoinLink);
+					return json({ ok: true });
 				}
 				if (req.method === "POST" && url.pathname === "/join-requests/clear") {
 					const body = (await req.json()) as { key?: string };
@@ -215,7 +224,7 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 				}
 				return json({ error: "not found" }, 404);
 			} catch (err) {
-				return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+				return json({ error: err instanceof Error ? err.message : String(err) }, err instanceof WorkspaceAccessError ? 403 : 500);
 			}
 		},
 	});

@@ -9,14 +9,14 @@
  * primer tells agents to query before they ever consider waking a peer.
  */
 
-import { API, fetchObject, query, queryAll, str, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { API, apiFetch, fetchObject, query, queryAll, str, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 
 // ── space filter (objects with no stamp belong to the default space) ──
 
 let defaultSpaceCache: string | null = null;
 export async function defaultSpaceId(): Promise<string> {
 	if (defaultSpaceCache !== null) return defaultSpaceCache;
-	const res = await fetch(`${API}/api/channels`);
+	const res = await apiFetch(`${API}/api/channels`);
 	const chans = (await res.json()) as Array<{ id: string }>;
 	defaultSpaceCache = chans[0]?.id ?? "";
 	return defaultSpaceCache;
@@ -31,7 +31,7 @@ export async function spaceFilterFor(spaceId: string): Promise<Record<string, un
 }
 
 async function queryTotal(body: Record<string, unknown>): Promise<number> {
-	const res = await fetch(`${API}/api/query`, {
+	const res = await apiFetch(`${API}/api/query`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ ...body, limit: 1 }),

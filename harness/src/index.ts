@@ -14,14 +14,14 @@
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
-import { API, chatPost, fetchObject, list, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
+import { API, apiFetch, chatPost, fetchObject, list, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
 import type { ObjectJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { convergeCatalogScope } from "./skillmgr";
 import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled } from "./roster";
-import { startNostrSync, vanishOnRelays } from "./nostrsync";
+import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, convergeSpaceServing, invalidateSpaceServing, publishClaims, spaceMine } from "./machine";
 import { validateBindings } from "./workspace";
 import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, ingestedOriginBlocks, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
@@ -131,7 +131,7 @@ async function buildServedOne(agentId: string, defaultChannel: string): Promise<
 async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
 	const out = new Map<string, Served>();
 	// Same source + order as the UI: /api/channels, first entry is default.
-	const channels = (await (await fetch(`${API}/api/channels`)).json()) as Array<{ id: string }>;
+	const channels = (await (await apiFetch(`${API}/api/channels`)).json()) as Array<{ id: string }>;
 	const defaultChannel = channels[0]?.id ?? "";
 	defaultChannelId = defaultChannel;
 	for (const agentId of agents) {
@@ -573,7 +573,6 @@ async function serve(): Promise<void> {
 	}
 	subscribe((objectId) => void route(objectId));
 	console.log("[harness] SSE connected; serving.");
-	void startNostrSync();
 }
 
 async function ask(): Promise<void> {
@@ -584,7 +583,7 @@ async function ask(): Promise<void> {
 		process.exit(1);
 	}
 	const agent = await fetchObject(agentId);
-	const channels = (await (await fetch(`${API}/api/channels`)).json()) as Array<{ id: string }>;
+	const channels = (await (await apiFetch(`${API}/api/channels`)).json()) as Array<{ id: string }>;
 	const chatId = await ensureChat(agent, str(agent.fields, "channel") || channels[0]?.id || "");
 	await chatPost(chatId, text);
 	const reply = await runTurn(agentId, chatId, { spawn: spawnSubagent });

@@ -8,9 +8,9 @@ client. Nostr-ready: your key is your identity, sync rides relays.
 (Formerly "glonOdin" — the TS reference implementation lives in
 `projekt/3/glon`.)
 
-Both stacks read and write the same `~/.glon/changes/<objectId>/<hex>.pb`
-files — content addresses verify across implementations
-(`sha256(proto3-encode(change with zeroed id))`, protobufjs-compatible).
+Native and browser builds use the same Odin domain engine. Raw
+`~/.glon/changes/<objectId>/<hex>.pb` bytes remain authoritative; legacy
+content addresses are verified over their original bytes, not a re-encoding.
 
 ## Run
 
@@ -20,31 +20,40 @@ odin build src -out:glon-odin -o:speed
 ./glon-odin list             # object summaries
 ./glon-odin dump <objectId>  # computed state as JSON (parity testing)
 
-cd app && npm install && npm run dev   # SPA on http://localhost:5190
+# In separate terminals; sync does not require an agent harness:
+cd harness && bun install && bun run sync
+cd harness && bun run serve        # optional: agents and machine integrations
+
+# The single UI source is the sibling RoostrWebsite repository:
+cd ../RoostrWebsite && npm install && npm run dev:local
+# Open http://127.0.0.1:5190/app and pair with the code in the daemon terminal.
 ```
 
 ## Layout
 
 ```
-src/
-  proto.odin   protobuf wire codec (decode anything protobufjs wrote;
-               encode proto3-default-omitting for stable hashes)
-  dag.odin     Kahn toposort + Anytype-style block tree ops
-               (insertTo/moveFromSide, deterministic layout ids) +
-               normalize pass + state computation
-  query.odin   filter/sort engine (17 conditions, and/or nesting,
-               date quickOptions, hierarchical sorts)
-  store.odin   disk scan → per-generation arena state cache; writes
-               content-addressed changes
-  server.odin  HTTP/1.1 over core:net — JSON API + SSE broadcast
-  mutate.odin  /api/mutate actions, bundled-relation bootstrap,
-               channel keys (channel-keys.json) + invite payloads
-  main.odin    serve | list | dump
-app/           SvelteKit SPA (adapter-static, ssr=false), talks to
-               VITE_GLON_API (default http://127.0.0.1:7333)
+core/          shared Odin protobuf codec, replay, query, mutation planning
+wasm/          bounded byte/JSON ABI for the same engine in browsers
+build-wasm.mjs emits RoostrWebsite/static/engine.wasm plus source/hash manifest
+src/           native disk store, authenticated HTTP/SSE, identity and key files
+harness/       Bun services: independent Nostr sync; optional agent/tool harness
+../RoostrWebsite/
+               canonical Svelte UI, paired-native and browser-offline backends
+               (no mirrored UI source in this repository)
 ```
 
 ## API
+
+All data APIs require `Authorization: Bearer …`. Local services read the
+mode-0600 `GLON_DATA/api-token`; never give that service token to a webpage.
+Browsers pair explicitly using the one-use five-minute code printed at daemon
+startup. Pairing creates an Origin-bound UI session that expires in 24 hours or
+on daemon restart. Public `/api/pair/status` never returns a pairing code.
+Authenticated fetch streaming carries SSE authorization; tokens are not URLs.
+Run `bun run pair` from `harness/` to ask the running daemon to print a fresh
+pairing code without restarting it or disconnecting already-paired tabs.
+UI sessions cannot export the native private key. An operator can explicitly run
+`./glon-odin key-export` in a private terminal for recovery; do not log/share it.
 
 ```
 GET  /api/objects            object summaries
@@ -59,34 +68,38 @@ GET  /api/events             SSE: {"objectId"} per committed change
 
 ## Verified
 
-- 269/269 real objects replay identically in Odin vs the TS engine
-  (blocks, marks, layouts, fields, tombstones).
-- Content addresses of Odin-written changes verify in the TS stack and
-  vice versa.
-- Browser end-to-end: editor typing/split/marks/drag-to-column, block
-  menu, queries with stored filters/sorts, channels + pins.
+- Native/WASM codec, replay, query and mutation fixtures are in `core/` and
+  `query_tests/`, with browser runners under `RoostrWebsite/scripts/`.
+- `odin test core`, `odin test query_tests`, and `odin test src` exercise domain
+  and local authorization contracts. Browser tests cover pairing, shared-space
+  authority, chunk bounds, durable outbox and ABI lifetime.
+- `RoostrWebsite/scripts/parity-replay.ts` verifies raw stored hashes and compares
+  all local objects against the daemon; it must use authenticated requests when
+  run against the protected daemon.
 
 ## Known deviations
 
-- Date quickOption windows use UTC day boundaries (TS used local time).
-- SSE only observes changes written through this server (no fs watch);
-  external writers need a manual refresh.
+- Native/browser date quickOption windows use the same UTC boundaries.
+- SSE observes writes through the daemon. Do not run the legacy TypeScript
+  bootstrap against a production data root; it recreates obsolete code objects.
 
 ## Sync (nostr)
 
-Relays are the transport between your devices; the `.pb` files stay
-canonical. The harness daemon publishes every local change as a kind-1078
-event (content = NIP-44 self-encryption of the raw change bytes, "h" tag =
-blinded object id) and imports everything it sees for your pubkey — the
-Odin server verifies each content address on import (`/api/changes`
-export/import endpoints). Channel keys ride a kind-30078 replaceable
-event, merged by union. Configure relays in Settings; import your nsec on
-a second machine ("Sign in with existing key") and it backfills.
+Relays transport encrypted changes; local `.pb` files remain canonical.
+`bun run sync` in `harness/` runs synchronization independently of agent work.
+Startup reconciles local history with relay history; merely wiping the relay
+does not reset the dataset. Permanent deletion uses the synced `__vanished__`
+ledger plus acknowledged NIP-09 cleanup, not manual file removal.
 
-Agents are served by whichever machine set them up ("Run on this machine"
-toggle on the agent page; roster in `GLON_DATA/harness.json`). Presence
-heartbeats (`harness_seen_at`/`harness_host`) show every device where an
-agent lives and whether it's awake.
+Shared imports carry verified outer signer, source space and key version to the
+native importer. Both engines check target scope and owner-only operations;
+knowing one shared-space key is not authority over another space or its members.
+Browser edits enter a durable outbox before publication, and logout refuses
+unpublished work unless it is explicitly exported.
+
+`served_by` on each space determines the serving machine. Machine claims and
+workspace bindings are not heartbeats. Only the serving machine sets its own
+verified checkout path.
 
 ## Harness (`harness/`)
 
@@ -99,6 +112,7 @@ blocks under `__discussion__`), so the Roostr UI is the chat surface.
 cd harness && bun install
 bun run src/index.ts setup --name Gracie          # create the agent object
 bun run src/index.ts serve                        # SSE daemon: replies to chats
+bun run sync                                     # independent notes transport
 bun run src/index.ts ask <agentId> "message"      # one-shot turn
 ```
 

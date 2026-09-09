@@ -17,6 +17,7 @@ import "core:fmt"
 import "core:path/filepath"
 import "core:net"
 import "core:strings"
+import "../core"
 
 g_nostr_mu: sync.Mutex
 
@@ -37,8 +38,8 @@ nostr_read :: proc(allocator := context.temp_allocator) -> Nostr_Settings {
 	if rerr == nil {
 		parsed, perr := json.parse(data, allocator = allocator)
 		if perr == nil {
-			s.privkey_hex = json_str(parsed, "privkey")
-			if rv, ok := json_field(parsed, "relays"); ok {
+			s.privkey_hex = core.json_str(parsed, "privkey")
+			if rv, ok := core.json_field(parsed, "relays"); ok {
 				if arr, aok := rv.(json.Array); aok {
 					for r in arr {
 						if str, sok := r.(json.String); sok do append(&s.relays, string(str))
@@ -51,14 +52,14 @@ nostr_read :: proc(allocator := context.temp_allocator) -> Nostr_Settings {
 }
 
 nostr_write :: proc(s: Nostr_Settings) {
-	root := jobj()
+	root := core.jobj()
 	root["version"] = json.Integer(1)
 	root["privkey"] = json.String(s.privkey_hex)
 	relays := make([dynamic]json.Value, context.temp_allocator)
 	for r in s.relays do append(&relays, json.String(r))
 	root["relays"] = json.Array(relays)
 	// Private key inside — owner-only, like wallet.json.
-	_ = os.write_entire_file(nostr_settings_path(), marshal(json.Object(root)), perm = {.Read_User, .Write_User})
+	_ = os.write_entire_file(nostr_settings_path(), core.marshal(json.Object(root)), perm = {.Read_User, .Write_User})
 }
 /** Battle-tested public relays seeded on fresh installs (Settings can edit). */
 DEFAULT_RELAYS :: []string{"wss://roostr-relay.fly.dev"}
@@ -175,7 +176,7 @@ bech32_decode :: proc(s: string, allocator := context.temp_allocator) -> (hrp: s
 
 /** mutate action: nostr_key_import {key: "nsec1…" | 64-hex}. Replaces the identity. */
 mutate_key_import :: proc(sock: net.TCP_Socket, parsed: json.Value) {
-	raw := strings.trim_space(json_str(parsed, "key"))
+	raw := strings.trim_space(core.json_str(parsed, "key"))
 	priv_hex := ""
 	if strings.has_prefix(raw, "nsec1") {
 		hrp, data, ok := bech32_decode(raw)
@@ -197,9 +198,13 @@ mutate_key_import :: proc(sock: net.TCP_Socket, parsed: json.Value) {
 	sync.lock(&g_nostr_mu)
 	defer sync.unlock(&g_nostr_mu)
 	s := nostr_read()
+	if s.privkey_hex != priv_hex && !shared_forget_local_identity() {
+		respond_error(sock, "could not invalidate previous identity authority", "500 Internal Server Error")
+		return
+	}
 	s.privkey_hex = priv_hex
 	nostr_write(s)
-	o := jobj()
+	o := core.jobj()
 	o["ok"] = json.Boolean(true)
 	respond_json(sock, json.Object(o))
 }
@@ -213,6 +218,10 @@ mutate_key_import :: proc(sock: net.TCP_Socket, parsed: json.Value) {
 mutate_identity_logout :: proc(sock: net.TCP_Socket) {
 	sync.lock(&g_nostr_mu)
 	defer sync.unlock(&g_nostr_mu)
+	if !shared_forget_local_identity(false) {
+		respond_error(sock, "could not invalidate previous identity authority", "500 Internal Server Error")
+		return
+	}
 	root := g_store.data_root
 	arch := fmt.tprintf("%s/logout-%d", root, unix_ms())
 	os.make_directory(arch)
@@ -224,7 +233,7 @@ mutate_identity_logout :: proc(sock: net.TCP_Socket) {
 	}
 	os.make_directory(fmt.tprintf("%s/changes", root))
 	store_invalidate()
-	o := jobj()
+	o := core.jobj()
 	o["ok"] = json.Boolean(true)
 	o["archived"] = json.String(strings.clone(arch, context.temp_allocator))
 	respond_json(sock, json.Object(o))
@@ -234,8 +243,29 @@ mutate_identity_logout :: proc(sock: net.TCP_Socket) {
 
 handle_settings :: proc(sock: net.TCP_Socket) {
 	s := nostr_ensure()
-	o := jobj()
+	o := core.jobj()
 	o["hasKey"] = json.Boolean(len(s.privkey_hex) == 64)
+	// The native runtime does not derive secp256k1 public keys. Only expose
+	// the trusted service's cached public identity when bound to this key.
+	sync.lock(&g_keys_mu)
+	keyring := channel_keys_read()
+	sync.unlock(&g_keys_mu)
+	public_key := core.json_str(keyring, "localPubkey")
+	bound := false
+	if raw, ok := hex.decode(transmute([]byte)s.privkey_hex, context.temp_allocator); ok && len(raw) == 32 && shared_hex_pubkey(public_key) {
+		ctx: sha2.Context_256
+		sha2.init_256(&ctx)
+		sha2.update(&ctx, raw)
+		digest: [32]byte
+		sha2.final(&ctx, digest[:])
+		bound = core.json_str(keyring, "localIdentityHash") == string(hex.encode(digest[:], context.temp_allocator))
+	}
+	o["identityPending"] = json.Boolean(!bound)
+	if bound {
+		public_bytes, _ := hex.decode(transmute([]byte)public_key, context.temp_allocator)
+		o["publicKey"] = json.String(public_key)
+		o["npub"] = json.String(bech32_encode("npub", public_bytes, context.temp_allocator))
+	}
 	relays := make([dynamic]json.Value, context.temp_allocator)
 	for r in s.relays do append(&relays, json.String(r))
 	o["relays"] = json.Array(relays)
@@ -265,7 +295,7 @@ mutate_key_export :: proc(sock: net.TCP_Socket) {
 		respond_error(sock, "key unavailable", "500 Internal Server Error")
 		return
 	}
-	o := jobj()
+	o := core.jobj()
 	o["ok"] = json.Boolean(true)
 	o["nsec"] = json.String(bech32_encode("nsec", raw))
 	o["hex"] = json.String(s.privkey_hex)
@@ -274,7 +304,7 @@ mutate_key_export :: proc(sock: net.TCP_Socket) {
 
 /** mutate action: nostr_relays_set {relays: string[]}. */
 mutate_relays_set :: proc(sock: net.TCP_Socket, parsed: json.Value) {
-	relays_json, ok := json_field(parsed, "relays")
+	relays_json, ok := core.json_field(parsed, "relays")
 	arr, aok := relays_json.(json.Array)
 	if !ok || !aok {
 		respond_error(sock, "relays array required")
@@ -293,7 +323,7 @@ mutate_relays_set :: proc(sock: net.TCP_Socket, parsed: json.Value) {
 		}
 	}
 	nostr_write(s)
-	o := jobj()
+	o := core.jobj()
 	o["ok"] = json.Boolean(true)
 	relays := make([dynamic]json.Value, context.temp_allocator)
 	for r in s.relays do append(&relays, json.String(r))

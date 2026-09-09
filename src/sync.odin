@@ -1,12 +1,16 @@
 package glon
 
+import "../core"
+
 // Change export/import — the wire surface the nostr sync daemon rides.
 //
 //   GET  /api/changes              → {objectId: [hexIds]} manifest
 //   GET  /api/changes/<objectId>   → {changes: [{id, b64}]}
-//   POST /api/changes              → {changes: [b64…]} import; verifies the
-//                                    content address, writes only absent
-//                                    files, broadcasts per touched object.
+//   POST /api/changes              → service-only {changes: [b64…],
+//                                    provenance?: {spaceId,keyId,signer}};
+//                                    shared imports verify installed authority
+//                                    before content-addressed writes. Omitting
+//                                    provenance is the trusted personal path.
 //
 // Import bypasses commit_change on purpose: these changes already carry
 // their identity (id = sha256(encode with id zeroed)); recomputing parents
@@ -22,7 +26,7 @@ import "core:strings"
 import "core:slice"
 
 handle_changes_manifest :: proc(sock: net.TCP_Socket) {
-	out := jobj()
+	out := core.jobj()
 	// Vanished objects are never offered for publication, even if a stray
 	// directory is still on disk waiting for the next compaction to reclaim it.
 	vanished := vanished_ids()
@@ -103,9 +107,9 @@ handle_sync_digest :: proc(sock: net.TCP_Socket) {
 		}
 		append(&buf, u8('\n'))
 	}
-	digest := sha256(buf[:])
+	digest := core.sha256(buf[:])
 
-	out := jobj()
+	out := core.jobj()
 	out["digest"] = json.String(string(hex.encode(digest[:], context.temp_allocator)))
 	out["objects"] = json.Integer(i64(len(objects)))
 	out["changes"] = json.Integer(i64(change_count))
@@ -120,7 +124,7 @@ handle_changes_get :: proc(sock: net.TCP_Socket, object_id: string) {
 	}
 	if object_id in vanished_ids() {
 		// A peer must not be able to pull a vanished object back out of us.
-		out := jobj()
+		out := core.jobj()
 		out["objectId"] = json.String(object_id)
 		out["changes"] = json.Array(make([dynamic]json.Value, context.temp_allocator))
 		respond_json(sock, json.Object(out))
@@ -137,14 +141,14 @@ handle_changes_get :: proc(sock: net.TCP_Socket, object_id: string) {
 				if !strings.has_suffix(f.name, ".pb") do continue
 				data, rerr := os.read_entire_file(f.fullpath, context.temp_allocator)
 				if rerr != nil do continue
-				o := jobj()
+				o := core.jobj()
 				o["id"] = json.String(f.name[:len(f.name) - 3])
 				o["b64"] = json.String(base64.encode(data, allocator = context.temp_allocator))
 				append(&arr, json.Object(o))
 			}
 		}
 	}
-	out := jobj()
+	out := core.jobj()
 	out["objectId"] = json.String(object_id)
 	out["changes"] = json.Array(arr)
 	respond_json(sock, json.Object(out))
@@ -156,10 +160,15 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 		respond_error(sock, "bad json")
 		return
 	}
-	changes_json, ok := json_field(parsed, "changes")
+	changes_json, ok := core.json_field(parsed, "changes")
 	arr, aok := changes_json.(json.Array)
 	if !ok || !aok {
 		respond_error(sock, "changes array required")
+		return
+	}
+	provenance, shared, valid_provenance := shared_provenance_parse(parsed)
+	if !valid_provenance {
+		respond_error(sock, "invalid shared provenance", "403 Forbidden")
 		return
 	}
 
@@ -184,7 +193,7 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 			rejected += 1
 			continue
 		}
-		c, cok := decode_change(data, context.temp_allocator)
+		c, cok := core.decode_change(data, context.temp_allocator)
 		if !cok || c.object_id == "" || len(c.id) != 32 {
 			rejected += 1
 			continue
@@ -201,12 +210,18 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 		hashed := make([dynamic]byte, 0, len(data) - 32, context.temp_allocator)
 		append(&hashed, 0x0a, 0x00)
 		append(&hashed, ..data[34:])
-		digest := sha256(hashed[:])
+		digest := core.sha256(hashed[:])
 		if string(digest[:]) != string(c.id) {
 			rejected += 1
 			continue
 		}
-		if strings.contains(c.object_id, "/") || strings.contains(c.object_id, "..") {
+		if strings.contains(c.object_id, "/") || strings.contains(c.object_id, "..") || strings.contains(c.object_id, "\\") || strings.contains(c.object_id, "\x00") {
+			rejected += 1
+			continue
+		}
+		// Validate against locally trusted authority and the durable state from
+		// preceding accepted changes, never this change's claimed author/scope.
+		if shared && !shared_import_allowed(&c, provenance) {
 			rejected += 1
 			continue
 		}
@@ -219,10 +234,10 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 		}
 		hex_str := string(hex.encode(c.id, context.temp_allocator))
 		dir, _ := filepath.join({g_store.root, c.object_id}, context.temp_allocator)
-		append(&ids, json.String(string(hex.encode(c.id, context.temp_allocator))))
 		path, _ := filepath.join({dir, strings.concatenate({hex_str, ".pb"}, context.temp_allocator)}, context.temp_allocator)
 		if os.exists(path) {
 			skipped += 1
+			append(&ids, json.String(hex_str))
 			continue
 		}
 		os.make_directory(g_store.data_root)
@@ -233,15 +248,20 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 			continue
 		}
 		imported += 1
+		append(&ids, json.String(hex_str))
+		// The next item must see accepted creates, membership removals and
+		// snapshots immediately; do not defer cache invalidation to batch end.
+		store_mark_dirty(c.object_id)
+		if c.object_id == VANISH_LOG_ID do vanished = vanished_ids()
 		touched[strings.clone(c.object_id, context.temp_allocator)] = true
 	}
 
 	if imported > 0 {
-		for object_id in touched do store_mark_dirty(object_id)
+		// Each successful write was invalidated before validating its successor.
 		for object_id in touched do sse_broadcast(object_id)
 	}
 
-	out := jobj()
+	out := core.jobj()
 	out["ok"] = json.Boolean(true)
 	out["imported"] = json.Integer(i64(imported))
 	out["skipped"] = json.Integer(i64(skipped))

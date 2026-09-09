@@ -19,6 +19,8 @@
 import { fetchObject, queryAll, setField, str, sv, type QueryRow } from "./api";
 import { machineId } from "./roster";
 import { MACHINE_TYPE } from "./machine";
+import { realpath, stat } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 
 const AGENTS_MD_CAP = 4000;
 const GIT_TIMEOUT_MS = 10_000;
@@ -52,6 +54,31 @@ function parseMap(row: QueryRow | null, key: string): Record<string, string> {
 /** This machine's spaceId -> path map. */
 export async function readBindings(): Promise<Record<string, string>> {
 	return parseMap(await myMachineRow(), "paths");
+}
+
+export class WorkspaceAccessError extends Error {}
+
+async function servingSpace(spaceId: string) {
+	if (!spaceId) throw new WorkspaceAccessError("space required");
+	const space = await fetchObject(spaceId);
+	if (str(space.fields, "served_by") !== await machineId()) {
+		throw new WorkspaceAccessError("this machine does not serve this space");
+	}
+	return space;
+}
+
+async function directoryPath(path: string): Promise<string> {
+	if (!isAbsolute(path)) throw new WorkspaceAccessError("workspace path must be absolute");
+	const canonical = await realpath(path);
+	if (!(await stat(canonical)).isDirectory()) throw new WorkspaceAccessError("workspace must be a directory");
+	return canonical;
+}
+
+/** Local path disclosure is restricted to spaces actually served by this machine. */
+export async function readBinding(spaceId: string): Promise<string> {
+	await servingSpace(spaceId);
+	const path = (await readBindings())[spaceId];
+	return path ? directoryPath(path) : "";
 }
 
 // ── Validation ────────────────────────────────────────────────────
@@ -119,6 +146,7 @@ export async function validateBindings(): Promise<void> {
 
 /** Bind (or with empty path, unbind) this machine's checkout for a space. */
 export async function setBinding(spaceId: string, path: string): Promise<{ status: string }> {
+	const space = await servingSpace(spaceId);
 	const row = await myMachineRow();
 	if (!row) throw new Error("this machine has no machine object yet - serve something first");
 	const paths = parseMap(row, "paths");
@@ -131,11 +159,10 @@ export async function setBinding(spaceId: string, path: string): Promise<{ statu
 		invalidateWorkspaces();
 		return { status: "unbound" };
 	}
-	const repoUrl = await fetchObject(spaceId)
-		.then((o) => str(o.fields, "repo_url"))
-		.catch(() => "");
-	const status = await bindingStatus(path, repoUrl);
-	paths[spaceId] = path;
+	const canonical = await directoryPath(path);
+	const status = await bindingStatus(canonical, str(space.fields, "repo_url"));
+	if (status !== "ok") throw new WorkspaceAccessError(`invalid workspace binding: ${status}`);
+	paths[spaceId] = canonical;
 	statuses[spaceId] = status;
 	await setField(row.id, "paths", sv(JSON.stringify(paths)));
 	await writeStatusMap(row, statuses);
