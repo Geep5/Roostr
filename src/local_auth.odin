@@ -70,7 +70,8 @@ local_auth_init :: proc(port: int) {
 local_pair_start :: proc() {
 	sync.lock(&g_local_auth.mu)
 	defer sync.unlock(&g_local_auth.mu)
-	delete(g_local_auth.code)
+	// code is "" (string literal) after a successful pair consumed it; only heap codes may be deleted.
+	if g_local_auth.code != "" do delete(g_local_auth.code)
 	g_local_auth.code = local_random_token()
 	g_local_auth.code_expires = unix_ms() + LOCAL_PAIR_TTL
 	fmt.eprintfln("[glon-odin] Browser pairing code (one use, 5 minutes): %s", g_local_auth.code)
@@ -109,6 +110,15 @@ local_bearer :: proc(header: string) -> string {
 	if len(token) != 64 do return ""
 	for c in token do if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') do return ""
 	return token
+}
+
+// Identity and relay configuration are deliberately platform-only; a paired
+// browser session (.UI) must never reach these four mutate actions.
+local_platform_action :: proc(action: string) -> bool {
+	switch action {
+	case "nostr_key_export", "nostr_key_import", "identity_logout", "nostr_relays_set": return true
+	}
+	return false
 }
 
 local_role :: proc(token, origin: string, now: i64) -> Local_Role {
@@ -179,6 +189,7 @@ local_authorize :: proc(sock: net.TCP_Socket, req: Request) -> bool {
 	}
 	if req.method == "POST" && pair {
 		if local_origin_valid(req.origin) do g_response_cors = local_cors(req.origin)
+		if !core.json_depth_ok(req.body) { respond_error(sock, "invalid JSON"); return false }
 		parsed, err := json.parse(req.body, allocator = context.temp_allocator)
 		if err != nil { respond_error(sock, "invalid JSON"); return false }
 		token, expires, status := local_pair(core.json_str(parsed, "code"), req.origin, now)
@@ -195,6 +206,7 @@ local_authorize :: proc(sock: net.TCP_Socket, req: Request) -> bool {
 	if role == .UI do g_response_cors = local_cors(req.origin)
 	if req.path == "/api/local-auth/validate" {
 		if role != .Service || req.method != "POST" { respond_error(sock, "service only", "403 Forbidden"); return false }
+		if !core.json_depth_ok(req.body) { respond_error(sock, "invalid JSON"); return false }
 		parsed, err := json.parse(req.body, allocator = context.temp_allocator)
 		if err != nil { respond_error(sock, "invalid JSON"); return false }
 		validated := local_role(core.json_str(parsed, "token"), core.json_str(parsed, "origin"), now)
@@ -213,9 +225,10 @@ local_authorize :: proc(sock: net.TCP_Socket, req: Request) -> bool {
 	if role == .UI {
 		if req.method == "POST" && req.path == "/api/changes" { respond_error(sock, "service only", "403 Forbidden"); return false }
 		if req.method == "POST" && req.path == "/api/mutate" {
+			if !core.json_depth_ok(req.body) { respond_error(sock, "invalid JSON"); return false }
 			parsed, err := json.parse(req.body, allocator = context.temp_allocator)
 			if err != nil { respond_error(sock, "invalid JSON"); return false }
-			if core.json_str(parsed, "action") == "nostr_key_export" { respond_error(sock, "key export requires local operator", "403 Forbidden"); return false }
+			if local_platform_action(core.json_str(parsed, "action")) { respond_error(sock, "action requires local operator", "403 Forbidden"); return false }
 		}
 	}
 	return true

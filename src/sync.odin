@@ -155,6 +155,10 @@ handle_changes_get :: proc(sock: net.TCP_Socket, object_id: string) {
 }
 
 handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
+	if !core.json_depth_ok(body) {
+		respond_error(sock, "bad json")
+		return
+	}
 	parsed, perr := json.parse(body, allocator = context.temp_allocator)
 	if perr != nil {
 		respond_error(sock, "bad json")

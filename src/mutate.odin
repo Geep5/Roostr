@@ -63,6 +63,10 @@ native_commit_plan :: proc(plan: ^core.Mutation_Plan, create_channel := false) -
 }
 
 handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
+ if !core.json_depth_ok(body) {
+  respond_error(sock, "bad json")
+  return
+ }
  parsed, perr := json.parse(body, allocator = context.temp_allocator)
  if perr != nil {
   respond_error(sock, "bad json")
@@ -131,7 +135,12 @@ channel_keys_path :: proc() -> string {
 g_keys_mu: sync.Mutex
 
 channel_keys_read :: proc() -> json.Value {
-	data, rerr := os.read_entire_file(channel_keys_path(), context.temp_allocator)
+	// Mirror the api-token pattern: re-tighten an existing file to owner-only on read.
+	file, oerr := os.open(channel_keys_path())
+	if oerr != nil do return nil
+	defer os.close(file)
+	_ = os.fchmod(file, {.Read_User, .Write_User})
+	data, rerr := os.read_entire_file(file, context.temp_allocator)
 	if rerr != nil do return nil
 	parsed, perr := json.parse(data, allocator = context.temp_allocator)
 	if perr != nil do return nil
@@ -172,7 +181,8 @@ channel_key_write :: proc(channel_id: string, key_hex: string, key_id: i64) {
 	entry["createdAt"] = json.Integer(unix_ms())
 	channels[channel_id] = json.Object(entry)
 	root["channels"] = json.Object(channels)
-	_ = os.write_entire_file(channel_keys_path(), core.marshal(json.Object(root)))
+	// Channel keys are shared secrets — owner-only, like nostr.json.
+	_ = os.write_entire_file(channel_keys_path(), core.marshal(json.Object(root)), perm = {.Read_User, .Write_User})
 }
 
 channel_key_set :: proc(channel_id: string, key_id: i64) {

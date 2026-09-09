@@ -79,6 +79,10 @@ GET  /api/events             SSE: {"objectId"} per committed change
 
 ## Known deviations
 
+- Replay serializes each block id once: trees with repeated child refs (legacy
+  imports, diamonds) no longer emit the block per reference — chained duplicates
+  used to expand 2^N and wedge boot. The website TS engine and the shared
+  `core/replay_fixtures.json` corpus must be updated together when they resync.
 - Native/browser date quickOption windows use the same UTC boundaries.
 - SSE observes writes through the daemon. Do not run the legacy TypeScript
   bootstrap against a production data root; it recreates obsolete code objects.

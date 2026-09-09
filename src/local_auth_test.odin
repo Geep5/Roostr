@@ -2,6 +2,7 @@ package glon
 
 import "core:strings"
 import "core:testing"
+import "../core"
 
 @(test)
 local_auth_contract :: proc(t: ^testing.T) {
@@ -69,6 +70,32 @@ local_auth_contract :: proc(t: ^testing.T) {
 	g_local_auth.code_expires = now + 10_000_000
 	_, _, full := local_pair(token, origin, now + 4_000_000)
 	testing.expect(t, full == "429 Too Many Requests")
+}
+
+@(test)
+local_ui_guard_contract :: proc(t: ^testing.T) {
+	// LA-2: all four platform-only mutate actions must 403 for a .UI session.
+	for action in ([]string{"nostr_key_export", "nostr_key_import", "identity_logout", "nostr_relays_set"}) {
+		testing.expect(t, local_platform_action(action))
+	}
+	for allowed in ([]string{"", "channel_create", "object_update", "channel_key_rotate", "nostr_key_expor"}) {
+		testing.expect(t, !local_platform_action(allowed))
+	}
+}
+
+@(test)
+local_json_depth_guard_contract :: proc(t: ^testing.T) {
+	// LA-1: every request-body json.parse is preceded by core.json_depth_ok;
+	// pin the helper contract the guards rely on (string literals don't nest).
+	testing.expect(t, core.json_depth_ok(transmute([]u8)string(`{"action":"x","ops":[[{"a":1}]]}`)))
+	testing.expect(t, !core.json_depth_ok(transmute([]u8)string(`{"a":[[[[[`)))
+	deep := make([dynamic]u8, context.temp_allocator)
+	for i in 0..<200 do append(&deep, '[')
+	testing.expect(t, !core.json_depth_ok(deep[:]))
+	shallow := make([dynamic]u8, context.temp_allocator)
+	for i in 0..<100 do append(&shallow, '[')
+	for i in 0..<100 do append(&shallow, ']')
+	testing.expect(t, core.json_depth_ok(shallow[:]))
 }
 
 @(test)

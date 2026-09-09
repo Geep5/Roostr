@@ -1013,6 +1013,39 @@ encode_snapshot :: proc(s: Snapshot, w: ^Writer) {
 	write_i64_field(w, 8, s.updated_at)
 }
 
+// ── Decode limits ────────────────────────────────────────────────────
+// A length-delimited repeated field costs ~2 wire bytes per element but
+// allocates a full model struct per element (~850 B per Operation): a
+// ~425x memory amplification against the 1 GB daemon. valid_message
+// walks every nested message before any allocation, so caps enforced
+// there reject hostile payloads through the normal decode error path.
+// Legitimate documents sit orders of magnitude below every cap.
+MAX_DECODE_ITEMS :: 100_000 // Change.ops, Snapshot.blocks/fields, Value list items/map entries, Block field maps
+MAX_DECODE_REFS :: 50_000   // Block.children_ids, String_List values (e.g. tags), text marks, custom meta pairs
+
+// Per-field element cap for repeated length-delimited fields; 0 = uncapped.
+wire_count_cap :: proc(message: Wire_Message, field: u64) -> int {
+	#partial switch message {
+	case .Change:
+		if field == 4 do return MAX_DECODE_ITEMS // ops
+	case .Snapshot:
+		if field == 3 do return MAX_DECODE_ITEMS // fields
+		if field == 5 do return MAX_DECODE_ITEMS // blocks
+	case .Block:
+		if field == 2 do return MAX_DECODE_REFS  // children_ids
+		if field == 4 do return MAX_DECODE_ITEMS // fields map
+	case .Value_Map, .Value_List:
+		if field == 1 do return MAX_DECODE_ITEMS
+	case .String_List:
+		if field == 1 do return MAX_DECODE_REFS // values (e.g. tags)
+	case .Text:
+		if field == 3 do return MAX_DECODE_REFS // marks
+	case .Custom:
+		if field == 3 do return MAX_DECODE_REFS // meta pairs
+	}
+	return 0
+}
+
 // Check all nested messages before model allocation. Unknown fields remain
 // forward compatible, but malformed known payloads never produce partial changes.
 Wire_Message :: enum {
@@ -1086,10 +1119,16 @@ wire_field :: proc(message: Wire_Message, field: u64) -> (wire: u64, nested: Wir
 valid_message :: proc(data: []byte, message: Wire_Message, depth: int = 0) -> bool {
 	if depth > 128 do return false
 	r := Reader{data = data}
+	counts := make(map[u64]int, allocator = context.temp_allocator)
+	defer delete(counts)
 	for r.pos < len(r.data) && !r.err {
 		tag := read_varint(&r)
 		field, wire := tag >> 3, tag & 7
 		if r.err || field == 0 || field > 0x1fffffff do return false
+		if cap := wire_count_cap(message, field); cap > 0 {
+			counts[field] += 1
+			if counts[field] > cap do return false
+		}
 		expected, nested, known := wire_field(message, field)
 		if known && wire != expected do return false
 		if known && nested != .Scalar {

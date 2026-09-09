@@ -6,6 +6,7 @@ package core
 import "core:encoding/json"
 import "core:encoding/base64"
 import "core:fmt"
+import "core:math"
 import "core:strings"
 
 // ── Model → json.Value ───────────────────────────────────────────────
@@ -23,7 +24,13 @@ value_to_json :: proc(v: Value, allocator := context.temp_allocator, ordered := 
 	case .Int:
 		o["intValue"] = json.Integer(v.i)
 	case .Float:
-		o["floatValue"] = json.Float(v.f)
+		// encoding/json marshals non-finite f64 as bare NaN/+Inf/-Inf,
+		// which is not valid JSON and breaks every API consumer. Clamp
+		// to 0: the wire vocabulary has no null-float and 0 is the
+		// proto3 default for the field.
+		f := v.f
+		if math.is_nan(f) || math.is_inf(f) do f = 0
+		o["floatValue"] = json.Float(f)
 	case .Bool:
 		o["boolValue"] = json.Boolean(v.b)
 	case .Bytes:
@@ -392,4 +399,43 @@ fields_from_json :: proc(v: json.Value, allocator := context.allocator) -> [dyna
 		append(&out, Value_Entry{key = strings.clone(pair.key, allocator), value = value_from_json(pair.value, allocator)})
 	}
 	return out
+}
+
+// ── Request-body pre-flight ──────────────────────────────────────────
+
+/**
+ * Cheap structural pre-flight for request bodies, run before json.parse:
+ * the parser's recursion depth (and memory use) is unbounded, so deeply
+ * nested input can wedge the process. Single pass over the raw bytes;
+ * brackets inside string literals and backslash escapes do not count.
+ * False when nesting exceeds max_depth or never balances (an opener
+ * left open at the end); surplus closers clamp at zero and are left for
+ * the parser to reject.
+ */
+json_depth_ok :: proc(data: []u8, max_depth := 128) -> bool {
+	depth := 0
+	in_string := false
+	escaped := false
+	for c in data {
+		if in_string {
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				in_string = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			in_string = true
+		case '{', '[':
+			depth += 1
+			if depth > max_depth do return false
+		case '}', ']':
+			depth = max(depth - 1, 0)
+		}
+	}
+	return depth == 0
 }

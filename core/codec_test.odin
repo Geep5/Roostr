@@ -68,3 +68,39 @@ codec_rejects_malformed_nested_messages :: proc(t: ^testing.T) {
 		testing.expect(t, !ok, wire)
 	}
 }
+
+// ROOSTR-PROTO-001: a length-delimited repeated field is ~2 wire bytes
+// per element but allocates a full model struct, a ~425x amplification.
+// Element caps reject such payloads through the normal decode error path.
+@(test)
+codec_rejects_over_capped_repeated_fields :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
+	// Change.ops (field 4) capped at MAX_DECODE_ITEMS.
+	over: Writer
+	over.buf = make([dynamic]byte, context.temp_allocator)
+	for _ in 0 ..< MAX_DECODE_ITEMS + 1 do write_len_prefixed(&over, 4, {})
+	_, ok := decode_change(over.buf[:])
+	testing.expect(t, !ok, "ops beyond the decode cap must be rejected")
+
+	at: Writer
+	at.buf = make([dynamic]byte, context.temp_allocator)
+	for _ in 0 ..< MAX_DECODE_ITEMS do write_len_prefixed(&at, 4, {})
+	_, ok = decode_change(at.buf[:])
+	testing.expect(t, ok, "ops at the decode cap must still decode")
+
+	// Block.children_ids (field 2) capped at MAX_DECODE_REFS, nested
+	// inside a snapshot block to exercise the recursive check.
+	blk: Writer
+	blk.buf = make([dynamic]byte, context.temp_allocator)
+	write_string_field(&blk, 1, "b")
+	for _ in 0 ..< MAX_DECODE_REFS + 1 do write_string_field(&blk, 2, "x")
+	snap: Writer
+	snap.buf = make([dynamic]byte, context.temp_allocator)
+	write_len_prefixed(&snap, 5, blk.buf[:])
+	change: Writer
+	change.buf = make([dynamic]byte, context.temp_allocator)
+	write_len_prefixed(&change, 7, snap.buf[:])
+	_, ok = decode_change(change.buf[:])
+	testing.expect(t, !ok, "children_ids beyond the decode cap must be rejected")
+}

@@ -3,8 +3,8 @@ package core
 import "core:encoding/json"
 
 // Legacy imports add children as roots before adding parents that reference
-// those same children. Repeated references are valid and retain their historical
-// serialization order. Only an active-path revisit is a cycle.
+// those same children. Repeated references are valid — tree_serialize emits
+// each block id once. Only an active-path revisit is a cycle.
 replay_tree_valid :: proc(t: ^Block_Tree) -> bool {
 	Visit :: struct { id: string, exiting: bool }
 	colors := make(map[string]u8, allocator = context.temp_allocator)

@@ -991,7 +991,7 @@
     }
   },
   {
-    "name": "legacy child root remains repeated under later parent; UI hides custom binary data",
+    "name": "legacy child root serialized once even when repeated under later parent; UI hides custom binary data",
     "changes": [
       {
         "id": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -1069,16 +1069,6 @@
           ],
           "content": {
             "table": {}
-          }
-        },
-        {
-          "id": "leaf",
-          "childrenIds": [],
-          "content": {
-            "custom": {
-              "contentType": "opaque",
-              "meta": {}
-            }
           }
         }
       ],

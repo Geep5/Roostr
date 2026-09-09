@@ -393,8 +393,13 @@ text_snippet :: proc(s: ^Object_State, needle: string) -> string {
 		lower := strings.to_lower(text, context.temp_allocator)
 		idx := strings.index(lower, n)
 		if idx < 0 do continue
-		start := max(idx - 40, 0)
-		end := min(idx + len(n) + 60, len(text))
+		// idx is an offset into the LOWERED copy: to_lower can expand
+		// invalid UTF-8 (each bad byte becomes a 3-byte replacement
+		// char), so idx may land past len(text). Clamp both ends to the
+		// original before slicing.
+		start := clamp(idx - 40, 0, len(text))
+		end := clamp(idx + len(n) + 60, 0, len(text))
+		if start >= end do return ""
 		out := text[start:end]
 		if start > 0 do out = strings.concatenate({"…", out}, context.temp_allocator)
 		if end < len(text) do out = strings.concatenate({out, "…"}, context.temp_allocator)

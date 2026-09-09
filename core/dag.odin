@@ -175,9 +175,16 @@ tree_serialize :: proc(t: ^Block_Tree, allocator := context.allocator) -> [dynam
 	out := make([dynamic]Block, allocator)
 	stack := make([dynamic]string, context.temp_allocator)
 	defer delete(stack)
+	// A block id reachable twice (duplicated child refs, diamonds, or a
+	// self-reference from a corrupted tree) is emitted once: revisiting
+	// would expand the output exponentially and wedge boot replay.
+	emitted := make(map[string]bool, allocator = context.temp_allocator)
+	defer delete(emitted)
 	for i := len(t.root_ids) - 1; i >= 0; i -= 1 do append(&stack, t.root_ids[i])
 	for len(stack) > 0 {
 		id := pop(&stack)
+		if id in emitted do continue
+		emitted[id] = true
 		b, ok := t.by_id[id]
 		if !ok do continue
 		append(&out, b^)
@@ -210,20 +217,16 @@ tree_unlink :: proc(t: ^Block_Tree, block_id: string) {
 	pid, has_parent := t.parent[block_id]
 	if has_parent {
 		if p, ok := t.by_id[pid]; ok {
-			for cid, i in p.children_ids {
-				if cid == block_id {
-					ordered_remove(&p.children_ids, i)
-					break
-				}
+			// Every occurrence: a duplicated child ref left behind would
+			// keep the block linked through the parent it was moved from.
+			for i := len(p.children_ids) - 1; i >= 0; i -= 1 {
+				if p.children_ids[i] == block_id do ordered_remove(&p.children_ids, i)
 			}
 		}
 		delete_key(&t.parent, block_id)
 	} else {
-		for id, i in t.root_ids {
-			if id == block_id {
-				ordered_remove(&t.root_ids, i)
-				break
-			}
+		for i := len(t.root_ids) - 1; i >= 0; i -= 1 {
+			if t.root_ids[i] == block_id do ordered_remove(&t.root_ids, i)
 		}
 	}
 }
@@ -621,6 +624,10 @@ compute_state :: proc(changes: []Change, allocator := context.allocator) -> (Obj
 				if b, ok := t.by_id[op.block_id]; ok do b.content = op.content
 			case .Block_Move:
 				apply_block_move(&t, op, op_key, allocator)
+				// Same post-op cycle check as Block_Add: a move can also
+				// corrupt the tree (e.g. duplicated child refs), and boot
+				// replay must reject it instead of serializing a cycle.
+				if !replay_tree_valid(&t) do return state, false
 				touched = true
 			case .Block_Set_Align:
 				if b, ok := t.by_id[op.block_id]; ok do b.align = op.align

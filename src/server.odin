@@ -142,6 +142,12 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 	context.temp_allocator = mem.dynamic_arena_allocator(&arena)
 	defer mem.dynamic_arena_destroy(&arena)
 
+	// A stalled localhost peer must not pin a handler thread forever; a
+	// timed-out read is a clean close, exactly like EOF in read_request.
+	// (SSE never recv-blocks after registration, so this cannot cull a
+	// healthy event stream.)
+	_ = net.set_option(sock, .Receive_Timeout, 30 * time.Second)
+
 	req, ok := read_request(sock)
 	when #config(GLON_HTTP_TRACE, false) {
 		fmt.eprintfln("[trace] read fd=%d ok=%v", sock, ok)
@@ -163,6 +169,9 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 		}
 		head := fmt.tprintf("HTTP/1.1 200 OK\r\n%sContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\ndata: {{\"hello\":true}}\n\n", g_response_cors)
 		if send_all(sock, transmute([]byte)head) {
+			// A reader that stalls mid-frame must fail the broadcast write fast;
+			// without this sse_broadcast blocks under g_sse.mu indefinitely.
+			_ = net.set_option(sock, .Send_Timeout, 30 * time.Second)
 			sync.lock(&g_sse.mu)
 			// Bound zombie pileup: a client that stops reading but keeps the
 			// socket open (abandoned headless pages) is indistinguishable from
@@ -494,6 +503,10 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 }
 
 handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
+	if !core.json_depth_ok(body) {
+		respond_error(sock, "bad json")
+		return
+	}
 	parsed, perr := json.parse(body, allocator = context.temp_allocator)
 	if perr != nil {
 		respond_error(sock, "bad json")
