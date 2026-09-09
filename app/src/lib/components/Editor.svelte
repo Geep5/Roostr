@@ -1235,6 +1235,177 @@
 		await refresh();
 	}
 
+	// ── Drag targeting (Anytype drag/provider.tsx) ─────────────────
+	// Anytype never asks "which element is under the pointer". At drag start a
+	// single provider snapshots every drop target's rect, then resolves the
+	// pointer against that cache: 100px of horizontal slop (OFFSET), each
+	// block's own paddings folded into its box so the gap between two rows
+	// always belongs to one of them, a tall always-reachable strip under the
+	// document (#blockLast), and a sticky last-valid-target for the drop.
+	// Per-element dragover - what we had - leaves dead strips everywhere: the
+	// margins, the handle rail, past the right edge, between rows, below the
+	// last block. That is why some rows simply refused to move.
+	const DRAG_OFFSET = 100; // provider.tsx:11 OFFSET
+	const DRAG_COL_BAND = 12; // J.Size.blockMenu / 4
+	const DRAG_LAST_MIN = 150; // J.Size.lastBlock
+	const DRAG_EDGE = 20; // scrollOnMove BORDER
+	const DRAG_STEP = 10; // scrollOnMove MAX_STEP
+	const DRAG_SPEED = 100; // scrollOnMove SPEED_DIV
+	/** canDropMiddle = block.canHaveChildren() (block/index.tsx:975). */
+	const DROP_INNER: number[] = [Style.PARAGRAPH, Style.BULLET, Style.NUMBERED, Style.CHECKBOX, Style.TOGGLE, Style.CALLOUT, Style.QUOTE];
+
+	type DropRect = { id: string; x: number; y: number; w: number; h: number; inner: boolean; bot?: boolean; docEnd?: boolean };
+	let dragRects: DropRect[] = [];
+	let dropHint = $state<{ id: string; position: number; bot?: boolean } | null>(null);
+	let lastValidDrop: { id: string; position: number } | null = null;
+	let dragPoint = { x: 0, y: 0 };
+	let dragScrollTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function dragScroller(): { scrollBy(x: number, y: number): void } {
+		let el = editorEl?.parentElement ?? null;
+		while (el) {
+			const cs = getComputedStyle(el);
+			if (/(auto|scroll)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight) return el;
+			el = el.parentElement;
+		}
+		return window;
+	}
+
+	/** provider.tsx initData/getNodeRect: snapshot every target once. */
+	function buildDragRects() {
+		dragRects = [];
+		if (!editorEl) return;
+		const rows: DropRect[] = [];
+		// targetBot strips first: they own the gap under a subtree, and a hit
+		// there means "after this whole block" rather than inside its last child.
+		for (const el of editorEl.querySelectorAll<HTMLElement>("[data-drop-bot]")) {
+			const bid = el.getAttribute("data-drop-bot") ?? "";
+			const r = el.getBoundingClientRect();
+			if (bid && r.height) rows.push({ id: bid, x: r.left, y: r.top, w: r.width, h: r.height, inner: false, bot: true });
+		}
+		for (const el of editorEl.querySelectorAll<HTMLElement>("[data-block]")) {
+			const bid = el.getAttribute("data-block") ?? "";
+			if (!bid || bid === "__discussion__") continue;
+			const r = el.getBoundingClientRect();
+			if (!r.height) continue;
+			const cs = getComputedStyle(el);
+			const padTop = parseInt(cs.paddingTop) || 0;
+			const padBot = parseInt(cs.paddingBottom) || 0;
+			// Their DropTarget covers the content only - the CSS insets it past
+			// the 48px menu column - so measure from the gutter's right edge.
+			const gutter = el.querySelector<HTMLElement>(":scope > .gutter");
+			const left = gutter ? gutter.getBoundingClientRect().right : r.left;
+			const style = byId.get(bid)?.content.text?.style;
+			rows.push({
+				id: bid,
+				x: left,
+				y: r.top - padTop - 2,
+				w: Math.max(1, r.right - left),
+				h: r.height + padTop + padBot + 2,
+				inner: style !== undefined && DROP_INNER.includes(style),
+			});
+		}
+		const host = editorEl.getBoundingClientRect();
+		const bottom = rows.length ? Math.max(...rows.map((r) => r.y + r.h)) : host.top;
+		const lastRoot = rootIds[rootIds.length - 1];
+		if (lastRoot) {
+			rows.push({ id: lastRoot, x: host.left, y: bottom, w: Math.max(1, host.width), h: Math.max(DRAG_LAST_MIN, host.bottom - bottom), inner: false, docEnd: true });
+		}
+		dragRects = rows;
+	}
+
+	/** provider.tsx checkNodes: hit-test the cache, then the band math. */
+	function resolveDrop(cx: number, cy: number): { id: string; position: number; bot?: boolean } | null {
+		for (const r of dragRects) {
+			if (cx < r.x - DRAG_OFFSET || cx > r.x + r.w + DRAG_OFFSET) continue;
+			if (cy < r.y || cy > r.y + r.h) continue;
+			if (dropForbidden(r.id)) continue;
+			// The doc-end strip lands after the last root block, and lights that
+			// row's bottom edge - a targetBot strip lights itself instead.
+			if (r.docEnd) return { id: r.id, position: Pos.BOTTOM };
+			if (r.bot) return { id: r.id, position: Pos.BOTTOM, bot: true };
+			let position: number;
+			if (cx <= r.x - DRAG_COL_BAND) position = Pos.LEFT;
+			else if (cx > r.x + r.w) position = Pos.RIGHT;
+			else if (cy <= r.y + r.h * 0.3) position = Pos.TOP;
+			else if (cy >= r.y + r.h * 0.7) position = Pos.BOTTOM;
+			else position = Pos.INNER_FIRST;
+			// recalcPositionY: a block that cannot hold children splits 50/50.
+			if (position === Pos.INNER_FIRST && !r.inner) position = cy <= r.y + r.h * 0.5 ? Pos.TOP : Pos.BOTTOM;
+			return { id: r.id, position };
+		}
+		return null;
+	}
+
+	/** checkParentIds: never target the dragged blocks or their descendants. */
+	function dropForbidden(targetId: string): boolean {
+		if (!targetId || !draggingId) return !targetId;
+		const group = selectedSet.has(draggingId) && selectedIds.length > 1 ? topmostSelected() : [draggingId];
+		const parentOf = new Map<string, string>();
+		for (const b of object.blocks) for (const c of b.childrenIds) parentOf.set(c, b.id);
+		let walk: string | undefined = targetId;
+		while (walk) {
+			if (group.includes(walk)) return true;
+			walk = parentOf.get(walk);
+		}
+		return false;
+	}
+
+	function onEditorDragOver(e: DragEvent) {
+		if (!draggingId) return;
+		e.preventDefault();
+		dragPoint = { x: e.clientX, y: e.clientY };
+		const hit = resolveDrop(e.clientX, e.clientY);
+		dropHint = hit;
+		if (hit) lastValidDrop = { id: hit.id, position: hit.position };
+		if (!dragScrollTimer) dragScrollTimer = setTimeout(dragScrollTick, 50);
+	}
+
+	/** scrollOnMove: crawl the document while the pointer sits at an edge. */
+	function dragScrollTick() {
+		dragScrollTimer = null;
+		if (!draggingId) return;
+		const h = window.innerHeight;
+		const y = dragPoint.y;
+		let dy = 0;
+		if (y < DRAG_EDGE) dy = -Math.min(DRAG_STEP, Math.ceil((DRAG_EDGE - y) / DRAG_SPEED));
+		else if (y > h - DRAG_EDGE) dy = Math.min(DRAG_STEP, Math.ceil((y - (h - DRAG_EDGE)) / DRAG_SPEED));
+		if (dy) {
+			dragScroller().scrollBy(0, dy);
+			// provider.tsx onScroll: the snapshot is refreshed, never rebuilt.
+			buildDragRects();
+			dropHint = resolveDrop(dragPoint.x, dragPoint.y);
+		}
+		dragScrollTimer = setTimeout(dragScrollTick, 50);
+	}
+
+	function endDrag() {
+		if (dragScrollTimer) clearTimeout(dragScrollTimer);
+		dragScrollTimer = null;
+		dragRects = [];
+		dropHint = null;
+		lastValidDrop = null;
+		draggingId = "";
+	}
+
+	async function onEditorDrop(e: DragEvent) {
+		if (!draggingId) return;
+		e.preventDefault();
+		// The pointer can be between targets on the frame the drop lands, so
+		// fall back to the last target we lit (provider.tsx lastValidTarget).
+		const hint = dropHint ?? (lastValidDrop && !dropForbidden(lastValidDrop.id) ? lastValidDrop : null);
+		dropHint = null;
+		if (dragScrollTimer) clearTimeout(dragScrollTimer);
+		dragScrollTimer = null;
+		dragRects = [];
+		lastValidDrop = null;
+		if (!hint) {
+			draggingId = "";
+			return;
+		}
+		await onDrop(hint.id, hint.position);
+	}
+
 	/** Empty-toggle placeholder click: create + focus the first child. */
 	async function onEmptyToggle(id: string) {
 		const innerId = crypto.randomUUID();
@@ -1464,6 +1635,7 @@
 </script>
 
 <svelte:window
+	ondragend={endDrag}
 	onkeydown={(e) => void onWindowKeydown(e)}
 	onmousedown={(e) => {
 		if (spellMenu && !(e.target as HTMLElement).closest(".spell-menu")) spellMenu = null;
@@ -1477,6 +1649,8 @@
 	bind:this={editorEl}
 	oncontextmenucapture={onEditorContextMenu}
 	onmousedown={selMouseDown}
+	ondragover={onEditorDragOver}
+	ondrop={(e) => void onEditorDrop(e)}
 	onclick={(e) => {
 		if (e.target === e.currentTarget && !selectedIds.length) void appendBlock();
 	}}
@@ -1487,12 +1661,16 @@
 			{byId}
 			{object}
 			{draggingId}
+			{dropHint}
 			selectedIds={selectedSet}
 			onkeydown={onKeydown}
 			oninput={onInput}
 			onblur={flushSave}
 			onselect={onSelect}
-			ondragbegin={(bid) => (draggingId = bid)}
+			ondragbegin={(bid) => {
+				draggingId = bid;
+				buildDragRects();
+			}}
 			ondrop={onDrop}
 			ontogglecheck={toggleChecked}
 			onemptytoggle={onEmptyToggle}

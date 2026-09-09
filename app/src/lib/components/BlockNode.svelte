@@ -14,6 +14,7 @@
 		byId,
 		object,
 		draggingId,
+		dropHint,
 		selectedIds,
 		onkeydown,
 		oninput,
@@ -31,6 +32,8 @@
 		byId: Map<string, BlockJSON>;
 		object: ObjectJSON;
 		draggingId: string;
+		/** Resolved drop target for the whole document (Anytype's hoverData). */
+		dropHint: { id: string; position: number; bot?: boolean } | null;
 		selectedIds: Set<string>;
 		onkeydown: (e: KeyboardEvent, id: string) => void;
 		oninput: (id: string) => void;
@@ -50,7 +53,8 @@
 	} = $props();
 
 	const block = $derived(byId.get(id));
-	let zone = $state(0); // 0 none, else Pos value
+	/** 0 none, a Pos value for this row, 12 for its targetBot strip. */
+	const zone = $derived(!dropHint || dropHint.id !== id ? 0 : dropHint.bot ? 12 : dropHint.position);
 	let textEl: HTMLElement | undefined = $state();
 
 	// Anytype toggle: open state is per-device (localStorage), arrow rotates,
@@ -102,60 +106,19 @@
 		const n = w?.floatValue ?? w?.intValue ?? 0;
 		return n > 0 ? `${n * 100}%` : "1fr";
 	}
-
-	/**
-	 * Anytype drag/provider.tsx zone math (initVars/col1/col2): Left only
-	 * when the pointer is LEFT of the content rect (`ex <= x - blockMenu/4`
-	 * — i.e. out in the rail/margin), Right only PAST the right edge. Inside
-	 * the block body position is purely vertical: top 30% → Top, bottom 30%
-	 * → Bottom, middle 40% → INSIDE (InnerFirst) on blocks that
-	 * canHaveChildren (paragraph, lists, toggle, callout, quote — not
-	 * headers/code/title); others split 50/50. Our rows don't receive
-	 * dragover in the page margin, so the rail itself plays Left and a slim
-	 * right-edge strip plays Right.
-	 */
-	const CAN_HAVE_CHILDREN: Record<number, true> = {
-		[Style.PARAGRAPH]: true,
-		[Style.BULLET]: true,
-		[Style.NUMBERED]: true,
-		[Style.CHECKBOX]: true,
-		[Style.TOGGLE]: true,
-		[Style.CALLOUT]: true,
-		[Style.QUOTE]: true,
-	};
-
-	function computeZone(e: DragEvent): number {
-		// Anytype's content DropTarget wraps only the block's own row - and
-		// since children now render OUTSIDE this element, the rect IS the row.
-		const el = e.currentTarget as HTMLElement;
-		const r = el.getBoundingClientRect();
-		const gutter = el.querySelector(":scope > .gutter");
-		const contentLeft = gutter ? gutter.getBoundingClientRect().right : r.left;
-		if (e.clientX < contentLeft) return Pos.LEFT;
-		if (e.clientX > r.right - 24) return Pos.RIGHT;
-		const h = r.height;
-		const y = h > 0 ? (e.clientY - r.top) / h : 0;
-		const style = block?.content.text?.style;
-		if (style !== undefined && CAN_HAVE_CHILDREN[style]) {
-			if (y <= 0.3) return Pos.TOP;
-			if (y >= 0.7) return Pos.BOTTOM;
-			return Pos.INNER_FIRST;
-		}
-		return y < 0.5 ? Pos.TOP : Pos.BOTTOM;
-	}
 </script>
 
 {#if block}
 	{#if block.content.layout?.style === Layout.ROW}
 		<div class="row" style="grid-template-columns: {block.childrenIds.map(widthOf).join(' ')}">
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
+				<BlockNode id={cid} {byId} {object} {draggingId} {dropHint} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 			{/each}
 		</div>
 	{:else if block.content.layout?.style === Layout.COLUMN}
 		<div class="col">
 			{#each block.childrenIds as cid (cid)}
-				<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
+				<BlockNode id={cid} {byId} {object} {draggingId} {dropHint} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 			{/each}
 		</div>
 	{:else if block.content.table}
@@ -163,18 +126,6 @@
 			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
 			data-block={block.id}
 			role="presentation"
-			ondragover={(e) => {
-				if (!draggingId || draggingId === block.id) return;
-				e.preventDefault();
-				zone = computeZone(e);
-			}}
-			ondragleave={() => (zone = 0)}
-			ondrop={(e) => {
-				e.preventDefault();
-				const z = zone;
-				zone = 0;
-				ondrop(block.id, z || Pos.BOTTOM);
-			}}
 			oncontextmenu={(e) => {
 				e.preventDefault();
 				e.stopPropagation();
@@ -210,18 +161,6 @@
 			class="block zone-{zone}" class:selected={selectedIds.has(block.id)}
 			data-block={block.id}
 			role="presentation"
-			ondragover={(e) => {
-				if (!draggingId || draggingId === block.id) return;
-				e.preventDefault();
-				zone = computeZone(e);
-			}}
-			ondragleave={() => (zone = 0)}
-			ondrop={(e) => {
-				e.preventDefault();
-				const z = zone;
-				zone = 0;
-				ondrop(block.id, z || Pos.BOTTOM);
-			}}
 			oncontextmenu={(e) => {
 				// Anytype rule: the focused text block keeps the native menu
 				// (spellcheck); everything else opens the block action menu.
@@ -307,29 +246,12 @@
 			{#if block.childrenIds.length > 0 && (!isToggle || toggleOpen)}
 				<div class="nested">
 					{#each block.childrenIds as cid (cid)}
-						<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
+						<BlockNode id={cid} {byId} {object} {draggingId} {dropHint} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 					{/each}
 				</div>
 				<!-- Anytype targetBot (block/index.tsx:1219): a thin strip below
 				     the children; dropping here lands AFTER this whole subtree. -->
-				<div
-					class="bot-strip"
-					class:over={zone === 12}
-					role="presentation"
-					style="pointer-events:{draggingId && draggingId !== block.id ? 'auto' : 'none'}"
-					ondragover={(e) => {
-						e.preventDefault();
-						e.stopPropagation();
-						zone = 12; // AFTER sentinel: strip line only, no block shadow
-					}}
-					ondragleave={() => (zone = 0)}
-					ondrop={(e) => {
-						e.preventDefault();
-						e.stopPropagation();
-						zone = 0;
-						ondrop(block.id, Pos.BOTTOM);
-					}}
-				></div>
+				<div class="bot-strip" class:over={zone === 12} data-drop-bot={block.id}></div>
 			{:else if isToggle && toggleOpen && block.childrenIds.length === 0}
 				<!-- Anytype .emptyToggle: muted hint, click creates the first child. -->
 				<button class="empty-toggle" onclick={() => onemptytoggle(block.id)}>Empty toggle. Click or drop Block inside</button>
@@ -343,18 +265,6 @@
 			class="block block-div zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
 			data-block={block.id}
 			role="presentation"
-			ondragover={(e) => {
-				if (!draggingId || draggingId === block.id) return;
-				e.preventDefault();
-				zone = computeZone(e);
-			}}
-			ondragleave={() => (zone = 0)}
-			ondrop={(e) => {
-				e.preventDefault();
-				const z = zone;
-				zone = 0;
-				ondrop(block.id, z || Pos.BOTTOM);
-			}}
 			oncontextmenu={(e) => {
 				e.preventDefault();
 				e.stopPropagation();
@@ -391,18 +301,6 @@
 			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
 			data-block={block.id}
 			role="presentation"
-			ondragover={(e) => {
-				if (!draggingId || draggingId === block.id) return;
-				e.preventDefault();
-				zone = computeZone(e);
-			}}
-			ondragleave={() => (zone = 0)}
-			ondrop={(e) => {
-				e.preventDefault();
-				const z = zone;
-				zone = 0;
-				ondrop(block.id, z || Pos.BOTTOM);
-			}}
 			oncontextmenu={(e) => {
 				e.preventDefault();
 				e.stopPropagation();
@@ -434,18 +332,6 @@
 			class="block zone-{zone} {draggingId === block.id ? 'dragging' : ''}" class:selected={selectedIds.has(block.id)}
 			data-block={block.id}
 			role="presentation"
-			ondragover={(e) => {
-				if (!draggingId || draggingId === block.id) return;
-				e.preventDefault();
-				zone = computeZone(e);
-			}}
-			ondragleave={() => (zone = 0)}
-			ondrop={(e) => {
-				e.preventDefault();
-				const z = zone;
-				zone = 0;
-				ondrop(block.id, z || Pos.BOTTOM);
-			}}
 			oncontextmenu={(e) => {
 				e.preventDefault();
 				e.stopPropagation();
@@ -501,18 +387,6 @@
 			class:selected={selectedIds.has(block.id)}
 			data-block={block.id}
 			role="presentation"
-			ondragover={(e) => {
-				if (!draggingId || draggingId === block.id) return;
-				e.preventDefault();
-				zone = computeZone(e);
-			}}
-			ondragleave={() => (zone = 0)}
-			ondrop={(e) => {
-				e.preventDefault();
-				const z = zone;
-				zone = 0;
-				ondrop(block.id, z || Pos.BOTTOM);
-			}}
 			oncontextmenu={(e) => {
 				e.preventDefault();
 				e.stopPropagation();
@@ -568,7 +442,7 @@
 			{#if block.childrenIds.length > 0}
 				<div class="nested">
 					{#each block.childrenIds as cid (cid)}
-						<BlockNode id={cid} {byId} {object} {draggingId} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
+						<BlockNode id={cid} {byId} {object} {draggingId} {dropHint} {selectedIds} {onkeydown} {oninput} {onblur} {onselect} {ondragbegin} {ondrop} {ontogglecheck} {onmenu} {onrefresh} {onpaste} {onemptytoggle} />
 					{/each}
 				</div>
 			{/if}
@@ -917,6 +791,7 @@
 	}
 	.bot-strip {
 		position: absolute;
+		pointer-events: none;
 		left: 0;
 		right: 0;
 		bottom: -4px;
