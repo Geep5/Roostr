@@ -541,11 +541,22 @@
 		if (document.activeElement !== target) focusNow(bid, offset, fallbackId);
 	}
 
-	/** Persist trailing writes; on failure the refresh restores server truth. */
+	/**
+	 * Persist trailing writes. Every caller has ALREADY applied the same
+	 * mutation to local state inside flushSync - that is the optimistic path -
+	 * so a successful write needs no re-read, and Anytype does not refetch the
+	 * object after a split either: the dispatcher patches its model in place.
+	 * We used to refetch the whole object here, which replaced `object` and
+	 * fired the query storm on every Enter; a keystroke landing inside that
+	 * window read a byId map that was about to be swapped, so its line went
+	 * missing or attached to the wrong block. A FAILED write still refetches:
+	 * there, server truth is exactly what we want.
+	 */
 	async function persist(writes: () => Promise<unknown>) {
 		try {
 			await writes();
-		} finally {
+		} catch (err) {
+			console.error("[editor] write failed, restoring server state", err);
 			await refresh();
 		}
 	}
@@ -589,9 +600,75 @@
 	}
 
 	// ── Keyboard ──────────────────────────────────────────────────
+	/**
+	 * Anytype onEnterBlock's re-entry guard (editor/page.tsx:1900-1912):
+	 *
+	 *   if (isEnterProcessing.current) { e.preventDefault(); return; };
+	 *   isEnterProcessing.current = true;
+	 *   const releaseEnterGuard = () => {
+	 *     window.setTimeout(() => { isEnterProcessing.current = false; }, 30);
+	 *   };
+	 *
+	 * Their reason is ours: "focus changes during block creation can trigger
+	 * synthetic key events ... causing an infinite loop of block creation".
+	 * A second Return arriving while the first is still in flight ran against
+	 * a half-applied tree - which is what glitched, dropped a line, or put one
+	 * a couple of rows above. Tab moves structure too, so it shares the latch;
+	 * Backspace does not, because dropping a delete would lose real intent.
+	 */
+	let structuralOp = false;
+
 	async function onKeydown(e: KeyboardEvent, id: string) {
-		const el = blockEl(id);
-		if (!el) return;
+		const latched = (e.key === "Enter" && !e.shiftKey) || e.key === "Tab";
+		// The DOM calls this and drops the promise, so a throw in here would be
+		// an invisible dead keystroke. Surface it.
+		if (!latched) {
+			try {
+				await onKeydownInner(e, id);
+			} catch (err) {
+				console.error("[editor] key handler failed", e.key, err);
+			}
+			return;
+		}
+		if (structuralOp) {
+			// Anytype drops it too. Logged because a burst of these is the
+			// fingerprint of a slow op, which is exactly what used to glitch.
+			console.debug("[editor] dropped", e.key, "- previous structural op still in flight");
+			e.preventDefault();
+			return;
+		}
+		structuralOp = true;
+		try {
+			await onKeydownInner(e, id);
+		} catch (err) {
+			console.error("[editor] structural key failed", e.key, err);
+			await refresh();
+		} finally {
+			setTimeout(() => (structuralOp = false), 30);
+		}
+	}
+
+	async function onKeydownInner(e: KeyboardEvent, id: string) {
+		let el = blockEl(id);
+		if (!el) {
+			// The row we were handed is no longer in the DOM - a re-render
+			// landed between the keypress and this handler. Retarget to whatever
+			// is actually focused, and NEVER hand a structural key back to the
+			// browser: contenteditable answers Enter with its own <br>, which
+			// reads exactly as "the Return did nothing" and leaves a stray break
+			// inside the block for the next Return to split around.
+			const ae = document.activeElement as HTMLElement | null;
+			const holder = ae?.closest?.("[data-block]") as HTMLElement | null;
+			const liveId = holder?.getAttribute("data-block") ?? "";
+			if (liveId && ae?.classList.contains("text")) {
+				console.warn("[editor] row", id.slice(0, 8), "left the DOM mid-keystroke; retargeted to", liveId.slice(0, 8));
+				el = ae;
+				id = liveId;
+			} else {
+				if (e.key === "Enter" || e.key === "Tab") e.preventDefault();
+				return;
+			}
+		}
 
 		// While the slash menu is open it owns navigation keys; everything
 		// else keeps typing into the block (Anytype behavior).
@@ -640,6 +717,16 @@
 			// browser's native newline insertion).
 			if (byId.get(id)?.content.text?.style === Style.CODE) return;
 			e.preventDefault();
+			// Every branch below asserts this block exists (byId.get(id)!). If a
+			// refresh dropped it - another device deleted it, or state was
+			// replaced mid-keystroke - the assertion throws, the rejection is
+			// swallowed by the fire-and-forget handler, and the keypress is lost
+			// with the default already prevented. That is a silent dead Return.
+			if (!byId.get(id)) {
+				console.warn("[editor] block", id.slice(0, 8), "vanished from state before the split; re-reading");
+				await refresh();
+				return;
+			}
 			const sel = selectionOffsets(el);
 			const { text, marks } = fromDom(el);
 			const at = sel?.from ?? text.length;
