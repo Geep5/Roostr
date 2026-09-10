@@ -230,7 +230,11 @@ parse_request_head :: proc(head: string) -> (req: Request, content_length: int, 
 			if !length_ok || content_length < 0 || content_length > 16 << 20 do return {}, 0, false
 		}
 	}
-	return req, content_length, req.host != "" && (req.method != "POST" || seen["content-length"])
+	// A POST with neither Content-Length nor Transfer-Encoding has an empty
+	// body by definition (TE is rejected above, so there is no smuggling
+	// ambiguity) - rejecting it silently dropped legitimate no-body POSTs
+	// like curl -X POST /api/pair/start.
+	return req, content_length, req.host != ""
 }
 
 read_request :: proc(sock: net.TCP_Socket) -> (Request, bool) {
@@ -421,7 +425,17 @@ handle_relations :: proc(sock: net.TCP_Socket) {
 					append(&options, json.Object(oo))
 				}
 			}
-			o["options"] = json.Array(options)
+
+			// Object-format restriction (Anytype relationFormatObjectTypes):
+			// allowed type ids, plus the Roostr-native query/collection source.
+			object_types := make([dynamic]json.Value, context.temp_allocator)
+			if v, ok := core.fields_get(s.fields, "object_types"); ok && v.kind == .List {
+				for item in v.items {
+					if item.kind == .String do append(&object_types, json.String(item.str))
+				}
+			}
+			o["objectTypes"] = json.Array(object_types)
+			o["objectSource"] = json.String(str(s, "object_source"))
 			append(&arr, json.Object(o))
 		}
 		respond_json(sock, json.Array(arr))
