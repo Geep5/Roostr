@@ -30,26 +30,12 @@ import "core:strings"
 import "core:sync"
 import "../core"
 
-VANISH_LOG_ID :: "__vanished__"
-VANISH_LOG_TYPE :: "vanish_log"
-// Entry keys are prefixed so the ledger's own metadata (name, …) can never
-// be mistaken for a vanished object id.
-VANISH_KEY_PREFIX :: "vanished:"
+VANISH_LOG_ID :: core.VANISH_LOG_ID
+VANISH_LOG_TYPE :: core.VANISH_LOG_TYPE
 
 /** Vanished object ids → purge timestamp (ms). Caller must hold the lock. */
 vanished_locked :: proc(allocator := context.temp_allocator) -> map[string]i64 {
-	out := make(map[string]i64, allocator = allocator)
-	log, ok := g_store.states[VANISH_LOG_ID]
-	if !ok do return out
-	for e in log.fields {
-		if !strings.has_prefix(e.key, VANISH_KEY_PREFIX) do continue
-		object_id := e.key[len(VANISH_KEY_PREFIX):]
-		if object_id == "" || object_id == VANISH_LOG_ID do continue
-		at: i64 = 0
-		if e.value.kind == .Int do at = e.value.i
-		out[object_id] = at
-	}
-	return out
+	return core.vanished_from_ledger(g_store.states[VANISH_LOG_ID], allocator)
 }
 
 /** Vanished object ids, taking the store lock. */

@@ -12,6 +12,7 @@ dispatch :: proc(method: string, payload: json.Value) -> (json.Value, string) {
 	case "query": return query_dispatch(payload)
 	case "mutation": return mutation_dispatch(payload)
 	case "wire": return wire_dispatch(payload)
+	case "sync": return sync_dispatch(payload)
 	case: return nil, "unknown core method"
 	}
 }
