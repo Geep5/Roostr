@@ -10,7 +10,7 @@ const output = join(website, "static");
 const compiler = process.env.ODIN ?? "odin";
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const sourceFiles = {};
-for (const directory of ["core", "wasm"]) {
+for (const directory of ["abi", "core", "wasm"]) {
 	for (const name of (await readdir(join(root, directory))).sort()) {
 		if (!name.endsWith(".odin") || name.endsWith("_test.odin")) continue;
 		const path = `${directory}/${name}`;

@@ -32,14 +32,20 @@ cd ../RoostrWebsite && npm install && npm run dev:local
 ## Layout
 
 ```
-core/          shared Odin protobuf codec, replay, query, mutation planning
-wasm/          bounded byte/JSON ABI for the same engine in browsers
+core/          shared Odin protobuf codec, replay, query, mutation planning,
+               NIP-44 v2 and relay wire helpers (blinding, sealing, address verify)
+abi/           bounded byte/JSON request ABI shared by every host build
+wasm/          browser entry (js_wasm32) for the abi
+native/        static-library entry (core_init) for Swift/C hosts
 build-wasm.mjs emits RoostrWebsite/static/engine.wasm plus source/hash manifest
+build-xcframework.mjs
+               emits RoostrIOS/Vendor/Glon.xcframework (iOS, simulator, macOS) plus manifest
 src/           native disk store, authenticated HTTP/SSE, identity and key files
 harness/       Bun services: independent Nostr sync; optional agent/tool harness
 ../RoostrWebsite/
                canonical Svelte UI, paired-native and browser-offline backends
                (no mirrored UI source in this repository)
+../RoostrIOS/  Swift host: GlonCore actor over the xcframework, SwiftUI shell
 ```
 
 ## API
@@ -68,8 +74,11 @@ GET  /api/events             SSE: {"objectId"} per committed change
 
 ## Verified
 
-- Native/WASM codec, replay, query and mutation fixtures are in `core/` and
-  `query_tests/`, with browser runners under `RoostrWebsite/scripts/`.
+- Native/WASM codec, replay, query, mutation and wire fixtures are in `core/` and
+  `query_tests/`, with browser runners under `RoostrWebsite/scripts/` and Swift
+  runners under `RoostrIOS/Tests/`. `core/nip44_vectors.json` is the official
+  NIP-44 vector set; `core/wire_fixtures.json` was produced by the TypeScript
+  reference so the engine is held to the bytes already on the relays.
 - `odin test core`, `odin test query_tests`, and `odin test src` exercise domain
   and local authorization contracts. Browser tests cover pairing, shared-space
   authority, chunk bounds, durable outbox and ABI lifetime.
