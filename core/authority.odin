@@ -232,6 +232,49 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 			append(&items, json.Object(item))
 		}
 		return json.Array(items), ""
+	// ── Receive session (sync_session.odin) ──
+	case "session":
+		// {pk, conversationKey, spaces: [{spaceId, keyHex, keyId}], cursor, replayGroups: [[key, at]], importedGroups?: [key]}
+		if err := sync_session_open(payload); err != "" {
+			sync_session_close()
+			return nil, err
+		}
+		return sync_state_json(), ""
+	case "spaces":
+		if !sync_session.active do return nil, "no sync session"
+		if err := sync_session_set_spaces(payload); err != "" do return nil, err
+		return sync_state_json(), ""
+	case "ingest":
+		// {event: {pubkey, created_at, kind, tags, content}, nowMs} → {cursor, item?, faultAt?, replayGroups?, decryptFailure?, decodeFailure?, hTag?}
+		// The host has already verified the event signature.
+		if !sync_session.active do return nil, "no sync session"
+		event, present := json_field(payload, "event")
+		if _, ok := event.(json.Object); !present || !ok do return nil, "ingest needs an event object"
+		now, has_now := json_int(payload, "nowMs")
+		if !has_now do return nil, "ingest needs nowMs"
+		r := sync_ingest(event, now)
+		out := jobj()
+		out["cursor"] = json.Integer(sync_session.cursor)
+		if r.item != nil do out["item"] = r.item
+		if r.faulted do out["faultAt"] = json.Integer(r.fault_at)
+		if r.replay_changed do out["replayGroups"] = sync_replay_groups_json()
+		if r.decrypt_failure do out["decryptFailure"] = json.Boolean(true)
+		if r.decode_failure do out["decodeFailure"] = json.Boolean(true)
+		if r.h_tag != "" do out["hTag"] = json.String(r.h_tag)
+		return json.Object(out), ""
+	case "settle":
+		// {chunkKey, imported} → {replayGroups?}
+		if !sync_session.active do return nil, "no sync session"
+		imported, _ := json_bool(payload, "imported")
+		out := jobj()
+		if sync_settle(json_str(payload, "chunkKey"), imported) do out["replayGroups"] = sync_replay_groups_json()
+		return json.Object(out), ""
+	case "state":
+		if !sync_session.active do return nil, "no sync session"
+		return sync_state_json(), ""
+	case "close":
+		sync_session_close()
+		return json.Boolean(true), ""
 	}
 	return nil, "unknown sync action"
 }

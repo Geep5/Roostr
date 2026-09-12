@@ -33,7 +33,8 @@ cd ../RoostrWebsite && npm install && npm run dev:local
 
 ```
 core/          shared Odin protobuf codec, replay, query, mutation planning,
-               NIP-44 v2 and relay wire helpers (blinding, sealing, address verify)
+               NIP-44 v2, relay wire helpers, the shared-space authority gate,
+               and the receive-side sync session (reassembly, cursor, replay groups)
 abi/           bounded byte/JSON request ABI shared by every host build
 wasm/          browser entry (js_wasm32) for the abi
 native/        static-library entry (core_init) for Swift/C hosts
