@@ -64,6 +64,20 @@ wire_raw_address :: proc(bytes: []byte) -> ([32]byte, bool) {
 wire_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	action := json_str(payload, "action")
 	switch action {
+	case "bech32_encode":
+		// {hrp, hex} → "npub1…" / "nsec1…"
+		raw, ok := hex_bytes(json_str(payload, "hex"))
+		hrp := json_str(payload, "hrp")
+		if !ok || hrp == "" do return nil, "bech32_encode needs hrp and hex"
+		return json.String(bech32_encode(hrp, raw, context.temp_allocator)), ""
+	case "bech32_decode":
+		// {text} → {hrp, hex}
+		hrp, raw, ok := bech32_decode(json_str(payload, "text"), context.temp_allocator)
+		if !ok do return nil, "invalid bech32"
+		out := jobj()
+		out["hrp"] = json.String(hrp)
+		out["hex"] = json.String(hex_id(raw, context.temp_allocator))
+		return json.Object(out), ""
 	case "conversation_key":
 		shared_x, ok := hex_bytes(json_str(payload, "sharedX"))
 		if !ok do return nil, "invalid sharedX hex"
