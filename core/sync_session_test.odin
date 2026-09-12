@@ -283,6 +283,150 @@ sync_session_restores_replay_groups_and_rejects_without_session :: proc(t: ^test
 	testing.expect(t, cursor == 7)
 }
 
+
+@(private = "file")
+enqueue :: proc(t: ^testing.T, key, object_id, change_id, change: string, space_id := "", key_id: i64 = 0, has_events := false) -> json.Value {
+	pending := jobj()
+	pending["key"] = json.String(key)
+	pending["objectId"] = json.String(object_id)
+	pending["changeId"] = json.String(change_id)
+	pending["bytes"] = json.String(change)
+	if space_id != "" {
+		pending["spaceId"] = json.String(space_id)
+		pending["keyId"] = json.Integer(key_id)
+	}
+	pending["hasEvents"] = json.Boolean(has_events)
+	fields := jobj()
+	fields["pending"] = json.Object(pending)
+	return call(t, "outbox_enqueue", fields)
+}
+
+@(private = "file")
+outbox_next_at :: proc(t: ^testing.T, now: i64) -> json.Value {
+	fields := jobj()
+	fields["nowMs"] = json.Integer(now)
+	return call(t, "outbox_next", fields)
+}
+
+@(private = "file")
+outbox_report :: proc(t: ^testing.T, key: string, ok, sealed: bool, now: i64) -> json.Value {
+	fields := jobj()
+	fields["key"] = json.String(key)
+	fields["ok"] = json.Boolean(ok)
+	fields["sealed"] = json.Boolean(sealed)
+	fields["nowMs"] = json.Integer(now)
+	return call(t, "outbox_result", fields)
+}
+
+@(private = "file")
+sync_session_outbox_order_backoff_and_sealing :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	// Session without a secret: personal items cannot be sealed.
+	fields := jobj()
+	fields["pk"] = json.String(PK)
+	fields["conversationKey"] = json.String(CONV)
+	call(t, "session", fields)
+	change := base64.encode(wire_change(t, "note-1", 0), allocator = context.temp_allocator)
+	enqueue(t, "c1", "note-1", "c1", change)
+	payload := jobj()
+	payload["action"] = json.String("outbox_next")
+	payload["nowMs"] = json.Integer(0)
+	_, err := sync_dispatch(json.Object(payload))
+	testing.expect(t, err == "session has no secret to seal personal changes", err)
+	sync_session_close()
+
+	open_session_with_secret(t)
+	defer sync_session_close()
+	r := enqueue(t, "c1", "note-1", "c1", change)
+	queued, _ := json_bool(r, "queued")
+	testing.expect(t, queued)
+	r = enqueue(t, "c1", "note-1", "c1", change)
+	queued, _ = json_bool(r, "queued")
+	testing.expect(t, !queued && json_str(r, "reason") == "already queued")
+	r = enqueue(t, "space-1/1/c1", "note-1", "c1", change, "space-1", 1)
+	queued, _ = json_bool(r, "queued")
+	testing.expect(t, queued, "shared obligation under the installed key")
+	r = enqueue(t, "space-1/9/c1", "note-1", "c1", change, "space-1", 9)
+	queued, _ = json_bool(r, "queued")
+	testing.expect(t, !queued && json_str(r, "reason") == "rotated space key", "old key version without ciphertext is retained, not queued")
+	r = enqueue(t, "space-1/9/c2", "note-1", "c2", change, "space-1", 9, has_events = true)
+	queued, _ = json_bool(r, "queued")
+	testing.expect(t, queued, "old key version with persisted ciphertext still publishes")
+	pending, _ := json_int(r, "pending")
+	testing.expect(t, pending == 3)
+
+	// FIFO: the personal item first, sealed with personal tags.
+	r = outbox_next_at(t, 1_000)
+	item, has_item := json_field(r, "item")
+	testing.expect(t, has_item && json_str(item, "key") == "c1")
+	sealed, has_sealed := json_field(item, "sealed")
+	testing.expect(t, has_sealed, "first attempt seals")
+	parts := json_array(sealed, "parts")
+	testing.expect(t, len(parts) == 1)
+	first_tag := event_tag(json_array(parts[0], "tags"), "h") or_else nil
+	testing.expect(t, tag_string(first_tag, 1) == wire_blind(hex_bytes(SECRET) or_else nil, "note-1"), "personal blind tag")
+	pending, _ = json_int(r, "pending")
+	testing.expect(t, pending == 2, "an in-flight item is not pending")
+
+	// Failure: attempts=1 → 4 s backoff, item moves behind the others.
+	r = outbox_report(t, "c1", false, true, 1_000)
+	r = outbox_next_at(t, 1_001)
+	item, _ = json_field(r, "item")
+	testing.expect(t, json_str(item, "key") == "space-1/1/c1", "next ready item is the shared one")
+	sealed, has_sealed = json_field(item, "sealed")
+	testing.expect(t, has_sealed)
+	tags := json_array(json_array(sealed, "parts")[0], "tags")
+	testing.expect(t, len(tags) == 2, "shared seal carries object and space tags")
+	outbox_report(t, "space-1/1/c1", true, true, 1_002)
+	r = outbox_next_at(t, 1_003)
+	item, _ = json_field(r, "item")
+	testing.expect(t, json_str(item, "key") == "space-1/9/c2")
+	if _, resealed := json_field(item, "sealed"); resealed do testing.fail_now(t, "persisted ciphertext must not be re-sealed")
+	outbox_report(t, "space-1/9/c2", true, false, 1_004)
+
+	// Only the failed personal item remains, not ready until 1_000 + 4_000.
+	r = outbox_next_at(t, 1_005)
+	_, has_item = json_field(r, "item")
+	wait, _ := json_int(r, "waitMs")
+	testing.expectf(t, !has_item && wait == 3_995, "wait %d", wait)
+	r = outbox_next_at(t, 5_000)
+	item, has_item = json_field(r, "item")
+	testing.expect(t, has_item && json_str(item, "key") == "c1")
+	attempts, _ := json_int(item, "attempts")
+	testing.expect(t, attempts == 1)
+	if _, resealed := json_field(item, "sealed"); resealed do testing.fail_now(t, "retry reuses the signed events the host kept")
+	outbox_report(t, "c1", true, false, 5_001)
+	r = outbox_next_at(t, 5_002)
+	_, has_item = json_field(r, "item")
+	pending, _ = json_int(r, "pending")
+	wait, _ = json_int(r, "waitMs")
+	testing.expect(t, !has_item && pending == 0 && wait == 0, "drained")
+	ghost := jobj()
+	ghost["action"] = json.String("outbox_result")
+	ghost["key"] = json.String("ghost")
+	ghost["ok"] = json.Boolean(true)
+	ghost["nowMs"] = json.Integer(1)
+	_, err = sync_dispatch(json.Object(ghost))
+	testing.expect(t, err == "unknown outbox key", err)
+}
+
+@(private = "file")
+open_session_with_secret :: proc(t: ^testing.T) {
+	spaces := make([dynamic]json.Value, context.temp_allocator)
+	space := jobj()
+	space["spaceId"] = json.String("space-1")
+	space["keyHex"] = json.String(SPACE_KEY)
+	space["keyId"] = json.Integer(1)
+	append(&spaces, json.Object(space))
+	fields := jobj()
+	fields["pk"] = json.String(PK)
+	fields["conversationKey"] = json.String(CONV)
+	fields["secret"] = json.String(SECRET)
+	fields["cursor"] = json.Integer(0)
+	fields["spaces"] = json.Array(spaces)
+	call(t, "session", fields)
+}
+
 // The session is process-global (the ABI is single-flight), so its scenarios
 // run sequentially inside one test rather than on the runner's threads.
 @(test)
@@ -291,4 +435,5 @@ sync_session_contract :: proc(t: ^testing.T) {
 	sync_session_reassembles_out_of_order_chunks(t)
 	sync_session_faults_on_conflict_expiry_and_limits(t)
 	sync_session_restores_replay_groups_and_rejects_without_session(t)
+	sync_session_outbox_order_backoff_and_sealing(t)
 }

@@ -42,7 +42,9 @@ Sync_Session :: struct {
 	arena:            mem.Dynamic_Arena,
 	pk:               string,
 	conversation_key: string,
+	secret:           string, // hex secret key; needed to seal personal changes
 	spaces:           [dynamic]Sync_Space,
+	outbox:           [dynamic]Outbox_Item,
 	cursor:           i64,
 	groups:           map[string]^Sync_Group,
 	group_bytes:      int,
@@ -71,6 +73,7 @@ sync_group_destroy :: proc(key: string, group: ^Sync_Group) {
 sync_session_close :: proc() {
 	if !sync_session.active do return
 	for key, group in sync_session.groups do sync_group_destroy(key, group)
+	outbox_clear()
 	delete(sync_session.groups)
 	delete(sync_session.replay_groups)
 	delete(sync_session.imported_groups)
@@ -105,11 +108,16 @@ sync_session_open :: proc(payload: json.Value) -> string {
 	sync_session.importing_groups = make(map[string]bool, allocator = base)
 	sync_session.keys = make(map[string]string, allocator = base)
 	sync_session.spaces = make([dynamic]Sync_Space, base)
+	sync_session.outbox = make([dynamic]Outbox_Item, base)
 	pk := json_str(payload, "pk")
 	key := json_str(payload, "conversationKey")
 	if !is_hex_pubkey(pk) || len(key) != 64 do return "session needs pk and conversationKey hex"
 	sync_session.pk = sync_keep(pk)
 	sync_session.conversation_key = sync_keep(key)
+	if secret := json_str(payload, "secret"); secret != "" {
+		if len(secret) != 64 do return "session secret must be 32 bytes hex"
+		sync_session.secret = sync_keep(secret)
+	}
 	sync_session.cursor, _ = json_int(payload, "cursor")
 	for entry in json_array(payload, "replayGroups") {
 		pair, ok := entry.(json.Array)
@@ -352,6 +360,7 @@ sync_state_json :: proc() -> json.Value {
 	out := jobj()
 	out["cursor"] = json.Integer(sync_session.cursor)
 	out["groups"] = json.Integer(i64(len(sync_session.groups)))
+	out["pending"] = json.Integer(i64(outbox_pending()))
 	out["replayGroups"] = sync_replay_groups_json()
 	floor: i64 = 0
 	has_floor := false

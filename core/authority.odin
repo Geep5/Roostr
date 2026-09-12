@@ -275,6 +275,46 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	case "close":
 		sync_session_close()
 		return json.Boolean(true), ""
+	// ── Outbox (sync_outbox.odin) ──
+	case "outbox_enqueue":
+		// {pending: {key, objectId, changeId, bytes: base64, spaceId?, keyId?, hasEvents}} → {queued, reason?, pending}
+		if !sync_session.active do return nil, "no sync session"
+		pending, present := json_field(payload, "pending")
+		if !present do return nil, "outbox_enqueue needs pending"
+		outcome, err := outbox_enqueue(pending)
+		if err != "" do return nil, err
+		out := jobj()
+		out["queued"] = json.Boolean(outcome == .Queued)
+		switch outcome {
+		case .Already_Queued: out["reason"] = json.String("already queued")
+		case .Rotated_Key: out["reason"] = json.String("rotated space key")
+		case .Queued:
+		}
+		out["pending"] = json.Integer(i64(outbox_pending()))
+		return json.Object(out), ""
+	case "outbox_next":
+		// {nowMs} → {item?: {key, objectId, changeId, attempts, spaceId?, keyId?, sealed?: {gid, parts}}, waitMs, pending}
+		if !sync_session.active do return nil, "no sync session"
+		now, has_now := json_int(payload, "nowMs")
+		if !has_now do return nil, "outbox_next needs nowMs"
+		item, wait, err := outbox_next(now)
+		if err != "" do return nil, err
+		out := jobj()
+		if item != nil do out["item"] = item
+		out["waitMs"] = json.Integer(wait)
+		out["pending"] = json.Integer(i64(outbox_pending()))
+		return json.Object(out), ""
+	case "outbox_result":
+		// {key, ok, sealed?, nowMs} → {pending}
+		if !sync_session.active do return nil, "no sync session"
+		now, has_now := json_int(payload, "nowMs")
+		if !has_now do return nil, "outbox_result needs nowMs"
+		ok, _ := json_bool(payload, "ok")
+		sealed, _ := json_bool(payload, "sealed")
+		if err := outbox_result(json_str(payload, "key"), ok, sealed, now); err != "" do return nil, err
+		out := jobj()
+		out["pending"] = json.Integer(i64(outbox_pending()))
+		return json.Object(out), ""
 	}
 	return nil, "unknown sync action"
 }
