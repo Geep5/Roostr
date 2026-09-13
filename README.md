@@ -29,6 +29,16 @@ cd ../RoostrWebsite && npm install && npm run dev:local
 # Open http://127.0.0.1:5190/app and pair with the code in the daemon terminal.
 ```
 
+### Toolchain
+
+Engine artifacts are built with **Odin `dev-2026-07`** (`odin version` →
+`dev-2026-07:819fdc7a8`, Homebrew `odin` 2026-07a). Both build scripts record
+the compiler in their manifests (`RoostrWebsite/static/engine-core.json`,
+`RoostrIOS/Vendor/glon-core.json`); a different compiler produces different
+artifact hashes, so rebuild and commit the artifacts from the pinned version
+or bump this line together with them. Tagged releases carry the same
+fingerprints in their notes.
+
 ## Layout
 
 ```
