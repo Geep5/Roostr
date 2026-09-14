@@ -25,6 +25,7 @@ import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, convergeSpaceServing, invalidateSpaceServing, publishClaims, spaceMine } from "./machine";
 import { validateBindings } from "./workspace";
 import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, ingestedOriginBlocks, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
+import { arm as armScheduler, startScheduler } from "./schedule";
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);
@@ -272,6 +273,7 @@ async function serve(): Promise<void> {
 	const busy = new Set<string>();
 	const active = new Map<string, string>(); // agentId → surface of the in-flight turn
 	const dirty = new Map<string, Set<string>>(); // agentId → surfaces awaiting a turn
+	const idleWaiters = new Map<string, Array<() => void>>(); // agentId → scheduled turns waiting for the slot
 
 	// ── A2A wake: one answering turn for the target, synchronously. ──
 	// The answering turn never carries agent_ask (a2aTurn), so an agent
@@ -323,20 +325,12 @@ async function serve(): Promise<void> {
 		return "(no reply yet - check the shared chat later)";
 	}
 
-	async function drive(s: Served, surfaceId: string, a2aTurn = false): Promise<void> {
-		if (busy.has(s.agentId)) {
-			if (surfaceId === active.get(s.agentId) && surfaceId !== s.chatId) {
-				// Same-surface follow-up: fold into the in-flight turn (steer).
-				// Chat-surface follow-ups need nothing — the runner refetches.
-				await ingestSurface(s, surfaceId);
-			} else if (surfaceId !== active.get(s.agentId)) {
-				// Another surface mid-turn: wait for the next turn (bot.odin rule).
-				let set = dirty.get(s.agentId);
-				if (!set) dirty.set(s.agentId, (set = new Set()));
-				set.add(surfaceId);
-			}
-			return;
-		}
+	/**
+	 * Hold the agent's turn slot around `body`: status reporting, error
+	 * capture, then the drain (chat first, queued surfaces after). Resolves
+	 * to the failure message, "" on success - the scheduler records it.
+	 */
+	async function withTurn(s: Served, surfaceId: string, body: () => Promise<unknown>): Promise<string> {
 		busy.add(s.agentId);
 		active.set(s.agentId, surfaceId);
 		// Turn state is local: /agents and /agent/status read this map. It used
@@ -348,8 +342,9 @@ async function serve(): Promise<void> {
 			agentTurnStatus.set(s.agentId, { id: s.agentId, name: s.name, icon: s.icon, state, surface: surfaceId, detail, ts: Date.now() });
 		};
 		report("working");
+		let failure = "";
 		try {
-			await handleSurface(s, surfaceId, { wake: a2aTurn ? undefined : wakeAgent, a2aTurn });
+			await body();
 			report("idle");
 		} catch (err) {
 			console.error(`[harness] turn failed for ${s.agentId.slice(0, 8)}:`, err);
@@ -364,10 +359,15 @@ async function serve(): Promise<void> {
 					/* keep raw */
 				}
 			}
-			report("error", msg.slice(0, 200));
+			failure = msg.slice(0, 200);
+			report("error", failure);
 		} finally {
 			busy.delete(s.agentId);
 			active.delete(s.agentId);
+			// A waiting scheduled turn claims the slot before the drain below
+			// yields; whatever the drain then finds pending queues behind it.
+			for (const wake of idleWaiters.get(s.agentId) ?? []) wake();
+			idleWaiters.delete(s.agentId);
 			// Drain: the chat first (its own messages), then queued surfaces.
 			const queued = [...(dirty.get(s.agentId) ?? [])];
 			dirty.delete(s.agentId);
@@ -379,6 +379,41 @@ async function serve(): Promise<void> {
 				}
 			}
 		}
+		return failure;
+	}
+
+	async function drive(s: Served, surfaceId: string, a2aTurn = false): Promise<void> {
+		if (busy.has(s.agentId)) {
+			if (surfaceId === active.get(s.agentId) && surfaceId !== s.chatId) {
+				// Same-surface follow-up: fold into the in-flight turn (steer).
+				// Chat-surface follow-ups need nothing — the runner refetches.
+				await ingestSurface(s, surfaceId);
+			} else if (surfaceId !== active.get(s.agentId)) {
+				// Another surface mid-turn: wait for the next turn (bot.odin rule).
+				let set = dirty.get(s.agentId);
+				if (!set) dirty.set(s.agentId, (set = new Set()));
+				set.add(surfaceId);
+			}
+			return;
+		}
+		await withTurn(s, surfaceId, () => handleSurface(s, surfaceId, { wake: a2aTurn ? undefined : wakeAgent, a2aTurn }));
+	}
+
+	/**
+	 * A scheduler-started turn on the agent's chat. The framed occurrence is
+	 * already posted (origin-tagged, so no watermark path ever ingests it);
+	 * this waits for the agent's slot rather than queueing a surface, then
+	 * runs one turn. Not human-rooted: no agent_ask.
+	 */
+	async function driveScheduled(s: Served, systemSuffix: string): Promise<string> {
+		while (busy.has(s.agentId)) {
+			const { promise, resolve } = Promise.withResolvers<void>();
+			let waiters = idleWaiters.get(s.agentId);
+			if (!waiters) idleWaiters.set(s.agentId, (waiters = []));
+			waiters.push(resolve);
+			await promise;
+		}
+		return withTurn(s, s.chatId, () => runTurn(s.agentId, s.chatId, { spawn: spawnSubagent, systemSuffix }));
 	}
 
 	/**
@@ -441,9 +476,16 @@ async function serve(): Promise<void> {
 			invalidateSpaceServing();
 			// A daemon blip (ECONNRESET mid-restart) must not kill the harness -
 			// the next channel event or boot reconcile converges again.
-			convergeSpaceServing().catch((err) => console.error("[harness] converge failed:", err?.message ?? err));
+			// The scheduler follows the gate: a space handed over moves its
+			// occurrences to the new server.
+			convergeSpaceServing()
+				.catch((err) => console.error("[harness] converge failed:", err?.message ?? err))
+				.then(armScheduler);
 			return;
 		}
+		// A rule edit (repeat_set/clear, an occurrence completed or fired)
+		// may move the earliest occurrence.
+		if (obj.fields["repeat"]) void armScheduler();
 		if (obj.typeKey === "chat") {
 			// A human posting into an A2A pair chat wakes BOTH participants
 			// for one answering turn each (sequential - the second sees the
@@ -573,6 +615,29 @@ async function serve(): Promise<void> {
 	}
 	subscribe((objectId) => void route(objectId));
 	console.log("[harness] SSE connected; serving.");
+
+	// The clock: fires occurrences due now (missed while down) and arms for
+	// the next. Only for spaces this machine serves - the gate is inside.
+	await startScheduler({
+		async served(agentId) {
+			const known = served.get(agentId);
+			if (known) return known;
+			// An agent of a space we serve that is not in the local roster
+			// (a bound agent nobody has spoken to since boot) still answers
+			// its own schedule here; another machine's agent does not.
+			const agent = await fetchObject(agentId).catch(() => null);
+			if (!agent || agent.typeKey !== "agent" || str(agent.fields, "spawn_parent")) return undefined;
+			const one = await buildServedOne(agentId, defaultChannelId);
+			if (!(await spaceMine(one.channelId))) return undefined;
+			served.set(agentId, one);
+			return one;
+		},
+		turn(agentId, systemSuffix) {
+			const s = served.get(agentId);
+			if (!s) return Promise.resolve("agent no longer served on this machine");
+			return driveScheduled(s, systemSuffix);
+		},
+	});
 }
 
 async function ask(): Promise<void> {

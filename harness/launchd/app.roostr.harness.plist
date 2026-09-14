@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>app.roostr.harness</string>
+
+	<!-- Replace /Users/you/projekt/4/glonOdin with your checkout. -->
+	<key>WorkingDirectory</key>
+	<string>/Users/you/projekt/4/glonOdin/harness</string>
+
+	<!-- Homebrew's bun. A curl-installed bun lives at /Users/you/.bun/bin/bun instead: use what `which bun` prints. -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/bun</string>
+		<string>run</string>
+		<string>serve</string>
+	</array>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<!-- Uncomment to run against a data root other than ~/.glon; must match the daemon's. -->
+		<!-- <key>GLON_DATA</key> -->
+		<!-- <string>/Users/you/.glon</string> -->
+	</dict>
+
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<!-- Restart backoff: launchd throttles respawns faster than this (seconds). -->
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+
+	<key>StandardOutPath</key>
+	<string>/Users/you/Library/Logs/Roostr/harness.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/you/Library/Logs/Roostr/harness.err.log</string>
+</dict>
+</plist>

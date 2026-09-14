@@ -155,3 +155,16 @@ per-channel `instructions` objects. Memory is `pinned_fact`/`milestone`
 objects with owner scoping, keyed upserts, supersession, and an opt-in
 compaction-time extraction loop (`memory_extraction_enabled`); digest
 injection via `memory_digest_enabled`.
+
+Recurring objects: the engine owns the rule (`repeat` field: `next`,
+`fired_for`, …) and the harness is the clock. `serve` arms one timer for
+the earliest unfired occurrence across the spaces this machine serves,
+re-arming on every `repeat` or `served_by` commit. When it fires it
+commits `occurrence_fire` (refused if another writer got there first), then
+either frames the object's body into the assigned agent's chat
+(`assignee`/`agent` naming an agent served here) and runs one turn -
+recorded on the object with `run_record` - or, for a person's object,
+posts a one-line reminder on its discussion. Agents finish with the
+`occurrence_complete` tool; a recurring object is never `done`. Missed
+occurrences (sleep, downtime) fire once on the next start. To keep it
+running, see `harness/launchd/`.

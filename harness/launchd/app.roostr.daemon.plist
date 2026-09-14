@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>app.roostr.daemon</string>
+
+	<!-- Replace /Users/you/projekt/4/glonOdin with your checkout (the built glon-odin binary lives at its root). -->
+	<key>WorkingDirectory</key>
+	<string>/Users/you/projekt/4/glonOdin</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/you/projekt/4/glonOdin/glon-odin</string>
+		<string>serve</string>
+	</array>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<!-- Uncomment to run against a data root other than ~/.glon; must match the harness's. -->
+		<!-- <key>GLON_DATA</key> -->
+		<!-- <string>/Users/you/.glon</string> -->
+	</dict>
+
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+
+	<key>StandardOutPath</key>
+	<string>/Users/you/Library/Logs/Roostr/daemon.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/you/Library/Logs/Roostr/daemon.err.log</string>
+</dict>
+</plist>

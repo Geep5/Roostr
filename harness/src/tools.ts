@@ -6,14 +6,16 @@
  */
 
 import {
+	bv,
 	chatPost,
 	createObject,
 	fetchObject,
+	fv,
+	iv,
 	mutate,
 	query,
 	str,
 	sv,
-	setField,
 	type ObjectJSON,
 	type ValueJSON,
 	addBlock,
@@ -173,6 +175,34 @@ async function assertInSpace(obj: ObjectJSON, ctx: ToolContext): Promise<ObjectJ
 	const objSpace = stamp || (await defaultSpaceId());
 	if (objSpace !== own) throw new Error(`object ${obj.id.slice(0, 8)} is outside this agent's space`);
 	return obj;
+}
+
+/**
+ * A field value in the relation's own type. Agents speak strings; the
+ * store does not - a checkbox written as "true" text is unchecked, a date
+ * as text never sorts. Unknown format (or unparseable input) stays text.
+ */
+function typedValue(format: string | undefined, raw: string): ValueJSON {
+	const n = raw.trim() === "" ? NaN : Number(raw);
+	switch (format) {
+		case "checkbox":
+			return bv(raw.trim().toLowerCase() === "true");
+		case "number":
+			if (!Number.isFinite(n)) return sv(raw);
+			return Number.isInteger(n) ? iv(n) : fv(n);
+		case "date": {
+			if (Number.isFinite(n)) return iv(n);
+			const parsed = Date.parse(raw);
+			return Number.isNaN(parsed) ? sv(raw) : iv(parsed);
+		}
+		default:
+			return sv(raw);
+	}
+}
+
+/** The occurrence planner's clock params: now, and this machine's UTC offset. */
+function localClock(): { now_ms: number; tz_offset_min: number } {
+	return { now_ms: Date.now(), tz_offset_min: -new Date().getTimezoneOffset() };
 }
 
 // ── Machine capabilities, brokered ────────────────────────────────
@@ -365,14 +395,32 @@ const TOOLS: RegisteredTool[] = [
 	{
 		def: {
 			name: "object_set_field",
-			description: "Set a string field on an object (e.g. name, status, description).",
+			description:
+				"Set a field on an object (e.g. name, status, done, dueDate). The value is written in the relation's own type: checkbox fields take true/false, number fields a number, date fields epoch milliseconds or an ISO date; anything else is text. Setting done=true on a recurring object completes its current occurrence.",
 			input_schema: { type: "object", properties: { id: { type: "string" }, key: { type: "string" }, value: { type: "string" } }, required: ["id", "key", "value"] },
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
 			await assertInSpace(await fetchObject(S(input.id)), ctx);
-			await setField(S(input.id), S(input.key), sv(S(input.value)));
+			const value = typedValue((await relationDefs(await agentSpace(ctx))).get(S(input.key))?.format, S(input.value));
+			// The clock rides along for the one case the engine needs it: done
+			// on a recurring object advances the occurrence in local time.
+			await mutate("set_field", { object_id: S(input.id), key: S(input.key), value, ...localClock() });
 			return "ok";
+		},
+	},
+	{
+		def: {
+			name: "occurrence_complete",
+			description:
+				"Mark the current occurrence of a recurring object done; its schedule advances to the next occurrence. Call it once, after the scheduled work is actually finished. Notes belong in your reply, not on the object.",
+			input_schema: { type: "object", properties: { object_id: { type: "string" } }, required: ["object_id"] },
+		},
+		handler: async (input, ctx) => {
+			const obj = await assertInSpace(await fetchObject(S(input.object_id)), ctx);
+			ctx.touched.add(obj.id);
+			const { next } = await mutate("occurrence_complete", { object_id: obj.id, ...localClock() });
+			return typeof next === "number" ? `ok; next occurrence ${new Date(next).toLocaleString()}` : "ok";
 		},
 	},
 	{

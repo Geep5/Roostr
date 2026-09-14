@@ -89,15 +89,20 @@ export async function queryAll(body: Record<string, unknown>, page = 500): Promi
 	return out;
 }
 
+/**
+ * One mutation. A refusal is a 400 with `{ok: false, error}`; the error
+ * text is the contract (`"occurrence already fired"`, `"object does not
+ * repeat"`, …), so it is what the thrown Error carries - not the status.
+ */
 export async function mutate(action: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
 	const res = await apiFetch(`${API}/api/mutate`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ action, ...params }),
 	});
-	if (!res.ok) throw new Error(`mutate ${action}: ${res.status}`);
-	const out = (await res.json()) as Record<string, unknown> & { ok?: boolean; error?: string };
-	if (!out.ok) throw new Error(out.error ?? `mutate ${action} failed`);
+	const out = (await res.json().catch(() => null)) as (Record<string, unknown> & { ok?: boolean; error?: string }) | null;
+	if (!res.ok) throw new Error(out?.error || `mutate ${action}: ${res.status}`);
+	if (!out?.ok) throw new Error(out?.error || `mutate ${action} failed`);
 	return out;
 }
 
