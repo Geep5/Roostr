@@ -2625,11 +2625,9 @@
     },
     "expected_changes": [
       {
+        "author": "alice",
         "id": "",
         "objectId": "new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -2680,14 +2678,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-name-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -2730,7 +2728,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\u270f\ufe0f"
+                "stringValue": "✏️"
               }
             }
           },
@@ -2776,14 +2774,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-description-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -2826,7 +2824,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\udcdd"
+                "stringValue": "📝"
               }
             }
           },
@@ -2872,14 +2870,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-iconEmoji-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -2922,7 +2920,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\uddbc\ufe0f"
+                "stringValue": "🖼️"
               }
             }
           },
@@ -2968,14 +2966,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-createdDate-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -3018,7 +3016,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\udcc5"
+                "stringValue": "📅"
               }
             }
           },
@@ -3064,14 +3062,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-modifiedDate-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -3114,7 +3112,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\uddd3\ufe0f"
+                "stringValue": "🗓️"
               }
             }
           },
@@ -3160,14 +3158,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-dueDate-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -3210,7 +3208,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\u23f0"
+                "stringValue": "⏰"
               }
             }
           },
@@ -3256,14 +3254,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-tag-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -3306,7 +3304,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83c\udff7\ufe0f"
+                "stringValue": "🏷️"
               }
             }
           },
@@ -3352,14 +3350,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-status-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -3402,7 +3400,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\udea6"
+                "stringValue": "🚦"
               }
             }
           },
@@ -3448,14 +3446,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-done-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -3498,7 +3496,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\u2705"
+                "stringValue": "✅"
               }
             }
           },
@@ -3544,14 +3542,110 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-repeat-new-id",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "repeat"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "repeat"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Repeat"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "↻"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 0
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-url-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -3594,7 +3688,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\udd17"
+                "stringValue": "🔗"
               }
             }
           },
@@ -3640,14 +3734,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-email-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -3690,7 +3784,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\u2709\ufe0f"
+                "stringValue": "✉️"
               }
             }
           },
@@ -3736,14 +3830,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-phone-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -3786,7 +3880,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\udcde"
+                "stringValue": "📞"
               }
             }
           },
@@ -3832,14 +3926,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-featuredRelations-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -3882,7 +3976,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\u2b50"
+                "stringValue": "⭐"
               }
             }
           },
@@ -3928,14 +4022,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-setOf-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -3978,7 +4072,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\uddc2\ufe0f"
+                "stringValue": "🗂️"
               }
             }
           },
@@ -4024,14 +4118,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-type-page-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -4066,7 +4160,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\udcc4"
+                "stringValue": "📄"
               }
             }
           },
@@ -4086,14 +4180,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-type-note-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -4128,7 +4222,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\udcdd"
+                "stringValue": "📝"
               }
             }
           },
@@ -4148,14 +4242,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-type-task-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -4190,7 +4284,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\u2705"
+                "stringValue": "✅"
               }
             }
           },
@@ -4210,14 +4304,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-type-person-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -4252,7 +4346,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\udc64"
+                "stringValue": "👤"
               }
             }
           },
@@ -4272,14 +4366,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-type-project-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -4314,7 +4408,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\udd28"
+                "stringValue": "🔨"
               }
             }
           },
@@ -4334,14 +4428,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-type-bookmark-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -4376,7 +4470,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\udd16"
+                "stringValue": "🔖"
               }
             }
           },
@@ -4396,14 +4490,14 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-type-chat-new-id",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectCreate": {
@@ -4438,7 +4532,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "\ud83d\udcac"
+                "stringValue": "💬"
               }
             }
           },
@@ -4458,7 +4552,9 @@
               }
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       }
     ],
     "expected_result": {
@@ -4507,7 +4603,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u270f\ufe0f"
+                "stringValue": "✏️"
               }
             ],
             [
@@ -4580,7 +4676,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcdd"
+                "stringValue": "📝"
               }
             ],
             [
@@ -4653,7 +4749,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\uddbc\ufe0f"
+                "stringValue": "🖼️"
               }
             ],
             [
@@ -4726,7 +4822,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcc5"
+                "stringValue": "📅"
               }
             ],
             [
@@ -4799,7 +4895,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\uddd3\ufe0f"
+                "stringValue": "🗓️"
               }
             ],
             [
@@ -4872,7 +4968,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u23f0"
+                "stringValue": "⏰"
               }
             ],
             [
@@ -4945,7 +5041,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83c\udff7\ufe0f"
+                "stringValue": "🏷️"
               }
             ],
             [
@@ -5018,7 +5114,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udea6"
+                "stringValue": "🚦"
               }
             ],
             [
@@ -5091,7 +5187,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u2705"
+                "stringValue": "✅"
               }
             ],
             [
@@ -5164,7 +5260,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udd17"
+                "stringValue": "🔗"
               }
             ],
             [
@@ -5237,7 +5333,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u2709\ufe0f"
+                "stringValue": "✉️"
               }
             ],
             [
@@ -5310,7 +5406,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcde"
+                "stringValue": "📞"
               }
             ],
             [
@@ -5383,7 +5479,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u2b50"
+                "stringValue": "⭐"
               }
             ],
             [
@@ -5456,7 +5552,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\uddc2\ufe0f"
+                "stringValue": "🗂️"
               }
             ],
             [
@@ -5523,7 +5619,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcc4"
+                "stringValue": "📄"
               }
             ],
             [
@@ -5570,7 +5666,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcdd"
+                "stringValue": "📝"
               }
             ],
             [
@@ -5617,7 +5713,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u2705"
+                "stringValue": "✅"
               }
             ],
             [
@@ -5664,7 +5760,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udc64"
+                "stringValue": "👤"
               }
             ],
             [
@@ -5711,7 +5807,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udd28"
+                "stringValue": "🔨"
               }
             ],
             [
@@ -5758,7 +5854,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udd16"
+                "stringValue": "🔖"
               }
             ],
             [
@@ -5805,7 +5901,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcac"
+                "stringValue": "💬"
               }
             ],
             [
@@ -5833,7 +5929,104 @@
       "id_seed": "new-id",
       "key_id": 0
     },
-    "expected_changes": [],
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-repeat-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "repeat"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "repeat"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Repeat"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "↻"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 0
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      }
+    ],
     "expected_result": {},
     "expected_vanish_changes": [],
     "expected_vanish_ids": []
@@ -5875,7 +6068,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u270f\ufe0f"
+                "stringValue": "✏️"
               }
             ],
             [
@@ -5948,7 +6141,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcdd"
+                "stringValue": "📝"
               }
             ],
             [
@@ -6021,7 +6214,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\uddbc\ufe0f"
+                "stringValue": "🖼️"
               }
             ],
             [
@@ -6094,7 +6287,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcc5"
+                "stringValue": "📅"
               }
             ],
             [
@@ -6167,7 +6360,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\uddd3\ufe0f"
+                "stringValue": "🗓️"
               }
             ],
             [
@@ -6240,7 +6433,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u23f0"
+                "stringValue": "⏰"
               }
             ],
             [
@@ -6313,7 +6506,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83c\udff7\ufe0f"
+                "stringValue": "🏷️"
               }
             ],
             [
@@ -6386,7 +6579,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udea6"
+                "stringValue": "🚦"
               }
             ],
             [
@@ -6459,7 +6652,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u2705"
+                "stringValue": "✅"
               }
             ],
             [
@@ -6532,7 +6725,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udd17"
+                "stringValue": "🔗"
               }
             ],
             [
@@ -6605,7 +6798,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u2709\ufe0f"
+                "stringValue": "✉️"
               }
             ],
             [
@@ -6678,7 +6871,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcde"
+                "stringValue": "📞"
               }
             ],
             [
@@ -6751,7 +6944,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u2b50"
+                "stringValue": "⭐"
               }
             ],
             [
@@ -6824,7 +7017,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\uddc2\ufe0f"
+                "stringValue": "🗂️"
               }
             ],
             [
@@ -6891,7 +7084,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcc4"
+                "stringValue": "📄"
               }
             ],
             [
@@ -6938,7 +7131,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcdd"
+                "stringValue": "📝"
               }
             ],
             [
@@ -6985,7 +7178,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\u2705"
+                "stringValue": "✅"
               }
             ],
             [
@@ -7032,7 +7225,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udc64"
+                "stringValue": "👤"
               }
             ],
             [
@@ -7079,7 +7272,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udd28"
+                "stringValue": "🔨"
               }
             ],
             [
@@ -7126,7 +7319,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udd16"
+                "stringValue": "🔖"
               }
             ],
             [
@@ -7173,7 +7366,7 @@
             [
               "iconEmoji",
               {
-                "stringValue": "\ud83d\udcac"
+                "stringValue": "💬"
               }
             ],
             [
@@ -7236,16 +7429,112 @@
     },
     "expected_changes": [
       {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-repeat-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "repeat"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "repeat"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Repeat"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "↻"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 0
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
         "id": "",
         "objectId": "legacy",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectDelete": {}
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       }
     ],
     "expected_result": {},
@@ -7358,5 +7647,2358 @@
       "a",
       "z"
     ]
+  },
+  {
+    "name": "repeat_set weekly at a time still ahead starts today",
+    "payload": {
+      "action": "repeat_set",
+      "params": {
+        "object_id": "t",
+        "rule": {
+          "freq": "week",
+          "interval": 1,
+          "weekdays": [
+            0,
+            3
+          ],
+          "time": 1410,
+          "tz": "America/Los_Angeles"
+        },
+        "now_ms": 1789318800000,
+        "tz_offset_min": -420
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {
+            "done": {
+              "boolValue": true
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "week"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 1
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": [
+                            {
+                              "intValue": 0
+                            },
+                            {
+                              "intValue": 3
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 1410
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": "America/Los_Angeles"
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20709
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1789367400000
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "done",
+              "value": {
+                "boolValue": false
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {
+      "next": 1789367400000
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "repeat_set weekly at a time already past starts next match",
+    "payload": {
+      "action": "repeat_set",
+      "params": {
+        "object_id": "t",
+        "rule": {
+          "freq": "week",
+          "interval": 1,
+          "weekdays": [
+            0
+          ],
+          "time": 540
+        },
+        "now_ms": 1789318800000,
+        "tz_offset_min": -420
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {},
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "week"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 1
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": [
+                            {
+                              "intValue": 0
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 540
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": ""
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20709
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1789920000000
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {
+      "next": 1789920000000
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "repeat_set every 2 weeks keeps cadence from the anchor",
+    "payload": {
+      "action": "repeat_set",
+      "params": {
+        "object_id": "t",
+        "rule": {
+          "freq": "week",
+          "interval": 2,
+          "weekdays": [
+            1
+          ],
+          "time": 600
+        },
+        "now_ms": 1789318800000,
+        "tz_offset_min": -420
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {},
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "week"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 2
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": [
+                            {
+                              "intValue": 1
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 600
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": ""
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20709
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1789405200000
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {
+      "next": 1789405200000
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "repeat_set monthly on the 31st clamps short months",
+    "payload": {
+      "action": "repeat_set",
+      "params": {
+        "object_id": "t",
+        "rule": {
+          "freq": "month",
+          "interval": 1,
+          "monthly": "date",
+          "time": 480,
+          "anchor_ms": 1769875200000
+        },
+        "now_ms": 1769904000000,
+        "tz_offset_min": -480
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {},
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "month"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 1
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": []
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 480
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": ""
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20484
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1772294400000
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {
+      "next": 1772294400000
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "repeat_set monthly on the last Friday",
+    "payload": {
+      "action": "repeat_set",
+      "params": {
+        "object_id": "t",
+        "rule": {
+          "freq": "month",
+          "interval": 1,
+          "monthly": "weekday",
+          "time": 540,
+          "anchor_ms": 1790352000000
+        },
+        "now_ms": 1789318800000,
+        "tz_offset_min": -420
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {},
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "month"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 1
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": []
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "weekday"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 540
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": ""
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20721
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1790352000000
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {
+      "next": 1790352000000
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "repeat_set daily on any type",
+    "payload": {
+      "action": "repeat_set",
+      "params": {
+        "object_id": "p",
+        "rule": {
+          "freq": "day",
+          "interval": 3,
+          "time": 420
+        },
+        "now_ms": 1789318800000,
+        "tz_offset_min": -420
+      },
+      "objects": [
+        {
+          "id": "p",
+          "typeKey": "page",
+          "fields": {},
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "p",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "day"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 3
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": []
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 420
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": ""
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20709
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1789567200000
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {
+      "next": 1789567200000
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "repeat_set rejects an invalid rule",
+    "payload": {
+      "action": "repeat_set",
+      "params": {
+        "object_id": "t",
+        "rule": {
+          "freq": "fortnight"
+        },
+        "now_ms": 1789318800000,
+        "tz_offset_min": -420
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {},
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "error": true
+  },
+  {
+    "name": "occurrence_complete advances past now and counts",
+    "payload": {
+      "action": "occurrence_complete",
+      "params": {
+        "object_id": "t",
+        "now_ms": 1789318800000,
+        "tz_offset_min": -420
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {
+            "repeat": {
+              "mapValue": {
+                "entries": [
+                  [
+                    "freq",
+                    {
+                      "stringValue": "week"
+                    }
+                  ],
+                  [
+                    "interval",
+                    {
+                      "intValue": 1
+                    }
+                  ],
+                  [
+                    "weekdays",
+                    {
+                      "valuesValue": {
+                        "items": [
+                          {
+                            "intValue": 0
+                          },
+                          {
+                            "intValue": 3
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "monthly",
+                    {
+                      "stringValue": "date"
+                    }
+                  ],
+                  [
+                    "time",
+                    {
+                      "intValue": 1410
+                    }
+                  ],
+                  [
+                    "tz",
+                    {
+                      "stringValue": "America/Los_Angeles"
+                    }
+                  ],
+                  [
+                    "anchor",
+                    {
+                      "intValue": 20709
+                    }
+                  ],
+                  [
+                    "next",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ],
+                  [
+                    "fired_for",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ],
+                  [
+                    "fired_at",
+                    {
+                      "intValue": 1
+                    }
+                  ],
+                  [
+                    "fired_by",
+                    {
+                      "stringValue": "mac"
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "week"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 1
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": [
+                            {
+                              "intValue": 0
+                            },
+                            {
+                              "intValue": 3
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 1410
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": "America/Los_Angeles"
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20709
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1789626600000
+                      }
+                    ],
+                    [
+                      "last_done",
+                      {
+                        "intValue": 1789318800000
+                      }
+                    ],
+                    [
+                      "count",
+                      {
+                        "intValue": 1
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {
+      "next": 1789626600000
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "occurrence_complete skips missed occurrences",
+    "payload": {
+      "action": "occurrence_complete",
+      "params": {
+        "object_id": "t",
+        "now_ms": 1791219600000,
+        "tz_offset_min": -420
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {
+            "repeat": {
+              "mapValue": {
+                "entries": [
+                  [
+                    "freq",
+                    {
+                      "stringValue": "week"
+                    }
+                  ],
+                  [
+                    "interval",
+                    {
+                      "intValue": 1
+                    }
+                  ],
+                  [
+                    "weekdays",
+                    {
+                      "valuesValue": {
+                        "items": [
+                          {
+                            "intValue": 0
+                          },
+                          {
+                            "intValue": 3
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "monthly",
+                    {
+                      "stringValue": "date"
+                    }
+                  ],
+                  [
+                    "time",
+                    {
+                      "intValue": 1410
+                    }
+                  ],
+                  [
+                    "tz",
+                    {
+                      "stringValue": "America/Los_Angeles"
+                    }
+                  ],
+                  [
+                    "anchor",
+                    {
+                      "intValue": 20709
+                    }
+                  ],
+                  [
+                    "next",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ],
+                  [
+                    "count",
+                    {
+                      "intValue": 4
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "week"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 1
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": [
+                            {
+                              "intValue": 0
+                            },
+                            {
+                              "intValue": 3
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 1410
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": "America/Los_Angeles"
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20709
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1791441000000
+                      }
+                    ],
+                    [
+                      "count",
+                      {
+                        "intValue": 5
+                      }
+                    ],
+                    [
+                      "last_done",
+                      {
+                        "intValue": 1791219600000
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {
+      "next": 1791441000000
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "occurrence_skip advances without counting",
+    "payload": {
+      "action": "occurrence_skip",
+      "params": {
+        "object_id": "t",
+        "now_ms": 1789318800000,
+        "tz_offset_min": -420
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {
+            "repeat": {
+              "mapValue": {
+                "entries": [
+                  [
+                    "freq",
+                    {
+                      "stringValue": "week"
+                    }
+                  ],
+                  [
+                    "interval",
+                    {
+                      "intValue": 1
+                    }
+                  ],
+                  [
+                    "weekdays",
+                    {
+                      "valuesValue": {
+                        "items": [
+                          {
+                            "intValue": 0
+                          },
+                          {
+                            "intValue": 3
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "monthly",
+                    {
+                      "stringValue": "date"
+                    }
+                  ],
+                  [
+                    "time",
+                    {
+                      "intValue": 1410
+                    }
+                  ],
+                  [
+                    "tz",
+                    {
+                      "stringValue": "America/Los_Angeles"
+                    }
+                  ],
+                  [
+                    "anchor",
+                    {
+                      "intValue": 20709
+                    }
+                  ],
+                  [
+                    "next",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ],
+                  [
+                    "count",
+                    {
+                      "intValue": 2
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "week"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 1
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": [
+                            {
+                              "intValue": 0
+                            },
+                            {
+                              "intValue": 3
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 1410
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": "America/Los_Angeles"
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20709
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1789626600000
+                      }
+                    ],
+                    [
+                      "count",
+                      {
+                        "intValue": 2
+                      }
+                    ],
+                    [
+                      "last_skipped",
+                      {
+                        "intValue": 1789318800000
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {
+      "next": 1789626600000
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "set_field done on a recurring object completes the occurrence",
+    "payload": {
+      "action": "set_field",
+      "params": {
+        "object_id": "t",
+        "key": "done",
+        "value": {
+          "boolValue": true
+        },
+        "now_ms": 1789318800000,
+        "tz_offset_min": -420
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {
+            "repeat": {
+              "mapValue": {
+                "entries": [
+                  [
+                    "freq",
+                    {
+                      "stringValue": "week"
+                    }
+                  ],
+                  [
+                    "interval",
+                    {
+                      "intValue": 1
+                    }
+                  ],
+                  [
+                    "weekdays",
+                    {
+                      "valuesValue": {
+                        "items": [
+                          {
+                            "intValue": 0
+                          },
+                          {
+                            "intValue": 3
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "monthly",
+                    {
+                      "stringValue": "date"
+                    }
+                  ],
+                  [
+                    "time",
+                    {
+                      "intValue": 1410
+                    }
+                  ],
+                  [
+                    "tz",
+                    {
+                      "stringValue": "America/Los_Angeles"
+                    }
+                  ],
+                  [
+                    "anchor",
+                    {
+                      "intValue": 20709
+                    }
+                  ],
+                  [
+                    "next",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "week"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 1
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": [
+                            {
+                              "intValue": 0
+                            },
+                            {
+                              "intValue": 3
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 1410
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": "America/Los_Angeles"
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20709
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1789626600000
+                      }
+                    ],
+                    [
+                      "last_done",
+                      {
+                        "intValue": 1789318800000
+                      }
+                    ],
+                    [
+                      "count",
+                      {
+                        "intValue": 1
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "done",
+              "value": {
+                "boolValue": false
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {
+      "next": 1789626600000
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "set_field done off is an ordinary field write",
+    "payload": {
+      "action": "set_field",
+      "params": {
+        "object_id": "t",
+        "key": "done",
+        "value": {
+          "boolValue": false
+        }
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {
+            "repeat": {
+              "mapValue": {
+                "entries": [
+                  [
+                    "freq",
+                    {
+                      "stringValue": "week"
+                    }
+                  ],
+                  [
+                    "interval",
+                    {
+                      "intValue": 1
+                    }
+                  ],
+                  [
+                    "weekdays",
+                    {
+                      "valuesValue": {
+                        "items": [
+                          {
+                            "intValue": 0
+                          },
+                          {
+                            "intValue": 3
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "monthly",
+                    {
+                      "stringValue": "date"
+                    }
+                  ],
+                  [
+                    "time",
+                    {
+                      "intValue": 1410
+                    }
+                  ],
+                  [
+                    "tz",
+                    {
+                      "stringValue": "America/Los_Angeles"
+                    }
+                  ],
+                  [
+                    "anchor",
+                    {
+                      "intValue": 20709
+                    }
+                  ],
+                  [
+                    "next",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "done",
+              "value": {
+                "boolValue": false
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {},
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "occurrence_fire marks the current occurrence once",
+    "payload": {
+      "action": "occurrence_fire",
+      "params": {
+        "object_id": "t",
+        "for_ms": 1789367400000,
+        "machine": "mac-1",
+        "now_ms": 1789318800000
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {
+            "repeat": {
+              "mapValue": {
+                "entries": [
+                  [
+                    "freq",
+                    {
+                      "stringValue": "week"
+                    }
+                  ],
+                  [
+                    "interval",
+                    {
+                      "intValue": 1
+                    }
+                  ],
+                  [
+                    "weekdays",
+                    {
+                      "valuesValue": {
+                        "items": [
+                          {
+                            "intValue": 0
+                          },
+                          {
+                            "intValue": 3
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "monthly",
+                    {
+                      "stringValue": "date"
+                    }
+                  ],
+                  [
+                    "time",
+                    {
+                      "intValue": 1410
+                    }
+                  ],
+                  [
+                    "tz",
+                    {
+                      "stringValue": "America/Los_Angeles"
+                    }
+                  ],
+                  [
+                    "anchor",
+                    {
+                      "intValue": 20709
+                    }
+                  ],
+                  [
+                    "next",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "week"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 1
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": [
+                            {
+                              "intValue": 0
+                            },
+                            {
+                              "intValue": 3
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 1410
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": "America/Los_Angeles"
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20709
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1789367400000
+                      }
+                    ],
+                    [
+                      "fired_for",
+                      {
+                        "intValue": 1789367400000
+                      }
+                    ],
+                    [
+                      "fired_at",
+                      {
+                        "intValue": 1789318800000
+                      }
+                    ],
+                    [
+                      "fired_by",
+                      {
+                        "stringValue": "mac-1"
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {},
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "occurrence_fire refuses a second fire",
+    "payload": {
+      "action": "occurrence_fire",
+      "params": {
+        "object_id": "t",
+        "for_ms": 1789367400000,
+        "machine": "mac-2",
+        "now_ms": 1789318800000
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {
+            "repeat": {
+              "mapValue": {
+                "entries": [
+                  [
+                    "freq",
+                    {
+                      "stringValue": "week"
+                    }
+                  ],
+                  [
+                    "interval",
+                    {
+                      "intValue": 1
+                    }
+                  ],
+                  [
+                    "weekdays",
+                    {
+                      "valuesValue": {
+                        "items": [
+                          {
+                            "intValue": 0
+                          },
+                          {
+                            "intValue": 3
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "monthly",
+                    {
+                      "stringValue": "date"
+                    }
+                  ],
+                  [
+                    "time",
+                    {
+                      "intValue": 1410
+                    }
+                  ],
+                  [
+                    "tz",
+                    {
+                      "stringValue": "America/Los_Angeles"
+                    }
+                  ],
+                  [
+                    "anchor",
+                    {
+                      "intValue": 20709
+                    }
+                  ],
+                  [
+                    "next",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ],
+                  [
+                    "fired_for",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "error": true
+  },
+  {
+    "name": "occurrence_fire refuses a stale occurrence",
+    "payload": {
+      "action": "occurrence_fire",
+      "params": {
+        "object_id": "t",
+        "for_ms": 1,
+        "machine": "mac-1",
+        "now_ms": 1789318800000
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {
+            "repeat": {
+              "mapValue": {
+                "entries": [
+                  [
+                    "freq",
+                    {
+                      "stringValue": "week"
+                    }
+                  ],
+                  [
+                    "interval",
+                    {
+                      "intValue": 1
+                    }
+                  ],
+                  [
+                    "weekdays",
+                    {
+                      "valuesValue": {
+                        "items": [
+                          {
+                            "intValue": 0
+                          },
+                          {
+                            "intValue": 3
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "monthly",
+                    {
+                      "stringValue": "date"
+                    }
+                  ],
+                  [
+                    "time",
+                    {
+                      "intValue": 1410
+                    }
+                  ],
+                  [
+                    "tz",
+                    {
+                      "stringValue": "America/Los_Angeles"
+                    }
+                  ],
+                  [
+                    "anchor",
+                    {
+                      "intValue": 20709
+                    }
+                  ],
+                  [
+                    "next",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "error": true
+  },
+  {
+    "name": "run_record stores provenance for the occurrence",
+    "payload": {
+      "action": "run_record",
+      "params": {
+        "object_id": "t",
+        "run": {
+          "at": 1789318800000,
+          "machine": "mac-1",
+          "conversation": "conv-1"
+        }
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {
+            "repeat": {
+              "mapValue": {
+                "entries": [
+                  [
+                    "freq",
+                    {
+                      "stringValue": "week"
+                    }
+                  ],
+                  [
+                    "interval",
+                    {
+                      "intValue": 1
+                    }
+                  ],
+                  [
+                    "weekdays",
+                    {
+                      "valuesValue": {
+                        "items": [
+                          {
+                            "intValue": 0
+                          },
+                          {
+                            "intValue": 3
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "monthly",
+                    {
+                      "stringValue": "date"
+                    }
+                  ],
+                  [
+                    "time",
+                    {
+                      "intValue": 1410
+                    }
+                  ],
+                  [
+                    "tz",
+                    {
+                      "stringValue": "America/Los_Angeles"
+                    }
+                  ],
+                  [
+                    "anchor",
+                    {
+                      "intValue": 20709
+                    }
+                  ],
+                  [
+                    "next",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "repeat",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "freq",
+                      {
+                        "stringValue": "week"
+                      }
+                    ],
+                    [
+                      "interval",
+                      {
+                        "intValue": 1
+                      }
+                    ],
+                    [
+                      "weekdays",
+                      {
+                        "valuesValue": {
+                          "items": [
+                            {
+                              "intValue": 0
+                            },
+                            {
+                              "intValue": 3
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    [
+                      "monthly",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "time",
+                      {
+                        "intValue": 1410
+                      }
+                    ],
+                    [
+                      "tz",
+                      {
+                        "stringValue": "America/Los_Angeles"
+                      }
+                    ],
+                    [
+                      "anchor",
+                      {
+                        "intValue": 20709
+                      }
+                    ],
+                    [
+                      "next",
+                      {
+                        "intValue": 1789367400000
+                      }
+                    ],
+                    [
+                      "last_run",
+                      {
+                        "mapValue": {
+                          "entries": [
+                            [
+                              "machine",
+                              {
+                                "stringValue": "mac-1"
+                              }
+                            ],
+                            [
+                              "conversation",
+                              {
+                                "stringValue": "conv-1"
+                              }
+                            ],
+                            [
+                              "at",
+                              {
+                                "intValue": 1789318800000
+                              }
+                            ]
+                          ]
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {},
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "repeat_clear removes the rule",
+    "payload": {
+      "action": "repeat_clear",
+      "params": {
+        "object_id": "t"
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {
+            "repeat": {
+              "mapValue": {
+                "entries": [
+                  [
+                    "freq",
+                    {
+                      "stringValue": "week"
+                    }
+                  ],
+                  [
+                    "interval",
+                    {
+                      "intValue": 1
+                    }
+                  ],
+                  [
+                    "weekdays",
+                    {
+                      "valuesValue": {
+                        "items": [
+                          {
+                            "intValue": 0
+                          },
+                          {
+                            "intValue": 3
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "monthly",
+                    {
+                      "stringValue": "date"
+                    }
+                  ],
+                  [
+                    "time",
+                    {
+                      "intValue": 1410
+                    }
+                  ],
+                  [
+                    "tz",
+                    {
+                      "stringValue": "America/Los_Angeles"
+                    }
+                  ],
+                  [
+                    "anchor",
+                    {
+                      "intValue": 20709
+                    }
+                  ],
+                  [
+                    "next",
+                    {
+                      "intValue": 1789367400000
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "t",
+        "ops": [
+          {
+            "fieldDelete": {
+              "key": "repeat"
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1789318800000
+      }
+    ],
+    "expected_result": {},
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "repeat_clear on a plain object fails",
+    "payload": {
+      "action": "repeat_clear",
+      "params": {
+        "object_id": "t"
+      },
+      "objects": [
+        {
+          "id": "t",
+          "typeKey": "task",
+          "fields": {},
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1789318800000,
+      "author": "alice",
+      "id_seed": "seed",
+      "key_id": 0
+    },
+    "error": true
   }
 ]

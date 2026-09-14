@@ -474,8 +474,95 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		if object_id == "" || key == "" || !has_value {
 			return plan, "object_id, key, value required"
 		}
-		op := Operation{kind = .Field_Set, key = key, value = value_from_json(value_json, context.temp_allocator)}
+		value := value_from_json(value_json, context.temp_allocator)
+		// A recurring object is never done: checking it completes the occurrence.
+		if key == "done" && value.kind == .Bool && value.b {
+			if current, recurring := repeat_state_value(input, object_id); recurring {
+				now_ms, tz_offset_min := repeat_clock(parsed, input)
+				advanced, err := repeat_advance_ops(current, now_ms, tz_offset_min, "last_done")
+				if err != "" do return plan, err
+				mutation_add(&plan, input, object_id, {Operation{kind = .Field_Set, key = REPEAT_KEY, value = advanced}, Operation{kind = .Field_Set, key = "done", value = bool_value(false)}})
+				repeat_result(&plan, advanced)
+				return plan, ""
+			}
+		}
+		op := Operation{kind = .Field_Set, key = key, value = value}
 		mutation_add(&plan, input, object_id, {op})
+		return plan, ""
+
+	// ── Recurring objects (repeat.odin) ──
+	case "repeat_set":
+		object_id := json_str(parsed, "object_id")
+		rule_json, has_rule := json_field(parsed, "rule")
+		if object_id == "" || !has_rule do return plan, "object_id and rule required"
+		if _, exists := input.states[object_id]; !exists do return plan, "unknown object"
+		now_ms, tz_offset_min := repeat_clock(parsed, input)
+		now_local := now_ms + tz_offset_min * REPEAT_MIN_MS
+		rule, ok := repeat_rule_from_json(rule_json, tz_offset_min, now_local)
+		if !ok do return plan, "invalid repeat rule"
+		previous, has_previous := repeat_state_value(input, object_id)
+		value := repeat_value(rule, repeat_first(rule, now_local), tz_offset_min, previous, has_previous)
+		ops := make([dynamic]Operation, context.temp_allocator)
+		append(&ops, Operation{kind = .Field_Set, key = REPEAT_KEY, value = value})
+		if done, present := fields_get(input.states[object_id].fields, "done"); present && done.kind == .Bool && done.b {
+			append(&ops, Operation{kind = .Field_Set, key = "done", value = bool_value(false)})
+		}
+		mutation_add(&plan, input, object_id, ops[:])
+		repeat_result(&plan, value)
+		return plan, ""
+
+	case "repeat_clear":
+		object_id := json_str(parsed, "object_id")
+		if object_id == "" do return plan, "object_id required"
+		if _, recurring := repeat_state_value(input, object_id); !recurring do return plan, "object does not repeat"
+		mutation_add(&plan, input, object_id, {Operation{kind = .Field_Delete, key = REPEAT_KEY}})
+		return plan, ""
+
+	case "occurrence_complete", "occurrence_skip":
+		object_id := json_str(parsed, "object_id")
+		if object_id == "" do return plan, "object_id required"
+		current, recurring := repeat_state_value(input, object_id)
+		if !recurring do return plan, "object does not repeat"
+		now_ms, tz_offset_min := repeat_clock(parsed, input)
+		advanced, err := repeat_advance_ops(current, now_ms, tz_offset_min, action == "occurrence_complete" ? "last_done" : "last_skipped")
+		if err != "" do return plan, err
+		mutation_add(&plan, input, object_id, {Operation{kind = .Field_Set, key = REPEAT_KEY, value = advanced}})
+		repeat_result(&plan, advanced)
+		return plan, ""
+
+	case "occurrence_fire":
+		// The scheduler's idempotency mark: only the current occurrence, only once.
+		object_id := json_str(parsed, "object_id")
+		for_ms, has_for := json_int(parsed, "for_ms")
+		machine := json_str(parsed, "machine")
+		if object_id == "" || !has_for || machine == "" do return plan, "object_id, for_ms, machine required"
+		current, recurring := repeat_state_value(input, object_id)
+		if !recurring do return plan, "object does not repeat"
+		next_ms, _ := repeat_entry_int(current, "next")
+		if next_ms != for_ms do return plan, "stale occurrence"
+		if fired_for, fired := repeat_entry_int(current, "fired_for"); fired && fired_for == for_ms do return plan, "occurrence already fired"
+		now_ms, _ := repeat_clock(parsed, input)
+		marked := repeat_with(current, "fired_for", int_value(for_ms))
+		marked = repeat_with(marked, "fired_at", int_value(now_ms))
+		marked = repeat_with(marked, "fired_by", string_value(machine))
+		mutation_add(&plan, input, object_id, {Operation{kind = .Field_Set, key = REPEAT_KEY, value = marked}})
+		return plan, ""
+
+	case "run_record":
+		// Provenance of an agent run for the current occurrence: {at, machine, conversation, error?}.
+		object_id := json_str(parsed, "object_id")
+		run_json, has_run := json_field(parsed, "run")
+		if object_id == "" || !has_run do return plan, "object_id and run required"
+		current, recurring := repeat_state_value(input, object_id)
+		if !recurring do return plan, "object does not repeat"
+		run := Value{kind = .Map}
+		run.entries = make([dynamic]Value_Entry, context.temp_allocator)
+		for key in ([]string{"machine", "conversation", "error"}) {
+			if s := json_str(run_json, key); s != "" do append(&run.entries, Value_Entry{key = key, value = string_value(s)})
+		}
+		at, has_at := json_int(run_json, "at")
+		append(&run.entries, Value_Entry{key = "at", value = int_value(has_at ? at : input.timestamp)})
+		mutation_add(&plan, input, object_id, {Operation{kind = .Field_Set, key = REPEAT_KEY, value = repeat_with(current, "last_run", run)}})
 		return plan, ""
 
 	case "delete_field":
@@ -888,6 +975,8 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	{"tag", "tag", "Tag", "🏷️", false, false, 0},
 	{"status", "status", "Status", "🚦", false, false, 1},
 	{"done", "checkbox", "Done", "✅", false, false, 0},
+	// Rendered by the Repeat cell, not the generic property editor.
+	{"repeat", "repeat", "Repeat", "↻", true, false, 0},
 	{"url", "url", "URL", "🔗", false, false, 0},
 	{"email", "email", "Email", "✉️", false, false, 0},
 	{"phone", "phone", "Phone", "📞", false, false, 0},
