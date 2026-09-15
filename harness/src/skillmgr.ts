@@ -14,6 +14,7 @@
 
 import { createObject, chatPost, fetchObject, mutate, query, str, queryAll } from "./api";
 import { publishCapabilities } from "./machine";
+import { activeCredentialKeys } from "./credentials";
 import { objectText } from "./skills";
 
 export interface CatalogEntry {
@@ -157,15 +158,24 @@ async function writeState(state: StateFile): Promise<void> {
 	await Bun.write(STATE_PATH, JSON.stringify(state, null, "\t"));
 }
 
-/** Catalog keys installed AND enabled here - what this machine can do for an object that `requires` it. */
+/**
+ * What this machine can do for an object that `requires` it: catalog
+ * skills installed AND enabled here, plus active service credentials
+ * (credentials.ts - an X login is a capability exactly like browserless).
+ */
 function capabilityKeys(state: StateFile): string[] {
-	return CATALOG.filter((c) => state.skills[c.key]?.enabled && state.skills[c.key]?.installed).map((c) => c.key);
+	return [...new Set([...CATALOG.filter((c) => state.skills[c.key]?.enabled && state.skills[c.key]?.installed).map((c) => c.key), ...activeCredentialKeys()])].sort();
 }
 
 /** A skill state change: persist, then publish the capability set to this machine's object (a write only on change). */
 async function saveSkills(state: StateFile): Promise<void> {
 	await writeState(state);
 	void publishCapabilities(capabilityKeys(state));
+}
+
+/** Credential changes call this: the published set follows the store. */
+export async function republishCapabilities(): Promise<void> {
+	void publishCapabilities(capabilityKeys(await readState()));
 }
 
 /** This machine's capability keys; the boot path publishes them so the machine object exists before anything is served. */

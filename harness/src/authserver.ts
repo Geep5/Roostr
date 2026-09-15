@@ -10,7 +10,8 @@ import { SimplePool, finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
 import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
-import { clearHoldup, disableSkill, enableSkill, listHoldups, recheckSkill, skillStatus, uninstallSkill, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
+import { clearHoldup, disableSkill, enableSkill, listHoldups, recheckSkill, republishCapabilities, skillStatus, uninstallSkill, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
+import { credentialStatus, finishBrowserLogin, removeCredential, setPasswordCredential, startBrowserLogin } from "./credentials";
 import { fetchObject, str } from "./api";
 import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
 import { WorkspaceAccessError } from "./workspace";
@@ -195,6 +196,39 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					const body = (await req.json()) as { key?: string };
 					const { clearJoinRequest } = await import("./nostrsync");
 					await clearJoinRequest(body.key ?? "");
+					return json({ ok: true });
+				}
+				if (req.method === "GET" && url.pathname === "/credentials") {
+					return json({ credentials: credentialStatus() });
+				}
+				if (req.method === "POST" && url.pathname === "/credentials/password") {
+					const body = (await req.json()) as { key?: string; fields?: Record<string, string> };
+					try {
+						setPasswordCredential(body.key ?? "", body.fields ?? {});
+						await republishCapabilities();
+						return json({ ok: true });
+					} catch (err) {
+						return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+					}
+				}
+				if (req.method === "POST" && url.pathname === "/credentials/browser/start") {
+					const body = (await req.json()) as { key?: string };
+					try {
+						return json(startBrowserLogin(body.key ?? ""));
+					} catch (err) {
+						return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+					}
+				}
+				if (req.method === "POST" && url.pathname === "/credentials/browser/finish") {
+					const body = (await req.json()) as { key?: string };
+					const active = finishBrowserLogin(body.key ?? "");
+					if (active) await republishCapabilities();
+					return json({ active });
+				}
+				if (req.method === "POST" && url.pathname === "/credentials/remove") {
+					const body = (await req.json()) as { key?: string };
+					removeCredential(body.key ?? "");
+					await republishCapabilities();
 					return json({ ok: true });
 				}
 				if (req.method === "POST" && url.pathname === "/skills/holdup-clear") {

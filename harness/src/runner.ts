@@ -17,6 +17,7 @@ import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
 import { callLLM, isContextOverflowError } from "./llm";
 import { channelInstructions, listSkills, remoteCapabilitiesSection, skillsPromptSection } from "./skills";
+import { credentialsPromptLine } from "./credentials";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceContext, workspacePromptSection } from "./workspace";
 import { digest } from "./memory";
@@ -162,6 +163,8 @@ async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts:
 	const skills = await listSkills(agent.id);
 	const skillsSection = skillsPromptSection(skills);
 	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
+	const credsLine = credentialsPromptLine();
+	if (credsLine) parts.push({ label: "Credentials", text: credsLine });
 	try {
 		const elsewhere = await remoteCapabilitiesSection(boundId);
 		if (elsewhere) parts.push({ label: "Capabilities elsewhere", text: elsewhere });
