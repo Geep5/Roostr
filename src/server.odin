@@ -286,6 +286,8 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 		handle_relations(sock)
 	case req.method == "GET" && req.path == "/api/channels":
 		handle_channels(sock)
+	case req.method == "POST" && req.path == "/api/serving":
+		handle_serving(sock, req.body)
 	case req.method == "POST" && req.path == "/api/query":
 		handle_query(sock, req.body)
 	case req.method == "POST" && req.path == "/api/mutate":
@@ -513,6 +515,36 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 			}
 		}
 		respond_json(sock, json.Array(arr))
+	}, &ctx)
+}
+
+// POST /api/serving {objectIds: [id]} → {id: {machineId, reason, requires, candidates}}
+// The per-object serving rule (core/serving.odin) over this replica's state.
+handle_serving :: proc(sock: net.TCP_Socket, body: []byte) {
+	parsed, perr := json.parse(body, allocator = context.temp_allocator)
+	ids, iok := core.json_field(parsed, "objectIds")
+	arr, aok := ids.(json.Array)
+	if perr != nil || !iok || !aok {
+		respond_error(sock, "objectIds required")
+		return
+	}
+	Ctx :: struct {
+		sock: net.TCP_Socket,
+		ids:  json.Array,
+	}
+	ctx := Ctx{sock, arr}
+	with_states(proc(states: map[string]^core.Object_State, user: rawptr) {
+		c := cast(^struct {
+			sock: net.TCP_Socket,
+			ids:  json.Array,
+		})user
+		out := core.jobj()
+		for item in c.ids {
+			id, sok := item.(json.String)
+			if !sok || string(id) == "" do continue
+			out[string(id)] = core.serving_to_json(core.resolve_server_in(states, string(id)))
+		}
+		respond_json(c.sock, json.Object(out))
 	}, &ctx)
 }
 

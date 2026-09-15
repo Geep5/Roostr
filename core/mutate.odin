@@ -977,6 +977,9 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	{"done", "checkbox", "Done", "✅", false, false, 0},
 	// Rendered by the Repeat cell, not the generic property editor.
 	{"repeat", "repeat", "Repeat", "↻", true, false, 0},
+	// Per-object serving (serving.odin); rendered by the serving chip.
+	{"served_by", "shorttext", "Served by", "🖥️", true, false, 0},
+	{"requires", "tag", "Requires", "🧩", true, false, 0},
 	{"url", "url", "URL", "🔗", false, false, 0},
 	{"email", "email", "Email", "✉️", false, false, 0},
 	{"phone", "phone", "Phone", "📞", false, false, 0},
