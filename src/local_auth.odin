@@ -87,7 +87,7 @@ local_sessions_load :: proc() {
 		origin := core.json_str(obj, "origin")
 		expires, has_expires := core.json_int(obj, "expires")
 		if len(token) != 64 || origin == "" || !has_expires || expires <= now do continue
-		g_local_auth.sessions[n] = Local_Session{strings.clone(token), strings.clone(origin), expires}
+		g_local_auth.sessions[n] = Local_Session{strings.clone(token), strings.clone(local_origin_canon(origin)), expires}
 		n += 1
 	}
 }
@@ -174,6 +174,17 @@ local_origin_loopback :: proc(origin: string) -> bool {
 	if colon := strings.index_byte(authority, ':'); colon >= 0 do host = authority[:colon]
 	return host == "localhost" || host == "127.0.0.1"
 }
+// localhost and 127.0.0.1 are the same machine: canonicalize so a pairing
+// made from one hostname holds when the UI is opened from the other.
+local_origin_canon :: proc(origin: string) -> string {
+	if strings.has_prefix(origin, "http://localhost") {
+		return strings.concatenate({"http://127.0.0.1", origin[len("http://localhost"):]}, context.temp_allocator)
+	}
+	if strings.has_prefix(origin, "https://localhost") {
+		return strings.concatenate({"https://127.0.0.1", origin[len("https://localhost"):]}, context.temp_allocator)
+	}
+	return origin
+}
 
 local_bearer :: proc(header: string) -> string {
 	if !strings.has_prefix(header, "Bearer ") do return ""
@@ -197,8 +208,9 @@ local_role :: proc(token, origin: string, now: i64) -> Local_Role {
 	defer sync.unlock(&g_local_auth.mu)
 	if origin == "" && local_secret_equal(token, g_local_auth.service_token) { g_session_expires = max(i64); return .Service }
 	if !local_origin_valid(origin) do return .None
+	canon := local_origin_canon(origin)
 	for session in g_local_auth.sessions {
-		if session.expires > now && session.origin == origin && local_secret_equal(token, session.token) { g_session_expires = session.expires; return .UI }
+		if session.expires > now && session.origin == canon && local_secret_equal(token, session.token) { g_session_expires = session.expires; return .UI }
 	}
 	return .None
 }
@@ -207,7 +219,8 @@ local_origin_paired :: proc(origin: string, now: i64) -> bool {
 	if !local_origin_valid(origin) do return false
 	sync.lock(&g_local_auth.mu)
 	defer sync.unlock(&g_local_auth.mu)
-	for session in g_local_auth.sessions do if session.expires > now && session.origin == origin do return true
+	canon := local_origin_canon(origin)
+	for session in g_local_auth.sessions do if session.expires > now && session.origin == canon do return true
 	return false
 }
 
@@ -226,7 +239,7 @@ local_pair :: proc(code, origin: string, now: i64) -> (token: string, expires: i
 		if session.expires > now do continue
 		delete(session.token)
 		delete(session.origin)
-		session = Local_Session{local_random_token(), strings.clone(origin), now + LOCAL_SESSION_TTL}
+		session = Local_Session{local_random_token(), strings.clone(local_origin_canon(origin)), now + LOCAL_SESSION_TTL}
 		g_local_auth.code_expires = 0
 		delete(g_local_auth.code)
 		g_local_auth.code = ""
@@ -292,7 +305,13 @@ local_authorize :: proc(sock: net.TCP_Socket, req: Request) -> bool {
 		return false
 	}
 	role := local_role(local_bearer(req.authorization), req.origin, now)
-	if role == .None { respond_error(sock, "authentication required", "401 Unauthorized"); return false }
+	// Rejections carry CORS for valid origins: without it the browser
+	// reports a "CORS policy" failure and hides the real 401.
+	if role == .None {
+		if local_origin_valid(req.origin) do g_response_cors = local_cors(req.origin)
+		respond_error(sock, "authentication required", "401 Unauthorized")
+		return false
+	}
 	if role == .UI do g_response_cors = local_cors(req.origin)
 	if req.path == "/api/local-auth/validate" {
 		if role != .Service || req.method != "POST" { respond_error(sock, "service only", "403 Forbidden"); return false }
