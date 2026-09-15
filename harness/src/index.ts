@@ -14,7 +14,7 @@
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
-import { API, apiFetch, chatPost, fetchObject, list, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
+import { API, apiFetch, chatPost, fetchObject, list, lv, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
 import type { ObjectJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
@@ -232,8 +232,10 @@ async function serve(): Promise<void> {
 		const channels = (await queryAll({ type: "channel" })).map((c) => ({ id: c.id, name: str(c.fields, "name") || "Space" }));
 		for (const c of channels) {
 			if (!(await servesHere(c.id))) continue;
+			let minted = false;
 			let id = (await queryAll({ type: "agent", filters: [{ key: "space_default", condition: "equal", value: c.id }] }))[0]?.id;
 			if (!id) {
+				minted = true;
 				id = (
 					await createObject(c.name, "agent", {
 						channel: sv(c.id),
@@ -251,6 +253,17 @@ async function serve(): Promise<void> {
 			if (!served.has(id)) {
 				const one = await buildServedOne(id, defaultChannelId);
 				if (one) served.set(id, one);
+			}
+			// The space chat is the front door: pin it at mint so it sits in
+			// the sidebar from day one. Once, only - an unpin is the human's
+			// word and is never rewritten.
+			if (minted) {
+				const chatId = served.get(id)?.chatId;
+				if (chatId) {
+					const ch = await fetchObject(c.id);
+					const pinnedIds = list(ch.fields, "pinnedIds");
+					if (!pinnedIds.includes(chatId)) await setField(c.id, "pinnedIds", lv([...pinnedIds, chatId]));
+				}
 			}
 		}
 	}
