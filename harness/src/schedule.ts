@@ -9,10 +9,11 @@
  * "stale occurrence" refusals are the idempotency key - two machines, or a
  * fire racing a re-arm, converge on exactly one dispatch per occurrence.
  *
- * Dispatch: an object whose `assignee` / `agent` names an agent served
- * here gets a framed message in that agent's chat plus one turn, recorded
- * back onto the object with `run_record`; anything else gets a one-line
- * reminder on its own discussion. Scheduler messages carry
+ * Dispatch: an object with an agent served here - its own bound agent, or
+ * one named by `assignee` / `agent` - gets a framed message in that
+ * agent's chat plus one turn, recorded back onto the object with
+ * `run_record`; anything else gets a one-line reminder on its own
+ * discussion. Scheduler messages carry
  * `origin: "schedule"`, which keeps them out of the watermark path
  * (`pendingMessages`) - the turn is driven explicitly, never by ingestion.
  *
@@ -151,10 +152,16 @@ function agentIdsOf(v: ValueJSON | undefined): string[] {
 	return (v.valuesValue?.items ?? []).flatMap(agentIdsOf);
 }
 
-/** The served agent responsible for the object, if any: `assignee` first, then `agent`. */
+/**
+ * The served agent responsible for the object, if any. The object's own
+ * bound agent first - the mind minted from its discussion is the one that
+ * has read it - then whoever `assignee` / `agent` name.
+ */
 async function ownerOf(obj: ObjectJSON): Promise<{ agentId: string; chatId: string } | undefined> {
 	if (!host) return undefined;
-	for (const id of [...agentIdsOf(obj.fields["assignee"]), ...agentIdsOf(obj.fields["agent"])]) {
+	const bound = await queryAll({ type: "agent", filters: [{ key: "bound_object", condition: "equal", value: obj.id }] });
+	const candidates = [...bound.map((a) => a.id).sort(), ...agentIdsOf(obj.fields["assignee"]), ...agentIdsOf(obj.fields["agent"])];
+	for (const id of candidates) {
 		const s = await host.served(id);
 		if (s) return s;
 	}

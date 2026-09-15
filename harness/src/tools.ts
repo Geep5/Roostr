@@ -77,7 +77,7 @@ const POSITION_INNER = 5; // glon.Position.Inner - append as the target's last c
  * existing list (e.g. under: "Walmart") instead of dumping new blocks
  * at the page root.
  */
-async function appendBody(objectId: string, text: string, under = ""): Promise<string> {
+export async function appendBody(objectId: string, text: string, under = ""): Promise<string> {
 	let targetId = "";
 	if (under.trim()) {
 		const obj = await fetchObject(objectId);
