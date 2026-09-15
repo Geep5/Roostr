@@ -30,6 +30,24 @@ local_auth_contract :: proc(t: ^testing.T) {
 	for invalid in ([]string{"null", "", "https://roostr.example/path", "https://x@roostr.example", "http://evil.example", "https://x\r\nX: y"}) {
 		testing.expect(t, !local_origin_valid(invalid))
 	}
+	for allowed in ([]string{
+		"http://localhost:5173",
+		"http://127.0.0.1:5190",
+		"https://localhost:5173",
+		"https://roostr.space",
+		"https://www.roostr.space",
+		"https://getroostr.fly.dev",
+	}) {
+		testing.expect(t, local_origin_can_read_pair_code(allowed))
+	}
+	for denied in ([]string{
+		"https://evil.example",
+		"https://roostr.space.evil.example",
+		"http://roostr.space",
+		"https://getroostr.fly.dev.evil.example",
+	}) {
+		testing.expect(t, !local_origin_can_read_pair_code(denied))
+	}
 	testing.expect(t, local_role(token, "", now) == .Service)
 	testing.expect(t, local_role(token, origin, now) == .None)
 	testing.expect(t, local_role("", "", now) == .None)

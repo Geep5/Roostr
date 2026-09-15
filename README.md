@@ -63,12 +63,14 @@ harness/       Bun services: independent Nostr sync; optional agent/tool harness
 
 All data APIs require `Authorization: Bearer …`. Local services read the
 mode-0600 `GLON_DATA/api-token`; never give that service token to a webpage.
-Browsers pair explicitly using the one-use five-minute code printed at daemon
-startup. Pairing creates an Origin-bound UI session that expires in 24 hours or
-on daemon restart. Public `/api/pair/status` never returns a pairing code.
-Authenticated fetch streaming carries SSE authorization; tokens are not URLs.
-Run `bun run pair` from `harness/` to ask the running daemon to print a fresh
-pairing code without restarting it or disconnecting already-paired tabs.
+Browsers pair explicitly using a one-use five-minute key. The daemon prints it
+at startup and exposes it to loopback UIs plus the exact Roostr production
+origins, so **This machine** can surface it without granting arbitrary websites
+local access. Pairing creates an Origin-bound UI session that expires in 24
+hours and persists across daemon restarts. Public `/api/pair/status` never
+returns a pairing key. Authenticated fetch streaming carries SSE authorization;
+tokens are not URLs. Run `bun run pair` from `harness/` to rotate the key without
+restarting the daemon or disconnecting already-paired tabs.
 UI sessions cannot export the native private key. An operator can explicitly run
 `./glon-odin key-export` in a private terminal for recovery; do not log/share it.
 
