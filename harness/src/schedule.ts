@@ -4,10 +4,13 @@
  * The engine owns the rule and the occurrence math (`repeat` field:
  * `next` is the current occurrence, `fired_for` marks it as fired). This
  * module only decides WHEN to look and WHO gets told: one armed timer for
- * the earliest unfired `next` among recurring objects in spaces this
- * machine serves. Firing is `occurrence_fire`, whose "already fired" /
- * "stale occurrence" refusals are the idempotency key - two machines, or a
- * fire racing a re-arm, converge on exactly one dispatch per occurrence.
+ * the earliest unfired `next` among recurring objects this machine serves
+ * (per object, resolved by the engine - `docs/object-serving.md`; a job
+ * that `requires` browserless fires on the machine that has it). Firing
+ * is `occurrence_fire`, whose "already fired" / "stale occurrence"
+ * refusals are the idempotency key - two machines that transiently
+ * disagree, or a fire racing a re-arm, converge on exactly one dispatch
+ * per occurrence.
  *
  * Dispatch: an object with an agent served here - its own bound agent, or
  * one named by `assignee` / `agent` - gets a framed message in that
@@ -22,10 +25,9 @@
  */
 
 import { addBlock, fetchObject, mutate, queryAll, str, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
-import { spaceMine } from "./machine";
+import { primeServing, servesHere } from "./machine";
 import { machineId } from "./roster";
 import { objectText } from "./skills";
-import { defaultSpaceId } from "./spacemap";
 
 export interface ScheduleHost {
 	/** The agent's holistic chat when this machine serves it; undefined otherwise. */
@@ -61,17 +63,13 @@ function dueOf(row: { id: string; fields: Record<string, ValueJSON> }): Due | nu
 	return { id: row.id, next, firedFor: entries?.["fired_for"]?.intValue };
 }
 
-/** Every recurring object in a space this machine serves, with its clock. */
+/** Every recurring object this machine serves, with its clock. */
 async function recurringMine(): Promise<Due[]> {
 	const rows: QueryRow[] = await queryAll({ filters: [{ key: "repeat", condition: "exists" }] });
-	const dflt = await defaultSpaceId();
+	const dues = rows.map(dueOf).filter((d): d is Due => d !== null);
+	await primeServing(dues.map((d) => d.id));
 	const out: Due[] = [];
-	for (const r of rows) {
-		const due = dueOf(r);
-		if (!due) continue;
-		if (!(await spaceMine(str(r.fields, "channel") || dflt))) continue;
-		out.push(due);
-	}
+	for (const d of dues) if (await servesHere(d.id)) out.push(d);
 	return out;
 }
 
@@ -83,8 +81,9 @@ export async function startScheduler(h: ScheduleHost): Promise<void> {
 
 /**
  * Point the timer at the earliest unfired occurrence. Cheap to call on
- * every commit that could move it (a `repeat` edit, a `served_by`
- * change): concurrent calls coalesce into one re-query.
+ * every commit that could move it (a `repeat` edit, a `served_by` or
+ * `requires` change, a machine's capabilities): concurrent calls coalesce
+ * into one re-query.
  */
 export async function arm(): Promise<void> {
 	if (arming) {

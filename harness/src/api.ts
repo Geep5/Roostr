@@ -61,6 +61,25 @@ export async function query(body: Record<string, unknown>): Promise<QueryRow[]> 
 	return out.records;
 }
 
+/** Which machine serves an object; `core/serving.odin` is the rule, `docs/object-serving.md` the spec. */
+export interface Serving {
+	/** "" when the space has no default and no machine qualifies. */
+	machineId: string;
+	reason: "pinned" | "pinned-uncapable" | "space" | "space-capable" | "capability" | "unsatisfied";
+	/** The object's `requires` list. */
+	requires: string[];
+	/** Machine ids whose `capabilities` cover `requires`, sorted. */
+	candidates: string[];
+}
+
+/** Resolve serving for many objects in one round trip; unknown ids resolve to the space default. */
+export async function servingFor(objectIds: string[]): Promise<Record<string, Serving>> {
+	if (objectIds.length === 0) return {};
+	const res = await apiFetch(`${API}/api/serving`, { method: "POST", body: JSON.stringify({ objectIds }) });
+	if (!res.ok) throw new Error(`serving: ${res.status}`);
+	return res.json() as Promise<Record<string, Serving>>;
+}
+
 /**
  * Every match, a page at a time. `total` is the unpaged count, so a
  * complete read costs one request unless the set really is larger than

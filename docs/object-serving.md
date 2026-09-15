@@ -1,6 +1,6 @@
 # Per-object serving
 
-Status: proposal. Supersedes the per-space rule in README "Sync (nostr)".
+Status: implemented. Supersedes the per-space rule in README "Sync (nostr)".
 
 ## Problem
 

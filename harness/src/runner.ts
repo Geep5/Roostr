@@ -16,7 +16,7 @@ import { boundObjectContext } from "./spacemap";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
 import { callLLM, isContextOverflowError } from "./llm";
-import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
+import { channelInstructions, listSkills, remoteCapabilitiesSection, skillsPromptSection } from "./skills";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceContext, workspacePromptSection } from "./workspace";
 import { digest } from "./memory";
@@ -162,6 +162,12 @@ async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts:
 	const skills = await listSkills(agent.id);
 	const skillsSection = skillsPromptSection(skills);
 	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
+	try {
+		const elsewhere = await remoteCapabilitiesSection(boundId);
+		if (elsewhere) parts.push({ label: "Capabilities elsewhere", text: elsewhere });
+	} catch (err) {
+		console.error("[harness] remote capabilities failed:", err instanceof Error ? err.message : err);
+	}
 	const instructions = await channelInstructions(str(agent.fields, "channel"));
 	if (instructions) parts.push({ label: "Space instructions", text: instructions });
 	// Machine-local by design: this section exists only on the machine

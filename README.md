@@ -121,9 +121,11 @@ knowing one shared-space key is not authority over another space or its members.
 Browser edits enter a durable outbox before publication, and logout refuses
 unpublished work unless it is explicitly exported.
 
-`served_by` on each space determines the serving machine. Machine claims and
-workspace bindings are not heartbeats. Only the serving machine sets its own
-verified checkout path.
+Serving is per object (`docs/object-serving.md`): the engine's resolver
+(`core/serving.odin`) picks the machine from the object's `served_by` pin,
+its `requires` capabilities against each machine object's published
+`capabilities`, then the space's `served_by` default. No heartbeats or
+leases - only the serving machine sets its own verified checkout path.
 
 ## Harness (`harness/`)
 

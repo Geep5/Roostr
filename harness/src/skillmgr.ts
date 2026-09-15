@@ -13,6 +13,7 @@
  */
 
 import { createObject, chatPost, fetchObject, mutate, query, str, queryAll } from "./api";
+import { publishCapabilities } from "./machine";
 import { objectText } from "./skills";
 
 export interface CatalogEntry {
@@ -154,6 +155,22 @@ async function readState(): Promise<StateFile> {
 
 async function writeState(state: StateFile): Promise<void> {
 	await Bun.write(STATE_PATH, JSON.stringify(state, null, "\t"));
+}
+
+/** Catalog keys installed AND enabled here - what this machine can do for an object that `requires` it. */
+function capabilityKeys(state: StateFile): string[] {
+	return CATALOG.filter((c) => state.skills[c.key]?.enabled && state.skills[c.key]?.installed).map((c) => c.key);
+}
+
+/** A skill state change: persist, then publish the capability set to this machine's object (a write only on change). */
+async function saveSkills(state: StateFile): Promise<void> {
+	await writeState(state);
+	void publishCapabilities(capabilityKeys(state));
+}
+
+/** This machine's capability keys; the boot path publishes them so the machine object exists before anything is served. */
+export async function capabilities(): Promise<string[]> {
+	return capabilityKeys(await readState());
 }
 
 /**
@@ -373,19 +390,19 @@ export async function recheckSkill(key: string): Promise<SkillPhase> {
 	const check = await sh(entry.checkCmd);
 	if (!check.ok) {
 		state.skills[key] = { enabled: false, installed: false, log: `[failed] check "${entry.checkCmd}" failed:\n${check.out}`, updatedAt: Date.now() };
-		await writeState(state);
+		await saveSkills(state);
 		return "failed";
 	}
 	if (entry.authCheckCmd) {
 		const auth = await sh(entry.authCheckCmd);
 		if (!auth.ok) {
 			state.skills[key] = { enabled: false, installed: true, log: `[needs-auth] ${entry.authHint ?? "authentication required"}\n${auth.out}`, updatedAt: Date.now() };
-			await writeState(state);
+			await saveSkills(state);
 			return "needs-auth";
 		}
 	}
 	state.skills[key] = { enabled: true, installed: true, log: "", updatedAt: Date.now() };
-	await writeState(state);
+	await saveSkills(state);
 	await upsertSkillObject(entry);
 	return "on";
 }
@@ -517,7 +534,7 @@ export async function disableSkill(key: string): Promise<void> {
 		s.enabled = false;
 		s.log = "";
 		s.updatedAt = Date.now();
-		await writeState(state);
+		await saveSkills(state);
 	}
 	// Skill object stays in the DAG but stops being listed (device filter).
 }
@@ -540,7 +557,7 @@ export async function uninstallSkill(key: string): Promise<SkillPhase> {
 				log: gone ? "" : `[failed] uninstall left "${entry.checkCmd}" passing\n${jobLogTail(key)}`,
 				updatedAt: Date.now(),
 			};
-			await writeState(state);
+			await saveSkills(state);
 		},
 		// Symmetric finish line: gone from PATH is what removal means.
 		async () => !(await sh(entry.checkCmd)).ok,

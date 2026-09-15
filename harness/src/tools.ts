@@ -12,17 +12,25 @@ import {
 	fetchObject,
 	fv,
 	iv,
+	list,
+	lv,
 	mutate,
 	query,
+	queryAll,
+	setField,
 	str,
 	sv,
 	type ObjectJSON,
+	type QueryRow,
 	type ValueJSON,
 	addBlock,
 	API,
 	apiFetch,
 } from "./api";
-import { fileHoldup, skillReady } from "./skillmgr";
+import { invalidateServing, machines, serverOf } from "./machine";
+import { machineId } from "./roster";
+import { CATALOG, fileHoldup, listHoldups, skillReady } from "./skillmgr";
+import { chatBlocks, isAgentAuthor } from "./surfaces";
 import { objectText, readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor } from "./spacemap";
 import * as memory from "./memory";
@@ -241,6 +249,20 @@ function domToText(html: string): string {
 	return (title ? `[title] ${title}\n` : "") + text;
 }
 
+/**
+ * Why the serving rule left this object here without the capability, if
+ * that is the case: a human pin to a machine that lacks it, or no machine
+ * having it at all. Empty otherwise (the object never required it).
+ */
+async function resolutionNote(capability: string, ctx: ToolContext): Promise<string> {
+	if (!ctx.boundObject) return "";
+	const s = await serverOf(ctx.boundObject).catch(() => null);
+	if (!s || !s.requires.includes(capability)) return "";
+	if (s.reason === "pinned-uncapable") return ` (serving: pinned-uncapable - the object is pinned to this machine, which lacks ${capability})`;
+	if (s.reason === "unsatisfied") return ` (serving: unsatisfied - no machine has ${capability})`;
+	return "";
+}
+
 /** File a holdup with best-effort agent/object names; never throws. */
 async function fileCapabilityHoldup(capability: string, error: string, ctx: ToolContext): Promise<void> {
 	let agentName = ctx.agentId.slice(0, 8);
@@ -255,11 +277,46 @@ async function fileCapabilityHoldup(capability: string, error: string, ctx: Tool
 		/* names are cosmetic */
 	}
 	try {
-		await fileHoldup({ capability, agentId: ctx.agentId, agentName, objectId, objectName, error });
+		await fileHoldup({ capability, agentId: ctx.agentId, agentName, objectId, objectName, error: error + (await resolutionNote(capability, ctx)) });
 	} catch {
 		/* the ledger must never break the turn */
 	}
 }
+
+const REQUIRE_TOOL: RegisteredTool = {
+	def: {
+		name: "object_require",
+		description:
+			"Declare that your object's work needs a machine capability listed under <capabilities-elsewhere> (a catalog key such as browserless or google). Appends it to the object's `requires`; the machine that has the capability serves the object from the next turn on - nothing moves mid-turn. Only object-bound agents can call this. Tell the human the work moved, then finish the turn.",
+		input_schema: {
+			type: "object",
+			properties: { capability: { type: "string", description: "catalog capability key" } },
+			required: ["capability"],
+		},
+	},
+	handler: async (input, ctx) => {
+		const key = S(input.capability).trim();
+		if (!CATALOG.some((c) => c.key === key)) return `error: unknown capability "${key}"; known: ${CATALOG.map((c) => c.key).join(", ")}`;
+		if (!ctx.boundObject) return "error: this agent is not bound to an object, so there is nothing to require it on";
+		const obj = await fetchObject(ctx.boundObject);
+		const name = str(obj.fields, "name") || obj.id.slice(0, 8);
+		const had = list(obj.fields, "requires");
+		if (!had.includes(key)) {
+			await setField(obj.id, "requires", lv([...had, key]));
+			ctx.touched.add(obj.id);
+		}
+		invalidateServing();
+		const [s, me, roster] = await Promise.all([serverOf(obj.id), machineId(), machines()]);
+		if (s.reason === "pinned-uncapable" || s.reason === "unsatisfied") {
+			const why = s.reason === "pinned-uncapable" ? `"${name}" is pinned to a machine that lacks ${key}` : `no machine has ${key}`;
+			await fileCapabilityHoldup(key, `object_require(${key}): ${why}`, ctx);
+			return `"${name}" now requires ${key}, but ${why}. A holdup has been filed - the human will see it in the Machine panel and can install the capability or move the pin. Tell them plainly; do not retry this turn.`;
+		}
+		if (s.machineId === me) return `ok: "${name}" requires ${key}, which this machine already has; the work stays here.`;
+		const server = roster.find((m) => m.machineId === s.machineId)?.name ?? s.machineId.slice(0, 8);
+		return `ok: "${name}" now requires ${key} and will be served by ${server} from the next turn on. Tell the human the work moved there and finish this turn.`;
+	},
+};
 
 const WEB_TOOLS: RegisteredTool[] = [
 	{
@@ -297,6 +354,51 @@ const WEB_TOOLS: RegisteredTool[] = [
 ];
 
 const TOOLS: RegisteredTool[] = [
+	{
+		def: {
+			name: "space_activity",
+			description:
+				"Recent life of this space: latest edited objects, the newest human discussion messages, recurring work due soon or overdue, and open capability holdups. Use it to brief the human on what is new and what matters - especially when they write without a specific request.",
+			input_schema: { type: "object", properties: { limit: { type: "number" } } },
+		},
+		handler: async (input, ctx) => {
+			const limit = Math.min(N(input.limit) ?? 12, 25);
+			const rows = (await queryAll({ filters: [await spaceFilter(ctx)] })).filter((r: QueryRow) => !["agent", "machine", "relation", "type", "template", "skill", "channel"].includes(r.typeKey));
+			const out: string[] = ["RECENTLY EDITED (newest first):"];
+			for (const r of [...rows].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)) {
+				out.push(`- ${r.typeKey} "${str(r.fields, "name") || r.id.slice(0, 8)}" ${new Date(r.updatedAt).toLocaleString()}`);
+			}
+			const now = Date.now();
+			const due = rows
+				.flatMap((r: QueryRow) => {
+					const next = r.fields["repeat"]?.mapValue?.entries?.["next"]?.intValue;
+					return next === undefined || next > now + 48 * 3600_000 ? [] : [{ name: str(r.fields, "name") || r.id.slice(0, 8), next: Number(next) }];
+				})
+				.sort((a: { next: number }, b: { next: number }) => a.next - b.next)
+				.slice(0, 8);
+			if (due.length > 0) {
+				out.push("", "RECURRING WORK (next occurrence):");
+				for (const d of due) out.push(`- "${d.name}" ${d.next < now ? "OVERDUE since" : "due"} ${new Date(d.next).toLocaleString()}`);
+			}
+			const msgs: string[] = [];
+			for (const c of rows.filter((r: QueryRow) => r.typeKey === "chat").sort((a: QueryRow, b: QueryRow) => b.updatedAt - a.updatedAt).slice(0, 3)) {
+				const obj = await fetchObject(c.id).catch(() => null);
+				if (!obj) continue;
+				for (const m of chatBlocks(obj).slice(-4)) {
+					const meta = m.block.content.custom?.meta ?? {};
+					if (isAgentAuthor(String(meta["author"] ?? "")) || meta["origin"]) continue;
+					msgs.push(`- ${String(meta["author"] || "human")} on "${str(obj.fields, "name") || obj.id.slice(0, 8)}": ${String(meta["text"] ?? "").slice(0, 140)}`);
+				}
+			}
+			if (msgs.length > 0) out.push("", "LATEST HUMAN MESSAGES:", ...msgs.slice(-5));
+			const holdups = await listHoldups().catch(() => []);
+			if (holdups.length > 0) {
+				out.push("", "OPEN HOLDUPS (capabilities missing):");
+				for (const h of holdups.slice(0, 5)) out.push(`- ${h.capability}: ${h.error.slice(0, 140)} (x${h.count})`);
+			}
+			return out.join("\n");
+		},
+	},
 	{
 		def: {
 			name: "object_search",

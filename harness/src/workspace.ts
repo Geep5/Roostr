@@ -9,8 +9,10 @@
  *     machine's object as a JSON map (`paths`: spaceId -> absolute path)
  *     with a sibling status map (`paths_status`). It syncs like everything
  *     else so any device can SEE where checkouts live, but only the machine
- *     that serves the space ever writes its own entry (enforced by the
- *     harness endpoint being the sole writer - the UI has no direct path).
+ *     that serves the space object (`docs/object-serving.md`: a channel
+ *     resolves to its own `served_by`) ever writes its own entry (enforced
+ *     by the harness endpoint being the sole writer - the UI has no direct
+ *     path).
  *
  * The binding is what makes serving sticky in practice: the machine with
  * the working copy is the only one that can execute in it.
@@ -18,7 +20,7 @@
 
 import { fetchObject, queryAll, setField, str, sv, type QueryRow } from "./api";
 import { machineId } from "./roster";
-import { MACHINE_TYPE } from "./machine";
+import { MACHINE_TYPE, servesHere } from "./machine";
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
@@ -61,9 +63,7 @@ export class WorkspaceAccessError extends Error {}
 async function servingSpace(spaceId: string) {
 	if (!spaceId) throw new WorkspaceAccessError("space required");
 	const space = await fetchObject(spaceId);
-	if (str(space.fields, "served_by") !== await machineId()) {
-		throw new WorkspaceAccessError("this machine does not serve this space");
-	}
+	if (!(await servesHere(spaceId))) throw new WorkspaceAccessError("this machine does not serve this space");
 	return space;
 }
 

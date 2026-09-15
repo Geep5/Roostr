@@ -9,6 +9,8 @@
  */
 
 import { fetchObject, query, queryAll, str, type ObjectJSON } from "./api";
+import { machines, serverOf } from "./machine";
+import { machineId } from "./roster";
 import { blockLine } from "./surfaces";
 
 /**
@@ -94,6 +96,30 @@ export function skillsPromptSection(skills: SkillListing[]): string {
 	if (skills.length === 0) return "";
 	const lines = skills.map((s) => `- ${s.name}: ${s.description}`);
 	return `<skills>\nReusable skills. When a task matches one, call skill_read BEFORE starting to load its full instructions:\n${lines.join("\n")}\n</skills>`;
+}
+
+/**
+ * Prompt section for a bound agent: catalog capabilities other machines
+ * have and this one lacks, so the agent knows that `object_require` can
+ * move its object's work there (`docs/object-serving.md`). Keys the
+ * object already requires are not repeated - if the work is still here,
+ * requiring them again changes nothing. Empty for unbound agents (they
+ * have no object to require on) and when nothing is missing.
+ */
+export async function remoteCapabilitiesSection(objectId: string): Promise<string> {
+	if (!objectId) return "";
+	// Dynamic, as in listSkills: skillmgr imports objectText from here.
+	const { CATALOG, capabilities } = await import("./skillmgr");
+	const me = await machineId();
+	const [local, roster, serving] = await Promise.all([capabilities(), machines(), serverOf(objectId)]);
+	const lines: string[] = [];
+	for (const c of CATALOG) {
+		if (local.includes(c.key) || serving.requires.includes(c.key)) continue;
+		const where = roster.filter((m) => m.machineId !== me && m.capabilities.includes(c.key)).map((m) => m.name);
+		if (where.length > 0) lines.push(`- ${c.key} (${where.join(", ")})`);
+	}
+	if (lines.length === 0) return "";
+	return `<capabilities-elsewhere>\nCapabilities this machine lacks that other machines have:\n${lines.join("\n")}\nTo use one, call object_require with its key; this object's work then moves to that machine on the next turn.\n</capabilities-elsewhere>`;
 }
 
 /** Channel instructions (CLAUDE.md analog): inlined fully. */
