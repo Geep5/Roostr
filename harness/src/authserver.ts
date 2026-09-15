@@ -12,7 +12,7 @@ import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
 import { clearHoldup, disableSkill, enableSkill, listHoldups, recheckSkill, republishCapabilities, skillStatus, uninstallSkill, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { credentialStatus, finishBrowserLogin, removeCredential, setPasswordCredential, startBrowserLogin } from "./credentials";
-import { fetchObject, str } from "./api";
+import { deleteField, fetchObject, str } from "./api";
 import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
 import { WorkspaceAccessError } from "./workspace";
 import type { SpaceJoinLink } from "./nostrsync";
@@ -233,7 +233,18 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 				}
 				if (req.method === "POST" && url.pathname === "/skills/holdup-clear") {
 					const body = (await req.json()) as { id?: string };
+					// The holdup wrote an error badge on its object ("needs
+					// <cap>: ..."); clearing the holdup clears exactly that.
+					const h = (await listHoldups()).find((x) => x.id === (body.id ?? ""));
 					await clearHoldup(body.id ?? "");
+					if (h?.objectId) {
+						try {
+							const obj = await fetchObject(h.objectId);
+							if (str(obj.fields, "error").startsWith(`needs ${h.capability}:`)) await deleteField(h.objectId, "error");
+						} catch {
+							/* badge clearing is best-effort */
+						}
+					}
 					return json({ ok: true });
 				}
 				if (req.method === "POST" && url.pathname.startsWith("/skills/")) {

@@ -150,6 +150,8 @@ export const lv = (items: string[]): ValueJSON => ({ valuesValue: { items: items
 export const setField = (id: string, key: string, value: ValueJSON) =>
 	mutate("set_field", { object_id: id, key, value });
 
+export const deleteField = (id: string, key: string) => mutate("delete_field", { object_id: id, key });
+
 export const createObject = async (name: string, typeKey: string, fields?: Record<string, ValueJSON>) =>
 	(await mutate("create", { name, type_key: typeKey, fields })) as { id: string };
 

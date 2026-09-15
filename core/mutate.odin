@@ -980,6 +980,11 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// Per-object serving (serving.odin); rendered by the serving chip.
 	{"served_by", "shorttext", "Served by", "🖥️", true, false, 0},
 	{"requires", "tag", "Requires", "🧩", true, false, 0},
+	// A "current problem" badge: the scheduler, a holdup, an agent, or a
+	// human sets it; visible and editable like any property so views can
+	// filter and sort by it. Automation prefixes its messages ("run failed:",
+	// "needs <capability>:") and only ever clears what it wrote.
+	{"error", "shorttext", "Error", "⚠️", false, false, 0},
 	{"url", "url", "URL", "🔗", false, false, 0},
 	{"email", "email", "Email", "✉️", false, false, 0},
 	{"phone", "phone", "Phone", "📞", false, false, 0},

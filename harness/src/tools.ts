@@ -14,6 +14,7 @@ import {
 	iv,
 	list,
 	lv,
+	deleteField,
 	mutate,
 	query,
 	queryAll,
@@ -264,7 +265,7 @@ async function resolutionNote(capability: string, ctx: ToolContext): Promise<str
 }
 
 /** File a holdup with best-effort agent/object names; never throws. */
-async function fileCapabilityHoldup(capability: string, error: string, ctx: ToolContext): Promise<void> {
+export async function fileCapabilityHoldup(capability: string, error: string, ctx: ToolContext): Promise<void> {
 	let agentName = ctx.agentId.slice(0, 8);
 	let objectId = ctx.boundObject ?? "";
 	let objectName = "";
@@ -281,7 +282,36 @@ async function fileCapabilityHoldup(capability: string, error: string, ctx: Tool
 	} catch {
 		/* the ledger must never break the turn */
 	}
+	// The same problem lands on the object's Error badge (prefix "needs
+	// <cap>:" - clearing the holdup clears exactly this).
+	if (ctx.boundObject) {
+		try {
+			await setField(ctx.boundObject, "error", sv(`needs ${capability}: ${error}`.slice(0, 300)));
+		} catch {
+			/* badge must never break the turn */
+		}
+	}
 }
+
+const FLAG_ERROR_TOOL: RegisteredTool = {
+	def: {
+		name: "object_flag_error",
+		description:
+			"Flag your object as broken: set its Error property so the human sees it in their views (they can sort and filter by it). Pass a short reason. Call again with an empty message once the problem is resolved to clear it. Only object-bound agents can call this.",
+		input_schema: { type: "object", properties: { message: { type: "string", description: "short reason; empty clears the flag" } } },
+	},
+	handler: async (input, ctx) => {
+		if (!ctx.boundObject) return "error: this agent is not bound to an object, so there is nothing to flag";
+		const message = S(input.message).trim().slice(0, 300);
+		ctx.touched.add(ctx.boundObject);
+		if (!message) {
+			await deleteField(ctx.boundObject, "error");
+			return "ok: error flag cleared";
+		}
+		await setField(ctx.boundObject, "error", sv(message));
+		return `ok: error flagged ("${message}") - it shows in the human's views until cleared. Tell them plainly.`;
+	},
+};
 
 const REQUIRE_TOOL: RegisteredTool = {
 	def: {
@@ -906,7 +936,7 @@ const A2A_TOOL: RegisteredTool = {
 
 export function toolDefs(template: string, depth: number, allowAsk = false): ToolDef[] {
 	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read"]);
-	let defs = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS].map((t) => t.def);
+	let defs = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, REQUIRE_TOOL, FLAG_ERROR_TOOL].map((t) => t.def);
 	if (template === "" && depth === 0 && allowAsk) defs.push(A2A_TOOL.def);
 	if (template === "explore") defs = defs.filter((d) => READ_ONLY.has(d.name));
 	const out = [...defs];
@@ -934,7 +964,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>,
 			ctx.submitResult(S(input.content));
 			return { content: "result submitted", isError: false };
 		}
-		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, A2A_TOOL].find((t) => t.def.name === name);
+		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, REQUIRE_TOOL, FLAG_ERROR_TOOL, A2A_TOOL].find((t) => t.def.name === name);
 		if (!tool) return { content: `unknown tool: ${name}`, isError: true };
 		const content = await tool.handler(input, ctx);
 		return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };

@@ -24,7 +24,7 @@
  * occurrences (sleep, downtime) fire on the next arm, each once.
  */
 
-import { addBlock, fetchObject, mutate, queryAll, str, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { addBlock, deleteField, fetchObject, mutate, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { primeServing, servesHere } from "./machine";
 import { machineId } from "./roster";
 import { objectText } from "./skills";
@@ -209,4 +209,9 @@ async function dispatch(d: Due, me: string): Promise<void> {
 	const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: owner.chatId };
 	if (error) run.error = error;
 	await mutate("run_record", { object_id: obj.id, run });
+	// The error badge: a failed run sets it; a clean run clears what a
+	// failed run wrote - never a human's or another writer's message.
+	const badge = str(obj.fields, "error");
+	if (error) await setField(obj.id, "error", sv(`run failed: ${error}`.slice(0, 300)));
+	else if (badge.startsWith("run failed:")) await deleteField(obj.id, "error");
 }
