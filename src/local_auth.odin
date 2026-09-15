@@ -33,6 +33,64 @@ local_random_token :: proc() -> string {
 	crypto.rand_bytes(bytes[:])
 	return string(hex.encode(bytes[:], context.allocator))
 }
+// UI sessions persist so "pair once" survives daemon restarts too; the
+// file mirrors the api-token rules (owner-only, re-tightened on touch).
+local_sessions_path :: proc() -> string {
+	path, _ := filepath.join({g_store.data_root, "ui-sessions"}, context.temp_allocator)
+	return strings.clone(path)
+}
+
+// Caller holds g_local_auth.mu.
+local_sessions_save :: proc() {
+	arr: json.Array
+	for s in g_local_auth.sessions {
+		if s.token == "" || s.expires <= unix_ms() do continue
+		o := core.jobj()
+		o["token"] = json.String(s.token)
+		o["origin"] = json.String(s.origin)
+		o["expires"] = json.Float(f64(s.expires))
+		append(&arr, json.Object(o))
+	}
+	data, err := json.marshal(arr, allocator = context.temp_allocator)
+	if err != nil do return
+	path := local_sessions_path()
+	defer delete(path)
+	file, ferr := os.open(path, {.Write, .Create, .Trunc}, {.Read_User, .Write_User})
+	if ferr != nil do return
+	defer os.close(file)
+	os.fchmod(file, {.Read_User, .Write_User})
+	os.write(file, data)
+}
+
+local_sessions_load :: proc() {
+	path := local_sessions_path()
+	defer delete(path)
+	file, err := os.open(path)
+	if err != nil do return
+	defer os.close(file)
+	os.fchmod(file, {.Read_User, .Write_User})
+	data, rerr := os.read_entire_file(file, context.temp_allocator)
+	if rerr != nil do return
+	parsed, perr := json.parse(data, allocator = context.temp_allocator)
+	if perr != nil do return
+	arr, ok := parsed.(json.Array)
+	if !ok do return
+	now := unix_ms()
+	sync.lock(&g_local_auth.mu)
+	defer sync.unlock(&g_local_auth.mu)
+	n := 0
+	for item in arr {
+		if n >= len(g_local_auth.sessions) do break
+		obj, is_obj := item.(json.Object)
+		if !is_obj do continue
+		token := core.json_str(obj, "token")
+		origin := core.json_str(obj, "origin")
+		expires, has_expires := core.json_int(obj, "expires")
+		if len(token) != 64 || origin == "" || !has_expires || expires <= now do continue
+		g_local_auth.sessions[n] = Local_Session{strings.clone(token), strings.clone(origin), expires}
+		n += 1
+	}
+}
 
 local_secret_equal :: proc(a, b: string) -> bool {
 	if len(a) != len(b) || len(a) == 0 do return false
@@ -63,6 +121,7 @@ local_auth_init :: proc(port: int) {
 		for c in token do if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') do panic("invalid api-token")
 		g_local_auth.service_token = strings.clone(token)
 	}
+	local_sessions_load()
 	local_pair_start()
 }
 
@@ -171,6 +230,7 @@ local_pair :: proc(code, origin: string, now: i64) -> (token: string, expires: i
 		g_local_auth.code_expires = 0
 		delete(g_local_auth.code)
 		g_local_auth.code = ""
+		local_sessions_save()
 		return session.token, session.expires, "200 OK"
 	}
 	return "", 0, "429 Too Many Requests"
