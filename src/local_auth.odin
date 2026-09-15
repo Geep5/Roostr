@@ -104,6 +104,18 @@ local_cors :: proc(origin: string) -> string {
 	return fmt.tprintf("Access-Control-Allow-Origin: %s\r\nVary: Origin\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\nAccess-Control-Allow-Private-Network: true\r\n", origin)
 }
 
+// Stricter than local_origin_valid (which welcomes any https origin for
+// hosted-app pairing): only a UI served from this very machine may read
+// the pairing code - anything else would hand remote sites local access.
+local_origin_loopback :: proc(origin: string) -> bool {
+	https := strings.has_prefix(origin, "https://")
+	if !https && !strings.has_prefix(origin, "http://") do return false
+	authority := origin[(https ? 8 : 7):]
+	host := authority
+	if colon := strings.index_byte(authority, ':'); colon >= 0 do host = authority[:colon]
+	return host == "localhost" || host == "127.0.0.1"
+}
+
 local_bearer :: proc(header: string) -> string {
 	if !strings.has_prefix(header, "Bearer ") do return ""
 	token := header[7:]
@@ -185,6 +197,24 @@ local_authorize :: proc(sock: net.TCP_Socket, req: Request) -> bool {
 	if req.method == "GET" && req.path == "/api/pair/status" {
 		if local_origin_valid(req.origin) do g_response_cors = local_cors(req.origin)
 		respond(sock, "200 OK", "application/json", transmute([]byte)string("{\"needsPair\":true}"))
+		return false
+	}
+	if req.method == "GET" && req.path == "/api/pair/code" {
+		// Pairing guards outside access; a valid local origin may read the
+		// current code instead of digging it out of the daemon terminal.
+		if !local_origin_loopback(req.origin) { respond_error(sock, "origin not allowed", "403 Forbidden"); return false }
+		g_response_cors = local_cors(req.origin)
+		sync.lock(&g_local_auth.mu)
+		if g_local_auth.code == "" || g_local_auth.code_expires <= now {
+			sync.unlock(&g_local_auth.mu)
+			local_pair_start()
+			sync.lock(&g_local_auth.mu)
+		}
+		o := core.jobj()
+		o["code"] = json.String(strings.clone(g_local_auth.code, context.temp_allocator))
+		o["expiresAt"] = json.Float(f64(g_local_auth.code_expires))
+		sync.unlock(&g_local_auth.mu)
+		respond_json(sock, json.Object(o))
 		return false
 	}
 	if req.method == "POST" && pair {
