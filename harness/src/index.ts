@@ -465,7 +465,7 @@ async function serve(): Promise<void> {
 	 * this waits for the agent's slot rather than queueing a surface, then
 	 * runs one turn. Not human-rooted: no agent_ask.
 	 */
-	async function driveScheduled(s: Served, systemSuffix: string): Promise<string> {
+	async function driveScheduled(s: Served, systemSuffix: string, requirementsObjectId?: string): Promise<string> {
 		while (busy.has(s.agentId)) {
 			const { promise, resolve } = Promise.withResolvers<void>();
 			let waiters = idleWaiters.get(s.agentId);
@@ -473,7 +473,7 @@ async function serve(): Promise<void> {
 			waiters.push(resolve);
 			await promise;
 		}
-		return withTurn(s, s.chatId, () => runTurn(s.agentId, s.chatId, { spawn: spawnSubagent, systemSuffix }));
+		return withTurn(s, s.chatId, () => runTurn(s.agentId, s.chatId, { spawn: spawnSubagent, systemSuffix, requirementsObjectId }));
 	}
 
 	/**
@@ -702,10 +702,10 @@ async function serve(): Promise<void> {
 			served.set(agentId, one);
 			return one;
 		},
-		turn(agentId, systemSuffix) {
+		turn(agentId, systemSuffix, requirementsObjectId) {
 			const s = served.get(agentId);
 			if (!s) return Promise.resolve("agent no longer served on this machine");
-			return driveScheduled(s, systemSuffix);
+			return driveScheduled(s, systemSuffix, requirementsObjectId);
 		},
 	});
 }

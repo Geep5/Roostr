@@ -33,7 +33,7 @@ export interface ScheduleHost {
 	/** The agent's holistic chat when this machine serves it; undefined otherwise. */
 	served(agentId: string): Promise<{ agentId: string; chatId: string } | undefined>;
 	/** One scheduler-started turn on the agent's chat, serialized with its other turns. Resolves to the failure message, "" on success. */
-	turn(agentId: string, systemSuffix: string): Promise<string>;
+	turn(agentId: string, systemSuffix: string, requirementsObjectId: string): Promise<string>;
 }
 
 const TURN_SUFFIX =
@@ -233,7 +233,7 @@ async function dispatch(d: Due, me: string): Promise<void> {
 	].join("\n");
 	await postScheduled(owner.chatId, frame, d, me);
 	console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) → agent ${owner.agentId.slice(0, 8)}`);
-	const error = await host.turn(owner.agentId, TURN_SUFFIX);
+	const error = await host.turn(owner.agentId, TURN_SUFFIX, obj.id);
 	const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: owner.chatId };
 	if (error) run.error = error;
 	await mutate("run_record", { object_id: obj.id, run });
