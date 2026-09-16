@@ -33,6 +33,31 @@ const CLAUDE_CODE_BETAS = [
 	"interleaved-thinking-2025-05-14",
 	"prompt-caching-scope-2026-01-05",
 ].join(",");
+const PROVIDER_RETRY_DELAYS_MS = [1_000, 3_000];
+const RETRYABLE_PROVIDER_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+
+function retryableProviderError(err: unknown): boolean {
+	const msg = err instanceof Error ? err.message : String(err);
+	return /socket connection was closed unexpectedly|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|fetch failed|network|temporarily unavailable/i.test(msg);
+}
+
+export async function fetchWithRetry(input: string, init: RequestInit, retryDelaysMs: readonly number[] = PROVIDER_RETRY_DELAYS_MS): Promise<Response> {
+	let last: unknown;
+	for (let attempt = 0; attempt <= retryDelaysMs.length; attempt++) {
+		try {
+			const res = await fetch(input, init);
+			if (!RETRYABLE_PROVIDER_STATUS.has(res.status)) return res;
+			const body = await res.text();
+			last = new Error(`${input} ${res.status}: ${body.slice(0, 600)}`);
+		} catch (err) {
+			last = err;
+			if (!retryableProviderError(err)) throw err;
+		}
+		if (attempt < retryDelaysMs.length) await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
+	}
+	throw last instanceof Error ? last : new Error(String(last));
+}
+
 const CLAUDE_CODE_STAINLESS_HEADERS: Record<string, string> = {
 	"X-Stainless-Helper-Method": "stream",
 	"X-Stainless-Retry-Count": "0",
@@ -100,7 +125,7 @@ async function callAnthropic(req: LLMRequest): Promise<LLMResult> {
 		headers["x-api-key"] = auth.token;
 	}
 
-	const res = await fetch("https://api.anthropic.com/v1/messages", {
+	const res = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
 		method: "POST",
 		headers,
 		body: JSON.stringify(body),
@@ -157,7 +182,7 @@ async function callKimi(req: LLMRequest): Promise<LLMResult> {
 			}
 		}
 	}
-	const res = await fetch("https://api.moonshot.ai/v1/chat/completions", {
+	const res = await fetchWithRetry("https://api.moonshot.ai/v1/chat/completions", {
 		method: "POST",
 		headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
 		body: JSON.stringify({
