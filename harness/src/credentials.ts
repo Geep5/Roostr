@@ -166,11 +166,11 @@ export function credentialsPromptLine(): string {
 	const parts: string[] = [];
 	for (const c of CREDENTIALS) {
 		const ways: string[] = [];
-		if (browserActive(c.key)) ways.push(`logged-in Chrome profile ${browserProfileDir(c.key)}; use shell_exec to launch Chrome with --user-data-dir=<path> when the task needs this account`);
+		if (browserActive(c.key)) ways.push(`logged-in Chrome profile ${browserProfileDir(c.key)}; call credential_fetch for pages that need this account; it runs headless Chrome with --headless=new --user-data-dir=<path>`);
 		if (store.credentials[c.key]) ways.push(`keys in ${storePath()} under "${c.key}"`);
 		if (ways.length > 0) parts.push(`${c.label}: ${ways.join("; ")}`);
 	}
-	return parts.length === 0 ? "" : `Credentials available on this machine. browserless/web_fetch is deliberately logged out; use these profiles or keys when the task depends on the account:\n${parts.map((p) => `- ${p}`).join("\n")}`;
+	return parts.length === 0 ? "" : `Credentials available on this machine. browserless/web_fetch is deliberately logged out; use credential_fetch or these keys when the task depends on the account:\n${parts.map((p) => `- ${p}`).join("\n")}`;
 }
 
 /** Save password-kind fields; every catalog field is required. */
@@ -219,6 +219,8 @@ export function startBrowserLogin(key: string): { pid: number } {
 	const dir = browserProfileDir(key);
 	mkdirSync(dir, { recursive: true });
 	const proc = Bun.spawn([bin, `--user-data-dir=${dir}`, "--no-first-run", "--no-default-browser-check", "--new-window", entry.loginUrl], {
+		// Setup is deliberately headed: the human may need 2FA and site
+		// challenge UI. Scheduled work must instead launch headlessly.
 		stdout: "ignore",
 		stderr: "ignore",
 		stdin: "ignore",

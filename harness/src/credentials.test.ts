@@ -4,17 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { credentialsPromptLine } from "./credentials";
+import { resetScheduler } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
 
 beforeEach(async () => {
+	resetScheduler();
 	previousRoot = process.env.GLON_DATA;
 	root = await mkdtemp(join(tmpdir(), "roostr-credentials-"));
 	process.env.GLON_DATA = root;
 });
 
 afterEach(async () => {
+	resetScheduler();
 	if (previousRoot === undefined) delete process.env.GLON_DATA;
 	else process.env.GLON_DATA = previousRoot;
 	await rm(root, { recursive: true, force: true });
@@ -34,6 +37,7 @@ test("browser credentials tell agents to use the logged-in Chrome profile, not b
 	const line = credentialsPromptLine();
 	expect(line).toContain("browserless/web_fetch is deliberately logged out");
 	expect(line).toContain("logged-in Chrome profile");
-	expect(line).toContain("shell_exec");
+	expect(line).toContain("credential_fetch");
+	expect(line).toContain("--headless=new");
 	expect(line).toContain("--user-data-dir=<path>");
 });

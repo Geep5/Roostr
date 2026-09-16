@@ -31,6 +31,7 @@ import {
 import { invalidateServing, machines, serverOf } from "./machine";
 import { machineId } from "./roster";
 import { CATALOG, fileHoldup, listHoldups, skillReady } from "./skillmgr";
+import { browserProfileDir, credentialStatus } from "./credentials";
 import { chatBlocks, isAgentAuthor } from "./surfaces";
 import { objectText, readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor } from "./spacemap";
@@ -349,6 +350,53 @@ const REQUIRE_TOOL: RegisteredTool = {
 };
 
 const WEB_TOOLS: RegisteredTool[] = [
+	{
+		def: {
+			name: "credential_fetch",
+			description:
+				"Fetch a live page through an active service credential's logged-in Chrome profile, headlessly, and return its rendered text. Use this instead of web_fetch or opening Chrome when the task depends on a signed-in account (currently X). If the credential is unavailable this files a holdup; if the page shows a login wall, report the credential as broken.",
+			input_schema: {
+				type: "object",
+				properties: {
+					credential: { type: "string", enum: ["x"] },
+					url: { type: "string", description: "absolute http(s) URL" },
+				},
+				required: ["credential", "url"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const key = S(input.credential);
+			const entry = credentialStatus().find((c) => c.key === key);
+			if (!entry?.active.browser) {
+				const reason = `credential "${key}" has no logged-in browser profile`;
+				await fileCapabilityHoldup(key, reason, ctx);
+				return `Credential unavailable: ${reason}. A holdup has been filed for the human in the Machine panel.`;
+			}
+			const url = S(input.url).trim();
+			if (!/^https?:\/\//i.test(url)) return "error: url must be absolute http(s)";
+			const profile = browserProfileDir(key);
+			const chrome = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"].find((p) => Bun.file(p).size > 0);
+			if (!chrome) {
+				const reason = "no Chrome/Chromium/Brave binary found";
+				await fileCapabilityHoldup(key, reason, ctx);
+				return `Credential failed: ${reason}. A holdup has been filed for the human in the Machine panel.`;
+			}
+			const proc = Bun.spawn([chrome, "--headless=new", "--disable-gpu", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--metrics-recording-only", "--no-first-run", "--no-default-browser-check", "--virtual-time-budget=15000", `--user-data-dir=${profile}`, "--dump-dom", url], { stdout: "pipe", stderr: "pipe" });
+			const timer = setTimeout(() => {
+				proc.kill();
+				Bun.spawn(["pkill", "-TERM", "-P", String(proc.pid)], { stdout: "ignore", stderr: "ignore" });
+			}, WEB_FETCH_TIMEOUT_MS);
+			const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+			const code = await proc.exited;
+			clearTimeout(timer);
+			if (code !== 0 || !out.trim()) {
+				const reason = `headless ${entry.label} Chrome failed on ${url}: ${(err || out || "no output").trim().slice(0, 300)}`;
+				await fileCapabilityHoldup(key, reason, ctx);
+				return `Credential failed: ${reason}. A holdup has been filed for the human in the Machine panel.`;
+			}
+			return domToText(out).slice(0, WEB_FETCH_CAP) || "(page rendered empty)";
+		},
+	},
 	{
 		def: {
 			name: "web_fetch",
@@ -774,6 +822,9 @@ const SHELL_TOOL: RegisteredTool = {
 	handler: async (input, ctx) => {
 		const command = S(input.command);
 		if (!command) return "error: command required";
+		if (/\bopen\b[\s\S]*Chrome|--new-window/.test(command) && command.includes("browser-profiles")) {
+			return "error: do not open a headed Chrome for machine credentials. Use credential_fetch for logged-in page reads; it runs headlessly.";
+		}
 		const proc = Bun.spawn(["sh", "-lc", command], { cwd: ctx.workspacePath || process.env.HOME, stdout: "pipe", stderr: "pipe" });
 		const timer = setTimeout(() => proc.kill(), SHELL_TIMEOUT_MS);
 		const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);

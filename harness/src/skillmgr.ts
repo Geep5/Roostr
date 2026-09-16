@@ -81,7 +81,7 @@ export const CATALOG: CatalogEntry[] = [
 			"Use it when a page needs JavaScript to render (SPAs, dashboards) and plain curl returns an empty shell.\n" +
 			"`browserless <url>` prints the rendered DOM; `browserless --screenshot out.png <url>` and `browserless --pdf out.pdf <url>` capture the page.\n" +
 			"It runs in Chrome's own headless profile, never signed in as the human — expect logged-out pages.\n" +
-			"For a task that needs an account, do NOT use browserless; use the logged-in Chrome profile listed in <credentials> with shell_exec.\n" +
+			"For a task that needs an account, do NOT use browserless; call credential_fetch with the credential key listed in <credentials>.\n" +
 			"Prefer plain curl for static pages: this launches a browser per call.",
 	},
 	{
