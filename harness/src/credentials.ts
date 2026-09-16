@@ -60,6 +60,13 @@ export const CREDENTIALS: CredentialEntry[] = [
 		],
 	},
 	{
+		key: "matcherino",
+		label: "Matcherino",
+		note: "Log in with Chrome to let agents administer Matcherino featured content through this machine.",
+		loginUrl: "https://matcherino.com/login",
+		sessionCookie: { host: "matcherino.com", name: "_matcherino_session" },
+	},
+	{
 		key: "linkedin",
 		label: "LinkedIn",
 		note: "LinkedIn has no write API for people; a logged-in Chrome session is the only way agents can act here.",
@@ -166,11 +173,11 @@ export function credentialsPromptLine(): string {
 	const parts: string[] = [];
 	for (const c of CREDENTIALS) {
 		const ways: string[] = [];
-		if (browserActive(c.key)) ways.push(`logged-in Chrome profile ${browserProfileDir(c.key)}; call credential_fetch to read pages or credential_action to perform account actions; both run headless Chrome with --headless=new --user-data-dir=<path>`);
+		if (browserActive(c.key)) ways.push(`logged-in Chrome profile ${browserProfileDir(c.key)}; call credential_fetch to read pages or the local x-retweet <status-url> command to retweet through the profile headlessly`);
 		if (store.credentials[c.key]) ways.push(`keys in ${storePath()} under "${c.key}"`);
 		if (ways.length > 0) parts.push(`${c.label}: ${ways.join("; ")}`);
 	}
-	return parts.length === 0 ? "" : `Credentials available on this machine. browserless/web_fetch is deliberately logged out; use credential_fetch/credential_action or these keys when the task depends on the account:\n${parts.map((p) => `- ${p}`).join("\n")}`;
+	return parts.length === 0 ? "" : `Credentials available on this machine. browserless/web_fetch is deliberately logged out; use credential_fetch for logged-in reads or x-retweet for X retweets:\n${parts.map((p) => `- ${p}`).join("\n")}`;
 }
 
 /** Save password-kind fields; every catalog field is required. */
