@@ -39,7 +39,7 @@ export const CATALOG: CatalogEntry[] = [
 	{
 		key: "browserless",
 		name: "browserless",
-		description: "Drive a headless Chrome from the shell — fetch rendered pages, screenshots, and PDFs of JS-heavy sites.",
+		description: "Render pages, screenshots, and PDFs in headless Chrome; use machine credential profiles when a task needs a signed-in account.",
 		// Two traps, both learned the hard way. The npm package named
 		// `browserless` is a Puppeteer *library* with no `bin`, so installing
 		// it can never satisfy `command -v browserless`. And a throwaway
@@ -81,6 +81,7 @@ export const CATALOG: CatalogEntry[] = [
 			"Use it when a page needs JavaScript to render (SPAs, dashboards) and plain curl returns an empty shell.\n" +
 			"`browserless <url>` prints the rendered DOM; `browserless --screenshot out.png <url>` and `browserless --pdf out.pdf <url>` capture the page.\n" +
 			"It runs in Chrome's own headless profile, never signed in as the human — expect logged-out pages.\n" +
+			"For a task that needs an account, do NOT use browserless; use the logged-in Chrome profile listed in <credentials> with shell_exec.\n" +
 			"Prefer plain curl for static pages: this launches a browser per call.",
 	},
 	{

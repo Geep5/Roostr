@@ -166,11 +166,11 @@ export function credentialsPromptLine(): string {
 	const parts: string[] = [];
 	for (const c of CREDENTIALS) {
 		const ways: string[] = [];
-		if (browserActive(c.key)) ways.push(`Chrome profile ${browserProfileDir(c.key)} (launch Chrome with --user-data-dir=<path> to act logged in)`);
+		if (browserActive(c.key)) ways.push(`logged-in Chrome profile ${browserProfileDir(c.key)}; use shell_exec to launch Chrome with --user-data-dir=<path> when the task needs this account`);
 		if (store.credentials[c.key]) ways.push(`keys in ${storePath()} under "${c.key}"`);
 		if (ways.length > 0) parts.push(`${c.label}: ${ways.join("; ")}`);
 	}
-	return parts.length === 0 ? "" : `Credentials available on this machine:\n${parts.map((p) => `- ${p}`).join("\n")}`;
+	return parts.length === 0 ? "" : `Credentials available on this machine. browserless/web_fetch is deliberately logged out; use these profiles or keys when the task depends on the account:\n${parts.map((p) => `- ${p}`).join("\n")}`;
 }
 
 /** Save password-kind fields; every catalog field is required. */
