@@ -12,6 +12,7 @@ import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
 import { clearHoldup, disableSkill, enableSkill, listHoldups, recheckSkill, republishCapabilities, skillStatus, uninstallSkill, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { credentialStatus, finishBrowserLogin, removeCredential, setPasswordCredential, startBrowserLogin } from "./credentials";
+import { addGoogleAccount, listGoogleAccounts, removeGoogleAccount } from "./google";
 import { deleteField, fetchObject, str } from "./api";
 import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
 import { WorkspaceAccessError } from "./workspace";
@@ -200,6 +201,26 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 				}
 				if (req.method === "GET" && url.pathname === "/credentials") {
 					return json({ credentials: credentialStatus() });
+				}
+				if (req.method === "GET" && url.pathname === "/google/accounts") {
+					return json({ accounts: await listGoogleAccounts() });
+				}
+				if (req.method === "POST" && url.pathname === "/google/accounts/add") {
+					const body = (await req.json()) as { account?: string };
+					try {
+						return json({ account: addGoogleAccount((body.account ?? "").trim().toLowerCase()) });
+					} catch (err) {
+						return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+					}
+				}
+				if (req.method === "POST" && url.pathname === "/google/accounts/remove") {
+					const body = (await req.json()) as { account?: string };
+					try {
+						removeGoogleAccount((body.account ?? "").trim().toLowerCase());
+						return json({ ok: true });
+					} catch (err) {
+						return json({ error: err instanceof Error ? err.message : String(err) }, 400);
+					}
 				}
 				if (req.method === "POST" && url.pathname === "/credentials/password") {
 					const body = (await req.json()) as { key?: string; fields?: Record<string, string> };
