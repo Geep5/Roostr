@@ -50,6 +50,7 @@ interface Due {
 }
 
 let host: ScheduleHost | null = null;
+let turnEnded: (() => void) | undefined;
 let timer: Timer | undefined;
 let arming = false;
 let armAgain = false;
@@ -78,8 +79,15 @@ export async function startScheduler(h: ScheduleHost): Promise<void> {
 	host = h;
 	await arm();
 }
+/** Completion signal for deterministic tests; production ignores it. */
+export function waitForTurnEnd(): Promise<void> {
+	return new Promise((resolve) => {
+		turnEnded = resolve;
+	});
+}
 /** Test seam: drop host/timer without touching exported behavior. */
 export function resetScheduler(): void {
+	turnEnded = undefined;
 	clearTimeout(timer);
 	timer = undefined;
 	host = null;
@@ -173,9 +181,9 @@ async function ownerOf(obj: ObjectJSON): Promise<{ agentId: string; chatId: stri
 		const s = await host.served(id);
 		if (s) return s;
 	}
-	// A new recurring object has no bound agent yet. Its space's default
-	// agent is the owner that already answers that space, so the schedule
-	// does not collapse to a human-only reminder.
+	// A new recurring object has no bound agent yet. The default owner is
+	// the local machine's agent for this space: the serving machine owns
+	// the occurrence, and `host.served` stands down if resolution moves it.
 	const channelId = str(obj.fields, "channel");
 	if (!channelId) return undefined;
 	const defaults = await queryAll({ type: "agent", filters: [{ key: "space_default", condition: "equal", value: channelId }] });
@@ -207,6 +215,7 @@ async function postScheduled(surfaceId: string, text: string, d: Due, me: string
 
 /** Tell the owner: an agent gets the instructions and a turn, a person gets a reminder. */
 async function dispatch(d: Due, me: string): Promise<void> {
+	try {
 	if (!host) return;
 	const obj = await fetchObject(d.id);
 	const name = str(obj.fields, "name") || "(untitled)";
@@ -233,4 +242,7 @@ async function dispatch(d: Due, me: string): Promise<void> {
 	const badge = str(obj.fields, "error");
 	if (error) await setField(obj.id, "error", sv(`run failed: ${error}`.slice(0, 300)));
 	else if (badge.startsWith("run failed:")) await deleteField(obj.id, "error");
+	} finally {
+		turnEnded?.();
+	}
 }

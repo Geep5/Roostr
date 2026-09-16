@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resetScheduler, startScheduler } from "./schedule";
+import { resetScheduler, startScheduler, waitForTurnEnd } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -79,19 +79,16 @@ test("a scheduled object without an owner uses its space's default agent", async
 	}) as typeof fetch;
 	globalThis.fetch = fetchMock;
 	const turns: string[] = [];
-	let resolveTurn!: () => void;
-	const turnDone = new Promise<void>((resolve) => {
-		resolveTurn = resolve;
-	});
+	const turnDone = waitForTurnEnd();
 	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
 	machine = "test-machine";
 	await startScheduler({
 		async served(agentId) {
-			return agentId === defaultAgentId ? { agentId, chatId } : undefined;
+			if (agentId !== defaultAgentId) return undefined;
+			return { agentId, chatId };
 		},
 		async turn(agentId) {
 			turns.push(agentId);
-			resolveTurn();
 			return "";
 		},
 	});
