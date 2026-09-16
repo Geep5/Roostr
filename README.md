@@ -167,8 +167,9 @@ re-arming on every `repeat` or `served_by` commit. When it fires it
 commits `occurrence_fire` (refused if another writer got there first), then
 either frames the object's body into the assigned agent's chat
 (`assignee`/`agent` naming an agent served here) and runs one turn -
-recorded on the object with `run_record` - or, for a person's object,
-posts a one-line reminder on its discussion. Agents finish with the
-`occurrence_complete` tool; a recurring object is never `done`. Missed
+recorded on the object with `run_record` - or falls back to the space's
+default agent when the object has no bound or assigned agent. A person's
+object still posts a one-line reminder on its discussion. Agents finish
+with the `occurrence_complete` tool; a recurring object is never `done`. Missed
 occurrences (sleep, downtime) fire once on the next start. To keep it
 running, see `harness/launchd/`.

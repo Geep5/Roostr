@@ -78,6 +78,15 @@ export async function startScheduler(h: ScheduleHost): Promise<void> {
 	host = h;
 	await arm();
 }
+/** Test seam: drop host/timer without touching exported behavior. */
+export function resetScheduler(): void {
+	clearTimeout(timer);
+	timer = undefined;
+	host = null;
+	arming = false;
+	armAgain = false;
+	firing = false;
+}
 
 /**
  * Point the timer at the earliest unfired occurrence. Cheap to call on
@@ -162,6 +171,16 @@ async function ownerOf(obj: ObjectJSON): Promise<{ agentId: string; chatId: stri
 	const candidates = [...bound.map((a) => a.id).sort(), ...agentIdsOf(obj.fields["assignee"]), ...agentIdsOf(obj.fields["agent"])];
 	for (const id of candidates) {
 		const s = await host.served(id);
+		if (s) return s;
+	}
+	// A new recurring object has no bound agent yet. Its space's default
+	// agent is the owner that already answers that space, so the schedule
+	// does not collapse to a human-only reminder.
+	const channelId = str(obj.fields, "channel");
+	if (!channelId) return undefined;
+	const defaults = await queryAll({ type: "agent", filters: [{ key: "space_default", condition: "equal", value: channelId }] });
+	for (const a of defaults.map((a) => a.id).sort()) {
+		const s = await host.served(a);
 		if (s) return s;
 	}
 	return undefined;
