@@ -38,6 +38,7 @@ import { objectText, readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor } from "./spacemap";
 import * as memory from "./memory";
 import { TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
+import { authRequirementsOf, localAuthRegistry, resolveAuthRequirements, validateAuthSelector } from "./authreq";
 
 /** proto TextStyle values the editor renders. */
 const STYLE = { paragraph: 0, h1: 1, h2: 2, h3: 3, quote: 4, bullet: 6, numbered: 7, checkbox: 8 } as const;
@@ -206,6 +207,18 @@ function typedValue(format: string | undefined, raw: string): ValueJSON {
 			const parsed = Date.parse(raw);
 			return Number.isNaN(parsed) ? sv(raw) : iv(parsed);
 		}
+		case "status":
+			return lv(raw.trim() ? [raw.trim()] : []);
+		// Tag and object relations are lists in the store (and in the UI):
+		// a bare string here would render as an empty cell.
+		case "tag":
+		case "object":
+			return lv(
+				raw
+					.split(",")
+					.map((s) => s.trim())
+					.filter(Boolean),
+			);
 		default:
 			return sv(raw);
 	}
@@ -629,6 +642,52 @@ const TOOLS: RegisteredTool[] = [
 			// on a recurring object advances the occurrence in local time.
 			await mutate("set_field", { object_id: S(input.id), key: S(input.key), value, ...localClock() });
 			return "ok";
+		},
+	},
+	{
+		def: {
+			name: "object_set_auth",
+			description:
+				"Declare and verify the identities an object's work needs. requires_auth takes selectors from <auth-contract> (`x`, `matcherino`, `google:support@matcherino.com`); browserless and external_action are checkboxes. Every selector is validated against this machine's identities before anything is written, and the reply reports each one's live status - use it to confirm an object will actually run.",
+			input_schema: {
+				type: "object",
+				properties: {
+					id: { type: "string", description: "object id; omit for your bound object" },
+					requires_auth: { type: "array", items: { type: "string" }, description: "identity selectors; [] clears the requirement" },
+					browserless: { type: "boolean" },
+					external_action: { type: "boolean" },
+				},
+			},
+		},
+		handler: async (input, ctx) => {
+			const id = S(input.id) || ctx.boundObject || "";
+			if (!id) return "error: no object id and this agent has no bound object";
+			const obj = await assertInSpace(await fetchObject(id), ctx);
+			ctx.touched.add(obj.id);
+			const registry = await localAuthRegistry();
+			if (Array.isArray(input.requires_auth)) {
+				const selectors = A(input.requires_auth);
+				const checked = selectors.map((raw) => ({ raw, result: validateAuthSelector(raw, registry) }));
+				const bad = checked.filter((c) => "error" in c.result);
+				if (bad.length > 0) {
+					const known = registry.map((r) => r.selector).join(", ");
+					return `error: nothing written. ${bad.map((b) => ("error" in b.result ? b.result.error : "")).join("; ")}. Selectors on this machine: ${known}`;
+				}
+				if (selectors.length === 0) await deleteField(obj.id, "requires_auth");
+				else await setField(obj.id, "requires_auth", lv(selectors));
+			}
+			for (const key of ["browserless", "external_action"] as const) {
+				if (typeof input[key] === "boolean") await setField(obj.id, key, bv(input[key] as boolean));
+			}
+			const after = await fetchObject(obj.id);
+			const resolved = await resolveAuthRequirements(authRequirementsOf(after.fields));
+			const rows = resolved.map((r) => `- ${r.raw}: ${r.active ? "active" : `MISSING - ${r.reason}`}`);
+			const flags = ["browserless", "external_action"].filter((k) => after.fields[k]?.boolValue).join(", ");
+			return [
+				resolved.length === 0 ? "requires_auth: (none)" : `requires_auth:\n${rows.join("\n")}`,
+				flags ? `flags: ${flags}` : "flags: (none)",
+				resolved.some((r) => !r.active) ? "At least one identity is missing: the work cannot run until the human fixes it - file a holdup." : "All declared identities are active: this object can run here.",
+			].join("\n");
 		},
 	},
 	{

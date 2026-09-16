@@ -21,7 +21,7 @@ import { credentialsPromptLine } from "./credentials";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceContext, workspacePromptSection } from "./workspace";
 import { digest } from "./memory";
-import { authRequirementsOf, authRequirementsPrompt, resolveAuthRequirements } from "./authreq";
+import { authContractPrompt, authRequirementsOf, localAuthRegistry, resolveAuthRequirements } from "./authreq";
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
 
 const OBJECT_AGENT_PRIMER = `You are the agent of exactly one object in Roostr - a local-first
@@ -169,14 +169,11 @@ async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts:
 	const credsLine = credentialsPromptLine();
 	if (credsLine) parts.push({ label: "Credentials", text: credsLine });
 	const requirementsId = opts.requirementsObjectId ?? boundId;
-	if (requirementsId) {
-		try {
-			const obj = await fetchObject(requirementsId);
-			const auth = authRequirementsPrompt(await resolveAuthRequirements(authRequirementsOf(obj.fields)));
-			if (auth) parts.push({ label: "Auth requirements", text: auth });
-		} catch (err) {
-			console.error("[harness] auth requirements failed:", err instanceof Error ? err.message : err);
-		}
+	try {
+		const declared = requirementsId ? authRequirementsOf((await fetchObject(requirementsId)).fields) : [];
+		parts.push({ label: "Auth contract", text: authContractPrompt(await localAuthRegistry(), await resolveAuthRequirements(declared)) });
+	} catch (err) {
+		console.error("[harness] auth contract failed:", err instanceof Error ? err.message : err);
 	}
 	try {
 		const elsewhere = await remoteCapabilitiesSection(boundId);

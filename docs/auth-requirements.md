@@ -56,15 +56,42 @@ For every scheduled or object-bound turn, the harness resolves `requires_auth` a
 - integration state (`browserless`);
 - Google account dirs via `gws-as <account> auth status`.
 
-Resolution is injected into the prompt as `<auth-requirements>`:
+The prompt always carries an `<auth-contract>` section: the property
+vocabulary, every identity this machine can fulfil, and what the object
+declares today — so an agent that has never seen `requires_auth` can set
+it up correctly in the same turn.
 
 ```text
-<auth-requirements>
-This object declares these auth requirements. Use exactly these identities; never substitute another account. If any is MISSING, file a holdup and do not complete the task:
+<auth-contract>
+Objects declare which identities their work needs; the serving machine fulfills them. Secrets never live on objects.
+Properties you set on a task object:
+- requires_auth (list): one entry per identity, `service` or `service:account`. google is multi-account and MUST name the account.
+- browserless (checkbox): the work needs this machine's headless browser to render pages.
+- external_action (checkbox): the work may write or act outside Roostr.
+Identities on this machine:
+- x: active
+- matcherino: matcherino active
 - google:support@matcherino.com: active
-- x: MISSING - x is not set up on this machine
-</auth-requirements>
+- google:grant@matcherino.com: needs setup - google account grant@matcherino.com needs auth
+Declared on this object:
+- google:support@matcherino.com: active
+</auth-contract>
 ```
+
+## Agents declare it themselves
+
+`object_set_auth` is the write path:
+
+- validates every selector against the machine's identity list before
+  writing anything — an unknown service or unconfigured account is
+  refused with the valid list instead of guessed;
+- writes `requires_auth` as a real list value plus the two checkboxes;
+- replies with each entry's live status, so an agent can confirm the
+  object will run before the scheduler fires it.
+
+`object_set_field` stays for ordinary properties; it now writes
+tag/status/object relations as list values so they are no longer
+silently malformed.
 
 ## Agent contract
 
