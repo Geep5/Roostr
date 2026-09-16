@@ -37,7 +37,8 @@ test("browser credentials tell agents to use the logged-in Chrome profile, not b
 	const line = credentialsPromptLine();
 	expect(line).toContain("browserless/web_fetch is deliberately logged out");
 	expect(line).toContain("logged-in Chrome profile");
-	expect(line).toContain("credential_fetch");
+	expect(line).toContain("credential_fetch/credential_action");
+	expect(line).toContain("credential_action");
 	expect(line).toContain("--headless=new");
 	expect(line).toContain("--user-data-dir=<path>");
 });

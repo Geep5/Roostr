@@ -32,6 +32,7 @@ import { invalidateServing, machines, serverOf } from "./machine";
 import { machineId } from "./roster";
 import { CATALOG, fileHoldup, listHoldups, skillReady } from "./skillmgr";
 import { browserProfileDir, credentialStatus } from "./credentials";
+import { credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
 import { chatBlocks, isAgentAuthor } from "./surfaces";
 import { objectText, readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor } from "./spacemap";
@@ -350,6 +351,47 @@ const REQUIRE_TOOL: RegisteredTool = {
 };
 
 const WEB_TOOLS: RegisteredTool[] = [
+	{
+		def: {
+			name: "credential_action",
+			description:
+				"Act inside an active credential's logged-in, headless Chrome page and return the resulting page text. Actions: read_mentions (open X mentions), retweet_post (open the given X status URL and click Repost/Retweet through the page). Use credential_fetch for read-only pages; use this for actions the logged-in account must perform.",
+			input_schema: {
+				type: "object",
+				properties: {
+					credential: { type: "string", enum: ["x"] },
+					action: { type: "string", enum: ["read_mentions", "retweet_post"] },
+					url: { type: "string", description: "X status URL for retweet_post" },
+				},
+				required: ["credential", "action"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const key = S(input.credential);
+			const entry = credentialStatus().find((c) => c.key === key);
+			if (!entry?.active.browser) {
+				const reason = `credential "${key}" has no logged-in browser profile`;
+				await fileCapabilityHoldup(key, reason, ctx);
+				return `Credential unavailable: ${reason}. A holdup has been filed for the human in the Machine panel.`;
+			}
+			const action = S(input.action);
+			const url = action === "read_mentions" ? "https://x.com/notifications/mentions" : S(input.url).trim();
+			if (!/^https:\/\/(?:x|twitter)\.com\//i.test(url)) return "error: url must be an x.com or twitter.com URL";
+			const js = action === "read_mentions" ? X_TIMELINE_JS : X_RETWEET_JS;
+			try {
+				const page = await credentialPageAction(browserProfileDir(key), url, js);
+				if (/sign in|log in|login/i.test(page.text) && !/notifications|repost|retweet/i.test(page.text)) {
+					return `Credential appears broken: the logged-out page was shown for ${url}. Re-login under This machine → Credentials.`;
+				}
+				const result = page.actionResult ? `\nAction: ${page.actionResult}` : "";
+				return `${page.title}\n${page.url}\n${page.text}${result}`.slice(0, WEB_FETCH_CAP);
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : String(error);
+				await fileCapabilityHoldup(key, reason, ctx);
+				return `Credential action failed: ${reason}. A holdup has been filed for the human in the Machine panel.`;
+			}
+		},
+	},
 	{
 		def: {
 			name: "credential_fetch",
