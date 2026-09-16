@@ -64,7 +64,7 @@ export const CREDENTIALS: CredentialEntry[] = [
 		label: "Matcherino",
 		note: "Log in with Chrome to let agents administer Matcherino featured content through this machine.",
 		loginUrl: "https://matcherino.com/login",
-		sessionCookie: { host: "matcherino.com", name: "_matcherino_session" },
+		sessionCookie: { host: "matcherino.com", name: "credentials" },
 	},
 	{
 		key: "linkedin",
