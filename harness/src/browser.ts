@@ -16,6 +16,7 @@ interface Target {
 	id: string;
 	type: string;
 	url: string;
+	webSocketDebuggerUrl?: string;
 }
 
 interface Frame {
@@ -33,7 +34,7 @@ async function sleep(ms: number): Promise<void> {
 	await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function targetFor(port: number, timeoutMs: number): Promise<Target> {
+async function targetFor(port: number, timeoutMs: number, url: string): Promise<Target> {
 	const deadline = Date.now() + timeoutMs;
 	let lastError = "";
 	while (Date.now() < deadline) {
@@ -41,8 +42,8 @@ async function targetFor(port: number, timeoutMs: number): Promise<Target> {
 			const res = await fetch(`http://127.0.0.1:${port}/json/list`);
 			if (res.ok) {
 				const targets = (await res.json()) as Target[];
-				const page = targets.find((t) => t.type === "page");
-				if (page) return page;
+				const page = targets.find((t) => t.type === "page" && t.url === url) ?? targets.find((t) => t.type === "page");
+				if (page?.webSocketDebuggerUrl) return page;
 			} else lastError = `HTTP ${res.status}`;
 		} catch (err) {
 			lastError = err instanceof Error ? err.message : String(err);
@@ -164,14 +165,15 @@ export async function credentialPageAction(profile: string, url: string, actionJ
 	}, timeoutMs);
 	let cdp: CdpSocket | undefined;
 	try {
-		await targetFor(debugPort, timeoutMs);
-		const info = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()) as Array<Target & { webSocketDebuggerUrl?: string }>;
-		const page = info.find((t) => t.type === "page" && t.url === url) ?? info.find((t) => t.type === "page");
-		if (!page?.webSocketDebuggerUrl) throw new Error("Chrome page target has no debugger URL");
+		const page = await targetFor(debugPort, timeoutMs, url);
 		cdp = await CdpSocket.open(page.webSocketDebuggerUrl);
 		await cdp.call("Runtime.enable");
 		await cdp.call("Page.enable");
-		await sleep(1_000);
+		const wanted = new URL(url);
+		const wantedHosts = new Set([wanted.host]);
+		if (wanted.host === "twitter.com") wantedHosts.add("x.com");
+		if (wanted.host === "x.com") wantedHosts.add("twitter.com");
+		await waitFor(cdp, `(() => { const ready = document.readyState === "interactive" || document.readyState === "complete"; const host = new URL(location.href).host; const requested = ${JSON.stringify([...wantedHosts])}.includes(host) && location.pathname === ${JSON.stringify(wanted.pathname)}; return ready && requested && !!document.body && document.body.innerText.length > 0; })()`, Math.min(20_000, timeoutMs), "requested rendered page");
 		let actionResult = "";
 		if (actionJs.trim()) {
 			const value = await evaluate(cdp, `(() => {\n${actionJs}\n})()`);
@@ -193,14 +195,22 @@ export async function credentialPageAction(profile: string, url: string, actionJ
 /** Retweet and confirm the menu/dialog in one page action. */
 export const X_RETWEET_JS = `(() => {
 	const label = document.body?.innerText ?? "";
-	const retweet = [...document.querySelectorAll('[data-testid="retweet"], [aria-label*="Repost"], [aria-label*="Retweet"]')][0];
-	if (!retweet) return JSON.stringify({ ok: false, error: "retweet button not found", snippet: label.slice(0, 500) });
-	retweet.click();
-	setTimeout(() => {
-		const confirm = [...document.querySelectorAll('[data-testid="retweetConfirm"], [role="button"]')].find((el) => /repost|retweet/i.test(el.textContent ?? ""));
-		if (confirm) confirm.click();
-	}, 400);
-	return "retweet click issued";
+	const button = document.querySelector('[data-testid="retweet"]') ?? [...document.querySelectorAll('[aria-label*="Repost"], [aria-label*="Retweet"]')][0];
+	if (!button) return JSON.stringify({ ok: false, error: "retweet button not found", snippet: label.slice(0, 500) });
+	button.click();
+	let confirmed = false;
+	const started = Date.now();
+	const clickConfirm = () => {
+		const confirm = document.querySelector('[data-testid="retweetConfirm"]') ?? [...document.querySelectorAll('[role="button"]')].find((el) => /^(repost|retweet)$/i.test((el.textContent ?? "").trim()));
+		if (confirm) {
+			confirm.click();
+			confirmed = true;
+			return;
+		}
+		if (Date.now() - started < 2_000) setTimeout(clickConfirm, 150);
+	};
+	clickConfirm();
+	return confirmed ? "retweet confirmed" : "retweet click issued";
 })()`;
 
 /** Read the visible X mentions/timeline text. */
