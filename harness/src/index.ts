@@ -18,11 +18,11 @@ import { API, apiFetch, chatPost, fetchObject, list, lv, mutate, query, setField
 import type { ObjectJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
-import { convergeCatalogScope } from "./skillmgr";
+import { capabilities, convergeCatalogScope } from "./skillmgr";
 import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
-import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, servesHere } from "./machine";
+import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, publishCapabilities, servesHere } from "./machine";
 import { validateBindings } from "./workspace";
 import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, ingestedOriginBlocks, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
 import { arm as armScheduler, startScheduler } from "./schedule";
@@ -204,6 +204,7 @@ async function handleSurface(s: Served, surfaceId: string, opts: { wake?: (t: st
 }
 
 async function serve(): Promise<void> {
+	await publishCapabilities(await capabilities()); // register this machine before serving resolves against the roster
 	await convergeCatalogScope();
 	await convergeSpaceServing();
 	// Checkout bindings: statuses refresh at boot and on every UI write.
