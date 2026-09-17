@@ -217,9 +217,16 @@ async function serve(): Promise<void> {
 	// message; agents can never create other minds. Lazily adopted into
 	// `served` when their surface first stirs.
 	const boundBy = new Map<string, string>();
+	// Objects whose bound agent names an external responder: the harness
+	// stays silent on their discussion (no serving, no adoption) so the
+	// external bot is the only voice. The field travels with the vault,
+	// so every machine honors it.
+	const externallyAnswered = new Set<string>();
 	for (const a of await queryAll({ type: "agent" })) {
 		const b = str(a.fields, "bound_object");
-		if (b) boundBy.set(b, a.id);
+		if (!b) continue;
+		boundBy.set(b, a.id);
+		if (str(a.fields, "external_responder")) externallyAnswered.add(b);
 	}
 	console.log(`[harness] ${boundBy.size} object-bound agent(s) known`);
 
@@ -579,6 +586,7 @@ async function serve(): Promise<void> {
 
 		// ── Bound agent takes its own object's surface - if it is ours. ──
 		const boundAgent = boundBy.get(objectId);
+		if (boundAgent && externallyAnswered.has(objectId)) return;
 		if (boundAgent) {
 			// The object's server answers, nobody else - per-object serving
 			// replaces per-agent adoption races with one synced fact.
