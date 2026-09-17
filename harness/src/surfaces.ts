@@ -134,16 +134,25 @@ export function isAgentAuthor(author: string): boolean {
  */
 export async function pendingMessages(obj: ObjectJSON, agentId: string): Promise<PendingMessage[]> {
 	const m = await loadMarks();
-	const msgs = chatBlocks(obj);
 	const mark = m[obj.id];
 
-	// A mark whose block was deleted must not freeze the surface: the scan
-	// below starts only once it meets `startAfter`, so an unresolvable mark
-	// leaves nothing pending forever - one deleted message and the agent is
-	// deaf on this object for good. Fall back to the fresh-surface seed.
+	// Chronological, NOT block order. Block order is DAG merge order: a
+	// device that commits while its replica is behind lists stale heads as
+	// parents, so its message merges in before messages written long
+	// before it. Walking positions skipped exactly those - a phone that
+	// had been offline could post, sync everywhere, and never be answered.
+	// Ties (same millisecond) keep block order, which every device agrees on.
+	const msgs = chatBlocks(obj)
+		.map((row, index) => ({ ...row, index, ts: Number(row.block.content.custom?.meta?.["ts"] ?? 0) }))
+		.sort((a, b) => a.ts - b.ts || a.index - b.index);
+
+	// A mark whose block was deleted must not freeze the surface: an
+	// unresolvable mark would otherwise leave nothing pending forever - one
+	// deleted message and the agent is deaf on this object for good. Fall
+	// back to the fresh-surface seed.
 	let startAfter = mark !== undefined && msgs.some((x) => x.id === mark) ? mark : undefined;
 	if (startAfter === undefined) {
-		// Fresh surface: seed at the agent's own last message.
+		// Fresh surface: seed at the agent's own newest message.
 		for (let i = msgs.length - 1; i >= 0; i--) {
 			if ((msgs[i].block.content.custom?.meta?.["author"] ?? "") === agentId) {
 				startAfter = msgs[i].id;
@@ -152,13 +161,10 @@ export async function pendingMessages(obj: ObjectJSON, agentId: string): Promise
 		}
 	}
 
-	let started = startAfter === undefined;
+	const markAt = startAfter === undefined ? -1 : msgs.findIndex((x) => x.id === startAfter);
 	const pending: PendingMessage[] = [];
-	for (const { id, block } of msgs) {
-		if (!started) {
-			if (id === startAfter) started = true;
-			continue;
-		}
+	// Newest last, so the caller's `pending[last]` mark only ever advances.
+	for (const { id, block } of msgs.slice(markAt + 1)) {
 		const meta = block.content.custom?.meta ?? {};
 		const author = meta["author"] ?? "";
 		if (author === agentId) continue;
