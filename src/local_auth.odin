@@ -194,11 +194,13 @@ local_bearer :: proc(header: string) -> string {
 	return token
 }
 
-// Identity and relay configuration are deliberately platform-only; a paired
-// browser session (.UI) must never reach these four mutate actions.
+// Export, logout and relay configuration are deliberately platform-only; a
+// paired browser session (.UI) must never reach these three mutate actions.
+// Key IMPORT is allowed for .UI: it lets a paired browser adopt an existing
+// nsec identity (website parity), and it can never reveal key material.
 local_platform_action :: proc(action: string) -> bool {
 	switch action {
-	case "nostr_key_export", "nostr_key_import", "identity_logout", "nostr_relays_set": return true
+	case "nostr_key_export", "identity_logout", "nostr_relays_set": return true
 	}
 	return false
 }

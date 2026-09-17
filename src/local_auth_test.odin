@@ -74,11 +74,11 @@ local_auth_contract :: proc(t: ^testing.T) {
 
 @(test)
 local_ui_guard_contract :: proc(t: ^testing.T) {
-	// LA-2: all four platform-only mutate actions must 403 for a .UI session.
-	for action in ([]string{"nostr_key_export", "nostr_key_import", "identity_logout", "nostr_relays_set"}) {
+	// LA-2: export/logout/relays must 403 for a .UI session; key import is allowed.
+	for action in ([]string{"nostr_key_export", "identity_logout", "nostr_relays_set"}) {
 		testing.expect(t, local_platform_action(action))
 	}
-	for allowed in ([]string{"", "channel_create", "object_update", "channel_key_rotate", "nostr_key_expor"}) {
+	for allowed in ([]string{"", "channel_create", "object_update", "channel_key_rotate", "nostr_key_import", "nostr_key_expor"}) {
 		testing.expect(t, !local_platform_action(allowed))
 	}
 }

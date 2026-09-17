@@ -90,7 +90,10 @@ nostr_ensure :: proc(allocator := context.temp_allocator) -> Nostr_Settings {
 bech32_encode :: core.bech32_encode
 bech32_decode :: core.bech32_decode
 
-/** mutate action: nostr_key_import {key: "nsec1…" | 64-hex}. Replaces the identity. */
+/** mutate action: nostr_key_import {key: "nsec1…" | 64-hex}. Replaces the identity.
+   On an actual key change the vault is archived and replay restarts from zero:
+   the old identity's objects must not leak into the new one, and the sync
+   cursor has to rewind so relay history re-imports against the new key. */
 mutate_key_import :: proc(sock: net.TCP_Socket, parsed: json.Value) {
 	raw := strings.trim_space(core.json_str(parsed, "key"))
 	priv_hex := ""
@@ -114,9 +117,23 @@ mutate_key_import :: proc(sock: net.TCP_Socket, parsed: json.Value) {
 	sync.lock(&g_nostr_mu)
 	defer sync.unlock(&g_nostr_mu)
 	s := nostr_read()
-	if s.privkey_hex != priv_hex && !shared_forget_local_identity() {
-		respond_error(sock, "could not invalidate previous identity authority", "500 Internal Server Error")
-		return
+	if s.privkey_hex != priv_hex {
+		if !shared_forget_local_identity() {
+			respond_error(sock, "could not invalidate previous identity authority", "500 Internal Server Error")
+			return
+		}
+		root := g_store.data_root
+		arch := fmt.tprintf("%s/import-%d", root, unix_ms())
+		os.make_directory(arch)
+		names := []string{"changes", "nostr.json", "sync-state.json", "channel-keys.json"}
+		for n in names {
+			from := fmt.tprintf("%s/%s", root, n)
+			to := fmt.tprintf("%s/%s", arch, n)
+			os.rename(from, to) // absent files are a no-op
+		}
+		os.make_directory(fmt.tprintf("%s/changes", root))
+		store_invalidate()
+		s = nostr_read() // archived along with the vault; re-read the fresh file
 	}
 	s.privkey_hex = priv_hex
 	nostr_write(s)
