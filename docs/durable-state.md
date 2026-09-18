@@ -1,7 +1,8 @@
-# Durable state: what is actually at risk, and what a DB fixes
+# Durable state and query scale, without a database
 
-Status: proposed. Audit of the reliability and scale limits, and the plan.
-Supersedes the pruning half of `docs/storage-compaction.md`.
+Status: layer 1 done, layer 2 partly done. Decision: **stay homebrew.** No
+SQLite, no DuckDB — the format stays ours and there is exactly one query
+implementation across daemon, browser and iOS.
 
 ## The concern, restated
 
@@ -9,153 +10,97 @@ Supersedes the pruning half of `docs/storage-compaction.md`.
 we should not lose anything, and a massive space should still be queryable."
 
 Both halves are right, but they are **different problems in different layers**,
-and only one of them is a data-loss risk today.
+and only one of them was ever a data-loss risk.
 
-## Layer 1 — the change log (canonical). Real bug, cheap fix.
+## Layer 1 — the change log (canonical). Fixed.
 
-The log on disk is the source of truth and what relays speak. It is not in
-memory. But two defects make it less of a rock than it looks:
+The log on disk is the source of truth and what relays speak; it was never in
+memory. Two defects made it less of a rock than it looked:
 
-**Writes are neither atomic nor durable** (`src/store.odin:191`):
+- **Writes were neither atomic nor durable**: `os.write_entire_file` straight
+  to the final content-addressed path, no temp file, no rename, no `fsync`. A
+  crash could leave a truncated file at a name claiming to be the hash of its
+  contents, and an acknowledged write could still be lost in the page cache.
+- **Loads never verified the address.** The filename *is* the sha256, and
+  nothing compared them, so a torn-but-decodable change replayed as genuine
+  and an undecodable one was skipped in silence.
 
-```odin
-if os.write_entire_file(path, full) != nil do return "", false
-```
+Both are fixed (`src/store.odin`): temp → `fsync` → `rename` → `fsync` the
+directory, the address is recomputed on load, and a mismatch is parked in
+`changes/.quarantine/<objectId>/` and counted in `/api/settings`
+(`quarantinedChanges`) so loss can never be silent. Verified against a copy of
+the real vault first: 861 objects loaded, 9 of 12,480 changes quarantined,
+zero false positives — all 9 also fail to decode in the TypeScript codec.
 
-No temp file, no rename, no `os.sync`. A crash or power cut mid-write leaves a
-**truncated file sitting at its final content-addressed path**, and the write is
-only in the page cache until the OS decides otherwise. The relay already does
-this correctly — `write_record_to` + `os.sync(g_fd)` (`relay/src/store.odin:102`).
+## Layer 2 — query scale. Two defects fixed, one ceiling measured.
 
-**Loads never verify the address** (`src/store.odin:148-153`):
+The core already keeps queried objects resident (`QUERY_CACHE_MAX_OBJECTS ::
+100_000`) and accepts `{ upserts, removed, reset }`, so a query should only
+carry what changed. Two things spoiled that, both in the host:
 
-```odin
-data, rerr := os.read_entire_file(f.fullpath, alloc)
-if rerr != nil do continue
-c, cok := core.decode_change(data, alloc)
-if cok do append(&changes, c)
-```
+1. **A cold start pushed the whole vault in one request** — anything past the
+   ABI's 16 MiB reservation was rejected outright, so a large space could not
+   be queried at all on first load. Fixed: the push is split into batches that
+   each fit the reservation (`PUSH_BUDGET_BYTES`), with `reset`/removals on the
+   first batch only.
+2. **Every query re-serialized the entire corpus** to diff signatures, so a
+   view render was O(corpus) even when nothing had moved. Fixed: the backend
+   records upserts/removals where it actually mutates state (`ensure`,
+   `enforceVanished`) and passes that delta; the signature diff remains as the
+   fallback for callers without change tracking.
 
-The filename *is* the sha256 of the change, and nothing checks it. So a
-truncated-but-decodable file is accepted as genuine — exactly the corruption
-content addressing exists to make impossible — and an undecodable one is skipped
-in silence: no error, no log line, no repair, the change simply disappears.
+Measured on this machine, fresh process per row:
 
-### Fix (do this first, it is small)
-
-1. Write `<hex>.pb.tmp`, `fsync` the file, `rename` into place, `fsync` the
-   directory. A rename is atomic, so a reader sees all or nothing.
-2. On load, recompute `sha256(encode_change(c, for_hashing = true))` and compare
-   with the filename. On mismatch: move to `changes/.quarantine/`, log loudly,
-   and let sync re-fetch the change from a relay (it is content-addressed, so a
-   good copy is recoverable from any peer).
-3. Count skipped/quarantined changes in the store and expose the number —
-   silent loss is the part that makes a system feel unreliable.
-
-This is the whole of the actual data-loss exposure. Everything below is scale
-and recovery time, not loss.
-
-## Layer 2 — derived state (in memory). Real ceiling, measured.
-
-`g_store.states` holds every computed object in an arena
-(`src/store.odin:38-39`), and the browser holds the same set in a `Map`. Nothing
-is *lost* when that dies — it is rebuilt by replay — but it costs:
-
-| limit | measured |
-| --- | --- |
-| daemon boot | replays all **12,480** changes |
-| browser cold start | full relay walk, ~97 pages × 128 events (~11.5 s CPU here, several × that on a phone) |
-| view query at 1,000 objects | 2 ms |
-| view query at 20,000 objects | 26 ms (9.3 MB serialized into the core per query) |
-| view query at 50,000 objects | **traps the WASM core** |
-| view query at 100,000 objects | **rejected: "Core request exceeds 16 MiB"** |
-
-Every view render serializes the entire object set into the engine. So a
-"massive space" is capped at roughly 30k objects by construction, and recovery
-is O(history) rather than O(1).
-
-That is the case for a persisted, indexed read model.
-
-## Which database
-
-The workload is: many small writes (one change per edit), point reads, and
-filtered/sorted/paginated list views plus text search.
-
-| | SQLite | DuckDB |
+| vault | cold first query | warm query after one edit |
 | --- | --- | --- |
-| shape | row store + B-tree indexes | columnar, vectorized |
-| built for | many small transactions, point/range reads | bulk analytical scans |
-| our views (filter/sort/paginate) | ideal | works, wasted strengths |
-| per-edit writes | ideal (WAL) | weak — built for bulk load |
-| text search | FTS5 built in | none |
-| browser/WASM payload | **3 MB** (`@sqlite.org/sqlite-wasm`) | **149 MB** unpacked (`@duckdb/duckdb-wasm`) |
-| iOS | ships with the OS | extra C++ dependency |
-| analytics (group/aggregate over millions) | mediocre | excellent |
+| 10,000 objects / 8.3 MB | 303 ms | **6.6 ms** |
+| 20,000 objects / 16.6 MB | 609 ms | **15.1 ms** |
 
-For the read model: **SQLite**. The phone is the binding constraint and it is
-already struggling with a 12k-event bootstrap; a 149 MB engine bundle is not an
-option there, and DuckDB's strengths (aggregate scans) are not what a view does.
+The warm path is what a view render costs now; before, it was the cold number
+every single time.
 
-For analytics: **DuckDB, as an optional sidecar on desktop**. It reads SQLite
-files and Parquet directly, so "count sponsors per month across 2M objects" can
-attach to the same data without becoming a dependency of the app. This keeps
-DuckDB exactly where it wins and off the critical path.
+### The ceiling that remains
 
-## Architecture
+The core's query arena is `QUERY_CACHE_MAX_BYTES :: 128 * 1024 * 1024`, and it
+is consumed several times faster than payload because every parsed allocation
+carries its own header. Measured limits:
 
-```
-relays  ─── changes (content-addressed, append-only)  ← canonical, syncable
-              │
-              ├─ changes/<objectId>.glog      durable log (atomic + fsync)
-              │
-              └─ state.sqlite                 derived, persisted read model
-                    objects(id, type_key, space, created_at, updated_at, deleted)
-                    fields(object_id, key, kind, text, num, bool, json)
-                    blocks(object_id, id, parent, idx, content_type, text)
-                    fts(objects: name, text)
-                    meta(cursor, schema_version, replayed_through)
-```
+| payload | result |
+| --- | --- |
+| 16.6 MB | works |
+| 20.4 MB | `query cache memory limit exceeded` |
+| 24.8 MB | `query cache memory limit exceeded` |
 
-Rules that keep it honest:
+So a space tops out around **20 MB of object JSON** — roughly 4× the current
+vault (4.79 MB). Two honest options when that becomes real, in this order:
 
-- **The DB is never the source of truth.** It is a projection that can be
-  dropped and rebuilt from the log. A decentralized system cannot sync a
-  database; it syncs changes. (Same rule the format already states for
-  snapshots: "never source of truth — a replay optimization".)
-- **One write path.** Applying a change writes the log frame and the DB rows in
-  one transaction, with `meta.replayed_through` advanced in the same commit. On
-  boot, if `replayed_through` is behind the log, replay only the tail.
-- **One query semantics.** Views compile to SQL in the shared core (Odin), which
-  every host executes against its own SQLite. Two hand-written query
-  implementations is precisely the divergence that produced this session's
-  daemon-vs-browser bugs; do not reintroduce it in SQL.
-- **Recovery is opening a file**, not replaying history: crash, power cut, or
-  kill -9 costs the tail since the last commit, which the log still holds.
+1. **Cut arena overhead per object.** The cache reparses each object's JSON
+   into a region with a header per allocation. Fewer, larger allocations (or
+   decoding straight from the wire bytes) buys multiples without raising the
+   budget.
+2. **Raise the budget.** One constant, linear effect — but it is WASM memory,
+   and the phone is the binding constraint, so this is the second lever.
 
-## Phases
+Neither needs a database. What a database would have bought — an indexed store
+that queries without holding the corpus — is the same work as (1), minus a
+dependency and minus a second query implementation. Two hand-written query
+engines is exactly the divergence that produced the daemon-vs-browser bugs this
+audit started from.
 
-1. **Harden the log** (atomic + fsync + verify-on-load + quarantine counter).
-   No schema change, no new dependency, removes the only true loss path.
-2. **Consolidate files**: per-object `.glog` (861 files instead of 12,480; ~49 MB
-   of block waste → ~5 MB). From `docs/storage-compaction.md`, minus pruning —
-   history stays, it costs 4.79 MB.
-3. **Introduce `state.sqlite`** as a pure projection, written alongside the
-   existing in-memory map. Ship it dark: compare every query's SQL result with
-   the in-memory engine's result over the real 855-object vault until they agree
-   exactly.
-4. **Cut over reads** to SQL, keep the in-memory map only as a cache for hot
-   objects. The 16 MiB serialize ceiling disappears; views paginate in SQL.
-5. **Browser/iOS**: same schema over `sqlite-wasm` + OPFS, so a phone opens a
-   file instead of replaying 12k events. Pairs with the `SpaceBundle` bootstrap.
-6. **Optional**: DuckDB attaches to the SQLite file on desktop for analytics.
+## What is NOT being done, and why
 
-## Verification
+- **No SQLite, no DuckDB.** The canonical format is the change log; a
+  decentralized system syncs changes, not databases. Any engine would be a
+  derived projection, and a projection is only worth its weight once (1) above
+  is exhausted.
+- **No file consolidation as separate work.** Collapsing 12,480 per-change
+  files into 861 per-object logs is only worth doing as part of a format change
+  (log + snapshots), not as interim churn ahead of one.
 
-- Crash test: kill the daemon mid-write in a loop; every surviving object must
-  replay clean, and every quarantined file must be re-fetchable from the relay.
-- Parity runner: for all 855 objects and every saved view in the real vault, SQL
-  results equal current engine results (ordering included).
-- Scale test: 200k synthetic objects — view query stays sub-100 ms and boot stays
-  O(tail), where today 50k traps the core.
-- Rebuild test: delete `state.sqlite`, rebuild from the log, byte-identical
-  projection.
+## Still available, unused
+
+`ObjectSnapshot` exists in the wire format (`glon.proto:245`) with `fields`
+**and** `blocks` — an object and its chat in one message — and `compute_state`
+already starts replay from the newest snapshot (`core/dag.odin:548`). Nothing
+writes one. When boot time or file count becomes the complaint, that is the
+lever, and it is already designed.
