@@ -75,6 +75,20 @@ fields_to_json :: proc(fields: [dynamic]Value_Entry, allocator := context.temp_a
 	return json.Object(o)
 }
 
+/**
+ * Block kinds whose `data` is a schema message this build can read, so it
+ * belongs on the state wire: a Conversation on a thread root, a Descriptor on
+ * a card. Everything else keeps its bytes private to the program that wrote
+ * them.
+ */
+SELF_DESCRIBING_BLOCKS :: []string{"discussion", "descriptor"}
+
+@(private = "file")
+is_self_describing :: proc(content_type: string) -> bool {
+	for kind in SELF_DESCRIBING_BLOCKS do if kind == content_type do return true
+	return false
+}
+
 block_to_json :: proc(b: Block, allocator := context.temp_allocator, ordered := false, wire := false) -> json.Value {
 	o := jobj(allocator)
 	o["id"] = json.String(b.id)
@@ -107,10 +121,11 @@ block_to_json :: proc(b: Block, allocator := context.temp_allocator, ordered := 
 		c["contentType"] = json.String(b.content.custom.content_type)
 		// Opaque payloads stay off the state wire on purpose (a program's
 		// bytes are not the UI's business, and the replay fixtures pin it).
-		// A conversation root is the exception: its `data` IS a Conversation,
-		// which the planner rewrites and clients render, so hiding it would
-		// make every thread's kind and participants unreadable.
-		if wire || (b.content.custom.content_type == "discussion" && len(b.content.custom.data) > 0) {
+		// The self-describing ones are the exception: a conversation root's
+		// `data` IS a Conversation and a card's IS a Descriptor - the planner
+		// rewrites them and clients round-trip them, unknown fields included,
+		// so hiding the bytes would make both unreadable.
+		if wire || (is_self_describing(b.content.custom.content_type) && len(b.content.custom.data) > 0) {
 			c["data"] = json.String(base64.encode(b.content.custom.data, allocator = allocator))
 		}
 		meta := jobj(allocator)
@@ -167,6 +182,17 @@ object_to_json_value :: proc(s: ^Object_State, allocator := context.temp_allocat
 	// root block. Every host reads object state through this function, so
 	// projecting it means no client - browser, daemon, phone - needs its own
 	// reader. The raw bytes stay on the block for round-tripping.
+	// The card this object IS, decoded once here: a client renders a setup
+	// form it has never seen without carrying a protobuf reader.
+	for b in s.blocks {
+		if b.content.kind != .Custom do continue
+		if b.content.custom.content_type != "descriptor" do continue
+		if len(b.content.custom.data) == 0 do continue
+		card, ok := decode_descriptor(b.content.custom.data, allocator)
+		if !ok do break // a damaged card is absent, never guessed at
+		o["descriptor"] = descriptor_to_json(card)
+		break
+	}
 	conversations := object_conversations(s, allocator)
 	if len(conversations) > 0 {
 		rows := make([dynamic]json.Value, allocator)

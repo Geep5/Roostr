@@ -42,6 +42,10 @@ test("an integration card is a form: labels, and which inputs are secret", () =>
 test("a skill card carries its check and install work, and asks for nothing", () => {
 	const browserless = byKey.get("browserless");
 	expect(browserless?.kind).toBe("skill");
+	// The human label travels as data; the key stays the command name. The
+	// website used to keep its own copy of this string.
+	expect(browserless?.name).toBe("Headless Chrome");
+	expect(byKey.get("google")?.name).toBe("Google Workspace");
 	// A tool on PATH has no login: no fields, and nothing to authenticate.
 	expect(browserless?.fields).toEqual([]);
 	expect(browserless?.auths).toEqual(["none"]);

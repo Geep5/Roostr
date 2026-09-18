@@ -20,7 +20,15 @@ import { objectText } from "./skills";
 
 export interface CatalogEntry {
 	key: string;
+	/** Object name, and the command a check looks for: `browserless`. */
 	name: string;
+	/**
+	 * Human label for a card ("Headless Chrome"). Absent = use `name`, which
+	 * is right when the tool's name IS the human name (`google`). This is the
+	 * publisher's choice, travelling as data - the old copy of these strings
+	 * lived in the website and drifted.
+	 */
+	label?: string;
 	description: string;
 	/** One-shot OMP prompt that performs the install. */
 	installPrompt: string;
@@ -40,6 +48,7 @@ export const CATALOG: CatalogEntry[] = [
 	{
 		key: "browserless",
 		name: "browserless",
+		label: "Headless Chrome",
 		description: "Render pages, screenshots, and PDFs in headless Chrome; use machine credential profiles when a task needs a signed-in account.",
 		// Two traps, both learned the hard way. The npm package named
 		// `browserless` is a Puppeteer *library* with no `bin`, so installing
@@ -88,6 +97,7 @@ export const CATALOG: CatalogEntry[] = [
 	{
 		key: "google",
 		name: "google",
+		label: "Google Workspace",
 		description: "Google Workspace from the shell via the gws CLI — Gmail, Calendar, Drive under the signed-in account.",
 		installPrompt:
 			"Install the `gws` Google Workspace CLI on this Mac (Homebrew or npm, whichever the project documents). " +

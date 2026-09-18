@@ -23,7 +23,7 @@
  * `gws` config dir.
  */
 
-import { API, apiFetch, createObject, mutate, queryAll, str, sv, iv, type ValueJSON } from "./api";
+import { API, apiFetch, createObject, fetchObject, mutate, queryAll, str, sv, iv, type ValueJSON } from "./api";
 import { CREDENTIALS } from "./credentials";
 import { CATALOG } from "./skillmgr";
 import { machineId } from "./roster";
@@ -94,7 +94,7 @@ export const decodeDescriptor = (bytes: string): Promise<DescriptorJSON> =>
 function skillDescriptor(entry: (typeof CATALOG)[number], author: string): DescriptorJSON {
 	return {
 		key: entry.key,
-		name: entry.name,
+		name: entry.label ?? entry.name,
 		description: entry.description,
 		kind: "skill",
 		fields: [],
@@ -149,9 +149,25 @@ async function descriptorRows(): Promise<Map<string, { id: string; fields: Recor
 	return out;
 }
 
+/** The card block on a descriptor object, if it has one. */
+async function cardBlock(objectId: string): Promise<{ id: string; bytes: string } | undefined> {
+	const object = await fetchObject(objectId);
+	for (const block of object.blocks ?? []) {
+		const custom = block.content?.custom;
+		if (custom?.contentType !== "descriptor") continue;
+		return { id: block.id, bytes: custom.data ?? "" };
+	}
+	return undefined;
+}
+
 /**
  * Seed or refresh this machine's descriptor cards. Idempotent: an unchanged
  * card writes nothing, because a restart must not cost a change per skill.
+ *
+ * The card rides in a BLOCK, not a field, so the core can decode it into
+ * every object it serves (`descriptor` on the object JSON) - a client renders
+ * the form without its own protobuf reader. The row's fields stay as the
+ * cheap projection lists and queries need.
  */
 export async function publishDescriptors(author?: string): Promise<{ created: number; updated: number }> {
 	const writer = author ?? (await vaultAuthorId());
@@ -160,23 +176,41 @@ export async function publishDescriptors(author?: string): Promise<{ created: nu
 	let updated = 0;
 	for (const descriptor of catalogDescriptors(writer)) {
 		const bytes = await encodeDescriptor(descriptor);
+		const row = {
+			key: sv(descriptor.key),
+			kind: sv(descriptor.kind),
+			description: sv(descriptor.description),
+			version: sv(descriptor.version),
+		};
 		const hit = existing.get(descriptor.key);
 		if (!hit) {
-			const { id } = await createObject(descriptor.name, DESCRIPTOR_TYPE, {
-				key: sv(descriptor.key),
-				kind: sv(descriptor.kind),
-				description: sv(descriptor.description),
-				version: sv(descriptor.version),
-				// The card itself, as bytes: the fields above are only what
-				// lists and queries need to show a row.
-				descriptor: sv(bytes),
+			const { id } = await createObject(descriptor.name, DESCRIPTOR_TYPE, row);
+			await mutate("block_add", {
+				object_id: id,
+				block: { content: { custom: { contentType: "descriptor", data: bytes, meta: {} } } },
 			});
-			void id;
 			created += 1;
 			continue;
 		}
-		if (str(hit.fields, "descriptor") === bytes) continue;
-		await mutate("set_field", { object_id: hit.id, key: "descriptor", value: sv(bytes) });
+		const card = await cardBlock(hit.id);
+		if (card?.bytes === bytes) continue;
+		if (card) {
+			await mutate("block_update", {
+				object_id: hit.id,
+				block_id: card.id,
+				content: { custom: { contentType: "descriptor", data: bytes, meta: {} } },
+			});
+		} else {
+			await mutate("block_add", {
+				object_id: hit.id,
+				block: { content: { custom: { contentType: "descriptor", data: bytes, meta: {} } } },
+			});
+			// Rows seeded before the card was a block carried it as a field;
+			// drop that so there is exactly one copy of the bytes.
+			if (str(hit.fields, "descriptor") !== "") {
+				await mutate("delete_field", { object_id: hit.id, key: "descriptor" });
+			}
+		}
 		await mutate("set_field", { object_id: hit.id, key: "version", value: sv(descriptor.version) });
 		updated += 1;
 	}

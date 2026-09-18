@@ -24,7 +24,10 @@ export interface BlockJSON {
 	childrenIds: string[];
 	content: {
 		text?: { text: string; style: number; checked?: boolean };
-		custom?: { contentType: string; meta?: Record<string, string> };
+		/** `data` is base64 protobuf: a Conversation on a thread root, a
+		 *  Descriptor on a card. The core decodes it and serves the result
+		 *  alongside, so nothing here parses it. */
+		custom?: { contentType: string; data?: string; meta?: Record<string, string> };
 		layout?: { style: number };
 	};
 }
