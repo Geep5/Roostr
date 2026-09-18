@@ -447,6 +447,11 @@ handle_relations :: proc(sock: net.TCP_Socket) {
 					append(&options, json.Object(oo))
 				}
 			}
+			// Dropped by accident in e4cd512 while adding the restriction
+			// fields below: the array was built and never assigned, so every
+			// select/tag relation reached the UI without its options and any
+			// object featuring one failed to render at all.
+			o["options"] = json.Array(options)
 
 			// Object-format restriction (Anytype relationFormatObjectTypes):
 			// allowed type ids, plus the Roostr-native query/collection source.
