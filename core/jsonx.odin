@@ -105,7 +105,14 @@ block_to_json :: proc(b: Block, allocator := context.temp_allocator, ordered := 
 	case .Custom:
 		c := jobj(allocator)
 		c["contentType"] = json.String(b.content.custom.content_type)
-		if wire do c["data"] = json.String(base64.encode(b.content.custom.data, allocator = allocator))
+		// Opaque payloads stay off the state wire on purpose (a program's
+		// bytes are not the UI's business, and the replay fixtures pin it).
+		// A conversation root is the exception: its `data` IS a Conversation,
+		// which the planner rewrites and clients render, so hiding it would
+		// make every thread's kind and participants unreadable.
+		if wire || (b.content.custom.content_type == "discussion" && len(b.content.custom.data) > 0) {
+			c["data"] = json.String(base64.encode(b.content.custom.data, allocator = allocator))
+		}
 		meta := jobj(allocator)
 		for p in b.content.custom.meta do meta[p.key] = json.String(p.value)
 		c["meta"] = json.Object(meta)

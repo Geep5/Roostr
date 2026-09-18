@@ -441,3 +441,141 @@ message ChangeBundle {
 message TextMessage {
   string text = 1;
 }
+
+// ── Descriptors: things describing themselves ────────────────────────
+//
+// A client should be able to open a vault it has never seen and know how to
+// work it, without a table of hard-coded knowledge compiled in. A Descriptor
+// is that printed menu card: what exists, what it needs, how to check it.
+// An Installation is the answer for one machine: what is true right now.
+//
+// Descriptors travel as bytes inside an object (machine-authored, versioned,
+// and protected by proto3's unknown-field preservation: a client older than
+// the descriptor renders what it understands and passes the rest through
+// untouched). Installations are ordinary object FIELDS instead, so `error`,
+// `account` and `status` work with views, sorting and the existing badge.
+//
+// Secrets are structurally absent. FieldSpec.secret says a value exists for
+// this on some machine; there is no field here that could carry the value.
+
+enum DescriptorKind {
+  DESCRIPTOR_KIND_UNSPECIFIED = 0;
+  SKILL = 1;        // a tool on the wall: a command, a CLI, a capability
+  INTEGRATION = 2;  // a key on a hook: an account or login
+  AGENT = 3;        // a mind: model, tools, prompt sections
+}
+
+enum FieldFormat {
+  FIELD_FORMAT_UNSPECIFIED = 0;
+  TEXT = 1;
+  PASSWORD = 2;
+  URL = 3;
+  EMAIL = 4;
+}
+
+enum AuthMethod {
+  AUTH_METHOD_UNSPECIFIED = 0;
+  BROWSER_PROFILE = 1;  // a logged-in Chrome profile on that machine
+  OAUTH = 2;            // a token in a local config dir
+  API_KEY = 3;          // fields the human pasted
+  NONE = 4;             // nothing to authenticate
+}
+
+enum InstallStatus {
+  INSTALL_STATUS_UNSPECIFIED = 0;
+  ACTIVE = 1;      // checked and working
+  NEEDS_AUTH = 2;  // present but not authorised
+  MISSING = 3;     // not installed here
+  BROKEN = 4;      // installed, failing (see error)
+}
+
+// One input a human must supply. The form a client renders IS this list.
+message FieldSpec {
+  string key = 1;          // "apiSecret"
+  string label = 2;        // "API secret"
+  bool secret = 3;         // never leaves the machine
+  FieldFormat format = 4;
+  string note = 5;         // shown under the input
+}
+
+// How a machine proves the thing works. `command` is NOT executed because a
+// descriptor said so - see docs/descriptors.md: anything executable needs
+// explicit human consent per descriptor, and never runs on arrival.
+message CheckSpec {
+  string command = 1;         // "command -v browserless"
+  string expect_contains = 2; // optional substring the output must hold
+  int32 timeout_ms = 3;
+}
+
+// How a machine acquires it. Prompt-shaped on purpose: the installer is an
+// agent following instructions, not a package manager.
+message InstallSpec {
+  string prompt = 1;
+  string uninstall_prompt = 2;
+  string docs_url = 3;
+}
+
+message Descriptor {
+  string key = 1;               // "x", "browserless", "google"
+  string name = 2;              // "X (Twitter)"
+  string description = 3;
+  DescriptorKind kind = 4;
+  repeated FieldSpec fields = 5;
+  repeated AuthMethod auths = 6;
+  CheckSpec check = 7;
+  InstallSpec install = 8;
+  string version = 9;           // descriptor version, author's own scheme
+  string author = 10;           // who published it; unsigned by design
+}
+
+// What is true for one descriptor on one machine. Mirrored into object
+// fields, so `error` lands on the bundled Error property.
+message Installation {
+  string key = 1;
+  string machine_id = 2;
+  InstallStatus status = 3;
+  string account = 4;        // "@matcherino", "support@matcherino.com"
+  AuthMethod auth = 5;       // which method it actually used
+  int64 checked_at = 6;
+  string error = 7;
+}
+
+// ── Conversations: many chats per object ─────────────────────────────
+//
+// An object holds MORE than one conversation: the human's chat about the
+// object, and the agent-to-agent threads that ran alongside it. All of them
+// live in this object's block tree, so one object's protobuf carries every
+// conversation it has ever had - a client that reads the object reads the
+// chats, with no side channel and no second fetch.
+//
+// Storage is deliberately the existing block machinery, not a new list:
+//   - one ROOT block per conversation, custom content_type "discussion",
+//     carrying a serialized Conversation in `custom.data`;
+//   - one CHILD block per message, custom content_type "chat", with
+//     meta{author, ts, text, replyTo, reactions} exactly as before.
+//
+// That buys three properties we already rely on: block adds merge cleanly
+// across devices (two agents can post at once), replay is idempotent by
+// block id, and there is no cap beyond the object itself - a message is one
+// appended change, not a rewrite of a growing field.
+//
+// The legacy root id "__discussion__" IS the human conversation; vaults
+// written before this message keep working and decode as kind HUMAN.
+
+enum ConversationKind {
+  CONVERSATION_KIND_UNSPECIFIED = 0;
+  HUMAN = 1;         // the human's chat about this object
+  AGENT_TO_AGENT = 2;// two or more agents working, alongside the human thread
+  AGENT_PRIVATE = 3; // one agent's own reasoning transcript
+}
+
+message Conversation {
+  string id = 1;                    // block id of this conversation's root
+  ConversationKind kind = 2;
+  string title = 3;                 // "Pricing review", "" = derive from kind
+  repeated string participants = 4; // author ids: agents, devices, humans
+  int64 created_at = 5;
+  string opened_by = 6;             // author id that started it
+  string about_message_id = 7;      // the message that spawned this thread
+  bool closed = 8;                  // closed threads stay readable
+}

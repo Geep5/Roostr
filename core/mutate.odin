@@ -339,15 +339,28 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		if object_id == "" || text == "" {
 			return plan, "object_id and text required"
 		}
+		// An object holds many conversations: the human thread plus the
+		// agent-to-agent ones. Absent `thread_id` means the human thread,
+		// which is what every existing caller wants.
+		thread_id := json_str(parsed, "thread_id")
+		if thread_id == "" do thread_id = DISCUSSION_ID
+		if thread_id != DISCUSSION_ID && !conversation_exists(input.states, object_id, thread_id) {
+			// A typo must not mint a ghost thread with no metadata: threads
+			// are opened explicitly by `conversation_open`. The legacy human
+			// root is the sole exception, auto-created below as it always was.
+			return plan, "conversation not found"
+		}
 		ops := make([dynamic]Operation, context.temp_allocator)
-		// Idempotent: replay skips the add when the id already exists.
-		root_meta := make([dynamic]Str_Pair, context.temp_allocator)
-		append(&ops, Operation {
-			kind      = .Block_Add,
-			block     = Block{id = DISCUSSION_ID, content = {kind = .Custom, custom = {content_type = "discussion", meta = root_meta}}},
-			target_id = "",
-			position  = 0,
-		})
+		if thread_id == DISCUSSION_ID {
+			// Idempotent: replay skips the add when the id already exists.
+			root_meta := make([dynamic]Str_Pair, context.temp_allocator)
+			append(&ops, Operation {
+				kind      = .Block_Add,
+				block     = Block{id = DISCUSSION_ID, content = {kind = .Custom, custom = {content_type = "discussion", meta = root_meta}}},
+				target_id = "",
+				position  = 0,
+			})
+		}
 		meta := make([dynamic]Str_Pair, context.temp_allocator)
 		// `as_author` lets the local agent harness post as the agent
 		// identity; default is this device's key-derived author id.
@@ -363,12 +376,110 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		append(&ops, Operation {
 			kind      = .Block_Add,
 			block     = Block{id = mid, content = {kind = .Custom, custom = {content_type = "chat", meta = meta}}},
-			target_id = DISCUSSION_ID,
+			target_id = thread_id,
 			position  = POS_INNER,
 		})
 		mutation_add(&plan, input, object_id, ops[:])
 		extra := jobj()
 		extra["id"] = json.String(mid)
+		extra["threadId"] = json.String(thread_id)
+		plan.result = extra
+		return plan, ""
+
+	case "conversation_open":
+		// Mints a new conversation root in the object. The Conversation
+		// message rides in the root block's `custom.data`, so the object's
+		// protobuf carries what the thread IS - kind, participants, title -
+		// not just its messages.
+		object_id := json_str(parsed, "object_id")
+		if object_id == "" do return plan, "object_id required"
+		kind := conversation_kind_from_key(json_str(parsed, "kind"))
+		if kind == .Unspecified do return plan, "kind must be human, a2a, or agent_private"
+		mid := mutation_id(&plan, input)
+		root_id := conversation_root_id(mid, context.temp_allocator)
+		conversation := Conversation {
+			id           = root_id,
+			kind         = kind,
+			title        = json_str(parsed, "title"),
+			created_at   = input.timestamp,
+			opened_by    = input.author,
+			closed       = false,
+			participants = make([dynamic]string, context.temp_allocator),
+		}
+		if opener := json_str(parsed, "as_author"); opener != "" do conversation.opened_by = opener
+		if about := json_str(parsed, "about_message_id"); about != "" do conversation.about_message_id = about
+		if list_value, ok := json_field(parsed, "participants"); ok {
+			if arr, is_array := list_value.(json.Array); is_array {
+				for item in arr {
+					if s, is_string := item.(json.String); is_string do append(&conversation.participants, string(s))
+				}
+			}
+		}
+		ops := make([dynamic]Operation, context.temp_allocator)
+		append(&ops, Operation {
+			kind      = .Block_Add,
+			block     = Block {
+				id = root_id,
+				content = {
+					kind = .Custom,
+					custom = {
+						content_type = "discussion",
+						data = encode_conversation(conversation, context.temp_allocator),
+						meta = make([dynamic]Str_Pair, context.temp_allocator),
+					},
+				},
+			},
+			target_id = "",
+			position  = 0,
+		})
+		mutation_add(&plan, input, object_id, ops[:])
+		extra := jobj()
+		extra["id"] = json.String(root_id)
+		plan.result = extra
+		return plan, ""
+
+	case "conversation_update":
+		// Whole-message LWW on the root, same discipline as a reaction
+		// toggle: the fields a caller omits keep their current values, and
+		// unknown fields written by a newer client survive the rewrite.
+		object_id := json_str(parsed, "object_id")
+		thread_id := json_str(parsed, "thread_id")
+		if object_id == "" || thread_id == "" do return plan, "object_id and thread_id required"
+		current, found := conversation_load(input.states, object_id, thread_id)
+		if !found do return plan, "conversation not found"
+		if title, has := json_field(parsed, "title"); has {
+			if s, is_string := title.(json.String); is_string do current.title = string(s)
+		}
+		if closed, has := json_field(parsed, "closed"); has {
+			if b, is_bool := closed.(json.Boolean); is_bool do current.closed = bool(b)
+		}
+		if list_value, has := json_field(parsed, "participants"); has {
+			if arr, is_array := list_value.(json.Array); is_array {
+				replacement := make([dynamic]string, context.temp_allocator)
+				for item in arr {
+					if s, is_string := item.(json.String); is_string do append(&replacement, string(s))
+				}
+				current.participants = replacement
+			}
+		}
+		ops := make([dynamic]Operation, context.temp_allocator)
+		// Block_Update replays `content`, not `block` - the op's block field
+		// is for adds.
+		append(&ops, Operation {
+			kind     = .Block_Update,
+			block_id = thread_id,
+			content  = Block_Content {
+				kind = .Custom,
+				custom = {
+					content_type = "discussion",
+					data = encode_conversation(current, context.temp_allocator),
+					meta = make([dynamic]Str_Pair, context.temp_allocator),
+				},
+			},
+		})
+		mutation_add(&plan, input, object_id, ops[:])
+		extra := jobj()
+		extra["id"] = json.String(thread_id)
 		plan.result = extra
 		return plan, ""
 

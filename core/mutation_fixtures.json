@@ -939,7 +939,8 @@
    }
   ],
   "expected_result": {
-   "id": "new-id"
+   "id": "new-id",
+   "threadId": "__discussion__"
   },
   "expected_vanish_changes": [],
   "expected_vanish_ids": []
