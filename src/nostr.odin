@@ -203,6 +203,9 @@ handle_settings :: proc(sock: net.TCP_Socket) {
 	for r in s.relays do append(&relays, json.String(r))
 	o["relays"] = json.Array(relays)
 	o["authorId"] = json.String(author_id())
+	// Damaged changes must be visible, not just logged: sync can refetch a
+	// content-addressed change, but only if someone knows one went missing.
+	o["quarantinedChanges"] = json.Integer(i64(g_store.quarantined))
 	respond_json(sock, json.Object(o))
 }
 
@@ -219,7 +222,6 @@ author_id :: proc(allocator := context.temp_allocator) -> string {
 	sha2.final(&ctx, digest[:])
 	return strings.clone(string(hex.encode(digest[:8], context.temp_allocator)), allocator)
 }
-
 /** mutate action: nostr_key_export → {nsec, hex}. */
 mutate_key_export :: proc(sock: net.TCP_Socket) {
 	s := nostr_ensure()

@@ -41,6 +41,8 @@ Store :: struct {
 	live_used: uint, // arena.total_used right after the last full rebuild
 	loaded_at: i64,
 	valid:     bool,
+	/** Changes parked as damaged since boot - surfaced, never silent. */
+	quarantined: int,
 }
 
 g_store: Store
@@ -120,6 +122,7 @@ ensure_loaded :: proc() {
 		clear(&g_store.dirty)
 	}
 
+	g_store.quarantined = 0
 	dir, derr := os.open(g_store.root)
 	if derr == nil {
 		defer os.close(dir)
@@ -131,12 +134,37 @@ ensure_loaded :: proc() {
 			}
 		}
 	}
+	// Damage is a standing fact, not a boot event: report everything parked,
+	// so a restart cannot make missing changes look healed.
+	g_store.quarantined += count_quarantined()
 	enforce_vanished_locked()
 	g_store.live_used = g_store.arena.total_used
 	g_store.loaded_at = now
 	g_store.valid = true
 }
 
+
+/** Changes currently parked under changes/.quarantine, across all objects. */
+count_quarantined :: proc() -> int {
+	root, _ := filepath.join({g_store.root, ".quarantine"}, context.temp_allocator)
+	dir, derr := os.open(root)
+	if derr != nil do return 0
+	defer os.close(dir)
+	per_object, eerr := os.read_dir(dir, -1, context.temp_allocator)
+	if eerr != nil do return 0
+	total := 0
+	for entry in per_object {
+		if entry.type != .Directory do continue
+		sub, serr := os.open(entry.fullpath)
+		if serr != nil do continue
+		files, ferr := os.read_dir(sub, -1, context.temp_allocator)
+		if ferr == nil {
+			for f in files do if strings.has_suffix(f.name, ".pb") do total += 1
+		}
+		os.close(sub)
+	}
+	return total
+}
 load_object_dir :: proc(dir_path: string, object_id: string, alloc := context.allocator) {
 	dir, derr := os.open(dir_path)
 	if derr != nil do return
@@ -147,10 +175,26 @@ load_object_dir :: proc(dir_path: string, object_id: string, alloc := context.al
 	changes := make([dynamic]core.Change, alloc)
 	for f in files {
 		if !strings.has_suffix(f.name, ".pb") do continue
+		// A crash used to be able to leave a torn file at a final,
+		// content-addressed name, and nothing here compared the name with
+		// the bytes: the truncated change was replayed as genuine, and an
+		// undecodable one vanished in silence. The filename IS the hash, so
+		// check it, and quarantine whatever fails instead of guessing.
 		data, rerr := os.read_entire_file(f.fullpath, alloc)
-		if rerr != nil do continue
+		if rerr != nil {
+			quarantine_change(f.fullpath, object_id, "unreadable")
+			continue
+		}
 		c, cok := core.decode_change(data, alloc)
-		if cok do append(&changes, c)
+		if !cok {
+			quarantine_change(f.fullpath, object_id, "undecodable")
+			continue
+		}
+		if !change_matches_name(c, f.name) {
+			quarantine_change(f.fullpath, object_id, "address mismatch")
+			continue
+		}
+		append(&changes, c)
 	}
 	if len(changes) == 0 do return
 
@@ -163,6 +207,40 @@ load_object_dir :: proc(dir_path: string, object_id: string, alloc := context.al
 	g_store.states[state.id] = sp
 }
 
+/** True when `<hex>.pb` is the content address of the change it holds. */
+change_matches_name :: proc(c: core.Change, file_name: string) -> bool {
+	name := strings.trim_suffix(file_name, ".pb")
+	if len(name) != 64 do return false
+	hashed := core.encode_change(c, for_hashing = true, allocator = context.temp_allocator)
+	digest := core.sha256(hashed)
+	return strings.equal_fold(name, string(hex.encode(digest[:], context.temp_allocator)))
+}
+
+/**
+ * Park a damaged change where an operator can find it and sync can replace
+ * it. Changes are content-addressed, so any relay or peer still holding the
+ * good copy heals the object on the next scan - but the loss must be loud,
+ * never a silently skipped file.
+ */
+quarantine_change :: proc(path: string, object_id: string, reason: string) {
+	// No counter here: the census in ensure_loaded counts what is parked on
+	// disk, so incrementing on the move as well would double-count.
+	root_dir, _ := filepath.join({g_store.root, ".quarantine"}, context.temp_allocator)
+	dest_dir, _ := filepath.join({root_dir, object_id}, context.temp_allocator)
+	os.make_directory(root_dir)
+	os.make_directory(dest_dir)
+	base := filepath.base(path)
+	dest, _ := filepath.join({dest_dir, base}, context.temp_allocator)
+	moved := os.rename(path, dest) == nil
+	fmt.eprintfln(
+		"[store] %s change quarantined (%s/%s)%s",
+		reason,
+		object_id,
+		base,
+		moved ? "" : " - COULD NOT MOVE, still in place",
+	)
+}
+
 /** Snapshot accessor: runs `fn` with the states map under the lock. */
 with_states :: proc(fn: proc(states: map[string]^core.Object_State, user: rawptr), user: rawptr = nil) {
 	sync.lock(&g_store.mu)
@@ -173,7 +251,17 @@ with_states :: proc(fn: proc(states: map[string]^core.Object_State, user: rawptr
 
 // ── Writing changes ──────────────────────────────────────────────────
 
-/** Content-address, persist, and invalidate. Returns hex id. */
+/**
+ * Content-address, persist, and invalidate. Returns hex id.
+ *
+ * Durable by the same rules the relay's log follows: a change is written to
+ * a temporary file, fsynced, then renamed into its content-addressed name,
+ * and the directory is fsynced so the name itself survives. Writing
+ * straight to the final path (as this did) could leave a torn file sitting
+ * at a name that claims to be the hash of its contents, and an
+ * unacknowledged write could still be lost in the page cache after the
+ * caller was told the commit succeeded.
+ */
 commit_change :: proc(c: ^core.Change) -> (string, bool) {
 	hashed := core.encode_change(c^, for_hashing = true, allocator = context.temp_allocator)
 	digest := core.sha256(hashed)
@@ -188,10 +276,43 @@ commit_change :: proc(c: ^core.Change) -> (string, bool) {
 	os.make_directory(g_store.root)
 	os.make_directory(dir)
 	path, _ := filepath.join({dir, strings.concatenate({hex_str, ".pb"}, context.temp_allocator)}, context.temp_allocator)
-	if os.write_entire_file(path, full) != nil do return "", false
+	if !write_file_durable(path, full) do return "", false
 
 	store_mark_dirty(c.object_id)
 	return strings.clone(hex_str), true
+}
+
+/** fsync a directory so a rename into it is durable, not just visible. */
+sync_directory :: proc(dir: string) -> bool {
+	fd, err := os.open(dir, {.Read}, os.Permissions_Default_File)
+	if err != nil do return false
+	ok := os.sync(fd) == nil
+	return os.close(fd) == nil && ok
+}
+
+/** Write bytes to `path` atomically: temp file, fsync, rename, fsync dir. */
+write_file_durable :: proc(path: string, data: []byte) -> bool {
+	tmp := strings.concatenate({path, ".tmp"}, context.temp_allocator)
+	fd, err := os.open(tmp, {.Write, .Create, .Trunc}, os.Permissions_Default_File)
+	if err != nil do return false
+	ok := true
+	off := 0
+	for off < len(data) {
+		n, werr := os.write(fd, data[off:])
+		if werr != nil || n <= 0 { ok = false; break }
+		off += n
+	}
+	if ok do ok = os.sync(fd) == nil
+	if os.close(fd) != nil do ok = false
+	if !ok {
+		_ = os.remove(tmp)
+		return false
+	}
+	if os.rename(tmp, path) != nil {
+		_ = os.remove(tmp)
+		return false
+	}
+	return sync_directory(os.dir(path))
 }
 
 /** Current heads of an object as raw 32-byte ids (temp-allocated). */
