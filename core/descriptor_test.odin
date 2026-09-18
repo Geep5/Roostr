@@ -9,6 +9,8 @@ package core
 //     descriptors are protobuf instead of hand-rolled JSON in object fields,
 //     so it is tested rather than assumed.
 
+import "core:encoding/base64"
+import "core:encoding/json"
 import "core:slice"
 import "core:testing"
 
@@ -173,4 +175,93 @@ installation_round_trips_with_its_error :: proc(t: ^testing.T) {
 	fixed, _ := decode_installation(encode_installation(clean))
 	testing.expect_value(t, fixed.error, "")
 	testing.expect_value(t, fixed.status, Install_Status.Active)
+}
+
+@(test)
+descriptor_json_boundary_preserves_the_future :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	// The ABI is JSON, so the compatibility guarantee has to survive TWO
+	// hops: bytes -> JSON -> bytes. A host that decodes a newer descriptor,
+	// shows it, and writes it back must not strip the parts it cannot name.
+	w := Writer{buf = make([dynamic]byte)}
+	write_string_field(&w, 1, "x")
+	write_string_field(&w, 2, "X (Twitter)")
+	write_tag(&w, 4, 0)
+	write_varint(&w, u64(Descriptor_Kind.Integration))
+	write_string_field(&w, 11, "written by next year's client")
+	original := w.buf[:]
+
+	request := jobj()
+	request["action"] = json.String("decode")
+	request["type"] = json.String("descriptor")
+	request["bytes"] = json.String(base64.encode(original, allocator = context.temp_allocator))
+	decoded, decode_error := dispatch("descriptor", json.Object(request))
+	testing.expect_value(t, decode_error, "")
+	testing.expect_value(t, json_str(decoded, "key"), "x")
+	testing.expect_value(t, json_str(decoded, "kind"), "integration")
+	testing.expect(t, json_str(decoded, "unknown") != "", "unknown bytes reach the host as base64")
+
+	encode_request := jobj()
+	encode_request["action"] = json.String("encode")
+	encode_request["type"] = json.String("descriptor")
+	encode_request["value"] = decoded
+	reencoded, encode_error := dispatch("descriptor", json.Object(encode_request))
+	testing.expect_value(t, encode_error, "")
+	text, is_string := reencoded.(json.String)
+	testing.expect(t, is_string, "encode returns base64")
+	bytes, ok := bytes_from_base64(string(text), context.temp_allocator)
+	testing.expect(t, ok, "valid base64")
+	testing.expect(t, slice.equal(original, bytes), "a JSON round trip through this host is byte-identical")
+}
+
+@(test)
+conversation_json_round_trips_through_the_abi :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	// What a client does with the 159 bytes on a thread root.
+	c := Conversation {
+		id           = "__thread__50706675",
+		kind         = .Agent_To_Agent,
+		title        = "Pricing research",
+		created_at   = 1789700000000,
+		opened_by    = "device-a",
+		participants = make([dynamic]string),
+	}
+	append(&c.participants, "agent-scout", "agent-analyst")
+
+	request := jobj()
+	request["action"] = json.String("decode")
+	request["type"] = json.String("conversation")
+	request["bytes"] = json.String(base64.encode(encode_conversation(c), allocator = context.temp_allocator))
+	decoded, err := dispatch("descriptor", json.Object(request))
+	testing.expect_value(t, err, "")
+	testing.expect_value(t, json_str(decoded, "kind"), "a2a")
+	testing.expect_value(t, json_str(decoded, "title"), "Pricing research")
+	people := json_array(decoded, "participants")
+	testing.expect_value(t, len(people), 2)
+	testing.expect_value(t, json_str(decoded, "openedBy"), "device-a")
+
+	// And an installation, whose `error` is the whole reason it exists.
+	install_request := jobj()
+	install_request["action"] = json.String("decode")
+	install_request["type"] = json.String("installation")
+	broken := Installation{key = "x", status = .Needs_Auth, error = "no logged-in browser profile"}
+	install_request["bytes"] = json.String(base64.encode(encode_installation(broken), allocator = context.temp_allocator))
+	install_decoded, install_error := dispatch("descriptor", json.Object(install_request))
+	testing.expect_value(t, install_error, "")
+	testing.expect_value(t, json_str(install_decoded, "status"), "needs_auth")
+	testing.expect_value(t, json_str(install_decoded, "error"), "no logged-in browser profile")
+
+	_, unknown_type := dispatch("descriptor", json.Object(params_of("decode", "wat")))
+	testing.expect_value(t, unknown_type, "unknown descriptor type")
+	_, unknown_action := dispatch("descriptor", json.Object(params_of("frobnicate", "descriptor")))
+	testing.expect_value(t, unknown_action, "unknown descriptor action")
+}
+
+@(private = "file")
+params_of :: proc(action, kind: string) -> map[string]json.Value {
+	out := jobj()
+	out["action"] = json.String(action)
+	out["type"] = json.String(kind)
+	out["bytes"] = json.String("")
+	return out
 }

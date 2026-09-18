@@ -187,17 +187,48 @@ actually hot. It is also the bigger change of the two, so: descriptors first
    renders `FieldSpec[]`; the website's `CAPABILITIES` literal is deleted.
 6. **Then the ABI**, on its own evidence.
 
-## Open questions for you
+## Decisions taken
 
-1. **Descriptor payload: proto bytes in a block, or normal object fields?**
-   Bytes give the compatibility guarantee and one definition; fields stay
-   human-editable in the UI and greppable in the vault. I lean to **bytes for
-   the descriptor** (machine-authored, versioned) and **fields for the
-   installation** (so `error`, `account` and `status` work with views and
-   sorting for free).
-2. **Who may publish a descriptor?** If it is data, a third party could ship
-   one and every client would render its form. That is the point — and also an
-   attack surface, since a descriptor drives what the UI asks a human to type.
-   Owner-signed only, at least to start.
-3. **Do agents get descriptors too, or stay bespoke?** They are the most
-   valuable case for "infer the other end" and the least settled shape.
+1. **Descriptor payload: bytes; installation: fields.** As recommended.
+   A descriptor is machine-authored and versioned, so it gets protobuf's
+   unknown-field guarantee; an installation's `error`, `account` and `status`
+   are view-facing, so they stay object fields where views, sorting and the
+   bundled Error badge already work.
+2. **Anyone may publish a descriptor** — power over safety, deliberately.
+   Consequences, stated rather than papered over:
+   - A descriptor drives what the UI asks a human to type. A hostile one can
+     ask for a password under a plausible label. The rendering client must
+     show `author` next to any credential form, and never pre-trust a key.
+   - `CheckSpec.command` and `InstallSpec.prompt` are *descriptions of work*,
+     not authorisation to do it. **Nothing executes on arrival.** A machine
+     runs a check or an install only after a human enables that descriptor on
+     that machine, per descriptor - the same shape of consent the skills
+     manager already takes.
+   - `key` collisions are first-writer-wins per space, and the author is part
+     of the identity; two "x" descriptors from different authors are two
+     cards, not a merge.
+3. **Agents get descriptors too** (`DescriptorKind.AGENT`, in the schema now).
+   The shape of an agent's card - model, tools, prompt sections - is the least
+   settled part, so it lands after integrations prove the pattern.
+
+## What exists now
+
+Built and verified (`core/descriptor.odin`, `core/conversation.odin`,
+`core/descriptor_json.odin`):
+
+- the six descriptor messages plus `Conversation` in `glon.proto`;
+- ONE codec, in the shared core, reached by every host through
+  `dispatch` → `"descriptor"` (`encode`/`decode` × descriptor, installation,
+  conversation). No host carries its own protobuf reader;
+- unknown-field preservation proven across BOTH hops - bytes → JSON → bytes -
+  because the ABI is JSON and a guarantee that stops at the host boundary is
+  not a guarantee (`core/descriptor_test.odin`,
+  `website/scripts/descriptor.test.ts`);
+- many conversations per object: `conversation_open`, `chat_post thread_id`,
+  `conversation_update`, with the legacy `__discussion__` root still reading
+  as the human thread.
+
+Remaining, in order: publish descriptors from the harness catalogs (deleting
+the TS literals and the website's hand-copy), publish installations where
+`publishCapabilities` runs, mirror holdups onto `error`, render `FieldSpec[]`
+generically, then the ABI.
