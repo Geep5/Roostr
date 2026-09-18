@@ -1,110 +1,737 @@
 {
-	"resolve": [
-		{
-			"name": "no requirements: space default",
-			"object": { "id": "o", "typeKey": "task", "fields": {} },
-			"space": { "id": "s", "typeKey": "channel", "fields": { "served_by": { "stringValue": "laptop" } } },
-			"machines": [
-				{ "id": "m1", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "laptop" } } },
-				{ "id": "m2", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "studio" }, "capabilities": { "listValue": { "values": ["browserless"] } } } }
-			],
-			"expected": { "machineId": "laptop", "reason": "space", "requires": [], "candidates": ["laptop", "studio"] }
-		},
-		{
-			"name": "no space claim and no requirements: nobody",
-			"object": { "id": "o", "typeKey": "task", "fields": {} },
-			"machines": [],
-			"expected": { "machineId": "", "reason": "space", "requires": [], "candidates": [] }
-		},
-		{
-			"name": "requirement moves work to the capable machine",
-			"object": { "id": "o", "typeKey": "task", "fields": { "requires": { "valuesValue": { "items": [{ "stringValue": "browserless" }] } } } },
-			"space": { "id": "s", "typeKey": "channel", "fields": { "served_by": { "stringValue": "laptop" } } },
-			"machines": [
-				{ "id": "m1", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "laptop" } } },
-				{ "id": "m2", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "studio" }, "capabilities": { "listValue": { "values": ["browserless", "gws"] } } } }
-			],
-			"expected": { "machineId": "studio", "reason": "capability", "requires": ["browserless"], "candidates": ["studio"] }
-		},
-		{
-			"name": "stickiness: the default keeps work it can do",
-			"object": { "id": "o", "typeKey": "task", "fields": { "requires": { "listValue": { "values": ["browserless"] } } } },
-			"space": { "id": "s", "typeKey": "channel", "fields": { "served_by": { "stringValue": "studio" } } },
-			"machines": [
-				{ "id": "m1", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "alpha" }, "capabilities": { "listValue": { "values": ["browserless"] } } } },
-				{ "id": "m2", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "studio" }, "capabilities": { "listValue": { "values": ["browserless"] } } } }
-			],
-			"expected": { "machineId": "studio", "reason": "space-capable", "requires": ["browserless"], "candidates": ["alpha", "studio"] }
-		},
-		{
-			"name": "tie-break: smallest machine id among capable",
-			"object": { "id": "o", "typeKey": "task", "fields": { "requires": { "listValue": { "values": ["gws"] } } } },
-			"space": { "id": "s", "typeKey": "channel", "fields": { "served_by": { "stringValue": "laptop" } } },
-			"machines": [
-				{ "id": "m3", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "zeta" }, "capabilities": { "listValue": { "values": ["gws"] } } } },
-				{ "id": "m2", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "beta" }, "capabilities": { "listValue": { "values": ["gws", "browserless"] } } } },
-				{ "id": "m1", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "laptop" } } }
-			],
-			"expected": { "machineId": "beta", "reason": "capability", "requires": ["gws"], "candidates": ["beta", "zeta"] }
-		},
-		{
-			"name": "all requirements must be present",
-			"object": { "id": "o", "typeKey": "task", "fields": { "requires": { "listValue": { "values": ["gws", "browserless"] } } } },
-			"space": { "id": "s", "typeKey": "channel", "fields": { "served_by": { "stringValue": "laptop" } } },
-			"machines": [
-				{ "id": "m1", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "laptop" }, "capabilities": { "listValue": { "values": ["gws"] } } } },
-				{ "id": "m2", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "studio" }, "capabilities": { "listValue": { "values": ["browserless"] } } } }
-			],
-			"expected": { "machineId": "laptop", "reason": "unsatisfied", "requires": ["gws", "browserless"], "candidates": [] }
-		},
-		{
-			"name": "pin wins when capable",
-			"object": { "id": "o", "typeKey": "task", "fields": { "served_by": { "stringValue": "studio" }, "requires": { "listValue": { "values": ["browserless"] } } } },
-			"space": { "id": "s", "typeKey": "channel", "fields": { "served_by": { "stringValue": "laptop" } } },
-			"machines": [
-				{ "id": "m1", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "alpha" }, "capabilities": { "listValue": { "values": ["browserless"] } } } },
-				{ "id": "m2", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "studio" }, "capabilities": { "listValue": { "values": ["browserless"] } } } }
-			],
-			"expected": { "machineId": "studio", "reason": "pinned", "requires": ["browserless"], "candidates": ["alpha", "studio"] }
-		},
-		{
-			"name": "pin with no requirements never needs capabilities",
-			"object": { "id": "o", "typeKey": "task", "fields": { "served_by": { "stringValue": "laptop" } } },
-			"space": { "id": "s", "typeKey": "channel", "fields": { "served_by": { "stringValue": "studio" } } },
-			"machines": [],
-			"expected": { "machineId": "laptop", "reason": "pinned", "requires": [], "candidates": [] }
-		},
-		{
-			"name": "pin is honoured but flagged when it cannot do the work",
-			"object": { "id": "o", "typeKey": "task", "fields": { "served_by": { "stringValue": "laptop" }, "requires": { "listValue": { "values": ["browserless"] } } } },
-			"space": { "id": "s", "typeKey": "channel", "fields": { "served_by": { "stringValue": "laptop" } } },
-			"machines": [
-				{ "id": "m1", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "laptop" } } },
-				{ "id": "m2", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "studio" }, "capabilities": { "listValue": { "values": ["browserless"] } } } }
-			],
-			"expected": { "machineId": "laptop", "reason": "pinned-uncapable", "requires": ["browserless"], "candidates": ["studio"] }
-		},
-		{
-			"name": "machines without an id and blank requirement entries are ignored",
-			"object": { "id": "o", "typeKey": "task", "fields": { "requires": { "listValue": { "values": ["", "browserless"] } } } },
-			"space": { "id": "s", "typeKey": "channel", "fields": { "served_by": { "stringValue": "laptop" } } },
-			"machines": [
-				{ "id": "m0", "typeKey": "machine", "fields": { "capabilities": { "listValue": { "values": ["browserless"] } } } },
-				{ "id": "m2", "typeKey": "machine", "fields": { "machine_id": { "stringValue": "studio" }, "capabilities": { "listValue": { "values": ["browserless"] } } } }
-			],
-			"expected": { "machineId": "studio", "reason": "capability", "requires": ["browserless"], "candidates": ["studio"] }
-		},
-		{
-			"name": "no object at all: the space default",
-			"space": { "id": "s", "typeKey": "channel", "fields": { "served_by": { "stringValue": "laptop" } } },
-			"machines": [],
-			"expected": { "machineId": "laptop", "reason": "space", "requires": [], "candidates": [] }
-		},
-		{
-			"name": "malformed machine entry is an error",
-			"object": { "id": "o", "typeKey": "task", "fields": {} },
-			"machines": [42],
-			"error": "invalid machine state"
-		}
-	]
+ "resolve": [
+  {
+   "name": "no requirements: space default",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {}
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "space",
+    "requires": [],
+    "candidates": [
+     "laptop",
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "no space claim and no requirements: nobody",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {}
+   },
+   "machines": [],
+   "expected": {
+    "machineId": "",
+    "reason": "space",
+    "requires": [],
+    "candidates": []
+   }
+  },
+  {
+   "name": "requirement moves work to the capable machine",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "requires": {
+      "valuesValue": {
+       "items": [
+        {
+         "stringValue": "browserless"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless",
+         "gws"
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "studio",
+    "reason": "capability",
+    "requires": [
+     "browserless"
+    ],
+    "candidates": [
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "stickiness: the default keeps work it can do",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "requires": {
+      "listValue": {
+       "values": [
+        "browserless"
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "studio"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "alpha"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "studio",
+    "reason": "space-capable",
+    "requires": [
+     "browserless"
+    ],
+    "candidates": [
+     "alpha",
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "tie-break: smallest machine id among capable",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "requires": {
+      "listValue": {
+       "values": [
+        "gws"
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m3",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "zeta"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "gws"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "beta"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "gws",
+         "browserless"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "beta",
+    "reason": "capability",
+    "requires": [
+     "gws"
+    ],
+    "candidates": [
+     "beta",
+     "zeta"
+    ]
+   }
+  },
+  {
+   "name": "all requirements must be present",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "requires": {
+      "listValue": {
+       "values": [
+        "gws",
+        "browserless"
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "gws"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "unsatisfied",
+    "requires": [
+     "gws",
+     "browserless"
+    ],
+    "candidates": []
+   }
+  },
+  {
+   "name": "pin wins when capable",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "served_by": {
+      "stringValue": "studio"
+     },
+     "requires": {
+      "listValue": {
+       "values": [
+        "browserless"
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "alpha"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "studio",
+    "reason": "pinned",
+    "requires": [
+     "browserless"
+    ],
+    "candidates": [
+     "alpha",
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "pin with no requirements never needs capabilities",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "studio"
+     }
+    }
+   },
+   "machines": [],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "pinned",
+    "requires": [],
+    "candidates": []
+   }
+  },
+  {
+   "name": "pin is honoured but flagged when it cannot do the work",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     },
+     "requires": {
+      "listValue": {
+       "values": [
+        "browserless"
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "pinned-uncapable",
+    "requires": [
+     "browserless"
+    ],
+    "candidates": [
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "machines without an id and blank requirement entries are ignored",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "requires": {
+      "listValue": {
+       "values": [
+        "",
+        "browserless"
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m0",
+     "typeKey": "machine",
+     "fields": {
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "studio",
+    "reason": "capability",
+    "requires": [
+     "browserless"
+    ],
+    "candidates": [
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "no object at all: the space default",
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "space",
+    "requires": [],
+    "candidates": []
+   }
+  },
+  {
+   "name": "malformed machine entry is an error",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {}
+   },
+   "machines": [
+    42
+   ],
+   "error": "invalid machine state"
+  },
+  {
+   "name": "a machine object answers for itself",
+   "object": {
+    "id": "m2",
+    "typeKey": "machine",
+    "fields": {
+     "machine_id": {
+      "stringValue": "studio"
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "alpha"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "alpha"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "studio",
+    "reason": "self",
+    "requires": [],
+    "candidates": [
+     "alpha",
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "a machine cannot be pinned to another machine",
+   "object": {
+    "id": "m2",
+    "typeKey": "machine",
+    "fields": {
+     "machine_id": {
+      "stringValue": "studio"
+     },
+     "served_by": {
+      "stringValue": "alpha"
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "alpha"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "alpha"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "studio",
+    "reason": "self",
+    "requires": [],
+    "candidates": [
+     "alpha",
+     "studio"
+    ]
+   }
+  }
+ ]
 }

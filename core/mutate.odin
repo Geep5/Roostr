@@ -1152,6 +1152,9 @@ BUNDLED_TYPES :: []Bundled_Type{
 	{"project", "Project", "🔨", "page"},
 	{"bookmark", "Bookmark", "🔖", "page"},
 	{"chat", "Chat", "💬", "chat"},
+	// Every harness registers its host at boot; without a type object the
+	// objects existed but had no definition, no sidebar row, and no way in.
+	{"machine", "Computer", "🖥️", "page"},
 }
 Table_Shape :: struct {
 	object_id:   string,

@@ -297,7 +297,11 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 	}
 }
 
-HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "relation", "channel", "skill", "peer", "machine", "pinned_fact", "milestone", "agent", VANISH_LOG_TYPE}
+// Kept in step with the browser's list in engine/backend.ts: `machine` is
+// deliberately absent from both, so Computers appear in lists on every
+// surface. A type hidden on one host and listed on the other is how
+// machines became invisible on localhost and visible on the website.
+HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "relation", "channel", "skill", "peer", "pinned_fact", "milestone", "agent", VANISH_LOG_TYPE}
 
 handle_list_objects :: proc(sock: net.TCP_Socket) {
 	Ctx :: struct {

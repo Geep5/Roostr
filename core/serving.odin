@@ -29,6 +29,7 @@ SERVED_BY_KEY :: "served_by"
 REQUIRES_KEY :: "requires"
 CAPABILITIES_KEY :: "capabilities"
 MACHINE_ID_KEY :: "machine_id"
+MACHINE_TYPE_KEY :: "machine"
 
 Serving :: struct {
 	machine_id: string,
@@ -96,7 +97,16 @@ resolve_server :: proc(object: ^Object_State, space: ^Object_State, machines: []
 	dflt := pin
 	if dflt == "" && space != nil do dflt = field_string(space.fields, SERVED_BY_KEY)
 
+	// A machine object answers for itself, ahead of any pin. Nobody else can
+	// install software on that box, read its holdups, or report its
+	// capabilities - so "who serves this machine?" has exactly one honest
+	// answer, and a pin to another machine would be a promise it cannot keep.
+	self := ""
+	if object != nil && object.type_key == MACHINE_TYPE_KEY do self = field_string(object.fields, MACHINE_ID_KEY)
+
 	switch {
+	case self != "":
+		out.machine_id, out.reason = self, "self"
 	case pin != "" && (len(out.requires) == 0 || capable(&out, pin)):
 		out.machine_id, out.reason = pin, "pinned"
 	case pin != "":

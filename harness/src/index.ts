@@ -277,8 +277,16 @@ async function serve(): Promise<void> {
 	}
 	await ensureSpaceAgents();
 
-	/** Kinds that never get their own mind. */
-	const UNMINTABLE = new Set(["agent", "chat", "channel", "relation", "type", "template", "skill", "program", "typescript", "json", "proto", "pinned_fact", "milestone", MACHINE_TYPE]);
+	/**
+	 * Kinds that never get their own mind.
+	 *
+	 * A machine object is NOT one of them: the resolver answers "self" for
+	 * it, so the only harness that can mint or answer is the box the object
+	 * describes - which is the point. That is how "install browserless" or
+	 * "why did last night's run fail" get answered by the machine that
+	 * knows, rather than by whichever agent happened to be nearby.
+	 */
+	const UNMINTABLE = new Set(["agent", "chat", "channel", "relation", "type", "template", "skill", "program", "typescript", "json", "proto", "pinned_fact", "milestone"]);
 
 	/** True when the newest discussion message is human-authored - the
 	 * ONLY trigger that may mint an agent. */
