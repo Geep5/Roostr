@@ -329,14 +329,6 @@ handle_list_objects :: proc(sock: net.TCP_Socket) {
 				break
 			}
 			if hidden do continue
-			// An agent's own chat is machinery: the harness mints one per
-			// agent and copies every object discussion into it, so listing
-			// it puts a second row with the same name beside the object it
-			// transcribes. Agent-to-agent pair chats and hand-made chats
-			// carry no `agent` field and stay listed.
-			if s.type_key == "chat" {
-				if _, is_transcript := core.fields_get(s.fields, "agent"); is_transcript do continue
-			}
 			o := core.jobj()
 			o["id"] = json.String(s.id)
 			o["typeKey"] = json.String(s.type_key)

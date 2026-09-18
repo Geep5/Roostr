@@ -4786,68 +4786,6 @@
    {
     "author": "alice",
     "id": "",
-    "objectId": "bundled-type-chat-new-id",
-    "ops": [
-     {
-      "objectCreate": {
-       "typeKey": "type"
-      }
-     },
-     {
-      "fieldSet": {
-       "key": "channel",
-       "value": {
-        "stringValue": "new-id"
-       }
-      }
-     },
-     {
-      "fieldSet": {
-       "key": "key",
-       "value": {
-        "stringValue": "chat"
-       }
-      }
-     },
-     {
-      "fieldSet": {
-       "key": "name",
-       "value": {
-        "stringValue": "Chat"
-       }
-      }
-     },
-     {
-      "fieldSet": {
-       "key": "iconEmoji",
-       "value": {
-        "stringValue": "💬"
-       }
-      }
-     },
-     {
-      "fieldSet": {
-       "key": "layout",
-       "value": {
-        "stringValue": "chat"
-       }
-      }
-     },
-     {
-      "fieldSet": {
-       "key": "bundled",
-       "value": {
-        "boolValue": true
-       }
-      }
-     }
-    ],
-    "parentIds": [],
-    "timestamp": 1234
-   },
-   {
-    "author": "alice",
-    "id": "",
     "objectId": "bundled-type-machine-new-id",
     "ops": [
      {
