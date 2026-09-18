@@ -87,6 +87,50 @@ dependency and minus a second query implementation. Two hand-written query
 engines is exactly the divergence that produced the daemon-vs-browser bugs this
 audit started from.
 
+## Layer 2, third fix — the corpus arrives as protobuf
+
+Status: done (`core/corpus.odin`, `abi/abi.odin` ABI v2,
+`website/src/lib/engine/query.ts`).
+
+Seeding the core's cache used to cost **three serialisations per object**: the
+host stringified each object, the ABI parsed it, and the cache re-marshalled
+and re-parsed it into its own region. The replica already stores every change
+as protobuf beside its JSON, so it now hands those bytes over untouched
+through a binary side-channel (`core_reserve_blob`), and the core decodes,
+toposorts and replays straight into the cache.
+
+Measured on this machine, JSON push vs corpus push, same objects:
+
+| objects | JSON payload | bytes payload | JSON push | corpus push |
+| --- | --- | --- | --- | --- |
+| 1,000 | 0.21 MB | 0.14 MB | 22 ms | **8 ms** |
+| 5,000 | 1.04 MB | 0.71 MB | 87 ms | **27 ms** |
+| 10,000 | 2.09 MB | 1.42 MB | 162 ms | **53 ms** |
+
+The 16 MiB JSON request wall is gone from this path too - bytes are ~⅔ the
+size of the JSON that described them, and the blob buffer is 32 MiB.
+
+**One bug worth recording**, because the class of it will recur: the codec
+*borrows* strings out of the bytes it reads (zero-copy, deliberately). A state
+decoded straight from the request blob therefore pointed into a buffer the ABI
+reuses on the next call. It never raised an error - it showed up as garbage
+names, replays that failed for no visible reason, and a query response that
+would not parse. The fix is to copy each object's frames into its own cache
+region and decode from the copy; `corpus_test.odin` pins it by overwriting the
+blob and re-reading a cached name.
+
+### The ceiling, measured rather than assumed
+
+Neither path raises the object ceiling, and the ceiling is **not** the
+encoding: a cached object costs ~5.8 KB of region regardless of its size, so
+20,000 objects is ~115 MB against a 128 MB cache budget inside a 512 MiB WASM
+heap. One push of ~20k objects exhausts it either way, which is why both paths
+now batch by object **count** (4,000) as well as bytes - a 6 MiB byte budget
+alone let 20k small objects into a single push, and that trapped the core.
+
+So the next lever, when a vault needs it, is **per-object region overhead**
+(fewer, larger allocations), then the constant - not the format.
+
 ## What is NOT being done, and why
 
 - **No SQLite, no DuckDB.** The canonical format is the change log; a

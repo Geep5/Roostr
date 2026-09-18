@@ -16,6 +16,25 @@ dispatch :: proc(method: string, payload: json.Value) -> (json.Value, string) {
 	case "serving": return serving_dispatch(payload)
 	// Descriptors and conversations: one codec, reached by every host.
 	case "descriptor": return descriptor_dispatch(payload)
+	// A whole vault, as the protobuf the host already holds.
+	case "corpus": return corpus_dispatch(payload)
 	case: return nil, "unknown core method"
 	}
+}
+
+/**
+ * Binary side-channel for the current request: protobuf bytes the host
+ * already has, handed over without a JSON hop. Set by the ABI before dispatch
+ * and cleared after, so nothing here may retain it.
+ */
+@(private = "file")
+request_blob: []byte
+
+set_request_blob :: proc(blob: []byte) {
+	request_blob = blob
+}
+
+/** The bytes the host attached to this request; empty when it attached none. */
+get_request_blob :: proc() -> []byte {
+	return request_blob
 }

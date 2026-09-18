@@ -10,15 +10,27 @@ import "core:mem"
 import "core:encoding/json"
 import "../core"
 
-ABI_VERSION :: 1
+ABI_VERSION :: 2
 REQUEST_LIMIT :: 16 * 1024 * 1024
 SCRATCH_LIMIT :: 128 * 1024 * 1024
+// A corpus arrives as protobuf change bytes, which the host already has on
+// disk - no JSON, so no stringify on the way in and no parse on the way out.
+//
+// 32 MiB, not more: this buffer is STATIC, and WASM linear memory is capped
+// at 512 MiB (`build-wasm.mjs --max-memory`). Together with the request
+// buffer and the scratch arena it has to leave room for the query cache to
+// grow on the heap - at 96 MiB it did not, and a 6 MiB push trapped the
+// allocator. The real vault measured here is 4.8 MB of change payload, so
+// this is ~6x headroom, and a bigger one still loads in batches.
+BLOB_LIMIT :: 32 * 1024 * 1024
 
 request_bytes: [REQUEST_LIMIT]byte
+blob_bytes: [BLOB_LIMIT]byte
 scratch_bytes: [SCRATCH_LIMIT]byte
 scratch: mem.Arena
 response: []byte
 reserved_length: int
+blob_length: int
 busy: bool
 
 // Each host entry point calls this exactly once before any other export.
@@ -68,9 +80,23 @@ core_reserve :: proc "c" (length: u32) -> rawptr {
 	if busy || length == 0 || length > REQUEST_LIMIT do return nil
 	busy = true
 	reserved_length = int(length)
+	blob_length = 0
 	response = nil
 	mem.arena_free_all(&scratch)
 	return raw_data(request_bytes[:])
+}
+
+/**
+ * Reserve the binary side-channel for THIS request: raw protobuf the host
+ * already holds (changes out of its own store). Call after `core_reserve` and
+ * before `core_execute`; a request without one simply has no blob.
+ */
+@(export)
+core_reserve_blob :: proc "c" (length: u32) -> rawptr {
+	context = runtime.default_context()
+	if !busy || length == 0 || length > BLOB_LIMIT do return nil
+	blob_length = int(length)
+	return raw_data(blob_bytes[:])
 }
 
 @(export)
@@ -81,6 +107,10 @@ core_execute :: proc "c" () -> u32 {
 	context.allocator = allocator
 	context.temp_allocator = allocator
 	envelope := core.jobj()
+	// Valid for exactly this call: `core_reserve` clears it, and the core
+	// never retains the slice past dispatch.
+	core.set_request_blob(blob_bytes[:blob_length])
+	defer core.set_request_blob(nil)
 	if !request_depth_ok(request_bytes[:reserved_length]) {
 		envelope["error"] = json.String("request JSON nesting exceeds 128 levels")
 		response = core.marshal(json.Object(envelope))
@@ -124,6 +154,7 @@ core_reset :: proc "c" (reset_all: u32) {
 	context = runtime.default_context()
 	response = nil
 	reserved_length = 0
+	blob_length = 0
 	busy = false
 	mem.arena_free_all(&scratch)
 	if reset_all != 0 do core.query_cache_reset()
