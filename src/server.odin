@@ -114,6 +114,10 @@ respond_error :: proc(sock: net.TCP_Socket, message: string, status := "400 Bad 
 serve :: proc(port: int) {
 	local_auth_init(port)
 	endpoint := net.Endpoint{address = net.IP4_Address{127, 0, 0, 1}, port = port}
+	// Odin's listen_tcp already sets SO_REUSEADDR. An `Address_In_Use` here
+	// means the PREVIOUS daemon is still alive holding the listener, which
+	// no socket option can share - it wants a graceful shutdown (close the
+	// listener on SIGTERM), not a flag.
 	sock, err := net.listen_tcp(endpoint)
 	if err != nil {
 		fmt.eprintln("[glon-odin] listen failed:", err)
@@ -321,6 +325,14 @@ handle_list_objects :: proc(sock: net.TCP_Socket) {
 				break
 			}
 			if hidden do continue
+			// An agent's own chat is machinery: the harness mints one per
+			// agent and copies every object discussion into it, so listing
+			// it puts a second row with the same name beside the object it
+			// transcribes. Agent-to-agent pair chats and hand-made chats
+			// carry no `agent` field and stay listed.
+			if s.type_key == "chat" {
+				if _, is_transcript := core.fields_get(s.fields, "agent"); is_transcript do continue
+			}
 			o := core.jobj()
 			o["id"] = json.String(s.id)
 			o["typeKey"] = json.String(s.type_key)
