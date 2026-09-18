@@ -1266,6 +1266,10 @@ BUNDLED_TYPES :: []Bundled_Type{
 	// Every harness registers its host at boot; without a type object the
 	// objects existed but had no definition, no sidebar row, and no way in.
 	{"machine", "Computer", "🖥️", "page"},
+	// What a skill or login IS (bytes on the card), and what is true for it
+	// on one machine (fields, so `error` reaches views).
+	{"descriptor", "Descriptor", "🗂️", "page"},
+	{"install", "Installation", "🔌", "page"},
 }
 Table_Shape :: struct {
 	object_id:   string,

@@ -18,11 +18,12 @@ import { API, apiFetch, chatPost, fetchObject, list, lv, mutate, query, setField
 import type { ObjectJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
-import { capabilities, convergeCatalogScope } from "./skillmgr";
+import { capabilities, convergeCatalogScope, publishInstallationState } from "./skillmgr";
 import { startAuthServer } from "./authserver";
 import { readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, publishCapabilities, servesHere } from "./machine";
+import { publishDescriptors } from "./descriptors";
 import { validateBindings } from "./workspace";
 import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, ingestedOriginBlocks, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
 import { arm as armScheduler, startScheduler } from "./schedule";
@@ -205,6 +206,12 @@ async function handleSurface(s: Served, surfaceId: string, opts: { wake?: (t: st
 
 async function serve(): Promise<void> {
 	await publishCapabilities(await capabilities()); // register this machine before serving resolves against the roster
+	// Publish what a skill or login IS, as data, so a client can render its
+	// setup form without a compiled-in table (docs/descriptors.md).
+	void publishDescriptors().catch((err) => console.error("[harness] descriptors:", err));
+	// And what is TRUE here per skill and login: one row per (thing ×
+	// machine), carrying `error` where a view can see it.
+	void publishInstallationState().catch((err) => console.error("[harness] installations:", err));
 	await convergeCatalogScope();
 	await convergeSpaceServing();
 	// Checkout bindings: statuses refresh at boot and on every UI write.

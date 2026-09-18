@@ -14,7 +14,8 @@
 
 import { createObject, chatPost, fetchObject, mutate, query, str, queryAll } from "./api";
 import { publishCapabilities } from "./machine";
-import { activeCredentialKeys } from "./credentials";
+import { activeCredentialKeys, credentialStatus } from "./credentials";
+import { publishHoldup, publishInstallations, clearInstallationError } from "./descriptors";
 import { objectText } from "./skills";
 
 export interface CatalogEntry {
@@ -172,11 +173,31 @@ function capabilityKeys(state: StateFile): string[] {
 async function saveSkills(state: StateFile): Promise<void> {
 	await writeState(state);
 	void publishCapabilities(capabilityKeys(state));
+	// The flat capability list and the per-skill rows come from the same
+	// state, at the same moment, so they cannot disagree.
+	void publishInstallations(state.skills, credentialStatus());
 }
 
 /** Credential changes call this: the published set follows the store. */
 export async function republishCapabilities(): Promise<void> {
-	void publishCapabilities(capabilityKeys(await readState()));
+	const state = await readState();
+	void publishCapabilities(capabilityKeys(state));
+	void publishInstallations(state.skills, credentialStatus());
+}
+
+/**
+ * Publish this machine's per-skill installation rows from current state.
+ * Boot calls it, because a machine that never changes a skill would otherwise
+ * never say what it has - and "no row" must mean "no machine", not "quiet".
+ */
+export async function publishInstallationState(): Promise<void> {
+	const state = await readState();
+	await publishInstallations(state.skills, credentialStatus());
+	// Holdups filed before rows existed would stay invisible forever, which
+	// is the exact failure this replaces: mirror the standing ones once.
+	for (const holdup of state.holdups ?? []) {
+		await publishHoldup(holdup.capability, holdup.error);
+	}
 }
 
 /** This machine's capability keys; the boot path publishes them so the machine object exists before anything is served. */
@@ -224,12 +245,17 @@ export async function fileHoldup(h: Omit<Holdup, "id" | "count" | "firstAt" | "u
 		state.holdups.push({ ...h, id: crypto.randomUUID(), count: 1, firstAt: Date.now(), updatedAt: Date.now() });
 	}
 	await writeState(state);
+	// Until now a holdup only ever existed in this file: no view, no query,
+	// no badge. Mirror it onto the installation's `error` so it is a row.
+	void publishHoldup(h.capability, h.error);
 }
 
 export async function clearHoldup(id: string): Promise<void> {
 	const state = await readState();
+	const gone = (state.holdups ?? []).find((x) => x.id === id);
 	state.holdups = (state.holdups ?? []).filter((x) => x.id !== id);
 	await writeState(state);
+	if (gone) void clearInstallationError(gone.capability);
 }
 
 /** Is a catalog capability ready to serve? Reason strings are shown to agents and humans. */

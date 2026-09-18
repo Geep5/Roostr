@@ -292,6 +292,7 @@ install_status_key :: proc(status: Install_Status) -> string {
 	case .Needs_Auth: return "needs_auth"
 	case .Missing: return "missing"
 	case .Broken: return "broken"
+	case .Disabled: return "disabled"
 	case .Unspecified: return ""
 	}
 	return ""
@@ -303,6 +304,7 @@ install_status_from_key :: proc(key: string) -> Install_Status {
 	case "needs_auth": return .Needs_Auth
 	case "missing": return .Missing
 	case "broken": return .Broken
+	case "disabled": return .Disabled
 	}
 	return .Unspecified
 }

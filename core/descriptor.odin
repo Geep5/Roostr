@@ -48,6 +48,7 @@ Install_Status :: enum i64 {
 	Needs_Auth  = 2,
 	Missing     = 3,
 	Broken      = 4,
+	Disabled    = 5,
 }
 
 Field_Spec :: struct {
@@ -152,6 +153,7 @@ install_status_from :: proc(v: i64) -> Install_Status {
 	case 2: return .Needs_Auth
 	case 3: return .Missing
 	case 4: return .Broken
+	case 5: return .Disabled
 	}
 	return .Unspecified
 }

@@ -292,6 +292,10 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 		handle_channels(sock)
 	case req.method == "POST" && req.path == "/api/serving":
 		handle_serving(sock, req.body)
+	// The codec lives in the shared core; hosts without a WASM core (the
+	// harness) reach it here instead of growing a second implementation.
+	case req.method == "POST" && req.path == "/api/descriptor":
+		handle_descriptor(sock, req.body)
 	case req.method == "POST" && req.path == "/api/query":
 		handle_query(sock, req.body)
 	case req.method == "POST" && req.path == "/api/mutate":
@@ -305,7 +309,7 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 // deliberately absent from both, so Computers appear in lists on every
 // surface. A type hidden on one host and listed on the other is how
 // machines became invisible on localhost and visible on the website.
-HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "relation", "channel", "skill", "peer", "pinned_fact", "milestone", "agent", VANISH_LOG_TYPE}
+HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "relation", "channel", "skill", "peer", "pinned_fact", "milestone", "agent", "descriptor", "install", VANISH_LOG_TYPE}
 
 handle_list_objects :: proc(sock: net.TCP_Socket) {
 	Ctx :: struct {
@@ -536,6 +540,25 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 
 // POST /api/serving {objectIds: [id]} → {id: {machineId, reason, requires, candidates}}
 // The per-object serving rule (core/serving.odin) over this replica's state.
+handle_descriptor :: proc(sock: net.TCP_Socket, body: []byte) {
+	// Straight pass-through to the shared codec: no state, no store lock -
+	// it turns bytes into JSON and back, nothing more.
+	parsed, perr := json.parse(body, allocator = context.temp_allocator)
+	if perr != nil {
+		respond_error(sock, "invalid JSON body")
+		return
+	}
+	out, err := core.dispatch("descriptor", parsed)
+	if err != "" {
+		respond_error(sock, err)
+		return
+	}
+	wrapped := core.jobj()
+	wrapped["ok"] = json.Boolean(true)
+	wrapped["result"] = out
+	respond_json(sock, json.Object(wrapped))
+}
+
 handle_serving :: proc(sock: net.TCP_Socket, body: []byte) {
 	parsed, perr := json.parse(body, allocator = context.temp_allocator)
 	ids, iok := core.json_field(parsed, "objectIds")
