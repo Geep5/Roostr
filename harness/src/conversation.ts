@@ -1,17 +1,22 @@
 /**
- * Conversation view: projects the conversation object's __discussion__ blocks into
- * (the agent's holistic chat; a subagent's own object)
- * Anthropic messages. Ported from glon agent-conversation.ts (classify /
- * filterToKept / repairToolPairs / groupIntoTurns / mergeConsecutiveTurns /
- * findCutIndex) with two OMP lifts:
+ * Conversation view: projects one conversation's blocks - the thread named by
+ * (objectId, threadId), typically an agent's transcript on the object it is
+ * bound to - into Anthropic messages. Ported from glon agent-conversation.ts
+ * (classify / filterToKept / repairToolPairs / groupIntoTurns /
+ * mergeConsecutiveTurns / findCutIndex) with two OMP lifts:
  *   - in-view tool-output pruning valve (never mutates blocks)
  *   - calibrated token estimator (ratio persisted on the agent object)
+ *
+ * The object is passed in already fetched and the thread id names which of
+ * its conversations to project; it defaults to the human discussion, the
+ * thread every object has.
  *
  * Compaction stays view-only: every pre-compaction block survives in the
  * DAG; the view starts at the latest summary's first_kept_block_id.
  */
 
-import type { BlockJSON, ObjectJSON } from "./api";
+import type { ObjectJSON } from "./api";
+import { convBlocks, HUMAN_THREAD } from "./conv";
 import {
 	BLOCK_COMPACTION,
 	BLOCK_TOOL_RESULT,
@@ -47,16 +52,12 @@ export function itemText(item: ClassifiedItem): string {
 	}
 }
 
-/** Classify __discussion__ children in append order. */
-export function classifyBlocks(object: ObjectJSON, agentId: string): ClassifiedItem[] {
-	const byId = new Map(object.blocks.map((b) => [b.id, b]));
-	const root = byId.get("__discussion__");
-	if (!root) return [];
+/** Classify one conversation's children in append order. */
+export function classifyBlocks(object: ObjectJSON, agentId: string, threadId = HUMAN_THREAD): ClassifiedItem[] {
 	const items: ClassifiedItem[] = [];
-	for (const cid of root.childrenIds) {
-		const block = byId.get(cid);
-		const custom = block?.content.custom;
-		if (!block || !custom) continue;
+	for (const { id: cid, block } of convBlocks(object, threadId)) {
+		const custom = block.content.custom;
+		if (!custom) continue;
 		const meta = custom.meta ?? {};
 		switch (custom.contentType) {
 			case "chat": {
@@ -248,9 +249,10 @@ export interface ConversationView {
 	latestCompaction: Extract<ClassifiedItem, { kind: "compaction" }> | null;
 }
 
-/** Full projection: latest summary → systemExtension; kept items → turns. */
-export function buildConversationView(object: ObjectJSON, agentId: string, ratio = 1): ConversationView {
-	const allItems = classifyBlocks(object, agentId);
+/** Full projection of one conversation: latest summary → systemExtension;
+ * kept items → turns. */
+export function buildConversationView(object: ObjectJSON, agentId: string, ratio = 1, threadId = HUMAN_THREAD): ConversationView {
+	const allItems = classifyBlocks(object, agentId, threadId);
 	const latest = findLatestCompaction(allItems);
 	let kept = latest ? filterToKept(allItems, latest.firstKeptBlockId) : allItems.filter((i) => i.kind !== "compaction");
 	kept = repairToolPairs(kept);

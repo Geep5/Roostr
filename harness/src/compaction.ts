@@ -8,7 +8,8 @@
  *   OMP lift: touched-object ids are carried across stacked compactions.
  */
 
-import { addBlock, fetchObject, flag, str, type ObjectJSON } from "./api";
+import { fetchObject, flag, str, type ObjectJSON } from "./api";
+import { addConvBlock, type ConvRef } from "./conv";
 import { estimateAskTokens, estimateTokens, findCutIndex, itemText, type ConversationView } from "./conversation";
 import { callLLM } from "./llm";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
@@ -187,10 +188,11 @@ async function runExtractionLoop(agentId: string, model: string, items: Classifi
 
 /**
  * Compact: cut, (extract), summarize, append ONE compaction_summary block
- * to the conversation object (the agent's chat; subagents' own object).
+ * into the conversation thread itself, so the summary sits in the same
+ * thread as the messages it replaces.
  * Returns true when a compaction happened.
  */
-export async function doCompact(agentId: string, convId: string, view: ConversationView, cfg: CompactionConfig, ratio: number): Promise<boolean> {
+export async function doCompact(agentId: string, ref: ConvRef, view: ConversationView, cfg: CompactionConfig, ratio: number): Promise<boolean> {
 	const cut = findCutIndex(view.items, cfg.keepRecentTokens, ratio);
 	if (cut <= 0) return false;
 	const toCompact = view.items.slice(0, cut);
@@ -223,27 +225,22 @@ export async function doCompact(agentId: string, convId: string, view: Conversat
 	let tokensBefore = 0;
 	for (const item of toCompact) tokensBefore += estimateTokens(itemText(item), ratio);
 
-	await addBlock(
-		convId,
-		{
-			id: crypto.randomUUID(),
-			childrenIds: [],
-			content: {
-				custom: {
-					contentType: BLOCK_COMPACTION,
-					meta: {
-						summary: res.text,
-						first_kept_block_id: firstKept.blockId,
-						tokens_before: String(tokensBefore),
-						touched_objects: [...touched].slice(0, 40).join(","),
-						ts: String(Date.now()),
-						...(prior ? { prior_summary_id: prior.blockId } : {}),
-					},
+	await addConvBlock(ref, {
+		id: crypto.randomUUID(),
+		childrenIds: [],
+		content: {
+			custom: {
+				contentType: BLOCK_COMPACTION,
+				meta: {
+					summary: res.text,
+					first_kept_block_id: firstKept.blockId,
+					tokens_before: String(tokensBefore),
+					touched_objects: [...touched].slice(0, 40).join(","),
+					ts: String(Date.now()),
+					...(prior ? { prior_summary_id: prior.blockId } : {}),
 				},
 			},
 		},
-		"__discussion__",
-		5, // INNER
-	);
+	});
 	return true;
 }

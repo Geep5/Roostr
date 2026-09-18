@@ -2,24 +2,27 @@
  * Surfaces — port of GrantAgentSetup's discovery.odin + bot.odin message
  * shaping, adapted to the DAG (no probing needed; everything is queryable).
  *
- * One agent, one holistic chat per (agent × channel), many surfaces:
- *   - the agent's chat object (the brain: conversation + tool blocks live here)
- *   - any other object's __discussion__ in the agent's channel
+ * A surface is an object's human discussion (`humanRef`): the thread a
+ * person writes in. An agent's own transcript is a conversation too, but
+ * never a surface - it is where surface messages land, not a place messages
+ * are picked up from, so there is no "is this surface my own chat?" test
+ * left here.
  *
- * A message on a non-chat surface is copied into the chat tagged with its
- * origin, framed like the bridge does: `[message from X · in note "Y" (id)]`
- * plus the object's body inlined (HOST_BODY_LIMIT, cut on a line boundary).
- * The reply posts back to the surface that asked AND lands in the chat via
- * the runner.
+ * A message on a surface is copied into the agent's transcript tagged with
+ * its origin, framed like the bridge does: `[message from X · in note "Y"
+ * (id)]` plus the object's body inlined (HOST_BODY_LIMIT, cut on a line
+ * boundary). The reply posts back to the surface that asked AND lands in
+ * the transcript via the runner.
  *
- * Watermarks (bot.odin marks): per-surface last-handled block id, persisted
- * locally in GLON_DATA/harness-marks.json — a local fact like the roster,
- * never synced. A surface with no mark seeds at the agent's own last message
- * (nothing replays); if the agent never spoke there, only the newest message
- * is picked up (their SEED_BACKLOG idea, conservative).
+ * Watermarks (bot.odin marks): per-conversation last-handled block id,
+ * persisted locally in GLON_DATA/harness-marks.json — a local fact like the
+ * roster, never synced. A conversation with no mark seeds at the agent's own
+ * last message (nothing replays); if the agent never spoke there, only the
+ * newest message is picked up (their SEED_BACKLOG idea, conservative).
  */
 
-import { addBlock, createObject, query, str, sv, type BlockJSON, type ObjectJSON } from "./api";
+import { str, type BlockJSON, type ObjectJSON } from "./api";
+import { addConvBlock, convBlocks, convKey, HUMAN_THREAD, isHuman, parseConvKey, type ConvRef } from "./conv";
 
 // ── Marks ─────────────────────────────────────────────────────────
 
@@ -44,56 +47,30 @@ async function saveMarks(): Promise<void> {
 	if (marks) await Bun.write(marksPath(), JSON.stringify(marks));
 }
 
-export async function setMark(surfaceId: string, blockId: string): Promise<void> {
+/** Marks key on the conversation: one object hosts several, each advancing
+ * on its own. */
+export async function setMark(ref: ConvRef, blockId: string): Promise<void> {
 	const m = await loadMarks();
-	m[surfaceId] = blockId;
+	m[convKey(ref)] = blockId;
 	await saveMarks();
 }
 
-// ── Default chat per (agent × channel) ────────────────────────────
-
 /**
- * In-flight chat creations, claimed synchronously by the caller.
+ * One conversation's watermark.
  *
- * The roster callback rebuilds every served agent, so a few quick toggles
- * (or two devices) put several buildServed passes in the air at once. Each
- * one queried, saw nothing, and created - one agent ended up with three
- * holistic chats, and since the harness takes the first row it saw, its
- * conversation split across them and the agent looked amnesiac.
+ * Marks written before conversations were addressed keyed on the object id
+ * alone, and parseConvKey reads such a key as that object's human thread -
+ * so the watermarks already in harness-marks.json keep counting instead of
+ * every discussion looking fresh and replaying its newest message once.
  */
-const ensuring = new Map<string, Promise<string>>();
-
-/** Find or create the agent's holistic chat for its channel. */
-export async function ensureChat(agent: ObjectJSON, channelId: string): Promise<string> {
-	const key = `${agent.id}:${channelId}`;
-	const inFlight = ensuring.get(key);
-	if (inFlight) return inFlight;
-	const run = (async () => {
-		const rows = await query({
-			type: "chat",
-			filters: [
-				{ key: "agent", condition: "equal", value: agent.id },
-				...(channelId ? [{ key: "channel", condition: "equal", value: channelId }] : []),
-			],
-			limit: 50,
-		});
-		// Lowest id wins, as with a twin agent: if another device created one
-		// concurrently, every device converges on the same chat instead of
-		// each preferring whichever row its query happened to return first.
-		if (rows.length > 0) return rows.map((r) => r.id).sort()[0];
-		const name = str(agent.fields, "name") || "Agent";
-		const fields: Record<string, ReturnType<typeof sv>> = { agent: sv(agent.id) };
-		if (channelId) fields.channel = sv(channelId);
-		const { id } = await createObject(name, "chat", fields);
-		console.log(`[harness] created chat "${name}" (${id.slice(0, 8)}) for agent ${agent.id.slice(0, 8)}`);
-		return id;
-	})();
-	ensuring.set(key, run);
-	try {
-		return await run;
-	} finally {
-		ensuring.delete(key);
+function markFor(m: Record<string, string>, ref: ConvRef): string | undefined {
+	const exact = m[convKey(ref)];
+	if (exact !== undefined) return exact;
+	for (const [key, blockId] of Object.entries(m)) {
+		const old = parseConvKey(key);
+		if (old.objectId === ref.objectId && old.threadId === ref.threadId) return blockId;
 	}
+	return undefined;
 }
 
 // ── Pending messages (watermarked) ────────────────────────────────
@@ -104,16 +81,9 @@ export interface PendingMessage {
 	text: string;
 }
 
-export function chatBlocks(obj: ObjectJSON): Array<{ id: string; block: BlockJSON }> {
-	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
-	const root = byId.get("__discussion__");
-	if (!root) return [];
-	const out: Array<{ id: string; block: BlockJSON }> = [];
-	for (const cid of root.childrenIds) {
-		const b = byId.get(cid);
-		if (b?.content.custom?.contentType === "chat") out.push({ id: cid, block: b });
-	}
-	return out;
+/** A conversation's message blocks, in append order. */
+export function chatBlocks(obj: ObjectJSON, ref: ConvRef): Array<{ id: string; block: BlockJSON }> {
+	return convBlocks(obj, ref.threadId).filter((row) => row.block.content.custom?.contentType === "chat");
 }
 
 /** A uuid author is an agent; anything else is a human's pubkey. */
@@ -122,19 +92,20 @@ export function isAgentAuthor(author: string): boolean {
 }
 
 /**
- * Unhandled user messages on a surface, oldest first. Origin-tagged copies
- * (already ingested from another surface) never count. Seeding rules per
- * the bridge's seed_mark.
+ * Unhandled user messages in a conversation, oldest first. Origin-tagged
+ * copies (already ingested from another surface) never count. Seeding rules
+ * per the bridge's seed_mark.
  *
- * An object's discussion is human-to-agent only: another agent's post there
- * never wakes this one. Two agents driven onto one object otherwise answer
- * each other forever, each seeing the other's reply as a new question, and
- * the human's thread fills with agent chatter. Agent-to-agent exchanges
- * belong in a pair chat, which is a `chat` object and keeps both authors.
+ * A human thread is human-to-agent only: another agent's post there never
+ * wakes this one. Two agents driven onto one object otherwise answer each
+ * other forever, each seeing the other's reply as a new question, and the
+ * human's thread fills with agent chatter. Agent-to-agent exchanges belong
+ * in a pair thread (conv.ts pairThread), which keeps both authors - so the
+ * thread decides what used to be decided by the object's type.
  */
-export async function pendingMessages(obj: ObjectJSON, agentId: string): Promise<PendingMessage[]> {
+export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: string): Promise<PendingMessage[]> {
 	const m = await loadMarks();
-	const mark = m[obj.id];
+	const mark = markFor(m, ref);
 
 	// Chronological, NOT block order. Block order is DAG merge order: a
 	// device that commits while its replica is behind lists stale heads as
@@ -142,7 +113,7 @@ export async function pendingMessages(obj: ObjectJSON, agentId: string): Promise
 	// before it. Walking positions skipped exactly those - a phone that
 	// had been offline could post, sync everywhere, and never be answered.
 	// Ties (same millisecond) keep block order, which every device agrees on.
-	const msgs = chatBlocks(obj)
+	const msgs = chatBlocks(obj, ref)
 		.map((row, index) => ({ ...row, index, ts: Number(row.block.content.custom?.meta?.["ts"] ?? 0) }))
 		.sort((a, b) => a.ts - b.ts || a.index - b.index);
 
@@ -169,7 +140,7 @@ export async function pendingMessages(obj: ObjectJSON, agentId: string): Promise
 		const author = meta["author"] ?? "";
 		if (author === agentId) continue;
 		if (meta["origin"]) continue; // ingested copy, handled with its origin surface
-		if (obj.typeKey !== "chat" && isAgentAuthor(author)) continue;
+		if (isHuman(ref) && isAgentAuthor(author)) continue;
 		pending.push({ blockId: id, author, text: meta["text"] ?? "" });
 	}
 
@@ -195,9 +166,9 @@ const STYLE_PREFIX: Record<number, string> = { 1: "# ", 2: "## ", 3: "### ", 4: 
  *
  * A link block carries only its target's id, and this stays synchronous, so
  * the id is what gets printed: the agent can resolve it with object_get.
- * Conversation blocks are never reached (they hang under __discussion__,
- * which the walk skips) and are excluded here too, so a future caller that
- * walks them cannot leak the thread into the body.
+ * Conversation blocks are never reached (they hang under a conversation
+ * root, which the walk skips) and are excluded here too, so a future caller
+ * that walks them cannot leak a thread into the body.
  */
 export function blockLine(b: BlockJSON): string {
 	const t = b.content.text;
@@ -249,7 +220,7 @@ export function serializeBody(obj: ObjectJSON): { body: string; truncated: boole
 			if (b.childrenIds.length) walk(b.childrenIds);
 		}
 	};
-	const roots = obj.blocks.filter((b) => !referenced.has(b.id) && b.id !== "__discussion__").map((b) => b.id);
+	const roots = obj.blocks.filter((b) => !referenced.has(b.id) && b.id !== HUMAN_THREAD).map((b) => b.id);
 	walk(roots);
 	let body = lines.join("\n").trim();
 	let truncated = false;
@@ -263,20 +234,22 @@ export function serializeBody(obj: ObjectJSON): { body: string; truncated: boole
 }
 
 // Body dedupe (bodycache.odin): skip re-inlining a body sent recently and
-// unchanged. In-memory — a harness restart resends, which is correct.
+// unchanged, keyed per conversation - one object can host several, and a
+// body inlined into one of them was never shown in the others.
+// In-memory — a harness restart resends, which is correct.
 const BODY_TTL_MS = 30 * 60 * 1000;
 const sentBodies = new Map<string, { hash: string; ts: number }>();
 
-function bodyDecision(surfaceId: string, body: string): "send" | "skip" {
+function bodyDecision(surfaceKey: string, body: string): "send" | "skip" {
 	const hash = String(Bun.hash(body));
-	const prev = sentBodies.get(surfaceId);
+	const prev = sentBodies.get(surfaceKey);
 	if (prev && prev.hash === hash && Date.now() - prev.ts < BODY_TTL_MS) return "skip";
-	sentBodies.set(surfaceId, { hash, ts: Date.now() });
+	sentBodies.set(surfaceKey, { hash, ts: Date.now() });
 	return "send";
 }
 
-/** The bridge's exact message shape for a non-chat surface. */
-export function frameMessage(surface: ObjectJSON, pending: PendingMessage[]): string {
+/** The bridge's exact message shape for a surface message. */
+export function frameMessage(surface: ObjectJSON, ref: ConvRef, pending: PendingMessage[]): string {
 	const kind = surface.typeKey || "object";
 	const name = str(surface.fields, "name") || "(untitled)";
 	const parts: string[] = [];
@@ -284,7 +257,7 @@ export function frameMessage(surface: ObjectJSON, pending: PendingMessage[]): st
 	parts.push(`[message from ${authors} · in ${kind} "${name}" (id ${surface.id})]`);
 
 	const { body, truncated } = serializeBody(surface);
-	if (bodyDecision(surface.id, body) === "skip") {
+	if (bodyDecision(convKey(ref), body) === "skip") {
 		parts.push(`[contents of this ${kind} were included earlier in this conversation and may have changed since — re-read the object if it matters]`);
 	} else if (body) {
 		parts.push(`--- contents of this ${kind}, as of now ---\n${body}${truncated ? "\n[…truncated; read the object for the rest]" : ""}\n--- end ---`);
@@ -292,11 +265,7 @@ export function frameMessage(surface: ObjectJSON, pending: PendingMessage[]): st
 		parts.push(`--- this ${kind} is empty ---`);
 	}
 
-	const thread = surface.blocks.find((b) => b.id === "__discussion__");
-	const chatCount = (thread?.childrenIds ?? []).filter((cid) => {
-		const c = surface.blocks.find((b) => b.id === cid)?.content.custom;
-		return c?.contentType === "chat" && (c.meta?.["text"] ?? "").trim();
-	}).length;
+	const chatCount = chatBlocks(surface, ref).filter((row) => (row.block.content.custom?.meta?.["text"] ?? "").trim()).length;
 	const earlier = chatCount - pending.length;
 	if (earlier > 0) parts.push(`[this ${kind} has ${earlier} earlier discussion message(s) \u2014 discussion_read ${surface.id} to see them]`);
 
@@ -304,27 +273,25 @@ export function frameMessage(surface: ObjectJSON, pending: PendingMessage[]): st
 	return parts.join("\n");
 }
 
-/** Copy an origin-surface message into the holistic chat, origin-tagged.
+/** Copy a surface message into the agent's transcript, origin-tagged.
  * `originBlock` is the source message's block id - the identity that makes
  * ingestion idempotent across machines and lost marks. */
-export async function ingestIntoChat(chatId: string, surfaceId: string, author: string, text: string, originBlock = ""): Promise<void> {
-	await addBlock(
-		chatId,
-		{
-			id: crypto.randomUUID(),
-			childrenIds: [],
-			content: { custom: { contentType: "chat", meta: { author, text, origin: surfaceId, origin_block: originBlock, ts: String(Date.now()) } } },
-		},
-		"__discussion__",
-		5, // INNER
-	);
+export async function ingestIntoChat(dest: ConvRef, origin: ConvRef, author: string, text: string, originBlock = ""): Promise<void> {
+	// The origin tag stays the object id, the shape schedule.ts:207 and the
+	// UI already read: a surface is always that object's human thread, so
+	// the id names the conversation exactly.
+	await addConvBlock(dest, {
+		id: crypto.randomUUID(),
+		childrenIds: [],
+		content: { custom: { contentType: "chat", meta: { author, text, origin: origin.objectId, origin_block: originBlock, ts: String(Date.now()) } } },
+	});
 }
 
-/** Origin block ids already copied into a chat - the dedupe set. */
-export function ingestedOriginBlocks(chat: { blocks: Array<{ content: { custom?: { meta?: Record<string, string> } } }> }): Set<string> {
+/** Origin block ids already copied into a conversation - the dedupe set. */
+export function ingestedOriginBlocks(obj: ObjectJSON, ref: ConvRef): Set<string> {
 	const out = new Set<string>();
-	for (const b of chat.blocks) {
-		const ob = b.content.custom?.meta?.["origin_block"];
+	for (const { block } of convBlocks(obj, ref.threadId)) {
+		const ob = block.content.custom?.meta?.["origin_block"];
 		if (ob) out.add(ob);
 	}
 	return out;

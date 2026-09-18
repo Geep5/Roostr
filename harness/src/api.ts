@@ -158,9 +158,18 @@ export const deleteField = (id: string, key: string) => mutate("delete_field", {
 export const createObject = async (name: string, typeKey: string, fields?: Record<string, ValueJSON>) =>
 	(await mutate("create", { name, type_key: typeKey, fields })) as { id: string };
 
-/** Append a chat message block; `asAuthor` attributes it to the agent. */
-export const chatPost = async (objectId: string, text: string, asAuthor = "", replyTo = "") =>
-	(await mutate("chat_post", { object_id: objectId, text, as_author: asAuthor, reply_to: replyTo })) as { id: string };
+/**
+ * Append a chat message block; `asAuthor` attributes it to the agent.
+ *
+ * `threadId` empty = the object's human discussion, which is what every
+ * human-facing caller wants; an agent's own transcript and an A2A exchange
+ * pass the thread they live in (`$lib/conv`).
+ */
+export const chatPost = async (objectId: string, text: string, asAuthor = "", replyTo = "", threadId = "") =>
+	(await mutate("chat_post", { object_id: objectId, text, as_author: asAuthor, reply_to: replyTo, thread_id: threadId })) as {
+		id: string;
+		threadId: string;
+	};
 
 /** Append an arbitrary block (used for tool_use / tool_result / compaction). */
 export const addBlock = (objectId: string, block: Partial<BlockJSON>, targetId = "", position = 0) =>

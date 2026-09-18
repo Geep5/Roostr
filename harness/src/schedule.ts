@@ -24,15 +24,16 @@
  * occurrences (sleep, downtime) fire on the next arm, each once.
  */
 
-import { addBlock, deleteField, fetchObject, mutate, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { deleteField, fetchObject, mutate, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { addConvBlock, convKey, humanRef, type ConvRef } from "./conv";
 import { primeServing, servesHere } from "./machine";
 import { machineId } from "./roster";
 import { objectText } from "./skills";
 
 export interface ScheduleHost {
-	/** The agent's holistic chat when this machine serves it; undefined otherwise. */
-	served(agentId: string): Promise<{ agentId: string; chatId: string } | undefined>;
-	/** One scheduler-started turn on the agent's chat, serialized with its other turns. Resolves to the failure message, "" on success. */
+	/** The agent's holistic transcript when this machine serves it; undefined otherwise. */
+	served(agentId: string): Promise<{ agentId: string; conv: ConvRef } | undefined>;
+	/** One scheduler-started turn on the agent's transcript, serialized with its other turns. Resolves to the failure message, "" on success. */
 	turn(agentId: string, systemSuffix: string, requirementsObjectId: string): Promise<string>;
 }
 
@@ -173,7 +174,7 @@ function agentIdsOf(v: ValueJSON | undefined): string[] {
  * bound agent first - the mind minted from its discussion is the one that
  * has read it - then whoever `assignee` / `agent` name.
  */
-async function ownerOf(obj: ObjectJSON): Promise<{ agentId: string; chatId: string } | undefined> {
+async function ownerOf(obj: ObjectJSON): Promise<{ agentId: string; conv: ConvRef } | undefined> {
 	if (!host) return undefined;
 	const bound = await queryAll({ type: "agent", filters: [{ key: "bound_object", condition: "equal", value: obj.id }] });
 	const candidates = [...bound.map((a) => a.id).sort(), ...agentIdsOf(obj.fields["assignee"]), ...agentIdsOf(obj.fields["agent"])];
@@ -195,22 +196,17 @@ async function ownerOf(obj: ObjectJSON): Promise<{ agentId: string; chatId: stri
 }
 
 /** A scheduler message: same block shape as an ingested copy, tagged with its occurrence. */
-async function postScheduled(surfaceId: string, text: string, d: Due, me: string): Promise<void> {
-	await addBlock(
-		surfaceId,
-		{
-			id: crypto.randomUUID(),
-			childrenIds: [],
-			content: {
-				custom: {
-					contentType: "chat",
-					meta: { author: "scheduler", text, ts: String(Date.now()), origin: "schedule", origin_object: d.id, occurrence: String(d.next), fired_by: me },
-				},
+async function postScheduled(ref: ConvRef, text: string, d: Due, me: string): Promise<void> {
+	await addConvBlock(ref, {
+		id: crypto.randomUUID(),
+		childrenIds: [],
+		content: {
+			custom: {
+				contentType: "chat",
+				meta: { author: "scheduler", text, ts: String(Date.now()), origin: "schedule", origin_object: d.id, occurrence: String(d.next), fired_by: me },
 			},
 		},
-		"__discussion__",
-		5, // INNER
-	);
+	});
 }
 
 /** Tell the owner: an agent gets the instructions and a turn, a person gets a reminder. */
@@ -222,7 +218,7 @@ async function dispatch(d: Due, me: string): Promise<void> {
 	const when = new Date(d.next).toLocaleString();
 	const owner = await ownerOf(obj);
 	if (!owner) {
-		await postScheduled(obj.id, `\u21bb "${name}" is due (${when})`, d, me);
+		await postScheduled(humanRef(obj.id), `\u21bb "${name}" is due (${when})`, d, me);
 		console.log(`[schedule] reminded "${name}" (${obj.id.slice(0, 8)}) - no served agent owns it`);
 		return;
 	}
@@ -231,10 +227,10 @@ async function dispatch(d: Due, me: string): Promise<void> {
 		`Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}. Instructions follow. When you have finished, call occurrence_complete on object ${obj.id}.`,
 		body || "(this object has no body text)",
 	].join("\n");
-	await postScheduled(owner.chatId, frame, d, me);
+	await postScheduled(owner.conv, frame, d, me);
 	console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) → agent ${owner.agentId.slice(0, 8)}`);
 	const error = await host.turn(owner.agentId, TURN_SUFFIX, obj.id);
-	const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: owner.chatId };
+	const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: convKey(owner.conv) };
 	if (error) run.error = error;
 	await mutate("run_record", { object_id: obj.id, run });
 	// The error badge: a failed run sets it; a clean run clears what a

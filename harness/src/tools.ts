@@ -7,7 +7,6 @@
 
 import {
 	bv,
-	chatPost,
 	createObject,
 	fetchObject,
 	fv,
@@ -24,7 +23,6 @@ import {
 	type ObjectJSON,
 	type QueryRow,
 	type ValueJSON,
-	addBlock,
 	API,
 	apiFetch,
 } from "./api";
@@ -33,12 +31,13 @@ import { machineId } from "./roster";
 import { CATALOG, fileHoldup, listHoldups, skillReady } from "./skillmgr";
 import { browserProfileDir, credentialStatus } from "./credentials";
 import { credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
-import { chatBlocks, isAgentAuthor } from "./surfaces";
+import { isAgentAuthor } from "./surfaces";
 import { objectText, readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor } from "./spacemap";
 import * as memory from "./memory";
 import { TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
 import { authRequirementsOf, localAuthRegistry, resolveAuthRequirements, validateAuthSelector } from "./authreq";
+import { HUMAN_THREAD, convBlocks, humanRef, pairThread, postTo, type ConvRef } from "./conv";
 
 /** proto TextStyle values the editor renders. */
 const STYLE = { paragraph: 0, h1: 1, h2: 2, h3: 3, quote: 4, bullet: 6, numbered: 7, checkbox: 8 } as const;
@@ -116,10 +115,10 @@ export interface ToolContext {
 	/** Set for object-bound agents: the object this agent belongs to. */
 	boundObject?: string;
 	/** Wired by index.ts on human-rooted turns only: wake a target
-	 *  agent on a pair chat. A2A-driven turns never get this - an agent
-	 *  answering an agent just answers, so cascade depth is 1 by
-	 *  construction. */
-	wake?: (targetAgentId: string, pairChatId: string) => Promise<string>;
+	 *  agent on the A2A thread the question landed in. A2A-driven turns
+	 *  never get this - an agent answering an agent just answers, so
+	 *  cascade depth is 1 by construction. */
+	wake?: (targetAgentId: string, ref: ConvRef) => Promise<string>;
 	depth: number;
 	/** Wired by spawn.ts; declared here to break the import cycle. */
 	spawn?: (task: string, template: string, ctx: ToolContext) => Promise<string>;
@@ -513,12 +512,18 @@ const TOOLS: RegisteredTool[] = [
 				out.push("", "RECURRING WORK (next occurrence):");
 				for (const d of due) out.push(`- "${d.name}" ${d.next < now ? "OVERDUE since" : "due"} ${new Date(d.next).toLocaleString()}`);
 			}
+			// Chat objects are gone, so there is no chat-row branch any more: a
+			// human message now lands in the object's own discussion, and that
+			// bumps the object's updatedAt - the rows already scanned above are
+			// exactly where the newest human talk is.
 			const msgs: string[] = [];
-			for (const c of rows.filter((r: QueryRow) => r.typeKey === "chat").sort((a: QueryRow, b: QueryRow) => b.updatedAt - a.updatedAt).slice(0, 3)) {
-				const obj = await fetchObject(c.id).catch(() => null);
+			for (const r of [...rows].sort((a: QueryRow, b: QueryRow) => b.updatedAt - a.updatedAt).slice(0, 6)) {
+				const obj = await fetchObject(r.id).catch(() => null);
 				if (!obj) continue;
-				for (const m of chatBlocks(obj).slice(-4)) {
-					const meta = m.block.content.custom?.meta ?? {};
+				for (const m of convBlocks(obj, HUMAN_THREAD).slice(-4)) {
+					const custom = m.block.content.custom;
+					if (custom?.contentType !== "chat") continue;
+					const meta = custom.meta ?? {};
 					if (isAgentAuthor(String(meta["author"] ?? "")) || meta["origin"]) continue;
 					msgs.push(`- ${String(meta["author"] || "human")} on "${str(obj.fields, "name") || obj.id.slice(0, 8)}": ${String(meta["text"] ?? "").slice(0, 140)}`);
 				}
@@ -569,11 +574,12 @@ const TOOLS: RegisteredTool[] = [
 		def: {
 			name: "discussion_read",
 			description:
-				"Read the discussion thread under an object (object_get shows only the body). Returns the last messages oldest-first with author names and timestamps. Use it when the current message refers to earlier conversation on that object.",
+				"Read one conversation on an object (object_get shows only the body). Returns the last messages oldest-first with author names and timestamps. Use it when the current message refers to earlier conversation on that object.",
 			input_schema: {
 				type: "object",
 				properties: {
 					id: { type: "string" },
+					thread_id: { type: "string", description: "a conversation on that object; omit for the human discussion" },
 					limit: { type: "number", description: "max messages, default 30" },
 				},
 				required: ["id"],
@@ -582,17 +588,15 @@ const TOOLS: RegisteredTool[] = [
 		handler: async (input, ctx) => {
 			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx);
 			ctx.touched.add(obj.id);
-			const byId = new Map(obj.blocks.map((b) => [b.id, b]));
-			const root = byId.get("__discussion__");
 			const msgs: Array<{ author: string; text: string; ts: number }> = [];
-			for (const cid of root?.childrenIds ?? []) {
-				const c = byId.get(cid)?.content.custom;
+			for (const { block } of convBlocks(obj, S(input.thread_id) || HUMAN_THREAD)) {
+				const c = block.content.custom;
 				if (c?.contentType !== "chat") continue;
 				const meta = c.meta ?? {};
 				if (!(meta["text"] ?? "").trim()) continue;
 				msgs.push({ author: meta["author"] ?? "", text: meta["text"] ?? "", ts: Number(meta["ts"] ?? 0) });
 			}
-			if (msgs.length === 0) return "(no discussion on this object)";
+			if (msgs.length === 0) return S(input.thread_id) ? "(no messages in that conversation)" : "(no discussion on this object)";
 			const limit = Math.max(1, Math.min(200, Number(input.limit) || 30));
 			const tail = msgs.slice(-limit);
 			const names = new Map<string, string>();
@@ -746,7 +750,9 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			await assertInSpace(await fetchObject(S(input.object_id)), ctx);
-			await chatPost(S(input.object_id), S(input.text), ctx.agentId);
+			// An object id alone addresses its human discussion; agent-to-agent
+			// talk has its own thread (agent_ask) and never lands here.
+			await postTo(humanRef(S(input.object_id)), S(input.text), ctx.agentId);
 			return "ok";
 		},
 	},
@@ -1023,18 +1029,23 @@ const EVAL_TOOLS: RegisteredTool[] = [
 
 // ── A2A: only a human-rooted turn may ask ─────────────────────────
 //
-// agent_ask posts into the pair's chat object ALWAYS (the durable
+// agent_ask posts into the pair's a2a thread ALWAYS (the durable
 // message board the human reads), then wakes the target for one
 // answering turn. The answering turn does NOT carry this tool, so an
 // agent answering an agent just answers - cascade depth is 1 by
 // construction, no counters needed. Agents can only reach objects
 // whose agent ALREADY exists: minds are minted by humans alone.
+//
+// The thread hangs off the ASKER's subject (conv.ts:136-139): the
+// question is part of the work that prompted it, so it belongs where
+// that work is. Asking back therefore opens a thread on the other
+// object - two directions, two records, each on its own subject.
 
 const A2A_TOOL: RegisteredTool = {
 	def: {
 		name: "agent_ask",
 		description:
-			"Ask another object's agent a question. Works ONLY on objects whose agent already exists (neighborhood/space_map show 'has agent') - agents never create minds. Your message lands in the shared pair chat the human can read, and the target answers you directly; it cannot itself ask further agents. Reads are free - query first, then ask once, well.",
+			"Ask another object's agent a question. Works ONLY on objects whose agent already exists (neighborhood/space_map show 'has agent') - agents never create minds. Your message lands in a shared thread on your own object, which the human can read, and the target answers you directly; it cannot itself ask further agents. Reads are free - query first, then ask once, well.",
 		input_schema: {
 			type: "object",
 			properties: {
@@ -1056,33 +1067,11 @@ const A2A_TOOL: RegisteredTool = {
 		const myName = str(me.fields, "name") || "agent";
 		const theirName = str(holders[0].fields, "name") || "agent";
 
-		// One durable chat per agent pair - the message board thread.
-		const pairKey = [ctx.agentId, targetAgentId].sort().join(":");
-		const existing = await query({ type: "chat", filters: [{ key: "a2a_pair", condition: "equal", value: pairKey }], limit: 1 });
-		let chatId: string;
-		if (existing.length > 0) chatId = existing[0].id;
-		else {
-			const created = await createObject(`${myName} ⇄ ${theirName}`, "chat", {
-				channel: sv(ctx.channelId),
-				a2a_pair: sv(pairKey),
-				participants: { valuesValue: { items: [sv(ctx.agentId), sv(targetAgentId)] } },
-				objects: { valuesValue: { items: [ctx.boundObject ? { linkValue: { targetId: ctx.boundObject, relationKey: "objects" } } : undefined, { linkValue: { targetId: target.id, relationKey: "objects" } }].filter(Boolean) as ValueJSON[] } },
-			});
-			chatId = created.id;
-			await addBlock(chatId, { id: "__discussion__", childrenIds: [], content: { custom: { contentType: "discussion", meta: {} } } });
-		}
-		await addBlock(
-			chatId,
-			{
-				id: crypto.randomUUID(),
-				childrenIds: [],
-				content: { custom: { contentType: "chat", meta: { author: ctx.agentId, ts: String(Date.now()), text: S(input.text) } } },
-			},
-			"__discussion__",
-			5,
-		);
+		const subjectId = ctx.boundObject || ctx.agentId;
+		const ref = await pairThread(subjectId, ctx.agentId, targetAgentId, `${myName} ⇄ ${theirName}`);
+		await postTo(ref, S(input.text), ctx.agentId);
 		if (!ctx.wake) return `letter delivered to ${theirName}; they will read it on their next turn`;
-		return await ctx.wake(targetAgentId, chatId);
+		return await ctx.wake(targetAgentId, ref);
 	},
 };
 

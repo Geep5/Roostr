@@ -5,10 +5,11 @@
  * submit_result tool and persisted on the subagent object.
  */
 
-import { chatPost, createObject, fetchObject, iv, setField, str, sv } from "./api";
+import { createObject, fetchObject, iv, setField, str, sv } from "./api";
 import { runTurn } from "./runner";
 import { MAX_SPAWN_DEPTH, SPAWN_CONCURRENCY } from "./types";
 import type { ToolContext } from "./tools";
+import { agentThread, postTo } from "./conv";
 
 interface Template {
 	name: string;
@@ -78,8 +79,13 @@ export async function spawnSubagent(task: string, templateName: string, parentCt
 		});
 
 		let submitted = "";
-		await chatPost(id, task); // the task is the first user message
-		const finalText = await runTurn(id, id, {
+		// A subagent's transcript is a thread on its own agent object: it is
+		// bound to nothing, so conv.ts:113-114 resolves the subject to the
+		// agent itself - where the old code posted when chat and agent were
+		// the same id.
+		const conv = await agentThread(await fetchObject(id));
+		await postTo(conv, task); // the task is the first user message
+		const finalText = await runTurn(id, conv, {
 			template: template.name,
 			depth: parentCtx.depth + 1,
 			spawn: template.name === "task" ? spawnSubagent : undefined,

@@ -25,7 +25,8 @@ import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, publishCapabilities, servesHere } from "./machine";
 import { publishDescriptors } from "./descriptors";
 import { validateBindings } from "./workspace";
-import { chatBlocks, ensureChat, frameMessage, ingestIntoChat, ingestedOriginBlocks, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
+import { chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
+import { agentThread, convKey, conversationsOf, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
 import { arm as armScheduler, startScheduler } from "./schedule";
 
 function argValue(flagName: string): string {
@@ -61,7 +62,8 @@ async function setup(): Promise<void> {
 
 interface Served {
 	agentId: string;
-	chatId: string;
+	/** The agent's own transcript: a thread on the object it is about. */
+	conv: ConvRef;
 	channelId: string;
 	/** Type keys this agent is responsible for; "*" = everything else. */
 	types: string[];
@@ -126,10 +128,13 @@ async function buildServedOne(agentId: string, defaultChannel: string): Promise<
 		channelId = defaultChannel;
 		if (channelId) await setField(agentId, "channel", sv(channelId));
 	}
-	const chatId = await ensureChat(agent, channelId);
+	// The transcript lives on the object the agent is about (its bound
+	// object, else the agent object itself), so one object carries its work
+	// and every conversation about it.
+	const conv = await agentThread(agent);
 	return {
 		agentId,
-		chatId,
+		conv,
 		channelId,
 		types: list(agent.fields, "responsible_types"),
 		bound: str(agent.fields, "bound_object"),
@@ -163,30 +168,37 @@ async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
 // event is safe because the drain loop re-checks after the turn.
 const ingesting = new Set<string>();
 
-/** Fetch → pending → advance mark → (origin surfaces) copy into the chat. */
-async function ingestSurface(s: Served, surfaceId: string): Promise<boolean> {
-	if (ingesting.has(surfaceId)) return false;
-	ingesting.add(surfaceId);
+/** Fetch → pending → advance mark → copy the human's words into the transcript. */
+async function ingestSurface(s: Served, origin: ConvRef): Promise<boolean> {
+	const lock = convKey(origin);
+	if (ingesting.has(lock)) return false;
+	ingesting.add(lock);
 	try {
-		const surface = await fetchObject(surfaceId);
-		const pending = await pendingMessages(surface, s.agentId);
+		const surface = await fetchObject(origin.objectId);
+		// A surface is a CONVERSATION: an object's human discussion, or an
+		// A2A thread two agents share. The agent's own transcript is never a
+		// surface, so the old self-ingest guard has no case left to cover.
+		const pending = await pendingMessages(surface, origin, s.agentId);
 		if (pending.length === 0) return false;
-		await setMark(surfaceId, pending[pending.length - 1].blockId);
-		if (surfaceId !== s.chatId) {
-			// Idempotence by identity, not marks: a message whose copy is
-			// already in the chat was handled - by this machine before a mark
-			// was lost, or by ANOTHER machine whose reply hasn't synced into
-			// our view yet (the spirit-dragon double-ingest). Skip it; an
-			// empty remainder means no turn at all.
-			const copied = ingestedOriginBlocks(await fetchObject(s.chatId).catch(() => ({ blocks: [] })));
-			const fresh = pending.filter((p) => !copied.has(p.blockId));
-			if (fresh.length === 0) return false;
-			const framed = frameMessage(surface, fresh);
-			await ingestIntoChat(s.chatId, surfaceId, fresh[fresh.length - 1].author || "user", framed, fresh[fresh.length - 1].blockId);
-		}
+		await setMark(origin, pending[pending.length - 1].blockId);
+		// Idempotence by identity, not marks: a message whose copy is already
+		// in the transcript was handled - by this machine before a mark was
+		// lost, or by ANOTHER machine whose reply hasn't synced into our view
+		// yet (the spirit-dragon double-ingest). Skip it; an empty remainder
+		// means no turn at all.
+		const transcript = await fetchObject(s.conv.objectId).catch(() => null);
+		// No transcript object in view means no idempotence check is possible;
+		// ingesting blind is how the double-post happened, so stand down and
+		// let the next event retry.
+		if (!transcript) return false;
+		const copied = ingestedOriginBlocks(transcript, s.conv);
+		const fresh = pending.filter((p) => !copied.has(p.blockId));
+		if (fresh.length === 0) return false;
+		const framed = frameMessage(surface, origin, fresh);
+		await ingestIntoChat(s.conv, origin, fresh[fresh.length - 1].author || "user", framed, fresh[fresh.length - 1].blockId);
 		return true;
 	} finally {
-		ingesting.delete(surfaceId);
+		ingesting.delete(lock);
 	}
 }
 
@@ -194,13 +206,15 @@ async function ingestSurface(s: Served, surfaceId: string): Promise<boolean> {
  * Handle a message on one surface: ingest, run the turn on the chat, reply
  * where asked.
  */
-async function handleSurface(s: Served, surfaceId: string, opts: { wake?: (t: string, c: string) => Promise<string>; a2aTurn?: boolean } = {}): Promise<boolean> {
-	if (!(await ingestSurface(s, surfaceId))) return false;
-	const reply = await runTurn(s.agentId, s.chatId, { spawn: spawnSubagent, wake: opts.wake, a2aTurn: opts.a2aTurn });
-	if (surfaceId !== s.chatId && reply.trim()) {
-		await chatPost(surfaceId, reply.trim(), s.agentId);
+async function handleSurface(s: Served, surface: ConvRef, opts: { wake?: (targetAgentId: string, pair: ConvRef) => Promise<string>; a2aTurn?: boolean } = {}): Promise<boolean> {
+	if (!(await ingestSurface(s, surface))) return false;
+	const reply = await runTurn(s.agentId, s.conv, { spawn: spawnSubagent, wake: opts.wake, a2aTurn: opts.a2aTurn });
+	if (reply.trim()) {
+		// The answer goes back to the conversation that asked - the human
+		// discussion, or the A2A thread the question arrived in.
+		await postTo(surface, reply.trim(), s.agentId);
 	}
-	console.log(`[${new Date().toISOString()}] ${s.agentId.slice(0, 8)} answered in ${surfaceId.slice(0, 8)}: ${reply.slice(0, 120)}`);
+	console.log(`[${new Date().toISOString()}] ${s.agentId.slice(0, 8)} answered in ${convKey(surface).slice(0, 26)}: ${reply.slice(0, 120)}`);
 	return true;
 }
 
@@ -269,17 +283,9 @@ async function serve(): Promise<void> {
 				const one = await buildServedOne(id, defaultChannelId);
 				if (one) served.set(id, one);
 			}
-			// The space chat is the front door: pin it at mint so it sits in
-			// the sidebar from day one. Once, only - an unpin is the human's
-			// word and is never rewritten.
-			if (minted) {
-				const chatId = served.get(id)?.chatId;
-				if (chatId) {
-					const ch = await fetchObject(c.id);
-					const pinnedIds = list(ch.fields, "pinnedIds");
-					if (!pinnedIds.includes(chatId)) await setField(c.id, "pinnedIds", lv([...pinnedIds, chatId]));
-				}
-			}
+			// The front door used to be a `chat` object pinned in the
+			// sidebar. The space's own discussion is that front door now, so
+			// there is nothing to pin: a space is already in the sidebar.
 		}
 	}
 	await ensureSpaceAgents();
@@ -293,12 +299,12 @@ async function serve(): Promise<void> {
 	 * "why did last night's run fail" get answered by the machine that
 	 * knows, rather than by whichever agent happened to be nearby.
 	 */
-	const UNMINTABLE = new Set(["agent", "chat", "channel", "relation", "type", "template", "skill", "program", "typescript", "json", "proto", "pinned_fact", "milestone"]);
+	const UNMINTABLE = new Set(["agent", "channel", "relation", "type", "template", "skill", "program", "typescript", "json", "proto", "pinned_fact", "milestone"]);
 
-	/** True when the newest discussion message is human-authored - the
-	 * ONLY trigger that may mint an agent. */
-	function lastMessageIsHuman(obj: Parameters<typeof chatBlocks>[0]): boolean {
-		const msgs = chatBlocks(obj);
+	/** True when a conversation's newest message is human-authored - the ONLY
+	 * trigger that may mint an agent, and what wakes an A2A pair. */
+	function lastMessageIsHumanIn(obj: ObjectJSON, ref: ConvRef): boolean {
+		const msgs = chatBlocks(obj, ref);
 		if (msgs.length === 0) return false;
 		const last = msgs[msgs.length - 1].block.content.custom?.meta ?? {};
 		if (last["origin"]) return false;
@@ -344,8 +350,8 @@ async function serve(): Promise<void> {
 	}
 
 	const busy = new Set<string>();
-	const active = new Map<string, string>(); // agentId → surface of the in-flight turn
-	const dirty = new Map<string, Set<string>>(); // agentId → surfaces awaiting a turn
+	const active = new Map<string, string>(); // agentId → convKey of the in-flight turn
+	const dirty = new Map<string, Set<string>>(); // agentId → convKeys awaiting a turn
 	const idleWaiters = new Map<string, Array<() => void>>(); // agentId → scheduled turns waiting for the slot
 
 	// ── A2A wake: one answering turn for the target, synchronously. ──
@@ -354,7 +360,7 @@ async function serve(): Promise<void> {
 	const A2A_MAX_CONCURRENT = 3;
 	let a2aActive = 0;
 
-	async function wakeAgent(targetAgentId: string, pairChatId: string): Promise<string> {
+	async function wakeAgent(targetAgentId: string, pair: ConvRef): Promise<string> {
 		let s = served.get(targetAgentId);
 		if (!s) {
 			try {
@@ -369,7 +375,7 @@ async function serve(): Promise<void> {
 		const queueLetter = () => {
 			let set = dirty.get(targetAgentId);
 			if (!set) dirty.set(targetAgentId, (set = new Set()));
-			set.add(pairChatId);
+			set.add(convKey(pair));
 		};
 		if (busy.has(targetAgentId)) {
 			queueLetter();
@@ -381,7 +387,7 @@ async function serve(): Promise<void> {
 		}
 		a2aActive++;
 		try {
-			const turn = drive(s, pairChatId, true);
+			const turn = drive(s, pair, true);
 			const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 180_000));
 			if ((await Promise.race([turn, timeout])) === "timeout") {
 				return "they are still thinking; their reply will appear in your shared chat";
@@ -389,10 +395,10 @@ async function serve(): Promise<void> {
 		} finally {
 			a2aActive--;
 		}
-		// Their reply is the newest message they authored in the pair chat.
-		const chat = await fetchObject(pairChatId).catch(() => null);
+		// Their reply is the newest message they authored in the pair thread.
+		const chat = await fetchObject(pair.objectId).catch(() => null);
 		if (!chat) return "(no reply)";
-		const msgs = chatBlocks(chat);
+		const msgs = chatBlocks(chat, pair);
 		for (let i = msgs.length - 1; i >= 0; i--) {
 			const meta = msgs[i].block.content.custom?.meta ?? {};
 			if ((meta["author"] ?? "") === targetAgentId) return meta["text"] || "(empty reply)";
@@ -405,16 +411,16 @@ async function serve(): Promise<void> {
 	 * capture, then the drain (chat first, queued surfaces after). Resolves
 	 * to the failure message, "" on success - the scheduler records it.
 	 */
-	async function withTurn(s: Served, surfaceId: string, body: () => Promise<unknown>): Promise<string> {
+	async function withTurn(s: Served, surface: ConvRef, body: () => Promise<unknown>): Promise<string> {
 		busy.add(s.agentId);
-		active.set(s.agentId, surfaceId);
+		active.set(s.agentId, convKey(surface));
 		// Turn state is local: /agents and /agent/status read this map. It used
 		// to be mirrored onto the agent object for remote clients, at two or
 		// three permanent commits per turn; a local surface answers the same
 		// question for free, and only the machine running the turn can answer
 		// it truthfully anyway.
 		const report = (state: "idle" | "working" | "error", detail = "") => {
-			agentTurnStatus.set(s.agentId, { id: s.agentId, name: s.name, icon: s.icon, state, surface: surfaceId, detail, ts: Date.now() });
+			agentTurnStatus.set(s.agentId, { id: s.agentId, name: s.name, icon: s.icon, state, surface: surface.objectId, detail, ts: Date.now() });
 		};
 		report("working");
 		let failure = "";
@@ -446,10 +452,13 @@ async function serve(): Promise<void> {
 			// Drain: the chat first (its own messages), then queued surfaces.
 			const queued = [...(dirty.get(s.agentId) ?? [])];
 			dirty.delete(s.agentId);
-			for (const q of [s.chatId, ...queued]) {
-				const surface = await fetchObject(q).catch(() => null);
-				if (surface && (await pendingMessages(surface, s.agentId)).length > 0) {
-					void drive(s, q);
+			// The transcript object's own discussion first (a human may have
+			// written there), then whatever queued behind the turn.
+			for (const key of [convKey(humanRef(s.conv.objectId)), ...queued]) {
+				const ref = parseConvKey(key);
+				const surface = await fetchObject(ref.objectId).catch(() => null);
+				if (surface && (await pendingMessages(surface, ref, s.agentId)).length > 0) {
+					void drive(s, ref);
 					break;
 				}
 			}
@@ -457,21 +466,23 @@ async function serve(): Promise<void> {
 		return failure;
 	}
 
-	async function drive(s: Served, surfaceId: string, a2aTurn = false): Promise<void> {
+	async function drive(s: Served, surface: ConvRef, a2aTurn = false): Promise<void> {
+		const key = convKey(surface);
 		if (busy.has(s.agentId)) {
-			if (surfaceId === active.get(s.agentId) && surfaceId !== s.chatId) {
-				// Same-surface follow-up: fold into the in-flight turn (steer).
-				// Chat-surface follow-ups need nothing — the runner refetches.
-				await ingestSurface(s, surfaceId);
-			} else if (surfaceId !== active.get(s.agentId)) {
-				// Another surface mid-turn: wait for the next turn (bot.odin rule).
+			if (key === active.get(s.agentId)) {
+				// Same-conversation follow-up: fold into the in-flight turn
+				// (steer); the runner refetches, so nothing else is needed.
+				await ingestSurface(s, surface);
+			} else {
+				// Another conversation mid-turn: wait for the next turn
+				// (bot.odin rule).
 				let set = dirty.get(s.agentId);
 				if (!set) dirty.set(s.agentId, (set = new Set()));
-				set.add(surfaceId);
+				set.add(key);
 			}
 			return;
 		}
-		await withTurn(s, surfaceId, () => handleSurface(s, surfaceId, { wake: a2aTurn ? undefined : wakeAgent, a2aTurn }));
+		await withTurn(s, surface, () => handleSurface(s, surface, { wake: a2aTurn ? undefined : wakeAgent, a2aTurn }));
 	}
 
 	/**
@@ -488,7 +499,7 @@ async function serve(): Promise<void> {
 			waiters.push(resolve);
 			await promise;
 		}
-		return withTurn(s, s.chatId, () => runTurn(s.agentId, s.chatId, { spawn: spawnSubagent, systemSuffix, requirementsObjectId }));
+		return withTurn(s, s.conv, () => runTurn(s.agentId, s.conv, { spawn: spawnSubagent, systemSuffix, requirementsObjectId }));
 	}
 
 	/**
@@ -514,8 +525,18 @@ async function serve(): Promise<void> {
 
 	/** Route an SSE object event to the agent whose surface it is. */
 	async function route(objectId: string): Promise<void> {
+		// An event on the object that holds an agent's transcript: the human
+		// may have written in its discussion.
 		for (const s of served.values()) {
-			if (objectId === s.chatId) return void drive(s, objectId);
+			if (objectId === s.conv.objectId) {
+				const here = await fetchObject(objectId).catch(() => null);
+				const ref = humanRef(objectId);
+				if (here && (await pendingMessages(here, ref, s.agentId)).length > 0) void drive(s, ref);
+				// Not a return: an A2A thread on this very object still has
+				// to be checked below, which is why a human asking both
+				// agents in a pair thread used to go unanswered.
+				break;
+			}
 		}
 		if (agents.has(objectId)) {
 			// Responsibility edits sync through the agent object — keep the
@@ -568,33 +589,36 @@ async function serve(): Promise<void> {
 			invalidateServing();
 			void armScheduler();
 		}
-		if (obj.typeKey === "chat") {
-			// A human posting into an A2A pair chat wakes BOTH participants
-			// for one answering turn each (sequential - the second sees the
-			// first's reply). Their answering turns carry no agent_ask.
-			const pairKey = str(obj.fields, "a2a_pair");
-			if (pairKey && lastMessageIsHuman(obj)) {
-				for (const pid of list(obj.fields, "participants")) {
-					let sp = served.get(pid);
-					if (!sp) {
-						try {
-							const built = await buildServedOne(pid, defaultChannelId);
-							if (!built) continue;
-							sp = built;
-							served.set(pid, sp);
-						} catch {
-							continue;
-						}
+		// A human posting into an A2A conversation wakes BOTH participants for
+		// one answering turn each (sequential - the second sees the first's
+		// reply). Their answering turns carry no agent_ask.
+		//
+		// This used to be `obj.typeKey === "chat"`, when a pair conversation
+		// was its own object. It is a thread on an ordinary object now, so the
+		// trigger is the thread's own newest message, not the object's type.
+		for (const conversation of await conversationsOf(objectId)) {
+			if (conversation.kind !== "a2a") continue;
+			const ref: ConvRef = { objectId, threadId: conversation.id };
+			if (!lastMessageIsHumanIn(obj, ref)) continue;
+			for (const pid of conversation.participants) {
+				let sp = served.get(pid);
+				if (!sp) {
+					try {
+						const built = await buildServedOne(pid, defaultChannelId);
+						if (!built) continue;
+						sp = built;
+						served.set(pid, sp);
+					} catch {
+						continue;
 					}
-					// Fresh fetch each participant: the first answer must be
-					// pending for the second, not invisible in a stale copy.
-					const fresh = await fetchObject(objectId).catch(() => null);
-					if (!fresh) break;
-					const pend = await pendingMessages(fresh, sp.agentId);
-					if (pend.length > 0) await drive(sp, objectId, true);
 				}
+				// Fresh fetch each participant: the first answer must be
+				// pending for the second, not invisible in a stale copy.
+				const fresh = await fetchObject(objectId).catch(() => null);
+				if (!fresh) break;
+				const pend = await pendingMessages(fresh, ref, sp.agentId);
+				if (pend.length > 0) await drive(sp, ref, true);
 			}
-			return;
 		}
 		if (obj.typeKey === "agent") return; // other agents' brains
 		const channelId = objectId === defaultChannelId || obj.typeKey === "channel" ? objectId : str(obj.fields, "channel") || defaultChannelId;
@@ -626,8 +650,8 @@ async function serve(): Promise<void> {
 					return;
 				}
 			}
-			const pending2 = await pendingMessages(obj, s2.agentId);
-			if (pending2.length > 0) void drive(s2, objectId);
+			const pending2 = await pendingMessages(obj, humanRef(obj.id), s2.agentId);
+			if (pending2.length > 0) void drive(s2, humanRef(obj.id));
 			return;
 		}
 
@@ -635,8 +659,8 @@ async function serve(): Promise<void> {
 		const s = responsibleFor(channelId, obj.typeKey);
 		if (s && !(await servesHere(s.bound || s.agentId))) return;
 		if (s) {
-			const pending = await pendingMessages(obj, s.agentId);
-			if (pending.length > 0) void drive(s, objectId);
+			const pending = await pendingMessages(obj, humanRef(obj.id), s.agentId);
+			if (pending.length > 0) void drive(s, humanRef(obj.id));
 			return;
 		}
 
@@ -650,7 +674,7 @@ async function serve(): Promise<void> {
 		// default space instead of the object's own - and a bound agent in
 		// the wrong space cannot even read the object it speaks for.
 		if (!obj.typeKey) return;
-		if (!lastMessageIsHuman(obj)) return;
+		if (!lastMessageIsHumanIn(obj, humanRef(obj.id))) return;
 		// Claim the object before the first await: one message arrives as
 		// several events, and every one of them reaches this line.
 		if (minting.has(objectId)) return;
@@ -660,9 +684,9 @@ async function serve(): Promise<void> {
 			const s3 = served.get(minted) ?? (await buildServedOne(minted, defaultChannelId));
 			if (!s3) return;
 			served.set(minted, s3);
-			void publishSystemSnapshot(s3.agentId, s3.chatId);
-			const pending3 = await pendingMessages(obj, s3.agentId);
-			if (pending3.length > 0) void drive(s3, objectId);
+			void publishSystemSnapshot(s3.agentId, s3.conv);
+			const pending3 = await pendingMessages(obj, humanRef(obj.id), s3.agentId);
+			if (pending3.length > 0) void drive(s3, humanRef(obj.id));
 		} finally {
 			minting.delete(objectId);
 		}
@@ -674,16 +698,16 @@ async function serve(): Promise<void> {
 		void buildServed(agents).then((next) => {
 			served = next;
 			for (const s of served.values()) {
-				void publishSystemSnapshot(s.agentId, s.chatId);
+				void publishSystemSnapshot(s.agentId, s.conv);
 				// Only if the chat is actually waiting on us. An unconditional
 				// turn here made enabling an agent start one, and a message
 				// arriving during that turn gets folded into it by drive's
 				// steer branch - which ingested it a second time and drew a
 				// second answer. Every other drive call site checks first.
 				void (async () => {
-					const chat = await fetchObject(s.chatId).catch(() => null);
+					const chat = await fetchObject(s.conv.objectId).catch(() => null);
 					if (!chat) return;
-					if ((await pendingMessages(chat, s.agentId)).length > 0) void drive(s, s.chatId);
+					if ((await pendingMessages(chat, humanRef(s.conv.objectId), s.agentId)).length > 0) void drive(s, humanRef(s.conv.objectId));
 				})();
 			}
 		});
@@ -695,8 +719,8 @@ async function serve(): Promise<void> {
 	// Publishing the prompt here rather than only mid-turn is what lets a
 	// never-messaged agent show a real prompt instead of an empty panel.
 	for (const s of served.values()) {
-		void publishSystemSnapshot(s.agentId, s.chatId);
-		void drive(s, s.chatId);
+		void publishSystemSnapshot(s.agentId, s.conv);
+		void drive(s, humanRef(s.conv.objectId));
 	}
 	subscribe((objectId) => void route(objectId));
 	console.log("[harness] SSE connected; serving.");
@@ -734,9 +758,9 @@ async function ask(): Promise<void> {
 	}
 	const agent = await fetchObject(agentId);
 	const channels = (await (await apiFetch(`${API}/api/channels`)).json()) as Array<{ id: string }>;
-	const chatId = await ensureChat(agent, str(agent.fields, "channel") || channels[0]?.id || "");
-	await chatPost(chatId, text);
-	const reply = await runTurn(agentId, chatId, { spawn: spawnSubagent });
+	const conv = await agentThread(agent);
+	await postTo(conv, text);
+	const reply = await runTurn(agentId, conv, { spawn: spawnSubagent });
 	console.log(reply);
 }
 

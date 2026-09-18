@@ -8,12 +8,15 @@
  * success, so every agent picks it up through the normal skills listing.
  *
  * Auth handoff: when a skill installs fine but needs a human to finish
- * OAuth (gws), the row goes `needs-auth` and the installer posts to the
- * shared "Setup" chat object — the coordinator-channel pattern, on-DAG.
+ * OAuth (gws), the row goes `needs-auth` and the installer posts to this
+ * machine's own discussion - the install is a fact about this device, and
+ * the Machine panel is where a human already looks for it.
  */
 
-import { createObject, chatPost, fetchObject, mutate, query, str, queryAll } from "./api";
-import { publishCapabilities } from "./machine";
+import { createObject, fetchObject, mutate, str, queryAll } from "./api";
+import { machines, publishCapabilities } from "./machine";
+import { machineId } from "./roster";
+import { humanRef, postTo } from "./conv";
 import { activeCredentialKeys, credentialStatus } from "./credentials";
 import { publishHoldup, publishInstallations, clearInstallationError } from "./descriptors";
 import { objectText } from "./skills";
@@ -303,17 +306,17 @@ async function sh(cmd: string): Promise<{ ok: boolean; out: string }> {
 	return { ok: code === 0, out: (out + err).trim() };
 }
 
-/** Find-or-create the shared "Setup" coordinator chat; post a line to it. */
-async function postToSetupChat(text: string): Promise<void> {
+/** Post a setup line to this machine's discussion (the Machine panel's thread). */
+async function postSetupNotice(text: string): Promise<void> {
 	try {
-		const rows = await query({ type: "chat", limit: 50 });
-		let id = rows.find((r) => str(r.fields, "name") === "Setup")?.id;
-		if (!id) {
-			id = (await createObject("Setup", "chat", { iconEmoji: { stringValue: "\u2699\uFE0F" } })).id;
-		}
-		await chatPost(id, text, "Installer");
+		const me = await machineId();
+		const mine = (await machines()).find((m) => m.machineId === me);
+		// serve() publishes this machine before anything can install
+		// (index.ts:208), so a miss means the registration itself failed.
+		if (!mine) throw new Error(`machine ${me.slice(0, 8)} is not registered`);
+		await postTo(humanRef(mine.objectId), text, "Installer");
 	} catch (err) {
-		console.error("[skills] setup-chat post failed:", err);
+		console.error("[skills] setup post failed:", err);
 	}
 }
 
@@ -550,13 +553,13 @@ export async function enableSkill(key: string): Promise<SkillPhase> {
 		async () => {
 			const phase = await recheckSkill(key);
 			if (phase === "needs-auth") {
-				await postToSetupChat(
+				await postSetupNotice(
 					`\u2699\uFE0F **${entry.name}** installed, but needs you to finish sign-in: ${entry.authHint ?? "authenticate, then hit Re-check in Settings."}`,
 				);
 			} else if (phase === "failed") {
 				const st = await readState();
 				const job = st.skills[key];
-				await postToSetupChat(`\u26A0\uFE0F **${entry.name}** install failed — see the log in Settings \u2192 Skills.`);
+				await postSetupNotice(`\u26A0\uFE0F **${entry.name}** install failed — see the log in Settings \u2192 Skills.`);
 				if (job) {
 					job.log = `[failed] install did not pass "${entry.checkCmd}"\n${jobLogTail(key)}`;
 					await writeState(st);

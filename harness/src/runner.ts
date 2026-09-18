@@ -11,7 +11,8 @@
  * instructions.
  */
 
-import { addBlock, chatPost, fetchObject, flag, iv, num, setField, str, sv, type ObjectJSON } from "./api";
+import { fetchObject, flag, iv, num, setField, str, sv, type ObjectJSON } from "./api";
+import { addConvBlock, postTo, type ConvRef } from "./conv";
 import { boundObjectContext } from "./spacemap";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
@@ -83,40 +84,30 @@ function tokenRatio(obj: ObjectJSON): number {
 	return tokenRatios.get(obj.id) ?? 1;
 }
 
-async function persistToolUse(convId: string, use: { id: string; name: string; input: Record<string, unknown> }): Promise<void> {
-	await addBlock(
-		convId,
-		{
-			id: crypto.randomUUID(),
-			childrenIds: [],
-			content: {
-				custom: {
-					contentType: BLOCK_TOOL_USE,
-					meta: { tool_use_id: use.id, tool_name: use.name, input: JSON.stringify(use.input), ts: String(Date.now()) },
-				},
+async function persistToolUse(ref: ConvRef, use: { id: string; name: string; input: Record<string, unknown> }): Promise<void> {
+	await addConvBlock(ref, {
+		id: crypto.randomUUID(),
+		childrenIds: [],
+		content: {
+			custom: {
+				contentType: BLOCK_TOOL_USE,
+				meta: { tool_use_id: use.id, tool_name: use.name, input: JSON.stringify(use.input), ts: String(Date.now()) },
 			},
 		},
-		"__discussion__",
-		5,
-	);
+	});
 }
 
-async function persistToolResult(convId: string, toolUseId: string, content: string, isError: boolean): Promise<void> {
-	await addBlock(
-		convId,
-		{
-			id: crypto.randomUUID(),
-			childrenIds: [],
-			content: {
-				custom: {
-					contentType: BLOCK_TOOL_RESULT,
-					meta: { tool_use_id: toolUseId, content: content.slice(0, TOOL_RESULT_TRUNCATE), is_error: String(isError), ts: String(Date.now()) },
-				},
+async function persistToolResult(ref: ConvRef, toolUseId: string, content: string, isError: boolean): Promise<void> {
+	await addConvBlock(ref, {
+		id: crypto.randomUUID(),
+		childrenIds: [],
+		content: {
+			custom: {
+				contentType: BLOCK_TOOL_RESULT,
+				meta: { tool_use_id: toolUseId, content: content.slice(0, TOOL_RESULT_TRUNCATE), is_error: String(isError), ts: String(Date.now()) },
 			},
 		},
-		"__discussion__",
-		5,
-	);
+	});
 }
 
 export interface RunOptions {
@@ -127,8 +118,8 @@ export interface RunOptions {
 	systemSuffix?: string;
 	/** Scheduled/object work whose requirements are not the agent's own bound object. */
 	requirementsObjectId?: string;
-	/** Wake another agent on a pair chat - present on human-rooted turns only. */
-	wake?: (targetAgentId: string, pairChatId: string) => Promise<string>;
+	/** Wake another agent on the a2a thread - present on human-rooted turns only. */
+	wake?: (targetAgentId: string, ref: ConvRef) => Promise<string>;
 	/** True when this turn answers another agent: agent_ask is withheld. */
 	a2aTurn?: boolean;
 }
@@ -225,11 +216,11 @@ async function publishSystemParts(agentId: string, parts: SystemPart[], ratio: n
  * unset because it uses the built-in default, and that default lives here in
  * the harness where no remote client can see it.
  */
-export async function publishSystemSnapshot(agentId: string, convId: string): Promise<void> {
+export async function publishSystemSnapshot(agentId: string, ref: ConvRef): Promise<void> {
 	try {
 		const agent = await fetchObject(agentId);
-		const conv = convId === agentId ? agent : await fetchObject(convId);
-		const view = buildConversationView(conv, agentId, tokenRatio(agent));
+		const conv = ref.objectId === agentId ? agent : await fetchObject(ref.objectId);
+		const view = buildConversationView(conv, agentId, tokenRatio(agent), ref.threadId);
 		await publishSystemParts(agentId, await buildSystemParts(agent, view, {}), tokenRatio(agent));
 	} catch (err) {
 		console.error(`[harness] prompt snapshot failed for ${agentId.slice(0, 8)}:`, err);
@@ -238,12 +229,13 @@ export async function publishSystemSnapshot(agentId: string, convId: string): Pr
 
 /**
  * Run the agent until it stops calling tools. Returns the final reply text.
- * The conversation lives on `convId` (the agent's holistic chat; subagents
- * converse on their own object, convId === agentId). Every turn artifact
- * (assistant text, tool_use, tool_result) is persisted to the DAG as it
- * happens — a crash resumes cleanly via repairToolPairs.
+ * The conversation is a thread inside the object it is about: `ref.objectId`
+ * is that object (an agent's own transcript lives on the agent object, so
+ * ref.objectId === agentId there) and `ref.threadId` is the thread. Every
+ * turn artifact (assistant text, tool_use, tool_result) is persisted to the
+ * DAG as it happens — a crash resumes cleanly via repairToolPairs.
  */
-export async function runTurn(agentId: string, convId: string, opts: RunOptions = {}): Promise<string> {
+export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = {}): Promise<string> {
 	let overflowRetries = 0;
 	let lastText = "";
 
@@ -260,7 +252,7 @@ export async function runTurn(agentId: string, convId: string, opts: RunOptions 
 		// Fresh fetch each iteration: picks up steered user messages and the
 		// blocks we just appended.
 		const agent = await fetchObject(agentId);
-		const conv = convId === agentId ? agent : await fetchObject(convId);
+		const conv = ref.objectId === agentId ? agent : await fetchObject(ref.objectId);
 		ctx.channelId = str(agent.fields, "channel");
 		ctx.boundObject = str(agent.fields, "bound_object") || undefined;
 		ctx.workspacePath = (await workspaceContext(ctx.channelId).catch(() => null))?.path;
@@ -272,7 +264,7 @@ export async function runTurn(agentId: string, convId: string, opts: RunOptions 
 		// takes effect on the agent's next tool call rather than its next turn.
 		const tools = toolDefs(opts.template ?? "", ctx.depth, !opts.a2aTurn && !!opts.wake);
 
-		let view = buildConversationView(conv, agentId, ratio);
+		let view = buildConversationView(conv, agentId, ratio, ref.threadId);
 		const systemParts = await buildSystemParts(agent, view, opts);
 		const system = systemParts.map((p) => p.text).join("\n\n");
 		// Subagent prompts are per-spawn and ephemeral; only a top-level
@@ -281,10 +273,10 @@ export async function runTurn(agentId: string, convId: string, opts: RunOptions 
 
 		// Pre-flight auto-compaction (agent-runner.ts:369-374).
 		if (shouldAutoCompact(system, view, tools, cfg, ratio)) {
-			const compacted = await doCompact(agentId, convId, view, cfg, ratio);
+			const compacted = await doCompact(agentId, ref, view, cfg, ratio);
 			if (compacted) {
-				const fresh = await fetchObject(convId);
-				view = buildConversationView(fresh, agentId, ratio);
+				const fresh = await fetchObject(ref.objectId);
+				view = buildConversationView(fresh, agentId, ratio, ref.threadId);
 			}
 		}
 
@@ -297,7 +289,7 @@ export async function runTurn(agentId: string, convId: string, opts: RunOptions 
 			// Overflow → compact → retry (agent-runner.ts:507-527).
 			if (isContextOverflowError(err) && overflowRetries < 2 && cfg.enabled) {
 				overflowRetries++;
-				await doCompact(agentId, convId, view, cfg, ratio);
+				await doCompact(agentId, ref, view, cfg, ratio);
 				continue;
 			}
 			throw err;
@@ -314,21 +306,21 @@ export async function runTurn(agentId: string, convId: string, opts: RunOptions 
 		}
 
 		if (res.text.trim()) {
-			await chatPost(convId, res.text.trim(), agentId);
+			await postTo(ref, res.text.trim(), agentId);
 			lastText = res.text.trim();
 		}
 
 		if (res.toolUses.length === 0) return lastText;
 
 		for (const use of res.toolUses) {
-			// Persist to the CONVERSATION object - the same one the next
+			// Persist into the CONVERSATION thread - the same one the next
 			// iteration's view is built from. Writing these to the agent
 			// object instead once made every turn amnesiac about its own
 			// tool calls: the model re-ran the same action until the
 			// iteration cap (14 grocery lists on one page).
-			await persistToolUse(convId, use);
+			await persistToolUse(ref, use);
 			const out = await dispatchTool(use.name, use.input, ctx);
-			await persistToolResult(convId, use.id, out.content, out.isError);
+			await persistToolResult(ref, use.id, out.content, out.isError);
 		}
 	}
 	await setField(agentId, "last_run_iterations", iv(MAX_TOOL_ITERATIONS));

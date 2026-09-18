@@ -32,7 +32,8 @@ test("a scheduled object without an owner uses its space's default agent", async
 	const objectId = "0b6c86a7-7063-4dcd-81d8-3c5707bbeb83";
 	const channelId = "34e8f017-dfd1-4062-abaf-f7574f2b5176";
 	const defaultAgentId = "856fcc37-9ad6-43e8-a1d8-5ee236699183";
-	const chatId = "64a59d6f-0000-4000-8000-000000000001";
+	const transcriptObject = "64a59d6f-0000-4000-8000-000000000001";
+	const transcriptThread = "64a59d6f-0000-4000-8000-000000000002";
 	const calls: Array<{ path: string; method: string; body: Record<string, unknown> }> = [];
 	let machine = "";
 	const fetchMock = (async (input, init) => {
@@ -85,7 +86,7 @@ test("a scheduled object without an owner uses its space's default agent", async
 	await startScheduler({
 		async served(agentId) {
 			if (agentId !== defaultAgentId) return undefined;
-			return { agentId, chatId };
+			return { agentId, conv: { objectId: transcriptObject, threadId: transcriptThread } };
 		},
 		async turn(agentId) {
 			turns.push(agentId);
@@ -95,6 +96,10 @@ test("a scheduled object without an owner uses its space's default agent", async
 	await turnDone;
 	const schedulerMessages = calls.filter((c) => c.path === "/api/mutate" && c.body.action === "block_add");
 	expect(turns).toEqual([defaultAgentId]);
-	expect(schedulerMessages.some((c) => c.body.object_id === chatId)).toBe(true);
+	// The message goes into the agent's thread on its host object, not at
+	// that object's root and not onto the scheduled object's discussion.
+	expect(schedulerMessages.some((c) => c.body.object_id === transcriptObject && c.body.target_id === transcriptThread && c.body.position === 5)).toBe(true);
 	expect(schedulerMessages.some((c) => c.body.object_id === objectId)).toBe(false);
+	const runs = calls.filter((c) => c.path === "/api/mutate" && c.body.action === "run_record");
+	expect((runs[0]?.body.run as Record<string, unknown>)?.conversation).toBe(`${transcriptObject}:${transcriptThread}`);
 });
