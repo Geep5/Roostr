@@ -3,3 +3,4 @@ app/node_modules/
 app/build/
 app/.svelte-kit/
 harness/node_modules/
+ui-sessions
