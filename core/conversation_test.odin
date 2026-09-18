@@ -347,3 +347,46 @@ a_thread_has_no_practical_cap :: proc(t: ^testing.T) {
 	testing.expect_value(t, thread_messages[59], "m59")
 	testing.expect_value(t, len(object_conversations(state_of(&v, object_id), context.temp_allocator)), 2)
 }
+
+@(test)
+object_json_names_its_conversations :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	// Every host reads object state through `object_to_json`, so the decoded
+	// conversation list must be there - otherwise each client grows its own
+	// protobuf reader, which is the duplication this schema removes.
+	v := Vault{changes = make([dynamic]Change, context.temp_allocator)}
+	created, _ := apply(&v, "create", params({"type_key", "note"}, {"name", "Pricing"}))
+	object_id := json_str(created, "id")
+	_, _ = apply(&v, "chat_post", params({"object_id", object_id}, {"text", "human question"}))
+	opened, _ := apply(&v, "conversation_open", params({"object_id", object_id}, {"kind", "a2a"}, {"title", "Research"}))
+	thread := json_str(opened, "id")
+	_, _ = apply(&v, "chat_post", params({"object_id", object_id}, {"thread_id", thread}, {"text", "agent one"}))
+	_, _ = apply(&v, "chat_post", params({"object_id", object_id}, {"thread_id", thread}, {"text", "agent two"}))
+
+	parsed, err := json.parse(object_to_json(state_of(&v, object_id), context.temp_allocator), parse_integers = true)
+	testing.expect(t, err == nil, "state JSON parses")
+	rows := json_array(parsed, "conversations")
+	testing.expect_value(t, len(rows), 2)
+	seen := make(map[string]json.Value, context.temp_allocator)
+	for row in rows do seen[json_str(row, "id")] = row
+	human, human_ok := seen[DISCUSSION_ID]
+	testing.expect(t, human_ok, "the human thread is listed")
+	testing.expect_value(t, json_str(human, "kind"), "human")
+	count, _ := json_int(human, "messageCount")
+	testing.expect_value(t, count, 1)
+	agent, agent_ok := seen[thread]
+	testing.expect(t, agent_ok, "the agent thread is listed")
+	testing.expect_value(t, json_str(agent, "kind"), "a2a")
+	testing.expect_value(t, json_str(agent, "title"), "Research")
+	agent_count, _ := json_int(agent, "messageCount")
+	testing.expect_value(t, agent_count, 2)
+
+	// An object with no chat carries no `conversations` key at all: a note
+	// must not pay bytes for a conversation it never had.
+	quiet := Vault{changes = make([dynamic]Change, context.temp_allocator)}
+	made, _ := apply(&quiet, "create", params({"type_key", "note"}, {"name", "Quiet"}))
+	quiet_id := json_str(made, "id")
+	quiet_parsed, _ := json.parse(object_to_json(state_of(&quiet, quiet_id), context.temp_allocator), parse_integers = true)
+	_, has_key := json_field(quiet_parsed, "conversations")
+	testing.expect(t, !has_key, "no conversations key without a conversation")
+}

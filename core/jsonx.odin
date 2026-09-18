@@ -162,6 +162,23 @@ object_to_json_value :: proc(s: ^Object_State, allocator := context.temp_allocat
 		append(&blocks, block_to_json(b, allocator))
 	}
 	o["blocks"] = json.Array(blocks)
+	// Conversations, decoded once, here: an object holds many (the human
+	// thread plus the agents'), and their metadata is protobuf bytes on the
+	// root block. Every host reads object state through this function, so
+	// projecting it means no client - browser, daemon, phone - needs its own
+	// reader. The raw bytes stay on the block for round-tripping.
+	conversations := object_conversations(s, allocator)
+	if len(conversations) > 0 {
+		rows := make([dynamic]json.Value, allocator)
+		for c in conversations {
+			row := conversation_to_json(c)
+			if obj, ok := row.(json.Object); ok {
+				obj["messageCount"] = json.Integer(conversation_message_count(s, c.id))
+			}
+			append(&rows, row)
+		}
+		o["conversations"] = json.Array(rows)
+	}
 	o["deleted"] = json.Boolean(s.deleted)
 	o["createdAt"] = json.Integer(s.created_at)
 	o["updatedAt"] = json.Integer(s.updated_at)
