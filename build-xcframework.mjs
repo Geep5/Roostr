@@ -17,7 +17,7 @@ const slices = [
 	{ name: "ios-arm64-simulator", args: ["-subtarget:iphonesimulator", "-minimum-os-version:17.0"] },
 	{ name: "macos-arm64", args: ["-minimum-os-version:14.0"] },
 ];
-const exports = ["core_abi_version", "core_init", "core_reserve", "core_execute", "core_response_pointer", "core_response_length", "core_reset"];
+const exports = ["core_abi_version", "core_init", "core_reserve", "core_reserve_blob", "core_execute", "core_response_pointer", "core_response_length", "core_reset"];
 const header = `#ifndef GLON_H
 #define GLON_H
 #include <stdint.h>
@@ -29,6 +29,8 @@ extern "C" {
 uint32_t core_abi_version(void);
 void core_init(void);
 void *core_reserve(uint32_t length);
+// Optional ABI v2 binary payload; reserve after core_reserve, before execute.
+void *core_reserve_blob(uint32_t length);
 uint32_t core_execute(void);
 void *core_response_pointer(void);
 uint32_t core_response_length(void);
@@ -76,7 +78,7 @@ try {
 	const version = spawnSync(compiler, ["version"], { encoding: "utf8" });
 	if (version.error || version.status !== 0) throw version.error ?? new Error("Cannot identify Odin compiler");
 	const manifest = {
-		abiVersion: 1,
+		abiVersion: 2,
 		compiler: version.stdout.trim(),
 		artifact: "Glon.xcframework",
 		slices: slices.map((s) => s.name),

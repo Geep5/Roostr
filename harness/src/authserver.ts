@@ -10,9 +10,10 @@ import { SimplePool, finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
 import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
-import { clearHoldup, disableSkill, enableSkill, listHoldups, recheckSkill, republishCapabilities, skillStatus, uninstallSkill, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
-import { credentialStatus, finishBrowserLogin, removeCredential, setPasswordCredential, startBrowserLogin } from "./credentials";
-import { addGoogleAccount, listGoogleAccounts, removeGoogleAccount } from "./google";
+import { clearHoldup, listHoldups, skillStatus, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
+import { credentialStatus } from "./credentials";
+import { listGoogleAccounts } from "./google";
+import { approveCapabilityRequest, finishCapabilityLogin, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
 import { deleteField, fetchObject, str } from "./api";
 import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
 import { WorkspaceAccessError } from "./workspace";
@@ -123,6 +124,32 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 				status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...cors },
 			});
 			try {
+				if (url.pathname === "/capability-requests" && req.method === "GET") {
+					return json({ requests: await listCapabilityRequests() });
+				}
+				if (url.pathname.startsWith("/capability-requests/") && req.method === "POST") {
+					if (authorization.role !== "ui") return json({ error: "A paired human approval is required." }, 403);
+					let body: { objectId?: unknown; messageId?: unknown; fields?: unknown };
+					try {
+						body = await req.json() as { objectId?: unknown; messageId?: unknown; fields?: unknown };
+						if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => !["objectId", "messageId", "fields"].includes(key))) throw new Error();
+					} catch {
+						return json({ error: "Invalid capability approval body." }, 400);
+					}
+					if (typeof body.objectId !== "string" || typeof body.messageId !== "string" || !body.objectId || !body.messageId) return json({ error: "objectId and messageId are required." }, 400);
+					if (url.pathname !== "/capability-requests/approve" && body.fields !== undefined) return json({ error: "Credential fields are only accepted by approval." }, 400);
+					try {
+						if (url.pathname === "/capability-requests/approve") return json(await approveCapabilityRequest(body.objectId, body.messageId, body.fields));
+						if (url.pathname === "/capability-requests/finish-login") return json(await finishCapabilityLogin(body.objectId, body.messageId));
+						if (url.pathname === "/capability-requests/reject") {
+							await rejectCapabilityRequest(body.objectId, body.messageId);
+							return json({ ok: true });
+						}
+						return json({ error: "not found" }, 404);
+					} catch (error) {
+						return json({ error: error instanceof Error ? error.message : "Capability approval failed." }, 400);
+					}
+				}
 				if (req.method === "GET" && url.pathname === "/auth/status") {
 					return json(await authStatus());
 				}
@@ -205,53 +232,6 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 				if (req.method === "GET" && url.pathname === "/google/accounts") {
 					return json({ accounts: await listGoogleAccounts() });
 				}
-				if (req.method === "POST" && url.pathname === "/google/accounts/add") {
-					const body = (await req.json()) as { account?: string };
-					try {
-						return json({ account: addGoogleAccount((body.account ?? "").trim().toLowerCase()) });
-					} catch (err) {
-						return json({ error: err instanceof Error ? err.message : String(err) }, 400);
-					}
-				}
-				if (req.method === "POST" && url.pathname === "/google/accounts/remove") {
-					const body = (await req.json()) as { account?: string };
-					try {
-						removeGoogleAccount((body.account ?? "").trim().toLowerCase());
-						return json({ ok: true });
-					} catch (err) {
-						return json({ error: err instanceof Error ? err.message : String(err) }, 400);
-					}
-				}
-				if (req.method === "POST" && url.pathname === "/credentials/password") {
-					const body = (await req.json()) as { key?: string; fields?: Record<string, string> };
-					try {
-						setPasswordCredential(body.key ?? "", body.fields ?? {});
-						await republishCapabilities();
-						return json({ ok: true });
-					} catch (err) {
-						return json({ error: err instanceof Error ? err.message : String(err) }, 400);
-					}
-				}
-				if (req.method === "POST" && url.pathname === "/credentials/browser/start") {
-					const body = (await req.json()) as { key?: string };
-					try {
-						return json(startBrowserLogin(body.key ?? ""));
-					} catch (err) {
-						return json({ error: err instanceof Error ? err.message : String(err) }, 400);
-					}
-				}
-				if (req.method === "POST" && url.pathname === "/credentials/browser/finish") {
-					const body = (await req.json()) as { key?: string };
-					const active = finishBrowserLogin(body.key ?? "");
-					if (active) await republishCapabilities();
-					return json({ active });
-				}
-				if (req.method === "POST" && url.pathname === "/credentials/remove") {
-					const body = (await req.json()) as { key?: string };
-					removeCredential(body.key ?? "");
-					await republishCapabilities();
-					return json({ ok: true });
-				}
 				if (req.method === "POST" && url.pathname === "/skills/holdup-clear") {
 					const body = (await req.json()) as { id?: string };
 					// The holdup wrote an error badge on its object ("needs
@@ -279,13 +259,6 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					if (op === "prompt-reset") {
 						return json({ ok: true, prompt: await resetSkillPrompt(body.key) });
 					}
-					if (op === "enable") return json({ phase: await enableSkill(body.key) });
-					if (op === "disable") {
-						await disableSkill(body.key);
-						return json({ phase: "off" });
-					}
-					if (op === "recheck") return json({ phase: await recheckSkill(body.key) });
-					if (op === "uninstall") return json({ phase: await uninstallSkill(body.key) });
 					return json({ error: "not found" }, 404);
 				}
 				return json({ error: "not found" }, 404);

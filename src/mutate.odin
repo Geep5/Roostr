@@ -11,6 +11,11 @@ import "core:encoding/json"
 import "core:encoding/hex"
 import "core:crypto"
 
+// The store lock protects each snapshot, not the whole read/plan/write
+// transaction. Serialize local mutations so two HTTP claims cannot both
+// observe "pending" before either processing receipt is durable.
+g_mutation_mu: sync.Mutex
+
 make_change :: proc(object_id: string, ops: []core.Operation, author := "glon-odin") -> core.Change {
 	c: core.Change
 	c.object_id = object_id
@@ -80,6 +85,8 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
  case "nostr_key_import": mutate_key_import(sock, parsed); return
  case "identity_logout": mutate_identity_logout(sock); return
  }
+ sync.lock(&g_mutation_mu)
+ defer sync.unlock(&g_mutation_mu)
  key_id: i64
  rotating := action == "channel_member_remove" || action == "channel_key_rotate"
  if rotating {
@@ -111,6 +118,8 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
 }
 
 seed_space_defaults :: proc(channel_id: string) {
+ sync.lock(&g_mutation_mu)
+ defer sync.unlock(&g_mutation_mu)
  params := core.jobj()
  params["action"] = json.String("seed_space_defaults")
  params["channel_id"] = json.String(channel_id)
@@ -119,6 +128,8 @@ seed_space_defaults :: proc(channel_id: string) {
 }
 
 bootstrap_space_defaults :: proc() {
+ sync.lock(&g_mutation_mu)
+ defer sync.unlock(&g_mutation_mu)
  params := core.jobj()
  params["action"] = json.String("bootstrap_space_defaults")
  plan, err := native_mutation_plan(json.Object(params))

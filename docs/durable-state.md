@@ -119,14 +119,25 @@ would not parse. The fix is to copy each object's frames into its own cache
 region and decode from the copy; `corpus_test.odin` pins it by overwriting the
 blob and re-reading a cached name.
 
+Corpus batches contain **complete histories for distinct objects**, grouped by
+the store's object-id metadata, not arbitrary runs of hash-ordered changes.
+Splitting one object's history across batches replaced its earlier state with
+a suffix-only replay. An oversized history now rejects the raw load and the
+backend falls back to its computed JSON snapshot; failed multi-batch loads
+require a full cache reset before that fallback.
+
+The backend also reapplies the vanish ledger after raw loading, including
+after a core-only reset. Loading stored bytes must not resurrect a relay copy
+that the replica's authoritative ledger has already excluded.
+
 ### The ceiling, measured rather than assumed
 
 Neither path raises the object ceiling, and the ceiling is **not** the
 encoding: a cached object costs ~5.8 KB of region regardless of its size, so
 20,000 objects is ~115 MB against a 128 MB cache budget inside a 512 MiB WASM
-heap. One push of ~20k objects exhausts it either way, which is why both paths
-now batch by object **count** (4,000) as well as bytes - a 6 MiB byte budget
-alone let 20k small objects into a single push, and that trapped the core.
+heap. One push of ~20k objects exhausts it either way. The corpus loader caps
+batches at **4,000 complete object histories or 24 MiB of framed bytes**;
+individual histories are never split. The JSON path uses a 6 MiB budget.
 
 So the next lever, when a vault needs it, is **per-object region overhead**
 (fewer, larger allocations), then the constant - not the format.

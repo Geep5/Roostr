@@ -27,6 +27,7 @@ import { API, apiFetch, createObject, fetchObject, mutate, queryAll, str, sv, iv
 import { CREDENTIALS } from "./credentials";
 import { CATALOG } from "./skillmgr";
 import { machineId } from "./roster";
+import { listGoogleAccounts } from "./google";
 import { hostname } from "node:os";
 
 export const DESCRIPTOR_TYPE = "descriptor";
@@ -35,7 +36,7 @@ export const INSTALL_TYPE = "install";
 /** Bumped when a catalog entry's meaning changes, not on every text tweak. */
 const DESCRIPTOR_VERSION = "1";
 
-export type InstallStatus = "active" | "needs_auth" | "missing" | "broken" | "disabled";
+export type InstallStatus = "active" | "needs_auth" | "needs_approval" | "processing" | "missing" | "broken" | "disabled";
 export type AuthMethod = "browser_profile" | "oauth" | "api_key" | "none";
 
 export interface DescriptorJSON {
@@ -250,7 +251,7 @@ export async function myInstallations(): Promise<Map<string, InstallationRow>> {
 	const id = await machineId();
 	const out = new Map<string, InstallationRow>();
 	for (const row of await fetchInstallations()) {
-		if (row.machineId === id) out.set(row.key, row);
+		if (row.machineId === id && !(row.key === "google" && row.account)) out.set(row.key, row);
 	}
 	return out;
 }
@@ -264,15 +265,14 @@ export interface InstallationState {
 
 /**
  * Record what is true for one descriptor on THIS machine. One row per
- * (descriptor × machine) - never one shared row with a per-machine map,
+ * (descriptor × machine × account) - never one shared row with a per-machine map,
  * because two machines writing the same field is a silent last-writer-wins,
  * and `error` could then only say one thing.
  */
 export async function publishInstallation(key: string, state: InstallationState): Promise<string> {
 	const id = await machineId();
 	const host = hostname();
-	const mine = await myInstallations();
-	const hit = mine.get(key);
+	const hit = (await fetchInstallations()).find((row) => row.machineId === id && row.key === key && (key !== "google" || row.account === (state.account ?? "")));
 	const now = Date.now();
 	const wanted: Record<string, ValueJSON> = {
 		key: sv(key),
@@ -284,7 +284,7 @@ export async function publishInstallation(key: string, state: InstallationState)
 		checked_at: iv(now),
 	};
 	if (!hit) {
-		const { id: rowId } = await createObject(`${key} on ${host}`, INSTALL_TYPE, wanted);
+		const { id: rowId } = await createObject(`${key}${state.account ? ` (${state.account})` : ""} on ${host}`, INSTALL_TYPE, wanted);
 		return rowId;
 	}
 	// Only the fields that changed, plus the timestamp when anything did: a
@@ -307,6 +307,23 @@ export async function publishInstallation(key: string, state: InstallationState)
 	}
 	await mutate("set_field", { object_id: hit.id, key: "checked_at", value: iv(now) });
 	return hit.id;
+}
+
+/** Existing local Google selectors are individually addressable without opening Settings first. */
+export async function publishGoogleInstallations(): Promise<void> {
+	const local = await machineId();
+	const rows = await fetchInstallations();
+	for (const account of await listGoogleAccounts()) {
+		const previous = rows.find((row) => row.machineId === local && row.key === "google" && row.account === account.account);
+		if (previous?.status === "needs_approval" || previous?.status === "processing") continue;
+		const ready = !account.error && !!account.authMethod && account.authMethod !== "none" && account.credentialsExists;
+		await publishInstallation("google", {
+			account: account.account,
+			status: ready ? "active" : "needs_auth",
+			auth: ready ? "oauth" : "none",
+			error: ready ? "" : "Google account authentication is not ready on this machine.",
+		});
+	}
 }
 
 /**
@@ -343,6 +360,8 @@ export async function publishInstallations(
 	const mine = await myInstallations();
 	for (const entry of CATALOG) {
 		const st = skills[entry.key];
+		const pending = mine.get(entry.key);
+		if (pending?.status === "needs_approval" || pending?.status === "processing") continue;
 		const status: InstallStatus = !st?.installed ? "missing" : st.enabled ? "active" : "disabled";
 		const previous = mine.get(entry.key);
 		// Only a working skill clears its own error; a missing or disabled one
@@ -351,6 +370,8 @@ export async function publishInstallations(
 		await publishInstallation(entry.key, { status, error, auth: "none" });
 	}
 	for (const credential of credentials) {
+		const pending = mine.get(credential.key);
+		if (pending?.status === "needs_approval" || pending?.status === "processing") continue;
 		const auth: AuthMethod | undefined = credential.active.browser
 			? "browser_profile"
 			: credential.active.password

@@ -35,6 +35,10 @@ descriptor_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 			value, ok := decode_conversation(bytes, context.temp_allocator)
 			if !ok do return nil, "invalid conversation"
 			return conversation_to_json(value), ""
+		case "agent_message":
+			value, ok := decode_agent_message(bytes, context.temp_allocator)
+			if !ok do return nil, "invalid agent message"
+			return agent_message_to_json(value), ""
 		}
 		return nil, "unknown descriptor type"
 	case "encode":
@@ -47,6 +51,10 @@ descriptor_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 			return json.String(base64.encode(encode_installation(installation_from_json(value), context.temp_allocator), allocator = context.temp_allocator)), ""
 		case "conversation":
 			return json.String(base64.encode(encode_conversation(conversation_from_json(value), context.temp_allocator), allocator = context.temp_allocator)), ""
+		case "agent_message":
+			message, ok := agent_message_from_json(value)
+			if !ok do return nil, "invalid agent message"
+			return json.String(base64.encode(encode_agent_message(message, context.temp_allocator), allocator = context.temp_allocator)), ""
 		}
 		return nil, "unknown descriptor type"
 	}

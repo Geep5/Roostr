@@ -579,3 +579,26 @@ message Conversation {
   string about_message_id = 7;      // the message that spawned this thread
   bool closed = 8;                  // closed threads stay readable
 }
+
+// A message is immutable. Every involved object stores the same AgentMessage
+// bytes under its own __thread__<exchange_id> discussion root. Delivery and
+// processing receipts are ordinary metadata blocks nested below that message.
+message AgentEndpoint {
+  string object_id = 1;
+  string agent_id = 2; // empty for human or installation endpoint
+}
+
+message AgentMessage {
+  string id = 1;
+  string exchange_id = 2;
+  AgentEndpoint sender = 3;
+  repeated AgentEndpoint recipients = 4; // immutable, distinct object snapshot
+  string text = 5;
+  string reply_to = 6;
+  int64 sent_at = 7;
+  string title = 8;
+  bool request_reply = 9;
+  bool historical = 10; // imported history never wakes or requests a response
+  string operation = 11; // allowlisted intent only; never credentials/arguments
+  string author = 12;
+}

@@ -9,11 +9,11 @@ afterEach(() => {
 
 test("provider requests retry transient socket resets before succeeding", async () => {
 	let calls = 0;
-	globalThis.fetch = (async () => {
+	globalThis.fetch = Object.assign(async () => {
 		calls++;
 		if (calls === 1) throw new Error("The socket connection was closed unexpectedly");
 		return new Response("{}", { status: 200 });
-	}) as typeof fetch;
+	}, { preconnect: originalFetch.preconnect });
 	const res = await fetchWithRetry("https://api.anthropic.com/v1/messages", { method: "POST" }, [0]);
 	expect(res.status).toBe(200);
 	expect(calls).toBe(2);
@@ -21,10 +21,10 @@ test("provider requests retry transient socket resets before succeeding", async 
 
 test("provider requests do not retry non-transient failures", async () => {
 	let calls = 0;
-	globalThis.fetch = (async () => {
+	globalThis.fetch = Object.assign(async () => {
 		calls++;
 		throw new Error("certificate expired");
-	}) as typeof fetch;
+	}, { preconnect: originalFetch.preconnect });
 	await expect(fetchWithRetry("https://api.anthropic.com/v1/messages", { method: "POST" })).rejects.toThrow("certificate expired");
 	expect(calls).toBe(1);
 });

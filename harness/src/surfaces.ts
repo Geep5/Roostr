@@ -99,11 +99,11 @@ export function isAgentAuthor(author: string): boolean {
  * A human thread is human-to-agent only: another agent's post there never
  * wakes this one. Two agents driven onto one object otherwise answer each
  * other forever, each seeing the other's reply as a new question, and the
- * human's thread fills with agent chatter. Agent-to-agent exchanges belong
- * in a pair thread (conv.ts pairThread), which keeps both authors - so the
- * thread decides what used to be decided by the object's type.
+ * human's thread fills with agent chatter. Agent-to-agent exchanges use
+ * addressed mailbox envelopes, never this human-discussion watermark path.
  */
 export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: string): Promise<PendingMessage[]> {
+	if (!isHuman(ref)) return [];
 	const m = await loadMarks();
 	const mark = markFor(m, ref);
 
@@ -277,13 +277,12 @@ export function frameMessage(surface: ObjectJSON, ref: ConvRef, pending: Pending
  * `originBlock` is the source message's block id - the identity that makes
  * ingestion idempotent across machines and lost marks. */
 export async function ingestIntoChat(dest: ConvRef, origin: ConvRef, author: string, text: string, originBlock = ""): Promise<void> {
-	// The origin tag stays the object id, the shape schedule.ts:207 and the
-	// UI already read: a surface is always that object's human thread, so
-	// the id names the conversation exactly.
+	// Keep the source object and thread for navigation. Mailbox messages carry
+	// their immutable id in origin_block, so retries do not duplicate context.
 	await addConvBlock(dest, {
 		id: crypto.randomUUID(),
 		childrenIds: [],
-		content: { custom: { contentType: "chat", meta: { author, text, origin: origin.objectId, origin_block: originBlock, ts: String(Date.now()) } } },
+		content: { custom: { contentType: "chat", meta: { author, text, origin: origin.objectId, origin_thread: origin.threadId, origin_block: originBlock, ts: String(Date.now()) } } },
 	});
 }
 

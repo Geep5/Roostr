@@ -32,7 +32,7 @@ function defaultClientSecret(): string | undefined {
 }
 
 /** Create an account selector directory, sharing only the OAuth client config. */
-export function addGoogleAccount(account: string): GoogleAccountStatus {
+export function addGoogleAccount(account: string): Promise<GoogleAccountStatus> {
 	if (!/^[^\s/]+@[^\s/]+$/.test(account)) throw new Error("Enter the Google account email address.");
 	const dir = accountDir(account);
 	mkdirSync(dir, { recursive: true });
@@ -47,7 +47,9 @@ export function removeGoogleAccount(account: string): void {
 	rmSync(dir, { recursive: true, force: true });
 }
 
-async function gws(account: string, ...args: string[]): Promise<{ code: number; out: string; err: string }> {
+interface GoogleCommandResult { code: number; out: string; err: string }
+
+async function gws(account: string, ...args: string[]): Promise<GoogleCommandResult> {
 	const proc = Bun.spawn(["gws-as", account, ...args], { stdout: "pipe", stderr: "pipe" });
 	const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
 	return { code: await proc.exited, out, err };
@@ -66,8 +68,15 @@ export async function googleAccountStatus(account: string): Promise<GoogleAccoun
 		storage: "none",
 	};
 	if (!configured) return { ...base, error: "not configured" };
-	const res = await gws(account, "auth", "status");
-	if (res.code !== 0) return { ...base, error: (res.err || res.out || "gws auth status failed").trim() };
+	let res: GoogleCommandResult;
+	try {
+		res = await gws(account, "auth", "status");
+	} catch {
+		return { ...base, error: "Google CLI status is unavailable on this machine." };
+	}
+	// Status can be mirrored into an installation object. CLI stderr is
+	// local-only and may contain credentials or configuration material.
+	if (res.code !== 0) return { ...base, error: "Google authentication status could not be verified on this machine." };
 	try {
 		const parsed = JSON.parse(res.out) as Record<string, unknown>;
 		return {

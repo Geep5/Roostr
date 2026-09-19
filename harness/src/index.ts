@@ -1,12 +1,8 @@
 /**
- * Roostr harness daemon — the /holdfast analog, surface model ported from
- * GrantAgentSetup's bot.odin. Each served agent owns one holistic chat per
- * channel (a `chat` object); the agent is also reachable through ANY
- * object's discussion in its channel — those messages are copied into the
- * chat framed with their origin + the object's body, and the reply posts
- * back to the surface that asked. One turn answers one surface; messages
- * arriving elsewhere mid-turn wait (same-chat follow-ups steer in via the
- * runner's per-iteration refetch).
+ * Roostr harness daemon. Each agent's private work stays on its owning
+ * object. Human discussions feed that transcript; addressed exchanges use
+ * durable inbox/outbox copies on every participant's own object DAG.
+ * Delivery retries independently of agent execution and machine liveness.
  *
  *   bun run src/index.ts setup --name Gracie [--model claude-…] [--channel id]
  *   bun run src/index.ts serve
@@ -20,13 +16,17 @@ import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { capabilities, convergeCatalogScope, publishInstallationState } from "./skillmgr";
 import { startAuthServer } from "./authserver";
-import { readRoster, setEnabled } from "./roster";
+import { machineId, readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, publishCapabilities, servesHere } from "./machine";
 import { publishDescriptors } from "./descriptors";
 import { validateBindings } from "./workspace";
 import { chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
-import { agentThread, convKey, conversationsOf, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
+import { agentSubject, agentThread, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
+import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
+import { migrateExchanges } from "./migrate-exchanges";
+import { processInboxMessage } from "./message-turn";
+import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
 import { arm as armScheduler, startScheduler } from "./schedule";
 
 function argValue(flagName: string): string {
@@ -104,6 +104,7 @@ let defaultChannelId = "";
  */
 async function buildServedOne(agentId: string, defaultChannel: string): Promise<Served | null> {
 	const agent = await fetchObject(agentId);
+	if (str(agent.fields, "external_responder")) return null;
 	if (!(await agentServedHere(agent))) {
 		console.log(`[harness] standing down for ${str(agent.fields, "name") || agentId.slice(0, 8)} - served by another machine`);
 		return null;
@@ -175,9 +176,8 @@ async function ingestSurface(s: Served, origin: ConvRef): Promise<boolean> {
 	ingesting.add(lock);
 	try {
 		const surface = await fetchObject(origin.objectId);
-		// A surface is a CONVERSATION: an object's human discussion, or an
-		// A2A thread two agents share. The agent's own transcript is never a
-		// surface, so the old self-ingest guard has no case left to cover.
+		// Only a human discussion is a surface. Addressed exchanges have
+		// durable processing receipts instead of local discussion watermarks.
 		const pending = await pendingMessages(surface, origin, s.agentId);
 		if (pending.length === 0) return false;
 		await setMark(origin, pending[pending.length - 1].blockId);
@@ -206,12 +206,10 @@ async function ingestSurface(s: Served, origin: ConvRef): Promise<boolean> {
  * Handle a message on one surface: ingest, run the turn on the chat, reply
  * where asked.
  */
-async function handleSurface(s: Served, surface: ConvRef, opts: { wake?: (targetAgentId: string, pair: ConvRef) => Promise<string>; a2aTurn?: boolean } = {}): Promise<boolean> {
+async function handleSurface(s: Served, surface: ConvRef): Promise<boolean> {
 	if (!(await ingestSurface(s, surface))) return false;
-	const reply = await runTurn(s.agentId, s.conv, { spawn: spawnSubagent, wake: opts.wake, a2aTurn: opts.a2aTurn });
+	const reply = await runTurn(s.agentId, s.conv, { spawn: spawnSubagent });
 	if (reply.trim()) {
-		// The answer goes back to the conversation that asked - the human
-		// discussion, or the A2A thread the question arrived in.
 		await postTo(surface, reply.trim(), s.agentId);
 	}
 	console.log(`[${new Date().toISOString()}] ${s.agentId.slice(0, 8)} answered in ${convKey(surface).slice(0, 26)}: ${reply.slice(0, 120)}`);
@@ -219,15 +217,19 @@ async function handleSurface(s: Served, surface: ConvRef, opts: { wake?: (target
 }
 
 async function serve(): Promise<void> {
+	const inboxOwner = `${await machineId()}:${crypto.randomUUID()}`;
+	setCapabilityRequestOwner(inboxOwner);
 	await publishCapabilities(await capabilities()); // register this machine before serving resolves against the roster
 	// Publish what a skill or login IS, as data, so a client can render its
 	// setup form without a compiled-in table (docs/descriptors.md).
-	void publishDescriptors().catch((err) => console.error("[harness] descriptors:", err));
+	await publishDescriptors();
 	// And what is TRUE here per skill and login: one row per (thing ×
 	// machine), carrying `error` where a view can see it.
-	void publishInstallationState().catch((err) => console.error("[harness] installations:", err));
+	await publishInstallationState();
 	await convergeCatalogScope();
 	await convergeSpaceServing();
+	const migration = await migrateExchanges({ apply: true });
+	console.log("[harness] exchange migration:", JSON.stringify(migration));
 	// Checkout bindings: statuses refresh at boot and on every UI write.
 	validateBindings().catch((err) => console.error("[harness] binding validation failed:", err?.message ?? err));
 	const agents = await servedAgents();
@@ -299,10 +301,9 @@ async function serve(): Promise<void> {
 	 * "why did last night's run fail" get answered by the machine that
 	 * knows, rather than by whichever agent happened to be nearby.
 	 */
-	const UNMINTABLE = new Set(["agent", "channel", "relation", "type", "template", "skill", "program", "typescript", "json", "proto", "pinned_fact", "milestone"]);
+	const UNMINTABLE = new Set(["agent", "channel", "relation", "type", "template", "skill", "descriptor", "install", "program", "typescript", "json", "proto", "pinned_fact", "milestone"]);
 
-	/** True when a conversation's newest message is human-authored - the ONLY
-	 * trigger that may mint an agent, and what wakes an A2A pair. */
+	/** Only an ordinary human discussion can cause an object agent to be minted. */
 	function lastMessageIsHumanIn(obj: ObjectJSON, ref: ConvRef): boolean {
 		const msgs = chatBlocks(obj, ref);
 		if (msgs.length === 0) return false;
@@ -354,56 +355,96 @@ async function serve(): Promise<void> {
 	const dirty = new Map<string, Set<string>>(); // agentId → convKeys awaiting a turn
 	const idleWaiters = new Map<string, Array<() => void>>(); // agentId → scheduled turns waiting for the slot
 
-	// ── A2A wake: one answering turn for the target, synchronously. ──
-	// The answering turn never carries agent_ask (a2aTurn), so an agent
-	// answering an agent can only answer - depth 1 by construction.
-	const A2A_MAX_CONCURRENT = 3;
-	let a2aActive = 0;
+	// Only work waiting on delivery/processing is kept here; the DAG owns
+	// the queue. SSE and reconnect scans repopulate this disposable index.
+	const mailboxObjects = new Set<string>();
+	const mailboxInFlight = new Set<string>();
+	const recoveredObjects = new Set<string>();
+	let mailboxScan: Promise<void> | undefined;
 
-	async function wakeAgent(targetAgentId: string, pair: ConvRef): Promise<string> {
-		let s = served.get(targetAgentId);
-		if (!s) {
-			try {
-				const built = await buildServedOne(targetAgentId, defaultChannelId);
-				if (!built) return "letter delivered; the target is served by another machine and will answer there";
-				s = built;
-				served.set(targetAgentId, s);
-			} catch (err) {
-				return `letter delivered; could not wake the target here (${err instanceof Error ? err.message : String(err)})`;
-			}
+	async function mailboxAgent(endpoint: { objectId: string; agentId: string }): Promise<Served | null> {
+		const agent = await fetchObject(endpoint.agentId);
+		if (agent.typeKey !== "agent" || str(agent.fields, "spawn_parent") || str(agent.fields, "external_responder")) return null;
+		if (agentSubject(agent) !== endpoint.objectId || !(await agentServedHere(agent))) return null;
+		const adoptable = !!str(agent.fields, "bound_object") || !!str(agent.fields, "space_default");
+		if (!agents.has(agent.id) && !adoptable) return null;
+		if (!agents.has(agent.id)) {
+			await setEnabled(agent.id, true);
+			agents.add(agent.id);
 		}
-		const queueLetter = () => {
-			let set = dirty.get(targetAgentId);
-			if (!set) dirty.set(targetAgentId, (set = new Set()));
-			set.add(convKey(pair));
-		};
-		if (busy.has(targetAgentId)) {
-			queueLetter();
-			return "letter delivered; they are mid-turn and will read it when they finish";
-		}
-		if (a2aActive >= A2A_MAX_CONCURRENT) {
-			queueLetter();
-			return "letter delivered; the system is busy - they will read it on their next turn";
-		}
-		a2aActive++;
+		const known = served.get(agent.id);
+		if (known?.conv.objectId === endpoint.objectId) return known;
+		const one = await buildServedOne(agent.id, defaultChannelId);
+		if (one) served.set(agent.id, one);
+		return one;
+	}
+
+	async function driveInbox(s: Served, object: ObjectJSON): Promise<void> {
+		if (busy.has(s.agentId) || !(await servesHere(object.id))) return;
+		// Another turn may have acquired the slot while serving was checked.
+		if (busy.has(s.agentId)) return;
+		const entry = pendingInbox(object, s.agentId)[0];
+		if (!entry) return;
+		await withTurn(s, { objectId: object.id, threadId: entry.threadId }, () =>
+			processInboxMessage(s.agentId, s.conv, entry, inboxOwner));
+	}
+
+	async function pumpMailbox(objectId: string, snapshot?: ObjectJSON): Promise<void> {
+		if (mailboxInFlight.has(objectId)) return;
+		mailboxInFlight.add(objectId);
 		try {
-			const turn = drive(s, pair, true);
-			const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), 180_000));
-			if ((await Promise.race([turn, timeout])) === "timeout") {
-				return "they are still thinking; their reply will appear in your shared chat";
+			let object = snapshot ?? await fetchObject(objectId);
+			if (!object.mailbox?.length) { mailboxObjects.delete(objectId); return; }
+			const live = object.mailbox.filter((entry) => !entry.message.historical);
+			const waiting = live.some((entry) =>
+				entry.outgoing && entry.message.recipients.some((recipient) => !entry.deliveries.some((delivery) => delivery.recipient.objectId === recipient.objectId && delivery.status === "delivered")) ||
+				entry.incoming && (entry.message.operation || entry.message.recipients.some((recipient) => recipient.objectId === objectId && recipient.agentId)) &&
+				["pending", "awaiting_approval", "processing"].includes(entry.processing.status));
+			if (!waiting) { mailboxObjects.delete(objectId); return; }
+			mailboxObjects.add(objectId);
+			// Copying an immutable message is safe on any replica. Only the
+			// owning machine may execute its addressed work.
+			if (live.some((entry) => entry.outgoing && entry.message.recipients.some((recipient) => !entry.deliveries.some((delivery) => delivery.recipient.objectId === recipient.objectId && delivery.status === "delivered")))) {
+				await deliverOutbox(object);
+				object = await fetchObject(objectId);
 			}
+			if (!(await servesHere(objectId))) return;
+			if (object.typeKey === "install") {
+				await receiveCapabilityRequests(object, inboxOwner);
+				return;
+			}
+			if (!recoveredObjects.has(objectId)) {
+				await recoverInbox(object, inboxOwner);
+				recoveredObjects.add(objectId);
+				object = await fetchObject(objectId);
+			}
+			const recipients = new Map<string, { objectId: string; agentId: string }>();
+			for (const entry of object.mailbox ?? []) {
+				if (!entry.incoming || entry.message.historical || entry.message.operation || entry.processing.status !== "pending") continue;
+				for (const endpoint of entry.message.recipients) {
+					if (endpoint.objectId === objectId && endpoint.agentId) recipients.set(endpoint.agentId, endpoint);
+				}
+			}
+			for (const endpoint of recipients.values()) {
+				const s = await mailboxAgent(endpoint);
+				if (s) void driveInbox(s, object).catch((error) => console.error("[harness] inbox turn:", error));
+			}
+		} catch (error) {
+			console.error(`[harness] mailbox ${objectId}:`, error);
 		} finally {
-			a2aActive--;
+			mailboxInFlight.delete(objectId);
 		}
-		// Their reply is the newest message they authored in the pair thread.
-		const chat = await fetchObject(pair.objectId).catch(() => null);
-		if (!chat) return "(no reply)";
-		const msgs = chatBlocks(chat, pair);
-		for (let i = msgs.length - 1; i >= 0; i--) {
-			const meta = msgs[i].block.content.custom?.meta ?? {};
-			if ((meta["author"] ?? "") === targetAgentId) return meta["text"] || "(empty reply)";
-		}
-		return "(no reply yet - check the shared chat later)";
+	}
+
+	function scanMailboxes(): Promise<void> {
+		if (mailboxScan) return mailboxScan;
+		mailboxScan = (async () => {
+			const objects = await queryAll({});
+			for (let offset = 0; offset < objects.length; offset += 8) {
+				await Promise.all(objects.slice(offset, offset + 8).map((object) => pumpMailbox(object.id)));
+			}
+		})().finally(() => { mailboxScan = undefined; });
+		return mailboxScan;
 	}
 
 	/**
@@ -462,11 +503,13 @@ async function serve(): Promise<void> {
 					break;
 				}
 			}
+			void pumpMailbox(s.conv.objectId);
 		}
 		return failure;
 	}
 
-	async function drive(s: Served, surface: ConvRef, a2aTurn = false): Promise<void> {
+	async function drive(s: Served, surface: ConvRef): Promise<void> {
+		if (!(await servesHere(s.conv.objectId))) return;
 		const key = convKey(surface);
 		if (busy.has(s.agentId)) {
 			if (key === active.get(s.agentId)) {
@@ -482,7 +525,7 @@ async function serve(): Promise<void> {
 			}
 			return;
 		}
-		await withTurn(s, surface, () => handleSurface(s, surface, { wake: a2aTurn ? undefined : wakeAgent, a2aTurn }));
+		await withTurn(s, surface, () => handleSurface(s, surface));
 	}
 
 	/**
@@ -499,7 +542,7 @@ async function serve(): Promise<void> {
 			waiters.push(resolve);
 			await promise;
 		}
-		return withTurn(s, s.conv, () => runTurn(s.agentId, s.conv, { spawn: spawnSubagent, systemSuffix, requirementsObjectId }));
+		return withTurn(s, s.conv, () => runTurn(s.agentId, s.conv, { spawn: spawnSubagent, systemSuffix, requirementsObjectId, a2aTurn: true }));
 	}
 
 	/**
@@ -525,6 +568,7 @@ async function serve(): Promise<void> {
 
 	/** Route an SSE object event to the agent whose surface it is. */
 	async function route(objectId: string): Promise<void> {
+		await pumpMailbox(objectId);
 		// An event on the object that holds an agent's transcript: the human
 		// may have written in its discussion.
 		for (const s of served.values()) {
@@ -532,10 +576,7 @@ async function serve(): Promise<void> {
 				const here = await fetchObject(objectId).catch(() => null);
 				const ref = humanRef(objectId);
 				if (here && (await pendingMessages(here, ref, s.agentId)).length > 0) void drive(s, ref);
-				// Not a return: an A2A thread on this very object still has
-				// to be checked below, which is why a human asking both
-				// agents in a pair thread used to go unanswered.
-				break;
+				// The same object can also carry incoming/outgoing envelopes.
 			}
 		}
 		if (agents.has(objectId)) {
@@ -588,37 +629,6 @@ async function serve(): Promise<void> {
 		if (obj.typeKey === MACHINE_TYPE || obj.fields["served_by"] || obj.fields["requires"]) {
 			invalidateServing();
 			void armScheduler();
-		}
-		// A human posting into an A2A conversation wakes BOTH participants for
-		// one answering turn each (sequential - the second sees the first's
-		// reply). Their answering turns carry no agent_ask.
-		//
-		// This used to be `obj.typeKey === "chat"`, when a pair conversation
-		// was its own object. It is a thread on an ordinary object now, so the
-		// trigger is the thread's own newest message, not the object's type.
-		for (const conversation of await conversationsOf(objectId)) {
-			if (conversation.kind !== "a2a") continue;
-			const ref: ConvRef = { objectId, threadId: conversation.id };
-			if (!lastMessageIsHumanIn(obj, ref)) continue;
-			for (const pid of conversation.participants) {
-				let sp = served.get(pid);
-				if (!sp) {
-					try {
-						const built = await buildServedOne(pid, defaultChannelId);
-						if (!built) continue;
-						sp = built;
-						served.set(pid, sp);
-					} catch {
-						continue;
-					}
-				}
-				// Fresh fetch each participant: the first answer must be
-				// pending for the second, not invisible in a stale copy.
-				const fresh = await fetchObject(objectId).catch(() => null);
-				if (!fresh) break;
-				const pend = await pendingMessages(fresh, ref, sp.agentId);
-				if (pend.length > 0) await drive(sp, ref, true);
-			}
 		}
 		if (obj.typeKey === "agent") return; // other agents' brains
 		const channelId = objectId === defaultChannelId || obj.typeKey === "channel" ? objectId : str(obj.fields, "channel") || defaultChannelId;
@@ -708,6 +718,7 @@ async function serve(): Promise<void> {
 					const chat = await fetchObject(s.conv.objectId).catch(() => null);
 					if (!chat) return;
 					if ((await pendingMessages(chat, humanRef(s.conv.objectId), s.agentId)).length > 0) void drive(s, humanRef(s.conv.objectId));
+					void pumpMailbox(chat.id, chat);
 				})();
 			}
 		});
@@ -722,7 +733,13 @@ async function serve(): Promise<void> {
 		void publishSystemSnapshot(s.agentId, s.conv);
 		void drive(s, humanRef(s.conv.objectId));
 	}
-	subscribe((objectId) => void route(objectId));
+	subscribe((objectId) => void route(objectId), () => {
+		void scanMailboxes().catch((error) => console.error("[harness] mailbox catch-up:", error));
+	});
+	setInterval(() => {
+		for (const id of mailboxObjects) void pumpMailbox(id);
+	}, 5_000);
+	await scanMailboxes();
 	console.log("[harness] SSE connected; serving.");
 
 	// The clock: fires occurrences due now (missed while down) and arms for

@@ -99,6 +99,9 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
   if !object_ok && !array_ok do return plan, "fields must be an object or ordered pairs"
  }
 	switch action {
+	case "message_send", "message_deliver", "message_delivery_error", "message_processing", "message_retry":
+		err := message_mutation(&plan, parsed, input)
+		return plan, err
 	case "create":
 		type_key := json_str(parsed, "type_key")
 		if type_key == "" do type_key = "note"
@@ -349,6 +352,9 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 			// are opened explicitly by `conversation_open`. The legacy human
 			// root is the sole exception, auto-created below as it always was.
 			return plan, "conversation not found"
+		}
+		if conversation, found := conversation_load(input.states, object_id, thread_id); found && conversation.kind == .Agent_To_Agent {
+			return plan, "a2a exchanges are read-only to chat_post; use message_send"
 		}
 		ops := make([dynamic]Operation, context.temp_allocator)
 		if thread_id == DISCUSSION_ID {

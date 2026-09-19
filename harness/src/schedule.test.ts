@@ -41,16 +41,17 @@ test("a scheduled object without an owner uses its space's default agent", async
 		const method = init?.method ?? (input instanceof Request ? input.method : "GET");
 		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
 		calls.push({ path: url.pathname, method, body });
+		const filter = Array.isArray(body.filters) ? body.filters[0] : undefined;
 		if (url.pathname === "/api/query") {
 			if (body.type === "machine") return respond({ records: [], total: 0 });
-			if (body.filters?.[0]?.key === "repeat") {
+			if (filter?.key === "repeat") {
 				return respond({
 					records: [{ id: objectId, typeKey: "marketing_task", fields: { repeat: { mapValue: { entries: { next: { intValue: now - 1000 } } } } } }],
 					total: 1,
 				});
 			}
-			if (body.type === "agent" && body.filters?.[0]?.key === "bound_object") return respond({ records: [], total: 0 });
-			if (body.type === "agent" && body.filters?.[0]?.key === "space_default") {
+			if (body.type === "agent" && filter?.key === "bound_object") return respond({ records: [], total: 0 });
+			if (body.type === "agent" && filter?.key === "space_default") {
 				return respond({ records: [{ id: defaultAgentId, typeKey: "agent", fields: {} }], total: 1 });
 			}
 			return respond({ records: [], total: 0 });

@@ -31,13 +31,13 @@ try {
 	if (result.status !== 0) throw new Error(`Odin WASM build failed (${result.status})`);
 	const bytes = await readFile(temporary);
 	const module = new WebAssembly.Module(bytes);
-	const required = ["memory", "_start", "core_abi_version", "core_reserve", "core_execute", "core_response_pointer", "core_response_length", "core_reset"];
+	const required = ["memory", "_start", "core_abi_version", "core_reserve", "core_reserve_blob", "core_execute", "core_response_pointer", "core_response_length", "core_reset"];
 	const names = new Set(WebAssembly.Module.exports(module).map((item) => item.name));
 	for (const name of required) if (!names.has(name)) throw new Error(`Missing WASM ABI export ${name}`);
 	const version = spawnSync(compiler, ["version"], { encoding: "utf8" });
 	if (version.error || version.status !== 0) throw version.error ?? new Error("Cannot identify Odin compiler");
 	const manifest = {
-		abiVersion: 1,
+		abiVersion: 2,
 		compiler: version.stdout.trim(),
 		target: "js_wasm32",
 		artifact: "engine.wasm",

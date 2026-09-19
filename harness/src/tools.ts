@@ -37,7 +37,11 @@ import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFil
 import * as memory from "./memory";
 import { TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
 import { authRequirementsOf, localAuthRegistry, resolveAuthRequirements, validateAuthSelector } from "./authreq";
-import { HUMAN_THREAD, convBlocks, humanRef, pairThread, postTo, type ConvRef } from "./conv";
+import { HUMAN_THREAD, agentSubject, convBlocks, humanRef, postTo } from "./conv";
+import { sendMessage } from "./mailbox";
+import { fetchInstallations } from "./descriptors";
+import { requestCapability, type CapabilityOperation } from "./capability-messages";
+import type { AgentEndpoint, AgentMessage } from "./api";
 
 /** proto TextStyle values the editor renders. */
 const STYLE = { paragraph: 0, h1: 1, h2: 2, h3: 3, quote: 4, bullet: 6, numbered: 7, checkbox: 8 } as const;
@@ -114,11 +118,8 @@ export interface ToolContext {
 	channelId: string;
 	/** Set for object-bound agents: the object this agent belongs to. */
 	boundObject?: string;
-	/** Wired by index.ts on human-rooted turns only: wake a target
-	 *  agent on the A2A thread the question landed in. A2A-driven turns
-	 *  never get this - an agent answering an agent just answers, so
-	 *  cascade depth is 1 by construction. */
-	wake?: (targetAgentId: string, ref: ConvRef) => Promise<string>;
+	/** Only human-rooted top-level turns may initiate another agent exchange. */
+	allowAsk?: boolean;
 	depth: number;
 	/** Wired by spawn.ts; declared here to break the import cycle. */
 	spawn?: (task: string, template: string, ctx: ToolContext) => Promise<string>;
@@ -354,11 +355,52 @@ const REQUIRE_TOOL: RegisteredTool = {
 		if (s.reason === "pinned-uncapable" || s.reason === "unsatisfied") {
 			const why = s.reason === "pinned-uncapable" ? `"${name}" is pinned to a machine that lacks ${key}` : `no machine has ${key}`;
 			await fileCapabilityHoldup(key, `object_require(${key}): ${why}`, ctx);
-			return `"${name}" now requires ${key}, but ${why}. A holdup has been filed - the human will see it in the Machine panel and can install the capability or move the pin. Tell them plainly; do not retry this turn.`;
+			const installations = (await fetchInstallations()).filter((row) => row.key === key && (!row.account || key !== "google"));
+			return `"${name}" now requires ${key}, but ${why}. A holdup has been filed. Installation objects: ${JSON.stringify(installations.map((row) => ({ id: row.id, machine: row.machineId, status: row.status })))}. Use capability_request to request setup on the chosen installation; its owning machine requires human approval. Tell the human plainly; do not retry this turn.`;
 		}
 		if (s.machineId === me) return `ok: "${name}" requires ${key}, which this machine already has; the work stays here.`;
 		const server = roster.find((m) => m.machineId === s.machineId)?.name ?? s.machineId.slice(0, 8);
 		return `ok: "${name}" now requires ${key} and will be served by ${server} from the next turn on. Tell the human the work moved there and finish this turn.`;
+	},
+};
+
+const CAPABILITY_LIST_TOOL: RegisteredTool = {
+	def: {
+		name: "capability_list",
+		description: "List skill/auth installation object addresses and their machine-local status across computers. Returns status and errors, never credential values.",
+		input_schema: { type: "object", properties: { key: { type: "string", description: "optional catalog key" } } },
+	},
+	handler: async (input) => {
+		const key = S(input.key);
+		return JSON.stringify((await fetchInstallations()).filter((row) => !key || row.key === key));
+	},
+};
+
+const CAPABILITY_TOOL: RegisteredTool = {
+	def: {
+		name: "capability_request",
+		description:
+			"Request setup or maintenance from a skill/auth installation object's owning machine. This only sends a durable request: a human must approve there before anything executes. Never put passwords, tokens, cookies or other secrets in the text. Use capability_list to find the installation address.",
+		input_schema: {
+			type: "object",
+			properties: {
+				installation_object_id: { type: "string" },
+				operation: { type: "string", enum: ["skill.install", "skill.enable", "skill.disable", "skill.uninstall", "auth.login", "auth.check", "auth.revoke", "auth.save"] },
+				text: { type: "string", description: "Why this action is needed; no secrets." },
+			},
+			required: ["installation_object_id", "operation"],
+		},
+	},
+	handler: async (input, ctx) => {
+		const agent = await fetchObject(ctx.agentId);
+		const result = await requestCapability({
+			sender: { objectId: agentSubject(agent), agentId: agent.id },
+			installationObjectId: S(input.installation_object_id),
+			operation: S(input.operation) as CapabilityOperation,
+			author: agent.id,
+			text: S(input.text),
+		});
+		return JSON.stringify({ ...result, status: "awaiting owner-machine approval" });
 	},
 };
 
@@ -596,6 +638,12 @@ const TOOLS: RegisteredTool[] = [
 				if (!(meta["text"] ?? "").trim()) continue;
 				msgs.push({ author: meta["author"] ?? "", text: meta["text"] ?? "", ts: Number(meta["ts"] ?? 0) });
 			}
+			for (const entry of obj.mailbox ?? []) {
+				if (entry.threadId !== S(input.thread_id)) continue;
+				const message = entry.message;
+				msgs.push({ author: message.sender.agentId || message.author || message.sender.objectId, text: message.text, ts: message.sentAt });
+			}
+			msgs.sort((a, b) => a.ts - b.ts);
 			if (msgs.length === 0) return S(input.thread_id) ? "(no messages in that conversation)" : "(no discussion on this object)";
 			const limit = Math.max(1, Math.min(200, Number(input.limit) || 30));
 			const tail = msgs.slice(-limit);
@@ -1027,57 +1075,68 @@ const EVAL_TOOLS: RegisteredTool[] = [
 	},
 ];
 
-// ── A2A: only a human-rooted turn may ask ─────────────────────────
-//
-// agent_ask posts into the pair's a2a thread ALWAYS (the durable
-// message board the human reads), then wakes the target for one
-// answering turn. The answering turn does NOT carry this tool, so an
-// agent answering an agent just answers - cascade depth is 1 by
-// construction, no counters needed. Agents can only reach objects
-// whose agent ALREADY exists: minds are minted by humans alone.
-//
-// The thread hangs off the ASKER's subject (conv.ts:136-139): the
-// question is part of the work that prompted it, so it belongs where
-// that work is. Asking back therefore opens a thread on the other
-// object - two directions, two records, each on its own subject.
-
+// A request commits to the sender's DAG before any delivery or recipient turn.
+// Only human-rooted turns initiate agent requests; replies cannot fan out
+// fresh questions, and group membership is the explicit address snapshot.
 const A2A_TOOL: RegisteredTool = {
 	def: {
 		name: "agent_ask",
 		description:
-			"Ask another object's agent a question. Works ONLY on objects whose agent already exists (neighborhood/space_map show 'has agent') - agents never create minds. Your message lands in a shared thread on your own object, which the human can read, and the target answers you directly; it cannot itself ask further agents. Reads are free - query first, then ask once, well.",
+			"Send a durable question to one or more existing object agents. Every recipient receives its own DAG copy and answers asynchronously on its serving machine, including after being offline. Read replies with discussion_read using the returned threadId. Agents never create minds. Specify the complete group audience for each message; a reply preserves its exchange_id and reply_to.",
 		input_schema: {
 			type: "object",
 			properties: {
-				object_id: { type: "string", description: "the object whose agent you want to ask" },
-				text: { type: "string", description: "your question or message" },
+				object_ids: { type: "array", items: { type: "string" }, minItems: 1, description: "objects whose existing agents should receive this message" },
+				text: { type: "string" },
+				exchange_id: { type: "string", description: "existing exchange id, or omit for a new exchange" },
+				reply_to: { type: "string", description: "message id being answered in that exchange" },
+				title: { type: "string" },
 			},
-			required: ["object_id", "text"],
+			required: ["object_ids", "text"],
 		},
 	},
 	handler: async (input, ctx) => {
-		const target = await assertInSpace(await fetchObject(S(input.object_id)), ctx);
-		const holders = await query({ type: "agent", filters: [{ key: "bound_object", condition: "equal", value: target.id }], limit: 1 });
-		if (holders.length === 0) {
-			return `no agent lives on "${str(target.fields, "name") || target.id.slice(0, 8)}" - agents cannot create minds. Read the object yourself: object_get ${target.id}`;
-		}
-		const targetAgentId = holders[0].id;
-		if (targetAgentId === ctx.agentId) throw new Error("that is your own object");
+		if (!ctx.allowAsk || ctx.depth !== 0) throw new Error("agent_ask is only available to human-rooted top-level turns");
+		const ids = [...new Set(A(input.object_ids))];
+		if (!ids.length || !S(input.text).trim()) throw new Error("recipient objects and nonempty text are required");
 		const me = await fetchObject(ctx.agentId);
-		const myName = str(me.fields, "name") || "agent";
-		const theirName = str(holders[0].fields, "name") || "agent";
-
-		const subjectId = ctx.boundObject || ctx.agentId;
-		const ref = await pairThread(subjectId, ctx.agentId, targetAgentId, `${myName} ⇄ ${theirName}`);
-		await postTo(ref, S(input.text), ctx.agentId);
-		if (!ctx.wake) return `letter delivered to ${theirName}; they will read it on their next turn`;
-		return await ctx.wake(targetAgentId, ref);
+		const subject = await fetchObject(agentSubject(me));
+		const recipients: AgentEndpoint[] = [];
+		const names: string[] = [];
+		for (const id of ids) {
+			const target = await fetchObject(id);
+			if (target.typeKey !== "channel" || target.id !== (await agentSpace(ctx))) await assertInSpace(target, ctx);
+			const holders = target.typeKey === "agent"
+				? [target]
+				: await queryAll({ type: "agent", filters: [{ key: target.typeKey === "channel" ? "space_default" : "bound_object", condition: "equal", value: id }] });
+			holders.sort((a, b) => a.id.localeCompare(b.id));
+			const holder = holders[0];
+			if (!holder) throw new Error(`no agent lives on "${str(target.fields, "name") || id}"; read that object directly`);
+			if (holder.id === ctx.agentId) throw new Error("an agent cannot send a request to itself");
+			const endpoint = { objectId: agentSubject(holder), agentId: holder.id };
+			if (recipients.some((entry) => entry.objectId === endpoint.objectId)) throw new Error("each recipient object must be distinct");
+			recipients.push(endpoint);
+			names.push(str(holder.fields, "name") || endpoint.objectId);
+		}
+		const replyTo = S(input.reply_to);
+		const parent = replyTo ? subject.mailbox?.find((entry) => entry.message.id === replyTo)?.message : undefined;
+		if (replyTo && !parent) throw new Error("reply_to must identify a message on your own object");
+		const exchangeId = S(input.exchange_id) || parent?.exchangeId || crypto.randomUUID();
+		if (parent && parent.exchangeId !== exchangeId) throw new Error("reply belongs to a different exchange");
+		const message: AgentMessage = {
+			id: crypto.randomUUID(), exchangeId,
+			sender: { objectId: subject.id, agentId: me.id }, recipients,
+			text: S(input.text).trim(), replyTo, sentAt: Date.now(),
+			title: S(input.title) || parent?.title || [str(me.fields, "name") || me.id, ...names].join(" / "),
+			requestReply: true, historical: false, operation: "", author: me.id,
+		};
+		return JSON.stringify({ ...await sendMessage(message), status: "queued", recipients });
 	},
 };
 
 export function toolDefs(template: string, depth: number, allowAsk = false): ToolDef[] {
-	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read"]);
-	let defs = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, REQUIRE_TOOL, FLAG_ERROR_TOOL].map((t) => t.def);
+	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read", "capability_list"]);
+	let defs = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, REQUIRE_TOOL, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL].map((t) => t.def);
 	if (template === "" && depth === 0 && allowAsk) defs.push(A2A_TOOL.def);
 	if (template === "explore") defs = defs.filter((d) => READ_ONLY.has(d.name));
 	const out = [...defs];
@@ -1105,7 +1164,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>,
 			ctx.submitResult(S(input.content));
 			return { content: "result submitted", isError: false };
 		}
-		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, REQUIRE_TOOL, FLAG_ERROR_TOOL, A2A_TOOL].find((t) => t.def.name === name);
+		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, REQUIRE_TOOL, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL, A2A_TOOL].find((t) => t.def.name === name);
 		if (!tool) return { content: `unknown tool: ${name}`, isError: true };
 		const content = await tool.handler(input, ctx);
 		return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };

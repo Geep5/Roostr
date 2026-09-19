@@ -81,7 +81,7 @@ fields_to_json :: proc(fields: [dynamic]Value_Entry, allocator := context.temp_a
  * a card. Everything else keeps its bytes private to the program that wrote
  * them.
  */
-SELF_DESCRIBING_BLOCKS :: []string{"discussion", "descriptor"}
+SELF_DESCRIBING_BLOCKS :: []string{"discussion", "descriptor", "agent_message"}
 
 @(private = "file")
 is_self_describing :: proc(content_type: string) -> bool {
@@ -205,6 +205,8 @@ object_to_json_value :: proc(s: ^Object_State, allocator := context.temp_allocat
 		}
 		o["conversations"] = json.Array(rows)
 	}
+	mailbox := object_mailbox(s, allocator)
+	if len(mailbox) > 0 do o["mailbox"] = json.Array(mailbox)
 	o["deleted"] = json.Boolean(s.deleted)
 	o["createdAt"] = json.Integer(s.created_at)
 	o["updatedAt"] = json.Integer(s.updated_at)

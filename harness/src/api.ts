@@ -32,6 +32,50 @@ export interface BlockJSON {
 	};
 }
 
+export interface AgentEndpoint {
+	objectId: string;
+	agentId: string;
+}
+
+export interface AgentMessage {
+	id: string;
+	exchangeId: string;
+	sender: AgentEndpoint;
+	recipients: AgentEndpoint[];
+	text: string;
+	replyTo: string;
+	sentAt: number;
+	title: string;
+	requestReply: boolean;
+	historical: boolean;
+	operation: string;
+	author: string;
+	unknown?: string;
+}
+
+export interface MessageDelivery {
+	recipient: AgentEndpoint;
+	status: "pending" | "delivered" | "failed";
+	error: string;
+	at: number;
+}
+
+export interface MessageProcessing {
+	status: "pending" | "awaiting_approval" | "processing" | "processed" | "failed";
+	owner: string;
+	error: string;
+	at: number;
+}
+
+export interface MailboxEntry {
+	message: AgentMessage;
+	threadId: string;
+	incoming: boolean;
+	outgoing: boolean;
+	deliveries: MessageDelivery[];
+	processing: MessageProcessing;
+}
+
 export interface ObjectJSON {
 	id: string;
 	typeKey: string;
@@ -40,6 +84,7 @@ export interface ObjectJSON {
 	deleted: boolean;
 	createdAt: number;
 	updatedAt: number;
+	mailbox?: MailboxEntry[];
 }
 
 export interface QueryRow {
@@ -68,7 +113,7 @@ export async function query(body: Record<string, unknown>): Promise<QueryRow[]> 
 export interface Serving {
 	/** "" when the space has no default and no machine qualifies. */
 	machineId: string;
-	reason: "pinned" | "pinned-uncapable" | "space" | "space-capable" | "capability" | "unsatisfied";
+	reason: "self" | "pinned" | "pinned-uncapable" | "space" | "space-capable" | "capability" | "unsatisfied";
 	/** The object's `requires` list. */
 	requires: string[];
 	/** Machine ids whose `capabilities` cover `requires`, sorted. */
@@ -175,8 +220,8 @@ export const chatPost = async (objectId: string, text: string, asAuthor = "", re
 export const addBlock = (objectId: string, block: Partial<BlockJSON>, targetId = "", position = 0) =>
 	mutate("block_add", { object_id: objectId, block, target_id: targetId, position });
 
-/** Subscribe to commit events; calls onObject for every committed object id. */
-export function subscribe(onObject: (objectId: string) => void): void {
+/** Subscribe to commits; onConnected also runs after every reconnection. */
+export function subscribe(onObject: (objectId: string) => void, onConnected?: () => void): void {
 	void (async () => {
 		for (;;) {
 			try {
@@ -184,6 +229,7 @@ export function subscribe(onObject: (objectId: string) => void): void {
 				if (!res.ok) throw new Error(`events: ${res.status}`);
 				const reader = res.body?.getReader();
 				if (!reader) throw new Error("no SSE body");
+				onConnected?.();
 				const decoder = new TextDecoder();
 				let buf = "";
 				for (;;) {

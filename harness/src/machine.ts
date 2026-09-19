@@ -22,6 +22,7 @@
 import { hostname } from "node:os";
 import { createObject, list, lv, queryAll, servingFor, setField, str, sv, type Serving, type ValueJSON } from "./api";
 import { machineId } from "./roster";
+import { agentSubject } from "./conv";
 
 export const MACHINE_TYPE = "machine";
 
@@ -87,9 +88,9 @@ export async function servesHere(objectId: string): Promise<boolean> {
 	return s.machineId === me || (s.machineId === "" && s.reason === "space");
 }
 
-/** Agents follow their objects: a bound agent runs where its object runs, an unbound one resolves on its own row. */
+/** An agent follows its bound object, its space, or its own unbound row. */
 export function agentServedHere(agent: { id: string; fields: Record<string, ValueJSON> }): Promise<boolean> {
-	return servesHere(str(agent.fields, "bound_object") || agent.id);
+	return servesHere(agentSubject(agent));
 }
 
 /** Stamp-if-absent: the first machine to see an unclaimed space becomes its

@@ -34,7 +34,7 @@ async function sleep(ms: number): Promise<void> {
 	await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function targetFor(port: number, timeoutMs: number, url: string): Promise<Target> {
+async function debuggerUrlFor(port: number, timeoutMs: number, url: string): Promise<string> {
 	const deadline = Date.now() + timeoutMs;
 	let lastError = "";
 	while (Date.now() < deadline) {
@@ -43,7 +43,7 @@ async function targetFor(port: number, timeoutMs: number, url: string): Promise<
 			if (res.ok) {
 				const targets = (await res.json()) as Target[];
 				const page = targets.find((t) => t.type === "page" && t.url === url) ?? targets.find((t) => t.type === "page");
-				if (page?.webSocketDebuggerUrl) return page;
+				if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
 			} else lastError = `HTTP ${res.status}`;
 		} catch (err) {
 			lastError = err instanceof Error ? err.message : String(err);
@@ -165,8 +165,8 @@ export async function credentialPageAction(profile: string, url: string, actionJ
 	}, timeoutMs);
 	let cdp: CdpSocket | undefined;
 	try {
-		const page = await targetFor(debugPort, timeoutMs, url);
-		cdp = await CdpSocket.open(page.webSocketDebuggerUrl);
+		const debuggerUrl = await debuggerUrlFor(debugPort, timeoutMs, url);
+		cdp = await CdpSocket.open(debuggerUrl);
 		await cdp.call("Runtime.enable");
 		await cdp.call("Page.enable");
 		const wanted = new URL(url);
@@ -181,7 +181,7 @@ export async function credentialPageAction(profile: string, url: string, actionJ
 		}
 		await sleep(1_000);
 		const state = JSON.parse(String(await evaluate(cdp, pageTextExpression()))) as { title: string; url: string; text: string };
-		if (!state.text) state.text = `NO TEXT title=${state.title} url=${state.url} target=${page.url}`;
+		if (!state.text) state.text = `NO TEXT title=${state.title} url=${state.url} requested=${url}`;
 		return { ...state, actionResult };
 	} finally {
 		clearTimeout(timeout);

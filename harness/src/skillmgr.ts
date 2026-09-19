@@ -18,7 +18,7 @@ import { machines, publishCapabilities } from "./machine";
 import { machineId } from "./roster";
 import { humanRef, postTo } from "./conv";
 import { activeCredentialKeys, credentialStatus } from "./credentials";
-import { publishHoldup, publishInstallations, clearInstallationError } from "./descriptors";
+import { publishHoldup, publishInstallations, publishGoogleInstallations, clearInstallationError } from "./descriptors";
 import { objectText } from "./skills";
 
 export interface CatalogEntry {
@@ -185,17 +185,17 @@ function capabilityKeys(state: StateFile): string[] {
 /** A skill state change: persist, then publish the capability set to this machine's object (a write only on change). */
 async function saveSkills(state: StateFile): Promise<void> {
 	await writeState(state);
-	void publishCapabilities(capabilityKeys(state));
+	await publishCapabilities(capabilityKeys(state));
 	// The flat capability list and the per-skill rows come from the same
 	// state, at the same moment, so they cannot disagree.
-	void publishInstallations(state.skills, credentialStatus());
+	await publishInstallations(state.skills, credentialStatus());
 }
 
 /** Credential changes call this: the published set follows the store. */
 export async function republishCapabilities(): Promise<void> {
 	const state = await readState();
-	void publishCapabilities(capabilityKeys(state));
-	void publishInstallations(state.skills, credentialStatus());
+	await publishCapabilities(capabilityKeys(state));
+	await publishInstallations(state.skills, credentialStatus());
 }
 
 /**
@@ -206,6 +206,7 @@ export async function republishCapabilities(): Promise<void> {
 export async function publishInstallationState(): Promise<void> {
 	const state = await readState();
 	await publishInstallations(state.skills, credentialStatus());
+	await publishGoogleInstallations();
 	// Holdups filed before rows existed would stay invisible forever, which
 	// is the exact failure this replaces: mirror the standing ones once.
 	for (const holdup of state.holdups ?? []) {
@@ -394,6 +395,14 @@ export interface SkillStatus {
 	defaultPrompt: string;
 }
 
+/** Local execution state without loading prompts or running install/auth gates. */
+export async function skillOperationState(key: string): Promise<{ phase: SkillPhase; installed: boolean }> {
+	if (!CATALOG.some((entry) => entry.key === key)) throw new Error("Unknown skill.");
+	const state = (await readState()).skills[key];
+	const phase = jobs.get(key)?.phase ?? (state?.enabled ? "on" : state?.log?.startsWith("[needs-auth]") ? "needs-auth" : state?.log?.startsWith("[failed]") ? "failed" : "off");
+	return { phase, installed: state?.installed ?? false };
+}
+
 export async function skillStatus(): Promise<SkillStatus[]> {
 	const state = await readState();
 	const prompts = new Map<string, string>();
@@ -445,6 +454,15 @@ export async function recheckSkill(key: string): Promise<SkillPhase> {
 	}
 	if (entry.authCheckCmd) {
 		const auth = await sh(entry.authCheckCmd);
+		// gws exits successfully even when no identity is authenticated.
+		if (key === "google" && auth.ok) {
+			try {
+				const status = JSON.parse(auth.out) as { auth_method?: string };
+				auth.ok = !!status.auth_method && status.auth_method !== "none";
+			} catch {
+				auth.ok = false;
+			}
+		}
 		if (!auth.ok) {
 			state.skills[key] = { enabled: false, installed: true, log: `[needs-auth] ${entry.authHint ?? "authentication required"}\n${auth.out}`, updatedAt: Date.now() };
 			await saveSkills(state);

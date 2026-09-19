@@ -132,16 +132,14 @@ test("a watermark belongs to one conversation, not the whole object", async () =
 	expect(await pendingMessages(obj, transcript, AGENT)).toEqual([]);
 });
 
-test("an agent's post wakes this agent in a thread but never in a human discussion", async () => {
-	// Two agents on one object's discussion would otherwise answer each
-	// other forever; agent-to-agent talk belongs in a pair thread, where
-	// both authors count. Before threads this was decided by the object's
-	// type, which no longer says anything about the conversation.
+test("legacy shared threads and private transcripts never wake the human-discussion path", async () => {
+	// Exchanges now have explicit mailbox claims. Reading a legacy shared
+	// thread as pending would replay historical agent work after migration.
 	const obj = objectWith(
 		"peer-post",
 		{ threadId: HUMAN_THREAD, order: [msg("h1", AGENT, 100, "my own reply"), msg("h2", OTHER_AGENT, 200, "peer chatter")] },
 		{ threadId: PRIVATE, order: [msg("t1", AGENT, 100, "my own reply"), msg("t2", OTHER_AGENT, 200, "peer asks me something")] },
 	);
 	expect(await pendingMessages(obj, humanRef(obj.id), AGENT)).toEqual([]);
-	expect((await pendingMessages(obj, { objectId: obj.id, threadId: PRIVATE }, AGENT)).map((p) => p.text)).toEqual(["peer asks me something"]);
+	expect(await pendingMessages(obj, { objectId: obj.id, threadId: PRIVATE }, AGENT)).toEqual([]);
 });

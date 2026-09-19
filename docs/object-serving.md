@@ -31,6 +31,7 @@ identically. No heartbeats, no leases, no coordinator.
 | machine  | `machine_id`   | string      | that machine               | stable id from `~/.glon/harness.json`                  |
 | machine  | `capabilities` | string list | that machine               | catalog keys installed **and** enabled here            |
 | machine  | `name`         | string      | that machine / human       | hostname by default                                    |
+| install  | `machine_id`   | string      | owning machine            | fixed owner for local capability/authentication work  |
 | channel  | `served_by`    | string      | human, first-seen machine  | default server for objects in the space (unchanged)    |
 | any      | `served_by`    | string      | human, agent tool          | pin: this machine serves this object                   |
 | any      | `requires`     | string list | human, agent tool          | capabilities the work needs                            |
@@ -52,6 +53,9 @@ Pure function in `core/serving.odin`, exposed through the ABI as method
 host — harness, website, iOS — calls it; none re-implements it.
 
 ```
+if object is an installation:
+    return (object.machine_id, "self")                   # missing owner means unserved
+
 candidates = machines whose capabilities ⊇ object.requires
 default    = object.served_by ?? space.served_by
 
@@ -69,6 +73,12 @@ adding a capability on machine B moves only objects whose current server
 lacks it; a human pin always wins and is visibly flagged when it cannot
 be honoured. The resolver never writes: responsibility moves by editing
 inputs (`requires`, `served_by`, `capabilities`), each a normal commit.
+
+Installation objects are the exception to general capability placement: their
+`machine_id` is authoritative. A capability request cannot move a machine's
+credentials or installation work to a different machine by changing
+`served_by` or `requires`. Requests and results live in installation mailboxes;
+the owner requires paired-human approval before local side effects.
 
 ### Agents follow their objects
 

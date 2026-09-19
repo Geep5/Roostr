@@ -81,6 +81,15 @@ resolve_server :: proc(object: ^Object_State, space: ^Object_State, machines: []
 	out.candidates = make([dynamic]string, allocator)
 	if object != nil do out.requires = field_strings(object.fields, REQUIRES_KEY, allocator)
 	else do out.requires = make([dynamic]string, allocator)
+	// Installations are machine-owned services. Neither a space default nor
+	// an object pin may approve credentials or install software elsewhere.
+	// An installation missing its owner stays unserved, rather than falling
+	// back to whichever machine happens to serve the space.
+	if object != nil && object.type_key == "install" {
+		out.machine_id = field_string(object.fields, MACHINE_ID_KEY)
+		out.reason = "self"
+		return out
+	}
 
 	for &m in machines {
 		id := field_string(m.fields, MACHINE_ID_KEY)

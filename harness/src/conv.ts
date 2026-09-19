@@ -53,6 +53,10 @@ export const parseConvKey = (key: string): ConvRef => {
 
 export const isHuman = (ref: ConvRef): boolean => ref.threadId === HUMAN_THREAD;
 
+/** The owning object is the address; the agent row is only its configuration. */
+export const agentSubject = (agent: Pick<ObjectJSON, "id" | "fields">): string =>
+	str(agent.fields, "bound_object") || str(agent.fields, "space_default") || agent.id;
+
 /** The core decodes every thread and serves them on the object. */
 export async function conversationsOf(objectId: string): Promise<ConversationJSON[]> {
 	const object = (await fetchObject(objectId)) as Described;
@@ -122,7 +126,7 @@ async function claim(key: string, open: () => Promise<ConvRef>): Promise<ConvRef
  * id wins, exactly as the lowest chat id used to.
  */
 export async function agentThread(agent: ObjectJSON): Promise<ConvRef> {
-	const subject = str(agent.fields, "bound_object") || agent.id;
+	const subject = agentSubject(agent);
 	const title = str(agent.fields, "name") || "Agent";
 	return claim(`agent:${agent.id}:${subject}`, async () => {
 		const threads = (await conversationsOf(subject)).filter((c) => c.kind === "agent_private");
@@ -158,42 +162,4 @@ export async function agentThread(agent: ObjectJSON): Promise<ConvRef> {
 		console.log(`[harness] opened transcript for "${title}" on ${subject.slice(0, 8)} (${out.id.slice(0, 18)}…)`);
 		return { objectId: subject, threadId: out.id };
 	});
-}
-
-/** Sorted so both agents compute the same identity for their pair. */
-export const pairKey = (a: string, b: string): string => [a, b].sort().join(":");
-
-/**
- * The conversation between two agents ABOUT an object: a thread on that
- * object, so the work and the negotiation about it stay together.
- */
-export async function pairThread(subjectId: string, agentA: string, agentB: string, title: string): Promise<ConvRef> {
-	const participants = [agentA, agentB].sort();
-	return claim(`pair:${subjectId}:${pairKey(agentA, agentB)}`, async () => {
-		const existing = (await conversationsOf(subjectId))
-			.filter((c) => c.kind === "a2a" && participants.every((p) => c.participants.includes(p)))
-			.map((c) => c.id)
-			.sort();
-		if (existing.length > 0) return { objectId: subjectId, threadId: existing[0] };
-		const out = (await mutate("conversation_open", {
-			object_id: subjectId,
-			kind: "a2a",
-			title,
-			participants,
-		})) as { id: string };
-		console.log(`[harness] opened A2A thread "${title}" on ${subjectId.slice(0, 8)} (${out.id.slice(0, 18)}…)`);
-		return { objectId: subjectId, threadId: out.id };
-	});
-}
-
-/** Every conversation an agent takes part in, across the objects it touches. */
-export async function agentConversations(objectId: string, agentId: string): Promise<ConvRef[]> {
-	return (await conversationsOf(objectId))
-		.filter((c) => c.participants.includes(agentId))
-		.map((c) => ({ objectId, threadId: c.id }));
-}
-
-/** A conversation's own metadata, for titles and participant lists. */
-export async function conversationMeta(ref: ConvRef): Promise<ConversationJSON | undefined> {
-	return (await conversationsOf(ref.objectId)).find((c) => c.id === ref.threadId);
 }

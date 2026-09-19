@@ -132,9 +132,9 @@ leases - only the serving machine sets its own verified checkout path.
 ## Harness (`harness/`)
 
 The holdfast agent harness, ported as a Bun sidecar that is a pure HTTP
-client of the Odin server. Agents are `agent` objects; their conversation
-is the object's discussion (chat blocks + tool_use/tool_result/compaction
-blocks under `__discussion__`), so the Roostr UI is the chat surface.
+client of the Odin server. Agents are `agent` objects. Direct human discussion
+and local tool/compaction history remain under `__discussion__`; messages
+between objects use their individual mailboxes, not a shared conversation.
 
 ```bash
 cd harness && bun install
@@ -159,6 +159,36 @@ per-channel `instructions` objects. Memory is `pinned_fact`/`milestone`
 objects with owner scoping, keyed upserts, supersession, and an opt-in
 compaction-time extraction loop (`memory_extraction_enabled`); digest
 injection via `memory_digest_enabled`.
+
+### Object mailboxes
+
+`AgentMessage` in `glon.proto` is the canonical message envelope: stable message
+and exchange IDs, sender object/agent, explicit recipients, reply reference,
+text, timestamp, and optional capability operation. The envelope is stored in
+each participating object's Change-DAG. An exchange ID groups the UI; it is not
+a separate authoritative conversation object.
+
+The sender commits an outbox entry first. Delivery commits the same envelope
+to each recipient's inbox before acknowledging that recipient on the sender.
+Duplicate delivery is idempotent; pending delivery survives restart. Delivery
+and processing are separate: "delivered" means in the inbox, not that a tool
+ran. The object's serving harness claims processing; interrupted work is
+reported as failed and requires explicit retry rather than silently replaying
+side effects.
+
+Group messages name every recipient. Replies fan out to the original audience;
+private replies start a separate exchange. Replies do not automatically request
+another response, avoiding agent reply loops. Existing exchanges migrate as
+historical messages and never run again merely because they were imported.
+
+Capability requests address the installation object owned by the relevant
+machine. Install, enable, disable, uninstall, login, credential save/check/revoke
+all use this message path. Receiving or syncing a request never starts an
+installation or login: **This machine → Capability requests** requires a paired
+human's approval. Passwords, API keys, cookies and OAuth tokens remain local;
+only requests, safe status and results enter object history.
+
+### Recurring objects
 
 Recurring objects: the engine owns the rule (`repeat` field: `next`,
 `fired_for`, …) and the harness is the clock. `serve` arms one timer for
