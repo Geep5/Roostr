@@ -64,6 +64,13 @@ descriptor_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 // ── model → JSON ─────────────────────────────────────────────────────
 
 @(private = "file")
+string_list_json :: proc(items: [dynamic]string) -> json.Value {
+	out := make([dynamic]json.Value, context.temp_allocator)
+	for s in items do append(&out, json.String(s))
+	return json.Array(out)
+}
+
+@(private = "file")
 put_unknown :: proc(out: ^map[string]json.Value, unknown: [dynamic]byte) {
 	if len(unknown) == 0 do return
 	out^["unknown"] = json.String(base64.encode(unknown[:], allocator = context.temp_allocator))
@@ -108,6 +115,16 @@ descriptor_to_json :: proc(d: Descriptor) -> json.Value {
 	}
 	out["version"] = json.String(d.version)
 	out["author"] = json.String(d.author)
+	if d.has_agent {
+		agent := jobj()
+		agent["system"] = json.String(d.agent.system)
+		agent["model"] = json.String(d.agent.model)
+		agent["requires"] = string_list_json(d.agent.requires)
+		agent["skills"] = string_list_json(d.agent.skills)
+		agent["responsibleTypes"] = string_list_json(d.agent.responsible_types)
+		put_unknown(&agent, d.agent.unknown)
+		out["agent"] = json.Object(agent)
+	}
 	put_unknown(&out, d.unknown)
 	return json.Object(out)
 }
@@ -154,6 +171,15 @@ read_unknown :: proc(v: json.Value) -> [dynamic]byte {
 	return out
 }
 
+@(private = "file")
+read_string_list :: proc(v: json.Value, key: string) -> [dynamic]string {
+	out := make([dynamic]string, context.temp_allocator)
+	for item in json_array(v, key) {
+		if s, ok := item.(json.String); ok do append(&out, string(s))
+	}
+	return out
+}
+
 descriptor_from_json :: proc(v: json.Value) -> Descriptor {
 	out: Descriptor
 	out.key = json_str(v, "key")
@@ -194,6 +220,15 @@ descriptor_from_json :: proc(v: json.Value) -> Descriptor {
 	}
 	out.version = json_str(v, "version")
 	out.author = json_str(v, "author")
+	if agent, ok := json_field(v, "agent"); ok {
+		out.has_agent = true
+		out.agent.system = json_str(agent, "system")
+		out.agent.model = json_str(agent, "model")
+		out.agent.requires = read_string_list(agent, "requires")
+		out.agent.skills = read_string_list(agent, "skills")
+		out.agent.responsible_types = read_string_list(agent, "responsibleTypes")
+		out.agent.unknown = read_unknown(agent)
+	}
 	out.unknown = read_unknown(v)
 	return out
 }

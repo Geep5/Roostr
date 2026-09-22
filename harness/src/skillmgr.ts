@@ -124,6 +124,32 @@ export const CATALOG: CatalogEntry[] = [
 			"Write helpers: `+reply`, `+reply-all`, `+forward`, `+send` (they handle threading). Calendar and Drive follow the same shape: `gws calendar events list --params '{\"calendarId\":\"primary\"}'`, `gws drive files list --params '{\"pageSize\":10}'`.\n" +
 			"Read before you write: list/search first, and never send mail or modify events unless the task explicitly asks.",
 	},
+	{
+		key: "matcherino-dev",
+		name: "matcherino-dev",
+		label: "Matcherino dev environment",
+		description: "The Matcherino checkout at /home/geep/Matcherino plus the SSH tunnel to the production read replica on 127.0.0.1:15432.",
+		// The checkout is a human's clone (ssh key, repo access); the
+		// installer's job is only the tunnel, which is idempotent and dies
+		// with the box, so a reboot puts this back to "failed" until re-run.
+		installPrompt:
+			"Bring up the Matcherino dev environment on this machine. " +
+			"The checkout must already exist at /home/geep/Matcherino (apiserver, reactui, provision); if it does not, stop and say so - cloning needs a human's ssh key. " +
+			"Open the SSH tunnel to the production read replica, idempotently: " +
+			"`ss -tlnp 2>/dev/null | grep -q ':15432 ' || (cd /home/geep/Matcherino/provision && ssh -F ssh.config -f -N -L 15432:localhost:5432 root@45.33.24.114)`. " +
+			"NEVER use sudo or any command that can prompt for a password. " +
+			"Finish only when `test -d /home/geep/Matcherino` succeeds and `bash -c 'exec 3<>/dev/tcp/127.0.0.1/15432'` connects.",
+		uninstallPrompt:
+			"Close the SSH tunnel to the Matcherino read replica: find the `ssh -F ssh.config -f -N -L 15432:localhost:5432` process with `pgrep -f 15432:localhost:5432` and kill it. " +
+			"Leave the checkout at /home/geep/Matcherino in place. Finish when nothing listens on 127.0.0.1:15432.",
+		checkCmd: "bash -c 'test -d /home/geep/Matcherino && (exec 3<>/dev/tcp/127.0.0.1/15432)'",
+		skillBody:
+			"Matcherino development on this machine.\n" +
+			"Checkout: /home/geep/Matcherino (apiserver in Go, reactui in Next.js, provision for infrastructure, MatcherinoReports/Guides for pre-built queries and procedures).\n" +
+			"Production read replica: an SSH tunnel on 127.0.0.1:15432. If a query gets \"connection refused\", re-open it: `ss -tlnp 2>/dev/null | grep -q ':15432 ' || (cd /home/geep/Matcherino/provision && ssh -F ssh.config -f -N -L 15432:localhost:5432 root@45.33.24.114)`.\n" +
+			"There is no psql on the host; query through docker: `docker run --rm --network host postgres:16.3 psql -h 127.0.0.1 -p 15432 -U readonly_user -d mno_production -c 'SQL;'` (credentials in the guides). SELECT only - the replica rejects writes.\n" +
+			"Read the guide before exploring from scratch: /home/geep/Matcherino/MatcherinoReports/Guides/matcherino-query-guide.md.",
+	},
 ];
 
 // -- Device-local state -------------------------------------------

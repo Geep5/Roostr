@@ -4,23 +4,26 @@
  * durable inbox/outbox copies on every participant's own object DAG.
  * Delivery retries independently of agent execution and machine liveness.
  *
- *   bun run src/index.ts setup --name Gracie [--model claude-…] [--channel id]
+ *   bun run src/index.ts setup --name Gracie [--kind assistant|marco] [--model claude-…] [--channel id] [--<kind field> value…]
  *   bun run src/index.ts serve
  *   bun run src/index.ts ask <agentId> "message"
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
-import { API, apiFetch, chatPost, fetchObject, list, lv, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
-import type { ObjectJSON } from "./api";
+import { API, apiFetch, chatPost, deleteField, fetchObject, list, lv, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
+import { AGENT_KINDS, agentKind } from "./kinds";
+import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { capabilities, convergeCatalogScope, publishInstallationState } from "./skillmgr";
+import { fileCapabilityHoldup } from "./tools";
 import { startAuthServer } from "./authserver";
 import { machineId, readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, publishCapabilities, servesHere } from "./machine";
 import { publishDescriptors } from "./descriptors";
 import { validateBindings } from "./workspace";
+import { startDiscordManager } from "./discord";
 import { chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
 import { agentSubject, agentThread, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
@@ -34,30 +37,71 @@ function argValue(flagName: string): string {
 	return idx >= 0 ? (process.argv[idx + 1] ?? "") : "";
 }
 
-/** Agents THIS machine serves: local roster ∩ live agent objects. */
+/**
+ * Agents THIS machine serves: local roster ∩ live agent objects, plus any
+ * agent assigned here by `served_by` (setup from another client), which
+ * joins the roster on sight so the agent page shows it enabled here.
+ */
 async function servedAgents(): Promise<Set<string>> {
 	const roster = new Set(await readRoster());
-	if (roster.size === 0) return roster;
+	const me = await machineId();
 	const rows = await queryAll({ type: "agent" });
-	return new Set(rows.filter((r) => roster.has(r.id) && !str(r.fields, "spawn_parent")).map((r) => r.id));
+	const out = new Set<string>();
+	for (const r of rows) {
+		if (str(r.fields, "spawn_parent")) continue;
+		const assigned = str(r.fields, "served_by") === me;
+		if (!roster.has(r.id) && !assigned) continue;
+		if (!roster.has(r.id)) await setEnabled(r.id, true);
+		out.add(r.id);
+	}
+	return out;
+}
+
+/**
+ * Backfill `kind` on agents minted before kinds existed: they were all
+ * assistants, and the runner's defaults key on the field being present.
+ */
+async function convergeAgentKinds(): Promise<void> {
+	for (const a of await queryAll({ type: "agent" })) {
+		if (str(a.fields, "spawn_parent") || str(a.fields, "kind")) continue;
+		await setField(a.id, "kind", sv("assistant"));
+	}
 }
 
 async function setup(): Promise<void> {
 	const name = argValue("--name") || "Agent";
+	const kindKey = argValue("--kind") || "assistant";
+	const kind = AGENT_KINDS.find((k) => k.key === kindKey);
+	if (!kind) {
+		console.log(`unknown kind "${kindKey}"; kinds: ${AGENT_KINDS.map((k) => k.key).join(", ")}`);
+		return;
+	}
 	const existing = await query({ type: "agent", filters: [{ key: "name", condition: "equal", value: name }] });
 	if (existing.length > 0) {
 		console.log(`agent "${name}" already exists: ${existing[0].id}`);
 		return;
 	}
-	const fields: Record<string, ReturnType<typeof sv>> = {
-		model: sv(argValue("--model") || "claude-sonnet-4-5"),
+	// Same shape the website's /setup writes: the kind's defaults copied
+	// onto the object, this machine pinned as its server, non-secret kind
+	// fields as plain strings. Secrets go to the credential store, never here.
+	const fields: Record<string, ValueJSON> = {
+		kind: sv(kind.key),
+		model: sv(argValue("--model") || kind.model),
+		served_by: sv(await machineId()),
+		requires: lv(kind.requires),
+		responsible_types: lv(kind.responsibleTypes),
 	};
 	if (argValue("--channel")) fields.channel = sv(argValue("--channel"));
+	for (const f of kind.fields) {
+		if (f.secret) continue;
+		const value = argValue(`--${f.key}`) || kind.defaults[f.key];
+		if (value) fields[f.key] = sv(value);
+	}
 	const { id } = await createObject(name, "agent", fields);
 	// Setup on this machine claims serving responsibility here — "mine"
 	// is a local fact, not a synced one.
 	await setEnabled(id, true);
-	console.log(`created agent "${name}": ${id} (enabled on this machine)`);
+	console.log(`created ${kind.key} agent "${name}": ${id} (enabled on this machine${kind.requires.length ? `; requires ${kind.requires.join(", ")}` : ""})`);
 }
 
 interface Served {
@@ -65,7 +109,7 @@ interface Served {
 	/** The agent's own transcript: a thread on the object it is about. */
 	conv: ConvRef;
 	channelId: string;
-	/** Type keys this agent is responsible for; "*" = everything else. */
+	/** Type keys this agent is responsible for; "*" = everything else. Its kind's list when the object has none. */
 	types: string[];
 	/** Object-bound agents: the one object this agent belongs to. */
 	bound: string;
@@ -137,11 +181,16 @@ async function buildServedOne(agentId: string, defaultChannel: string): Promise<
 		agentId,
 		conv,
 		channelId,
-		types: list(agent.fields, "responsible_types"),
+		types: responsibleTypes(agent),
 		bound: str(agent.fields, "bound_object"),
 		name: str(agent.fields, "name") || agentId.slice(0, 8),
 		icon: str(agent.fields, "iconEmoji"),
 	};
+}
+
+/** The object's own list when set (even empty), else the kind's default. */
+function responsibleTypes(agent: ObjectJSON): string[] {
+	return agent.fields["responsible_types"] ? list(agent.fields, "responsible_types") : agentKind(str(agent.fields, "kind")).responsibleTypes;
 }
 
 /** agentId → Served; rebuilt on roster change. */
@@ -228,6 +277,7 @@ async function serve(): Promise<void> {
 	await publishInstallationState();
 	await convergeCatalogScope();
 	await convergeSpaceServing();
+	await convergeAgentKinds();
 	const migration = await migrateExchanges({ apply: true });
 	console.log("[harness] exchange migration:", JSON.stringify(migration));
 	// Checkout bindings: statuses refresh at boot and on every UI write.
@@ -267,12 +317,14 @@ async function serve(): Promise<void> {
 			let id = (await queryAll({ type: "agent", filters: [{ key: "space_default", condition: "equal", value: c.id }] }))[0]?.id;
 			if (!id) {
 				minted = true;
+				const kind = agentKind("assistant");
 				id = (
 					await createObject(c.name, "agent", {
 						channel: sv(c.id),
 						space_default: sv(c.id),
+						kind: sv(kind.key),
 						iconEmoji: sv("🛰️"),
-						model: sv(process.env.GLON_AGENT_MODEL || "claude-sonnet-4-5"),
+						model: sv(kind.model),
 					})
 				).id;
 				console.log(`[harness] minted default agent for space "${c.name}" → ${id.slice(0, 8)}`);
@@ -336,8 +388,9 @@ async function serve(): Promise<void> {
 		const { id } = await createObject(name, "agent", {
 			channel: sv(channelId),
 			bound_object: sv(obj.id),
+			kind: sv("assistant"),
 			iconEmoji: sv(str(obj.fields, "iconEmoji") || "🛰️"),
-			model: sv(model || process.env.GLON_AGENT_MODEL || "claude-sonnet-4-5"),
+			model: sv(model || agentKind("assistant").model),
 		});
 		boundBy.set(obj.id, id);
 		// Minting is also an assignment: this machine answers for what it
@@ -362,12 +415,22 @@ async function serve(): Promise<void> {
 	const recoveredObjects = new Set<string>();
 	let mailboxScan: Promise<void> | undefined;
 
+	const me = await machineId();
+
+	/**
+	 * An agent this machine may take into its roster on first contact: a
+	 * bound agent (follows its object), a space default (follows its
+	 * space), or one assigned here by `served_by` (setup from any client).
+	 */
+	function adoptable(agent: ObjectJSON): boolean {
+		return !!str(agent.fields, "bound_object") || !!str(agent.fields, "space_default") || str(agent.fields, "served_by") === me;
+	}
+
 	async function mailboxAgent(endpoint: { objectId: string; agentId: string }): Promise<Served | null> {
 		const agent = await fetchObject(endpoint.agentId);
 		if (agent.typeKey !== "agent" || str(agent.fields, "spawn_parent") || str(agent.fields, "external_responder")) return null;
 		if (agentSubject(agent) !== endpoint.objectId || !(await agentServedHere(agent))) return null;
-		const adoptable = !!str(agent.fields, "bound_object") || !!str(agent.fields, "space_default");
-		if (!agents.has(agent.id) && !adoptable) return null;
+		if (!agents.has(agent.id) && !adoptable(agent)) return null;
 		if (!agents.has(agent.id)) {
 			await setEnabled(agent.id, true);
 			agents.add(agent.id);
@@ -452,13 +515,44 @@ async function serve(): Promise<void> {
 	}
 
 	/**
+	 * Why the agent cannot run here, or "" when it can: its kind's
+	 * `requires` (and its own) name capabilities this machine lacks. The
+	 * resolver still says "pinned-uncapable" for it, so the agent stays
+	 * ours - it just does not take turns, and the holdup says why: filed
+	 * once per distinct reason (the ledger and the installation row are the
+	 * places a human looks), mirrored onto the agent's Error badge, and
+	 * cleared from the badge the moment the requirement is met.
+	 */
+	const heldUp = new Map<string, string>(); // agentId → reason last filed
+	async function requirementsHoldup(s: Served): Promise<string> {
+		const agent = await fetchObject(s.agentId).catch(() => null);
+		if (!agent) return "";
+		const required = [...new Set([...agentKind(str(agent.fields, "kind")).requires, ...list(agent.fields, "requires")])];
+		const have = required.length > 0 ? await capabilities() : [];
+		const missing = required.filter((k) => !have.includes(k));
+		if (missing.length === 0) {
+			if (heldUp.delete(s.agentId) || str(agent.fields, "error").startsWith("needs ")) await deleteField(s.agentId, "error").catch(() => {});
+			return "";
+		}
+		const reason = `needs ${missing.join(", ")}: not active on this machine`;
+		if (heldUp.get(s.agentId) !== reason) {
+			heldUp.set(s.agentId, reason);
+			console.log(`[harness] holding ${s.name} (${s.agentId.slice(0, 8)}): ${reason}`);
+			for (const capability of missing) {
+				await fileCapabilityHoldup(capability, `${s.name} requires ${capability} to run here`, { agentId: s.agentId, channelId: s.channelId, boundObject: agentSubject(agent), depth: 0, touched: new Set() });
+			}
+		}
+		return reason;
+	}
+
+	/**
 	 * Hold the agent's turn slot around `body`: status reporting, error
 	 * capture, then the drain (chat first, queued surfaces after). Resolves
 	 * to the failure message, "" on success - the scheduler records it.
+	 * A held-up agent never enters the slot: nothing is ingested, so the
+	 * work waits on the surface until the machine can do it.
 	 */
 	async function withTurn(s: Served, surface: ConvRef, body: () => Promise<unknown>): Promise<string> {
-		busy.add(s.agentId);
-		active.set(s.agentId, convKey(surface));
 		// Turn state is local: /agents and /agent/status read this map. It used
 		// to be mirrored onto the agent object for remote clients, at two or
 		// three permanent commits per turn; a local surface answers the same
@@ -467,6 +561,13 @@ async function serve(): Promise<void> {
 		const report = (state: "idle" | "working" | "error", detail = "") => {
 			agentTurnStatus.set(s.agentId, { id: s.agentId, name: s.name, icon: s.icon, state, surface: surface.objectId, detail, ts: Date.now() });
 		};
+		const held = await requirementsHoldup(s);
+		if (held) {
+			report("error", held);
+			return held;
+		}
+		busy.add(s.agentId);
+		active.set(s.agentId, convKey(surface));
 		report("working");
 		let failure = "";
 		try {
@@ -532,13 +633,8 @@ async function serve(): Promise<void> {
 		await withTurn(s, surface, () => handleSurface(s, surface));
 	}
 
-	/**
-	 * A scheduler-started turn on the agent's chat. The framed occurrence is
-	 * already posted (origin-tagged, so no watermark path ever ingests it);
-	 * this waits for the agent's slot rather than queueing a surface, then
-	 * runs one turn. Not human-rooted: no agent_ask.
-	 */
-	async function driveScheduled(s: Served, systemSuffix: string, requirementsObjectId?: string): Promise<string> {
+	/** Wait for the agent's turn slot; the holder's drain wakes us before it yields. */
+	async function awaitSlot(s: Served): Promise<void> {
 		while (busy.has(s.agentId)) {
 			const { promise, resolve } = Promise.withResolvers<void>();
 			let waiters = idleWaiters.get(s.agentId);
@@ -546,6 +642,16 @@ async function serve(): Promise<void> {
 			waiters.push(resolve);
 			await promise;
 		}
+	}
+
+	/**
+	 * A scheduler-started turn on the agent's chat. The framed occurrence is
+	 * already posted (origin-tagged, so no watermark path ever ingests it);
+	 * this waits for the agent's slot rather than queueing a surface, then
+	 * runs one turn. Not human-rooted: no agent_ask.
+	 */
+	async function driveScheduled(s: Served, systemSuffix: string, requirementsObjectId?: string): Promise<string> {
+		await awaitSlot(s);
 		return withTurn(s, s.conv, () => runTurn(s.agentId, s.conv, { spawn: spawnSubagent, systemSuffix, requirementsObjectId, a2aTurn: true }));
 	}
 
@@ -589,17 +695,33 @@ async function serve(): Promise<void> {
 			const s = served.get(objectId);
 			if (s) {
 				const agent = await fetchObject(objectId).catch(() => null);
-				if (agent) s.types = list(agent.fields, "responsible_types");
+				if (agent) s.types = responsibleTypes(agent);
 			}
 			return; // agent objects are not surfaces
 		}
 		// Any agent object event (incl. one minted on another machine)
-		// keeps the bound index current.
+		// keeps the bound index current - and an agent assigned here by
+		// `served_by` (a /setup from any client) is adopted on sight, so
+		// its first message needs no restart.
 		if (!agents.has(objectId)) {
 			const maybe = await fetchObject(objectId).catch(() => null);
 			if (maybe?.typeKey === "agent") {
 				const b = str(maybe.fields, "bound_object");
 				if (b) boundBy.set(b, objectId);
+				if (!b && !str(maybe.fields, "spawn_parent") && str(maybe.fields, "served_by") === me) {
+					agents.add(objectId);
+					await setEnabled(objectId, true);
+					const one = await buildServedOne(objectId, defaultChannelId).catch((err) => {
+						console.error(`[harness] failed to adopt assigned agent ${objectId.slice(0, 8)}:`, err);
+						return null;
+					});
+					if (one) {
+						served.set(objectId, one);
+						console.log(`[harness] adopted ${one.name} (${objectId.slice(0, 8)}) - assigned to this machine`);
+						void publishSystemSnapshot(one.agentId, one.conv);
+						void drive(one, humanRef(one.conv.objectId));
+					}
+				}
 				return;
 			}
 		}
@@ -768,6 +890,20 @@ async function serve(): Promise<void> {
 			return driveScheduled(s, systemSuffix, requirementsObjectId);
 		},
 	});
+
+	// Discord channels are surfaces too: one poller per served agent whose
+	// kind talks to Discord, following `served` as agents come and go. The
+	// turn goes through withTurn, so a held-up agent answers nothing and
+	// the failure text is what the channel sees.
+	startDiscordManager({
+		served: () => [...served.values()].map((s) => ({ agentId: s.agentId, objectId: s.conv.objectId })),
+		async turn(agentId, ref) {
+			const s = served.get(agentId);
+			if (!s) return "agent no longer served on this machine";
+			await awaitSlot(s);
+			return withTurn(s, ref, () => runTurn(s.agentId, ref, { spawn: spawnSubagent }));
+		},
+	});
 }
 
 async function ask(): Promise<void> {
@@ -835,5 +971,5 @@ else if (cmd === "serve") await serve();
 else if (cmd === "ask") await ask();
 else if (cmd === "vanish") await vanish();
 else {
-	console.log("commands: setup --name X [--model m] [--channel id] | serve | ask <agentId> <msg> | vanish <objectId…>|--trash [--yes]");
+	console.log("commands: setup --name X [--kind assistant|marco] [--model m] [--channel id] [--<kind field> v] | serve | ask <agentId> <msg> | vanish <objectId…>|--trash [--yes]");
 }

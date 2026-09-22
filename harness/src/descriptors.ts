@@ -26,6 +26,7 @@
 import { API, apiFetch, createObject, fetchObject, mutate, queryAll, str, sv, iv, type ValueJSON } from "./api";
 import { CREDENTIALS } from "./credentials";
 import { CATALOG } from "./skillmgr";
+import { AGENT_KINDS, type AgentKindEntry } from "./kinds";
 import { machineId } from "./roster";
 import { listGoogleAccounts } from "./google";
 import { hostname } from "node:os";
@@ -48,6 +49,8 @@ export interface DescriptorJSON {
 	auths: AuthMethod[];
 	check?: { command: string; expectContains: string; timeoutMs: number };
 	install?: { prompt: string; uninstallPrompt: string; docsUrl: string };
+	/** Present only on `kind: "agent"` cards: the defaults an agent of this kind starts from. */
+	agent?: { system: string; model: string; requires: string[]; skills: string[]; responsibleTypes: string[] };
 	version: string;
 	author: string;
 	/** Bytes a newer writer added; re-emitted verbatim. */
@@ -136,10 +139,26 @@ function credentialDescriptor(entry: (typeof CREDENTIALS)[number], author: strin
 	};
 }
 
+/** Agent kind -> descriptor card: the setup form is its non-secret fields; requirements are other cards' keys. */
+function agentDescriptor(entry: AgentKindEntry, author: string): DescriptorJSON {
+	return {
+		key: entry.key,
+		name: entry.name,
+		description: entry.description,
+		kind: "agent",
+		fields: entry.fields,
+		auths: ["none"],
+		agent: { system: entry.system, model: entry.model, requires: entry.requires, skills: entry.skills, responsibleTypes: entry.responsibleTypes },
+		version: DESCRIPTOR_VERSION,
+		author,
+	};
+}
+
 export function catalogDescriptors(author: string): DescriptorJSON[] {
 	return [
 		...CATALOG.map((c) => skillDescriptor(c, author)),
 		...CREDENTIALS.map((c) => credentialDescriptor(c, author)),
+		...AGENT_KINDS.map((c) => agentDescriptor(c, author)),
 	];
 }
 

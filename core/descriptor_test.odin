@@ -85,7 +85,7 @@ descriptor_defaults_are_omitted :: proc(t: ^testing.T) {
 @(test)
 descriptor_keeps_fields_it_cannot_name :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
-	// A descriptor from a NEWER writer: field 11 (string) and field 12
+	// A descriptor from a NEWER writer: field 12 (string) and field 13
 	// (varint) do not exist in this build's schema, plus field 6 inside a
 	// FieldSpec. This build must render what it knows and hand the rest back
 	// untouched, or every round trip through an old client is data loss.
@@ -98,8 +98,8 @@ descriptor_keeps_fields_it_cannot_name :: proc(t: ^testing.T) {
 	write_string_field(&inner, 1, "region")
 	write_string_field(&inner, 6, "eu-west-1") // unknown inside a nested message
 	write_len_prefixed(&w, 5, inner.buf[:])
-	write_string_field(&w, 11, "a field this build has never heard of")
-	write_tag(&w, 12, 0)
+	write_string_field(&w, 12, "a field this build has never heard of")
+	write_tag(&w, 13, 0)
 	write_varint(&w, 4242)
 	from_future := w.buf[:]
 
@@ -118,6 +118,116 @@ descriptor_keeps_fields_it_cannot_name :: proc(t: ^testing.T) {
 		slice.equal(from_future, again),
 		"a descriptor from the future survives a round trip through this build",
 	)
+}
+
+@(test)
+descriptor_agent_round_trips :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	// An AGENT card carries what the kind IS: prompt, model, and the string
+	// lists setup copies onto the agent object. Every list survives both the
+	// wire and the JSON hop, or a kind picker would mint agents missing a
+	// requirement and `resolve_server` would place them on the wrong machine.
+	d: Descriptor
+	d.key = "marco"
+	d.name = "Marco"
+	d.description = "Matcherino dev bot."
+	d.kind = .Agent
+	d.version = "1"
+	d.has_agent = true
+	d.agent.system = "You are Marco."
+	d.agent.model = "kimi-k2-0905-preview"
+	d.agent.requires = make([dynamic]string)
+	append(&d.agent.requires, "matcherino-dev")
+	append(&d.agent.requires, "discord-bot")
+	d.agent.skills = make([dynamic]string)
+	append(&d.agent.skills, "matcherino-dev")
+	d.agent.responsible_types = make([dynamic]string)
+	append(&d.agent.responsible_types, "task")
+	append(&d.agent.responsible_types, "bug")
+
+	wire := encode_descriptor(d)
+	back, ok := decode_descriptor(wire)
+	testing.expect(t, ok, "agent descriptor decodes")
+	testing.expect_value(t, back.kind, Descriptor_Kind.Agent)
+	testing.expect(t, back.has_agent, "agent present")
+	testing.expect_value(t, back.agent.system, "You are Marco.")
+	testing.expect_value(t, back.agent.model, "kimi-k2-0905-preview")
+	testing.expect_value(t, len(back.agent.requires), 2)
+	testing.expect_value(t, back.agent.requires[0], "matcherino-dev")
+	testing.expect_value(t, back.agent.requires[1], "discord-bot")
+	testing.expect_value(t, len(back.agent.skills), 1)
+	testing.expect_value(t, back.agent.skills[0], "matcherino-dev")
+	testing.expect_value(t, len(back.agent.responsible_types), 2)
+	testing.expect_value(t, back.agent.responsible_types[1], "bug")
+	testing.expect(t, !back.has_install, "an agent card has no install spec")
+	testing.expect(t, slice.equal(wire, encode_descriptor(back)), "re-encode is byte-identical")
+
+	// JSON hop, through the host ABI: keys are the contract a client reads.
+	request := jobj()
+	request["action"] = json.String("decode")
+	request["type"] = json.String("descriptor")
+	request["bytes"] = json.String(base64.encode(wire, allocator = context.temp_allocator))
+	decoded, decode_error := dispatch("descriptor", json.Object(request))
+	testing.expect_value(t, decode_error, "")
+	testing.expect_value(t, json_str(decoded, "kind"), "agent")
+	agent, has_agent := json_field(decoded, "agent")
+	testing.expect(t, has_agent, "agent object emitted")
+	testing.expect_value(t, json_str(agent, "system"), "You are Marco.")
+	testing.expect_value(t, json_str(agent, "model"), "kimi-k2-0905-preview")
+	testing.expect_value(t, len(json_array(agent, "requires")), 2)
+	testing.expect_value(t, len(json_array(agent, "skills")), 1)
+	responsible := json_array(agent, "responsibleTypes")
+	testing.expect_value(t, len(responsible), 2)
+	testing.expect_value(t, string(responsible[0].(json.String)), "task")
+
+	encode_request := jobj()
+	encode_request["action"] = json.String("encode")
+	encode_request["type"] = json.String("descriptor")
+	encode_request["value"] = decoded
+	reencoded, encode_error := dispatch("descriptor", json.Object(encode_request))
+	testing.expect_value(t, encode_error, "")
+	bytes, b64_ok := bytes_from_base64(string(reencoded.(json.String)), context.temp_allocator)
+	testing.expect(t, b64_ok, "valid base64")
+	testing.expect(t, slice.equal(wire, bytes), "JSON round trip is byte-identical")
+
+	// A non-agent card must not grow an empty `agent` object: the key's
+	// presence is how a client tells an agent card from the rest.
+	plain: Descriptor
+	plain.key = "browserless"
+	plain_back, _ := decode_descriptor(encode_descriptor(plain))
+	testing.expect(t, !plain_back.has_agent, "absent agent stays absent")
+	_, plain_has_agent := json_field(descriptor_to_json(plain_back), "agent")
+	testing.expect(t, !plain_has_agent, "no agent key without an agent spec")
+}
+
+@(test)
+descriptor_agent_keeps_fields_it_cannot_name :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	// Field 6 inside AgentSpec is from a newer writer; same guarantee as the
+	// nested FieldSpec case, tested on its own because AgentSpec has its own
+	// decoder.
+	inner := Writer{buf = make([dynamic]byte)}
+	write_string_field(&inner, 1, "You are Marco.")
+	write_string_field(&inner, 3, "discord-bot")
+	write_string_field(&inner, 6, "a kind property from next year")
+	w := Writer{buf = make([dynamic]byte)}
+	write_string_field(&w, 1, "marco")
+	write_tag(&w, 4, 0)
+	write_varint(&w, u64(Descriptor_Kind.Agent))
+	write_len_prefixed(&w, 11, inner.buf[:])
+	from_future := w.buf[:]
+
+	back, ok := decode_descriptor(from_future)
+	testing.expect(t, ok, "decodes")
+	testing.expect(t, back.has_agent, "agent present")
+	testing.expect_value(t, back.agent.system, "You are Marco.")
+	testing.expect_value(t, len(back.agent.requires), 1)
+	testing.expect(t, len(back.agent.unknown) > 0, "unknown nested bytes captured")
+	testing.expect(t, slice.equal(from_future, encode_descriptor(back)), "survives a round trip")
+
+	// And through JSON: `unknown` base64 on the agent object carries it.
+	via_json := descriptor_from_json(descriptor_to_json(back))
+	testing.expect(t, slice.equal(from_future, encode_descriptor(via_json)), "survives the JSON hop")
 }
 
 @(test)
@@ -188,7 +298,7 @@ descriptor_json_boundary_preserves_the_future :: proc(t: ^testing.T) {
 	write_string_field(&w, 2, "X (Twitter)")
 	write_tag(&w, 4, 0)
 	write_varint(&w, u64(Descriptor_Kind.Integration))
-	write_string_field(&w, 11, "written by next year's client")
+	write_string_field(&w, 12, "written by next year's client")
 	original := w.buf[:]
 
 	request := jobj()

@@ -515,6 +515,17 @@ message InstallSpec {
   string docs_url = 3;
 }
 
+// What an agent of this kind is. Present only on kind == AGENT cards; the
+// harness kinds catalog publishes one, and setup copies `requires` onto the
+// agent object so `resolve_server` can hold it to the machine that has them.
+message AgentSpec {
+  string system = 1;                 // standing prompt
+  string model = 2;                  // default model id
+  repeated string requires = 3;      // descriptor keys the serving machine must have active
+  repeated string skills = 4;        // skill keys surfaced to this kind (empty = all)
+  repeated string responsible_types = 5;
+}
+
 message Descriptor {
   string key = 1;               // "x", "browserless", "google"
   string name = 2;              // "X (Twitter)"
@@ -526,6 +537,7 @@ message Descriptor {
   InstallSpec install = 8;
   string version = 9;           // descriptor version, author's own scheme
   string author = 10;           // who published it; unsigned by design
+  AgentSpec agent = 11;         // present only for kind == AGENT
 }
 
 // What is true for one descriptor on one machine. Mirrored into object

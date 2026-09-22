@@ -73,6 +73,12 @@ export const CREDENTIALS: CredentialEntry[] = [
 		loginUrl: "https://www.linkedin.com/login",
 		sessionCookie: { host: "www.linkedin.com", name: "li_at" },
 	},
+	{
+		key: "discord-bot",
+		label: "Discord bot",
+		note: "Bot token for a Discord application; agents of the Marco kind poll and answer their channels with it.",
+		passwordFields: [{ key: "token", label: "Bot token", secret: true }],
+	},
 ];
 
 const STORE_VERSION = 1;
@@ -194,6 +200,11 @@ export function setPasswordCredential(key: string, fields: Record<string, string
 	const store = readStore();
 	store.credentials[key] = { kind: "password", fields: clean, updatedAt: Date.now() };
 	writeStore(store);
+}
+
+/** Password-kind fields of one credential, or null when it is not set up here. Machine-local: never put a value in the DAG. */
+export function passwordCredential(key: string): Record<string, string> | null {
+	return readStore().credentials[key]?.fields ?? null;
 }
 
 const CHROME_CANDIDATES = [

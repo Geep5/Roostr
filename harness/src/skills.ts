@@ -12,6 +12,7 @@ import { fetchObject, query, queryAll, str, type ObjectJSON } from "./api";
 import { machines, serverOf } from "./machine";
 import { machineId } from "./roster";
 import { blockLine } from "./surfaces";
+import { agentKind } from "./kinds";
 
 /**
  * Serialize an object's blocks in tree order.
@@ -60,12 +61,15 @@ export interface SkillListing {
  *
  * Spaces do not enter into it: an agent already belongs to exactly one,
  * so ownership is the finer grain and a global skill stays reachable
- * from anywhere.
+ * from anywhere. An agent's kind may narrow the list further (`skills`
+ * on the kind, by skill name); empty means everything above.
  */
 export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 	const { CATALOG, enabledCatalogKeys } = await import("./skillmgr");
 	const enabled = await enabledCatalogKeys();
 	const managed = new Set(CATALOG.map((c) => c.name.toLowerCase()));
+	const agent = agentId ? await fetchObject(agentId).catch(() => null) : null;
+	const only = new Set(agentKind(agent ? str(agent.fields, "kind") : "").skills.map((k) => k.toLowerCase()));
 	const rows = await queryAll({ type: "skill" });
 	return rows
 		.map((r) => ({
@@ -78,6 +82,7 @@ export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 			// Someone else's playbook: invisible, whoever is asking.
 			if (s.owner !== "" && s.owner !== agentId) return false;
 			const key = s.name.toLowerCase();
+			if (only.size > 0 && !only.has(key)) return false;
 			if (!managed.has(key)) return true;
 			return enabled.has(key);
 		});

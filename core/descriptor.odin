@@ -74,6 +74,15 @@ Install_Spec :: struct {
 	unknown:          [dynamic]byte,
 }
 
+Agent_Spec :: struct {
+	system:            string,
+	model:             string,
+	requires:          [dynamic]string,
+	skills:            [dynamic]string,
+	responsible_types: [dynamic]string,
+	unknown:           [dynamic]byte,
+}
+
 Descriptor :: struct {
 	key:         string,
 	name:        string,
@@ -87,6 +96,8 @@ Descriptor :: struct {
 	has_install: bool,
 	version:     string,
 	author:      string,
+	agent:       Agent_Spec,
+	has_agent:   bool,
 	/** Fields this build does not know, kept verbatim so a round trip through
 	 *  an older client cannot destroy a newer descriptor. */
 	unknown:     [dynamic]byte,
@@ -225,6 +236,32 @@ decode_install_spec :: proc(data: []byte, allocator := context.allocator) -> Ins
 	return out
 }
 
+decode_agent_spec :: proc(data: []byte, allocator := context.allocator) -> Agent_Spec {
+	context.allocator = allocator
+	out: Agent_Spec
+	out.requires = make([dynamic]string, allocator)
+	out.skills = make([dynamic]string, allocator)
+	out.responsible_types = make([dynamic]string, allocator)
+	out.unknown = make([dynamic]byte, allocator)
+	r := Reader{data = data}
+	for r.pos < len(r.data) && !r.err {
+		start := r.pos
+		tag := read_varint(&r)
+		field, wire := tag >> 3, tag & 7
+		switch field {
+		case 1: out.system = read_string(&r)
+		case 2: out.model = read_string(&r)
+		case 3: append(&out.requires, read_string(&r))
+		case 4: append(&out.skills, read_string(&r))
+		case 5: append(&out.responsible_types, read_string(&r))
+		case:
+			skip_field(&r, wire)
+			keep_unknown(&out.unknown, &r, start)
+		}
+	}
+	return out
+}
+
 decode_descriptor :: proc(data: []byte, allocator := context.allocator) -> (Descriptor, bool) {
 	context.allocator = allocator
 	out: Descriptor
@@ -261,6 +298,9 @@ decode_descriptor :: proc(data: []byte, allocator := context.allocator) -> (Desc
 			out.has_install = true
 		case 9: out.version = read_string(&r)
 		case 10: out.author = read_string(&r)
+		case 11:
+			out.agent = decode_agent_spec(read_bytes(&r), allocator)
+			out.has_agent = true
 		case:
 			skip_field(&r, wire)
 			keep_unknown(&out.unknown, &r, start)
@@ -332,6 +372,17 @@ encode_install_spec :: proc(s: Install_Spec, w: ^Writer) {
 	write_unknown(w, s.unknown)
 }
 
+encode_agent_spec :: proc(s: Agent_Spec, w: ^Writer) {
+	write_string_field(w, 1, s.system)
+	write_string_field(w, 2, s.model)
+	// Repeated strings: every element is emitted, an empty one included -
+	// proto3 default-omission is for singular fields only.
+	for item in s.requires do write_len_prefixed(w, 3, transmute([]byte)item)
+	for item in s.skills do write_len_prefixed(w, 4, transmute([]byte)item)
+	for item in s.responsible_types do write_len_prefixed(w, 5, transmute([]byte)item)
+	write_unknown(w, s.unknown)
+}
+
 encode_descriptor :: proc(d: Descriptor, allocator := context.allocator) -> []byte {
 	w := Writer{buf = make([dynamic]byte, allocator)}
 	write_string_field(&w, 1, d.key)
@@ -360,6 +411,11 @@ encode_descriptor :: proc(d: Descriptor, allocator := context.allocator) -> []by
 	}
 	write_string_field(&w, 9, d.version)
 	write_string_field(&w, 10, d.author)
+	if d.has_agent {
+		inner := Writer{buf = make([dynamic]byte, context.temp_allocator)}
+		encode_agent_spec(d.agent, &inner)
+		write_len_prefixed(&w, 11, inner.buf[:])
+	}
 	write_unknown(&w, d.unknown)
 	return w.buf[:]
 }

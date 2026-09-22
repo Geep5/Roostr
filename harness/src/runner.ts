@@ -20,7 +20,8 @@ import { callLLM, isContextOverflowError } from "./llm";
 import { channelInstructions, listSkills, remoteCapabilitiesSection, skillsPromptSection } from "./skills";
 import { credentialsPromptLine } from "./credentials";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
-import { workspaceContext, workspacePromptSection } from "./workspace";
+import { workspaceAt, workspaceContext, workspacePromptSection } from "./workspace";
+import { agentKind } from "./kinds";
 import { digest } from "./memory";
 import { authContractPrompt, authRequirementsOf, localAuthRegistry, resolveAuthRequirements } from "./authreq";
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
@@ -57,17 +58,6 @@ agent for X". For a person object you are the keeper of their profile,
 not the person: speak about them in third person, never pretend to be
 them. Skip introductions and menu-of-options boilerplate entirely -
 answer the question directly, as this object.`;
-
-const DEFAULT_SYSTEM = `You are a helpful agent living inside Roostr, a local-first notes app where
-everything is an object in a content-addressed DAG. You converse with your
-principal through your chat and through any object's discussion — messages
-from other objects arrive framed with their origin and the object's contents.
-ALWAYS answer in plain text: your final reply is posted to the surface the
-question came from automatically (never use chat_reply_on for that; it is
-only for unprompted messages on OTHER objects). Use tools to read, search,
-create, and organize objects; use memory_* tools to pin durable facts and
-milestones. Be concise and concrete. When a listed skill matches the task,
-read it with skill_read before starting.`;
 
 /**
  * Chars-per-token calibration, per agent, in memory only.
@@ -134,7 +124,8 @@ export interface SystemPart {
 
 async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts: RunOptions): Promise<SystemPart[]> {
 	const boundId = str(agent.fields, "bound_object");
-	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || (boundId ? OBJECT_AGENT_PRIMER : DEFAULT_SYSTEM) }];
+	// The kind's standing prompt is the default a blank `system` falls back to.
+	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || (boundId ? OBJECT_AGENT_PRIMER : agentKind(str(agent.fields, "kind")).system) }];
 	if (boundId) {
 		try {
 			const bc = await boundObjectContext(boundId, str(agent.fields, "channel"));
@@ -174,9 +165,11 @@ async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts:
 	if (instructions) parts.push({ label: "Space instructions", text: instructions });
 	// Machine-local by design: this section exists only on the machine
 	// holding the checkout - which the serving gate guarantees is the one
-	// running this turn.
+	// running this turn. An agent's own `repo_path` (a kind field) beats
+	// the space's binding.
 	try {
-		const ws = await workspaceContext(str(agent.fields, "channel"));
+		const repo = str(agent.fields, "repo_path");
+		const ws = repo ? await workspaceAt(repo) : await workspaceContext(str(agent.fields, "channel"));
 		if (ws) parts.push({ label: "Workspace", text: workspacePromptSection(ws) });
 	} catch (err) {
 		console.error("[harness] workspace context failed:", err instanceof Error ? err.message : err);
@@ -254,10 +247,13 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		const conv = ref.objectId === agentId ? agent : await fetchObject(ref.objectId);
 		ctx.channelId = str(agent.fields, "channel");
 		ctx.boundObject = str(agent.fields, "bound_object") || str(agent.fields, "space_default") || undefined;
-		ctx.workspacePath = (await workspaceContext(ctx.channelId).catch(() => null))?.path;
+		// Same checkout the Workspace prompt section describes; a missing
+		// directory means home, never a spawn failure.
+		const repo = str(agent.fields, "repo_path");
+		ctx.workspacePath = (await (repo ? workspaceAt(repo) : workspaceContext(ctx.channelId)).catch(() => null))?.path;
 		const ratio = tokenRatio(agent);
 		const cfg = compactionConfig(agent);
-		const model = str(agent.fields, "model") || "mock";
+		const model = str(agent.fields, "model") || agentKind(str(agent.fields, "kind")).model;
 		// Re-read every iteration with everything else, so revoking the grant
 		// takes effect on the agent's next tool call rather than its next turn.
 		const tools = toolDefs(opts.template ?? "", ctx.depth, ctx.allowAsk);

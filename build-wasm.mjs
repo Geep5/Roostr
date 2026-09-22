@@ -52,5 +52,6 @@ try {
 	console.log(`Built ${join(output, "engine.wasm")} (${bytes.length} bytes; source ${manifest.sourceFingerprint})`);
 } finally {
 	await rm(temporary, { force: true });
+	await rm(`${temporary}.o`, { force: true }); // odin leaves the object beside its output on linux
 	await rm(join(output, `.engine-core-${process.pid}.json`), { force: true });
 }

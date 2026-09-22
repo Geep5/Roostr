@@ -182,13 +182,20 @@ export interface Workspace {
 
 /**
  * The workspace an agent in `channelId` works in on THIS machine, or null
- * when the space has no binding here. Reads AGENTS.md/CLAUDE.md from the
- * checkout so repo knowledge rides with the repo, not the DAG.
+ * when the space has no binding here.
  */
 export async function workspaceContext(channelId: string): Promise<Workspace | null> {
 	if (!channelId) return null;
 	const path = (await readBindings())[channelId];
-	if (!path) return null;
+	return path ? workspaceAt(path) : null;
+}
+
+/**
+ * A checkout by path (a space binding, or an agent's own `repo_path`), or
+ * null when the directory is missing. Reads AGENTS.md/CLAUDE.md from it so
+ * repo knowledge rides with the repo, not the DAG.
+ */
+export async function workspaceAt(path: string): Promise<Workspace | null> {
 	const exists = await Bun.file(`${path}/.`)
 		.stat()
 		.then((s) => s.isDirectory())

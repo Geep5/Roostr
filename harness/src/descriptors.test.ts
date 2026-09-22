@@ -10,6 +10,7 @@
 import { expect, test } from "bun:test";
 import { catalogDescriptors } from "./descriptors";
 import { CREDENTIALS } from "./credentials";
+import { AGENT_KINDS } from "./kinds";
 import { CATALOG } from "./skillmgr";
 
 const AUTHOR = "npub1fcppsmdf84swh33vqwklscppskw5j8tcu280n27ejlz53lvl5xcqxj0vl2";
@@ -17,7 +18,7 @@ const cards = catalogDescriptors(AUTHOR);
 const byKey = new Map(cards.map((c) => [c.key, c]));
 
 test("every catalog entry becomes exactly one card", () => {
-	expect(cards.length).toBe(CATALOG.length + CREDENTIALS.length);
+	expect(cards.length).toBe(CATALOG.length + CREDENTIALS.length + AGENT_KINDS.length);
 	expect(new Set(cards.map((c) => c.key)).size).toBe(cards.length);
 	for (const c of cards) {
 		expect(c.author).toBe(AUTHOR);
@@ -51,6 +52,19 @@ test("a skill card carries its check and install work, and asks for nothing", ()
 	expect(browserless?.auths).toEqual(["none"]);
 	expect(browserless?.check?.command).toBe(CATALOG.find((c) => c.key === "browserless")?.checkCmd);
 	expect((browserless?.install?.prompt ?? "").length).toBeGreaterThan(0);
+});
+
+test("an agent card names its requirements by other cards' keys and keeps secrets off the form", () => {
+	const marco = byKey.get("marco");
+	expect(marco?.kind).toBe("agent");
+	// Assigning the kind to a machine means those cards must be active there.
+	for (const key of marco?.agent?.requires ?? []) expect(byKey.get(key)?.kind).not.toBe("agent");
+	expect(marco?.agent?.requires).toContain("discord-bot");
+	// The bot token belongs to the discord-bot credential, never to the agent object.
+	expect(marco?.fields.some((f) => f.secret)).toBe(false);
+	expect(byKey.get("discord-bot")?.fields.filter((f) => f.secret).map((f) => f.key)).toEqual(["token"]);
+	// Cards that are not agents carry no agent block, so an old client ignores it wholesale.
+	for (const c of cards) expect(c.agent !== undefined).toBe(c.kind === "agent");
 });
 
 test("no card can carry a secret value", () => {
