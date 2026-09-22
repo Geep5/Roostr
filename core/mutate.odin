@@ -742,12 +742,12 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		// A property definition takes its values with it.
 		rel_ids, rel_key := relation_value_cascade(input.states, object_id)
 		mutation_add(&plan, input, object_id, {Operation{kind = .Object_Delete}})
-		// The object's bound agent (and its chat) go with it.
-		cascade := bound_agent_cascade(input.states, object_id)
+		// The object's own agent (and its chat) go with it.
+		cascade := object_agent_cascade(input.states, object_id)
 		for cid in cascade do mutation_add(&plan, input, cid, {Operation{kind = .Object_Delete}})
 		for iid in instances {
 			mutation_add(&plan, input, iid, {Operation{kind = .Object_Delete}})
-			icascade := bound_agent_cascade(input.states, iid)
+			icascade := object_agent_cascade(input.states, iid)
 			for cid in icascade do mutation_add(&plan, input, cid, {Operation{kind = .Object_Delete}})
 		}
 		for oid in rel_ids do mutation_add(&plan, input, oid, {Operation{kind = .Field_Delete, key = rel_key}})
@@ -773,8 +773,8 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		for id in ids {
 			if id == "" || strings.contains(id, "/") || strings.contains(id, "..") do return plan, "invalid object id"
 		}
-		// A type definition takes its instances with it; then bound agents
-		// (and their chats) vanish with every object in the set. A property
+		// A type definition takes its instances with it; then each object's
+		// own agent (and its chats) vanishes with it. A property
 		// definition wipes its values from the survivors first.
 		expanded := make([dynamic]string, context.temp_allocator)
 		for id in ids {
@@ -785,7 +785,7 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		}
 		root_count := len(expanded)
 		for i in 0 ..< root_count {
-			cascade := bound_agent_cascade(input.states, expanded[i])
+			cascade := object_agent_cascade(input.states, expanded[i])
 			for cid in cascade do append(&expanded, cid)
 		}
 		plan.vanish_ids = expanded
@@ -1030,13 +1030,24 @@ relation_value_cascade :: proc(states: map[string]^Object_State, object_id: stri
 	slice.sort(ids[:])
 	return
 }
-
-// ── Bound-agent cascade ──────────────────────────────────────────────
+// ── Object-agent cascade ─────────────────────────────────────────────
 //
-// Deleting an object retires its object-bound agent and that agent's
-// holistic chat: a mind whose object is gone has nothing to be. Pair
-// chats survive - they are shared history with another agent.
-bound_agent_cascade :: proc(states: map[string]^Object_State, object_id: string) -> [dynamic]string {
+// Deleting an object retires the agent it names (`object.agent`) and that
+// agent's holistic chat - but only when no other live object still names
+// the same agent: an agent is one mind many objects may point at, and a
+// space default is never anyone's to retire. Pair chats survive - they
+// are shared history with another agent.
+
+// Types that never have an agent of their own; an `agent` field on them
+// means something else (a chat's owner, an installation's requester).
+// Mirrors the harness's UNMINTABLE set (harness/src/index.ts).
+AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "type", "template", "skill", "descriptor", "install", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
+
+object_has_own_agent :: proc(type_key: string) -> bool {
+	for t in AGENTLESS_TYPES do if t == type_key do return false
+	return true
+}
+object_agent_cascade :: proc(states: map[string]^Object_State, object_id: string) -> [dynamic]string {
 	out := make([dynamic]string, context.temp_allocator)
 	Ctx :: struct {
 		out:       ^[dynamic]string,
@@ -1048,24 +1059,26 @@ bound_agent_cascade :: proc(states: map[string]^Object_State, object_id: string)
 			out:       ^[dynamic]string,
 			object_id: string,
 		})user
-		agent_ids := make([dynamic]string, context.temp_allocator)
+		self := states[c.object_id]
+		if self == nil do return
+		aid := field_string(self.fields, "agent")
+		if aid == "" do return
+		// Deleted agents cascade too: vanishing a binned object must take
+		// its binned agent along, not orphan the tombstone.
+		agent := states[aid]
+		if agent == nil || agent.type_key != "agent" do return
+		if field_string(agent.fields, "space_default") != "" do return
 		for _, s in states {
-			// Deleted rows cascade too: vanishing a binned object must
-			// take its binned agent along, not orphan the tombstone.
-			if s.type_key != "agent" do continue
-			if v, ok := fields_get(s.fields, "bound_object"); ok && v.kind == .String && v.str == c.object_id {
-				append(&agent_ids, strings.clone(s.id, context.temp_allocator))
-			}
+			if s.deleted || s.id == c.object_id || !object_has_own_agent(s.type_key) do continue
+			if field_string(s.fields, "agent") == aid do return // still someone's mind
 		}
-		for aid in agent_ids {
-			append(c.out, aid)
-			for _, s in states {
-				if s.type_key != "chat" do continue
-				// The agent's own holistic chat, not a shared pair chat.
-				if p, pok := fields_get(s.fields, "a2a_pair"); pok && p.kind == .String && p.str != "" do continue
-				if v, ok := fields_get(s.fields, "agent"); ok && v.kind == .String && v.str == aid {
-					append(c.out, strings.clone(s.id, context.temp_allocator))
-				}
+		append(c.out, strings.clone(aid, context.temp_allocator))
+		for _, s in states {
+			if s.type_key != "chat" do continue
+			// The agent's own holistic chat, not a shared pair chat.
+			if p, pok := fields_get(s.fields, "a2a_pair"); pok && p.kind == .String && p.str != "" do continue
+			if field_string(s.fields, "agent") == aid {
+				append(c.out, strings.clone(s.id, context.temp_allocator))
 			}
 		}
 	}, &ctx)

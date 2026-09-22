@@ -1,7 +1,7 @@
 /**
  * Conversation view: projects one conversation's blocks - the thread named by
- * (objectId, threadId), typically an agent's transcript on the object it is
- * bound to - into Anthropic messages. Ported from glon agent-conversation.ts
+ * (objectId, threadId), typically an agent's transcript on the object that
+ * names it - into Anthropic messages. Ported from glon agent-conversation.ts
  * (classify / filterToKept / repairToolPairs / groupIntoTurns /
  * mergeConsecutiveTurns / findCutIndex) with two OMP lifts:
  *   - in-view tool-output pruning valve (never mutates blocks)

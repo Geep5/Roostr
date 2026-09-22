@@ -13,7 +13,7 @@
 
 import { fetchObject, flag, iv, num, setField, str, sv, type ObjectJSON } from "./api";
 import { addConvBlock, postTo, type ConvRef } from "./conv";
-import { boundObjectContext } from "./spacemap";
+import { objectContext } from "./spacemap";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
 import { callLLM, isContextOverflowError } from "./llm";
@@ -106,7 +106,7 @@ export interface RunOptions {
 	spawn?: ToolContext["spawn"];
 	submitResult?: (content: string) => void;
 	systemSuffix?: string;
-	/** Scheduled/object work whose requirements are not the agent's own bound object. */
+	/** Scheduled/object work whose requirements are not the object this turn is about. */
 	requirementsObjectId?: string;
 	/** True when this turn answers another agent: agent_ask is withheld. */
 	a2aTurn?: boolean;
@@ -122,19 +122,22 @@ export interface SystemPart {
 	text: string;
 }
 
-async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts: RunOptions): Promise<SystemPart[]> {
-	const boundId = str(agent.fields, "bound_object");
+async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: ConversationView, opts: RunOptions): Promise<SystemPart[]> {
+	// The object this transcript is about: the object naming this agent
+	// (`object.agent`) when the thread lives on it; nothing when the thread is
+	// the agent's own page or its space (those get the kind's standing prompt).
+	const objectId = host.id === agent.id || host.typeKey === "channel" ? "" : host.id;
 	// The kind's standing prompt is the default a blank `system` falls back to.
-	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || (boundId ? OBJECT_AGENT_PRIMER : agentKind(str(agent.fields, "kind")).system) }];
-	if (boundId) {
+	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || (objectId ? OBJECT_AGENT_PRIMER : agentKind(str(agent.fields, "kind")).system) }];
+	if (objectId) {
 		try {
-			const bc = await boundObjectContext(boundId, str(agent.fields, "channel"));
+			const bc = await objectContext(objectId, str(agent.fields, "channel"));
 			parts.push({ label: "Your object", text: bc.object });
 			parts.push({ label: "Your type", text: bc.type });
 			parts.push({ label: "Connections", text: bc.connections });
 			parts.push({ label: "Space map", text: bc.space });
 		} catch (err) {
-			console.error(`[harness] bound context failed for ${agent.id.slice(0, 8)}:`, err);
+			console.error(`[harness] object context failed for ${agent.id.slice(0, 8)}:`, err);
 		}
 	}
 	if (opts.systemSuffix) parts.push({ label: "Subagent template", text: opts.systemSuffix });
@@ -148,7 +151,7 @@ async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts:
 	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
 	const credsLine = credentialsPromptLine();
 	if (credsLine) parts.push({ label: "Credentials", text: credsLine });
-	const requirementsId = opts.requirementsObjectId ?? boundId;
+	const requirementsId = opts.requirementsObjectId ?? objectId;
 	try {
 		const declared = requirementsId ? authRequirementsOf((await fetchObject(requirementsId)).fields) : [];
 		parts.push({ label: "Auth contract", text: authContractPrompt(await localAuthRegistry(), await resolveAuthRequirements(declared)) });
@@ -156,7 +159,7 @@ async function buildSystemParts(agent: ObjectJSON, view: ConversationView, opts:
 		console.error("[harness] auth contract failed:", err instanceof Error ? err.message : err);
 	}
 	try {
-		const elsewhere = await remoteCapabilitiesSection(boundId);
+		const elsewhere = await remoteCapabilitiesSection(objectId);
 		if (elsewhere) parts.push({ label: "Capabilities elsewhere", text: elsewhere });
 	} catch (err) {
 		console.error("[harness] remote capabilities failed:", err instanceof Error ? err.message : err);
@@ -212,7 +215,7 @@ export async function publishSystemSnapshot(agentId: string, ref: ConvRef): Prom
 		const agent = await fetchObject(agentId);
 		const conv = ref.objectId === agentId ? agent : await fetchObject(ref.objectId);
 		const view = buildConversationView(conv, agentId, tokenRatio(agent), ref.threadId);
-		await publishSystemParts(agentId, await buildSystemParts(agent, view, {}), tokenRatio(agent));
+		await publishSystemParts(agentId, await buildSystemParts(agent, conv, view, {}), tokenRatio(agent));
 	} catch (err) {
 		console.error(`[harness] prompt snapshot failed for ${agentId.slice(0, 8)}:`, err);
 	}
@@ -246,7 +249,9 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		const agent = await fetchObject(agentId);
 		const conv = ref.objectId === agentId ? agent : await fetchObject(ref.objectId);
 		ctx.channelId = str(agent.fields, "channel");
-		ctx.boundObject = str(agent.fields, "bound_object") || str(agent.fields, "space_default") || undefined;
+		// The object this turn is about is where its transcript lives: the
+		// object naming this agent, or its space - never the agent's own page.
+		ctx.boundObject = ref.objectId === agentId ? undefined : ref.objectId;
 		// Same checkout the Workspace prompt section describes; a missing
 		// directory means home, never a spawn failure.
 		const repo = str(agent.fields, "repo_path");
@@ -259,7 +264,7 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		const tools = toolDefs(opts.template ?? "", ctx.depth, ctx.allowAsk);
 
 		let view = buildConversationView(conv, agentId, ratio, ref.threadId);
-		const systemParts = await buildSystemParts(agent, view, opts);
+		const systemParts = await buildSystemParts(agent, conv, view, opts);
 		const system = systemParts.map((p) => p.text).join("\n\n");
 		// Subagent prompts are per-spawn and ephemeral; only a top-level
 		// served agent's prompt is worth publishing for remote inspection.

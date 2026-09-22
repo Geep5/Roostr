@@ -88,7 +88,7 @@ export async function servesHere(objectId: string): Promise<boolean> {
 	return s.machineId === me || (s.machineId === "" && s.reason === "space");
 }
 
-/** An agent follows its bound object, its space, or its own unbound row. */
+/** An agent is served where its home is: its space, else its own row. */
 export function agentServedHere(agent: { id: string; fields: Record<string, ValueJSON> }): Promise<boolean> {
 	return servesHere(agentSubject(agent));
 }

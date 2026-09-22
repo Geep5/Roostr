@@ -384,16 +384,24 @@ object_json_names_its_conversations :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-mail_object :: proc(t: ^testing.T, v: ^Vault, kind := "note", space := "", binding := "", space_default := "") -> string {
+mail_object :: proc(t: ^testing.T, v: ^Vault, kind := "note", space := "", space_default := "") -> string {
 	request := params({"type_key", kind})
 	fields := jobj()
 	fields["channel"] = value_to_json(string_value(space))
-	if binding != "" do fields["bound_object"] = value_to_json(string_value(binding))
 	if space_default != "" do fields["space_default"] = value_to_json(string_value(space_default))
 	request["fields"] = json.Object(fields)
 	result, err := apply(v, "create", request)
 	testing.expect(t, err == "", err)
 	return json_str(result, "id")
+}
+
+/** `object.agent = agent`: the object names the agent that answers for it. */
+@(private = "file")
+mail_assign :: proc(t: ^testing.T, v: ^Vault, object_id, agent_id: string) {
+	request := params({"object_id", object_id}, {"key", "agent"})
+	request["value"] = value_to_json(string_value(agent_id))
+	_, err := apply(v, "set_field", request)
+	testing.expect(t, err == "", err)
 }
 
 @(private = "file")
@@ -605,7 +613,8 @@ mailbox_human_self_groups_and_agent_binding_boundaries :: proc(t: ^testing.T) {
 	space := mail_object(t, &v, "channel")
 	other_space := mail_object(t, &v, "channel")
 	source := mail_object(t, &v, "note", space)
-	agent := mail_object(t, &v, "agent", space, source)
+	agent := mail_object(t, &v, "agent", space)
+	mail_assign(t, &v, source, agent)
 	target := mail_object(t, &v, "note", space)
 	foreign_object := mail_object(t, &v, "note", other_space)
 	message := mail_envelope("human-self", source, Agent_Endpoint{object_id = source, agent_id = agent}, Agent_Endpoint{object_id = target})
@@ -641,7 +650,7 @@ mailbox_human_self_groups_and_agent_binding_boundaries :: proc(t: ^testing.T) {
 	append(&message.recipients, Agent_Endpoint{object_id = target})
 	_, duplicate_error := mail_send(&v, message)
 	testing.expect(t, duplicate_error != "", "recipient snapshot is distinct by object")
-	default_agent := mail_object(t, &v, "agent", space, "", space)
+	default_agent := mail_object(t, &v, "agent", space, space)
 	space_message := mail_envelope("space-default", space, Agent_Endpoint{object_id = target})
 	space_message.sender.agent_id = default_agent
 	_, default_error := mail_send(&v, space_message)

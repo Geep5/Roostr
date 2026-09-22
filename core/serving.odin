@@ -20,8 +20,9 @@ package core
 //   capability          smallest machine_id among capable machines
 //   unsatisfied         nothing capable → the space default, and a holdup
 //
-// An agent follows its object: hosts resolve `agent.bound_object` (or the
-// agent object itself) through this same function.
+// An agent has no server of its own: the object that names it (`object.agent`)
+// resolves through this same function, and the agent object itself for its
+// own transcript.
 
 import "core:encoding/json"
 

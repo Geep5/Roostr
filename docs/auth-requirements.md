@@ -50,7 +50,7 @@ Whether the task may perform an external write/action. Reads and preparation do 
 
 ## Resolution
 
-For every scheduled or object-bound turn, the harness resolves `requires_auth` against local state:
+For every scheduled or object-served turn, the harness resolves `requires_auth` against local state:
 
 - credential catalog (`x`, `matcherino`, `linkedin`);
 - integration state (`browserless`);

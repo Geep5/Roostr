@@ -177,13 +177,22 @@ export async function buildSpaceMap(spaceId: string): Promise<string> {
 	const viewLines = [...views, ...collections].map((v) => `${str(v.fields, "name") || "Untitled"} (${viewSummary(v)})`);
 	if (viewLines.length) lines.push(`Saved views — the human's own groupings; query_run any of them:\n  ${viewLines.join("\n  ")}`);
 
+	// Objects that name an agent: "agent of X" lines, one per agent.
+	const objectsOf = new Map<string, string[]>();
+	const rows = await queryAll({ filters: [sf, { key: "agent", condition: "notEmpty" }] });
+	for (const r of rows) {
+		const aid = str(r.fields, "agent");
+		if (!aid) continue;
+		const list = objectsOf.get(aid) ?? [];
+		list.push(str(r.fields, "name") || r.id.slice(0, 8));
+		objectsOf.set(aid, list);
+	}
 	const agentLines: string[] = [];
 	for (const a of agents) {
 		if (str(a.fields, "spawn_parent")) continue;
-		const bound = str(a.fields, "bound_object");
-		if (bound) {
-			const target = await fetchObject(bound).catch(() => null);
-			agentLines.push(`${str(a.fields, "name")} — agent of "${target ? str(target.fields, "name") : bound.slice(0, 8)}"`);
+		const named = objectsOf.get(a.id);
+		if (named?.length) {
+			agentLines.push(`${str(a.fields, "name")} — agent of ${named.map((n) => `"${n}"`).join(", ")}`);
 		} else {
 			const types_ = strItems(a.fields["responsible_types"]);
 			agentLines.push(`${str(a.fields, "name")} — space agent${types_.length ? ` for ${types_.join(", ")}` : ""}`);
@@ -229,16 +238,12 @@ export async function buildNeighborhood(objectId: string, spaceId: string): Prom
 	const names = new Map<string, { name: string; type: string }>();
 	for (const r of rows) names.set(r.id, { name: r.name ?? str(r.fields, "name") ?? r.id.slice(0, 8), type: r.typeKey });
 
-	// Agents bound to neighbors: askable minds.
-	const agents = await queryAll({ type: "agent", filters: [sf] });
-	const boundOf = new Map<string, string>();
-	for (const a of agents) {
-		const b = str(a.fields, "bound_object");
-		if (b) boundOf.set(b, str(a.fields, "name"));
-	}
+	// Neighbors that name an agent: askable minds.
+	const hasAgent = new Set<string>();
+	for (const r of rows) if (str(r.fields, "agent")) hasAgent.add(r.id);
 	const tag = (id: string): string => {
 		const n = names.get(id);
-		const agent = boundOf.has(id) ? ", has agent" : "";
+		const agent = hasAgent.has(id) ? ", has agent" : "";
 		return n ? `"${n.name}" (${n.type}${agent})` : id.slice(0, 8);
 	};
 	const relLabel = (key: string): string => {
@@ -286,7 +291,7 @@ export async function buildNeighborhood(objectId: string, spaceId: string): Prom
 	return lines.length ? lines.join("\n") : "(no connections yet)";
 }
 
-// ── field summary for the bound object itself ─────────────────────
+// ── field summary for the conversation's object itself ────────────
 
 export async function buildObjectSummary(obj: ObjectJSON, spaceId: string): Promise<string> {
 	const rels = await relationDefs(spaceId);
@@ -314,19 +319,19 @@ export async function buildObjectSummary(obj: ObjectJSON, spaceId: string): Prom
 	return lines.join("\n");
 }
 
-// ── bound-context assembly, memoized per turn window ──────────────
+// ── object-context assembly, memoized per turn window ─────────────
 
-export interface BoundContext {
+export interface ObjectContext {
 	object: string;
 	type: string;
 	connections: string;
 	space: string;
 }
 
-const memo = new Map<string, { at: number; ctx: BoundContext }>();
+const memo = new Map<string, { at: number; ctx: ObjectContext }>();
 const MEMO_TTL = 30_000;
 
-export async function boundObjectContext(objectId: string, spaceId: string): Promise<BoundContext> {
+export async function objectContext(objectId: string, spaceId: string): Promise<ObjectContext> {
 	const hit = memo.get(objectId);
 	if (hit && Date.now() - hit.at < MEMO_TTL) return hit.ctx;
 	const obj = await fetchObject(objectId);

@@ -83,15 +83,16 @@ the owner requires paired-human approval before local side effects.
 ### Agents follow their objects
 
 ```
-server(agent) = resolve_server(agent.bound_object ?? agent, ...)
+server(obj) where obj.agent = a  →  resolve_server(a, ...)
 ```
 
-A bound agent (minted from an object's discussion) runs where its object
-runs. An unbound agent (named by `assignee` on many objects) is itself an
-object and resolves on its own row. `ScheduleHost.served(agentId)` in
-`harness/src/index.ts` becomes `server(agent) == me`; `spaceMine` is
-deleted and its callers (mint gate, drive gate, stand-down, roster
-adoption) take the object-level answer.
+An object names the agent that answers for it via its `agent` field. That
+agent is itself an object and resolves on its own row; the object the
+agent serves then runs wherever the agent resolves. The binding lives on
+the object (not on the agent), so an agent can serve many objects.
+`ScheduleHost.served(agentId)` in `harness/src/index.ts` becomes
+"agent resolves to me, or any object with `agent` set to it resolves to
+me"; the serving gate resolves `obj.agent ?? obj` through the engine.
 
 ### Recurring objects
 

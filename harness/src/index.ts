@@ -24,10 +24,11 @@ import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing,
 import { publishDescriptors } from "./descriptors";
 import { validateBindings } from "./workspace";
 import { startDiscordManager } from "./discord";
-import { chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, isAgentAuthor, pendingMessages, setMark } from "./surfaces";
-import { agentSubject, agentThread, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
+import { frameMessage, ingestIntoChat, ingestedOriginBlocks, pendingMessages, setMark } from "./surfaces";
+import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { migrateExchanges } from "./migrate-exchanges";
+import { migrateBoundAgents } from "./migrate-bound";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
 import { arm as armScheduler, startScheduler } from "./schedule";
@@ -106,13 +107,13 @@ async function setup(): Promise<void> {
 
 interface Served {
 	agentId: string;
-	/** The agent's own transcript: a thread on the object it is about. */
+	/** The agent's home transcript: on its space (a default) or its own page. Turns on objects that name it run on those objects. */
 	conv: ConvRef;
 	channelId: string;
 	/** Type keys this agent is responsible for; "*" = everything else. Its kind's list when the object has none. */
 	types: string[];
-	/** Object-bound agents: the one object this agent belongs to. */
-	bound: string;
+	/** The space this agent is the default mind of, or "". */
+	spaceDefault: string;
 	name: string;
 	icon: string;
 }
@@ -141,31 +142,21 @@ export const agentTurnStatus = new Map<string, AgentTurnStatus>();
 let defaultChannelId = "";
 
 /**
- * Prepare one agent for serving (chat ensured, channel pinned), or null
- * when this machine does not serve it: per-object serving
- * (docs/object-serving.md) resolves the agent's bound object, else its
- * own row. Null is the stand-down every caller honours.
+ * Prepare one agent for serving (transcript claimed, channel pinned), or
+ * null when this machine does not serve it (per-object serving,
+ * docs/object-serving.md) - the stand-down every caller honours.
+ * `forObject`: the agent is wanted because this machine serves an object
+ * that names it (`object.agent`), so the object's server answers even when
+ * the agent's own page is served elsewhere.
  */
-async function buildServedOne(agentId: string, defaultChannel: string): Promise<Served | null> {
+async function buildServedOne(agentId: string, defaultChannel: string, forObject = false): Promise<Served | null> {
 	const agent = await fetchObject(agentId);
 	if (str(agent.fields, "external_responder")) return null;
-	if (!(await agentServedHere(agent))) {
+	if (!forObject && !(await agentServedHere(agent))) {
 		console.log(`[harness] standing down for ${str(agent.fields, "name") || agentId.slice(0, 8)} - served by another machine`);
 		return null;
 	}
 	let channelId = str(agent.fields, "channel");
-	// A bound agent lives wherever its OBJECT lives: space migrations
-	// re-stamp objects, and the agent must follow or it becomes a ghost
-	// of a vanished space.
-	const boundId = str(agent.fields, "bound_object");
-	if (boundId) {
-		const obj = await fetchObject(boundId).catch(() => null);
-		const objChannel = obj ? str(obj.fields, "channel") : "";
-		if (objChannel && objChannel !== channelId) {
-			channelId = objChannel;
-			await setField(agentId, "channel", sv(objChannel));
-		}
-	}
 	if (!channelId) {
 		// Never let an agent float on channel ordering: bind it to the
 		// current default PERMANENTLY. (An ordering flip once moved every
@@ -173,19 +164,26 @@ async function buildServedOne(agentId: string, defaultChannel: string): Promise<
 		channelId = defaultChannel;
 		if (channelId) await setField(agentId, "channel", sv(channelId));
 	}
-	// The transcript lives on the object the agent is about (its bound
-	// object, else the agent object itself), so one object carries its work
-	// and every conversation about it.
 	const conv = await agentThread(agent);
 	return {
 		agentId,
 		conv,
 		channelId,
 		types: responsibleTypes(agent),
-		bound: str(agent.fields, "bound_object"),
+		spaceDefault: str(agent.fields, "space_default"),
 		name: str(agent.fields, "name") || agentId.slice(0, 8),
 		icon: str(agent.fields, "iconEmoji"),
 	};
+}
+
+/**
+ * The transcript a turn on `surface` runs in: on the object itself when it
+ * names this agent (`object.agent`), so one object carries its work and every
+ * conversation about it; else the agent's home.
+ */
+async function transcriptFor(s: Served, surface: ObjectJSON): Promise<ConvRef> {
+	if (str(surface.fields, "agent") !== s.agentId) return s.conv;
+	return agentThreadOn(await fetchObject(s.agentId), surface.id);
 }
 
 /** The object's own list when set (even empty), else the kind's default. */
@@ -218,34 +216,35 @@ async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
 // event is safe because the drain loop re-checks after the turn.
 const ingesting = new Set<string>();
 
-/** Fetch → pending → advance mark → copy the human's words into the transcript. */
-async function ingestSurface(s: Served, origin: ConvRef): Promise<boolean> {
+/** Fetch → pending → advance mark → copy the human's words into the transcript. Returns the transcript to run the turn in, or null when nothing was ingested. */
+async function ingestSurface(s: Served, origin: ConvRef): Promise<ConvRef | null> {
 	const lock = convKey(origin);
-	if (ingesting.has(lock)) return false;
+	if (ingesting.has(lock)) return null;
 	ingesting.add(lock);
 	try {
 		const surface = await fetchObject(origin.objectId);
 		// Only a human discussion is a surface. Addressed exchanges have
 		// durable processing receipts instead of local discussion watermarks.
 		const pending = await pendingMessages(surface, origin, s.agentId);
-		if (pending.length === 0) return false;
+		if (pending.length === 0) return null;
 		await setMark(origin, pending[pending.length - 1].blockId);
 		// Idempotence by identity, not marks: a message whose copy is already
 		// in the transcript was handled - by this machine before a mark was
 		// lost, or by ANOTHER machine whose reply hasn't synced into our view
 		// yet (the spirit-dragon double-ingest). Skip it; an empty remainder
 		// means no turn at all.
-		const transcript = await fetchObject(s.conv.objectId).catch(() => null);
+		const conv = await transcriptFor(s, surface);
+		const transcript = conv.objectId === surface.id ? surface : await fetchObject(conv.objectId).catch(() => null);
 		// No transcript object in view means no idempotence check is possible;
 		// ingesting blind is how the double-post happened, so stand down and
 		// let the next event retry.
-		if (!transcript) return false;
-		const copied = ingestedOriginBlocks(transcript, s.conv);
+		if (!transcript) return null;
+		const copied = ingestedOriginBlocks(transcript, conv);
 		const fresh = pending.filter((p) => !copied.has(p.blockId));
-		if (fresh.length === 0) return false;
+		if (fresh.length === 0) return null;
 		const framed = frameMessage(surface, origin, fresh);
-		await ingestIntoChat(s.conv, origin, fresh[fresh.length - 1].author || "user", framed, fresh[fresh.length - 1].blockId);
-		return true;
+		await ingestIntoChat(conv, origin, fresh[fresh.length - 1].author || "user", framed, fresh[fresh.length - 1].blockId);
+		return conv;
 	} finally {
 		ingesting.delete(lock);
 	}
@@ -256,8 +255,9 @@ async function ingestSurface(s: Served, origin: ConvRef): Promise<boolean> {
  * where asked.
  */
 async function handleSurface(s: Served, surface: ConvRef): Promise<boolean> {
-	if (!(await ingestSurface(s, surface))) return false;
-	const reply = await runTurn(s.agentId, s.conv, { spawn: spawnSubagent });
+	const conv = await ingestSurface(s, surface);
+	if (!conv) return false;
+	const reply = await runTurn(s.agentId, conv, { spawn: spawnSubagent });
 	if (reply.trim()) {
 		await postTo(surface, reply.trim(), s.agentId);
 	}
@@ -280,33 +280,30 @@ async function serve(): Promise<void> {
 	await convergeAgentKinds();
 	const migration = await migrateExchanges({ apply: true });
 	console.log("[harness] exchange migration:", JSON.stringify(migration));
+	// bound_object -> object.agent, after the exchange migration has read
+	// the legacy field for the last time.
+	console.log("[harness] bound-agent migration:", JSON.stringify(await migrateBoundAgents()));
 	// Checkout bindings: statuses refresh at boot and on every UI write.
 	validateBindings().catch((err) => console.error("[harness] binding validation failed:", err?.message ?? err));
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
 
-	// ── Object-bound agents ─────────────────────────────────────────
-	// objectId → its bound agent. Minted ONLY from a human discussion
-	// message; agents can never create other minds. Lazily adopted into
-	// `served` when their surface first stirs.
-	const boundBy = new Map<string, string>();
-	// Objects whose bound agent names an external responder: the harness
-	// stays silent on their discussion (no serving, no adoption) so the
-	// external bot is the only voice. The field travels with the vault,
-	// so every machine honors it.
-	const externallyAnswered = new Set<string>();
+	// ── External responders ─────────────────────────────────────────
+	// Agents another bot answers for: the harness stays silent on every
+	// object that names one (`object.agent`) - no serving, no adoption - so
+	// the external bot is the only voice. The field travels with the vault,
+	// so every machine honors it. Kept current from agent object events.
+	const externalAgents = new Set<string>();
 	for (const a of await queryAll({ type: "agent" })) {
-		const b = str(a.fields, "bound_object");
-		if (!b) continue;
-		boundBy.set(b, a.id);
-		if (str(a.fields, "external_responder")) externallyAnswered.add(b);
+		if (str(a.fields, "external_responder")) externalAgents.add(a.id);
 	}
-	console.log(`[harness] ${boundBy.size} object-bound agent(s) known`);
+	const externallyAnswered = (obj: ObjectJSON): boolean => externalAgents.has(str(obj.fields, "agent"));
+	console.log(`[harness] ${externalAgents.size} externally answered agent(s) known`);
 
 	// ── Default space agent: every space served here gets one mind of its
 	// own, so "ask the space" works before any object has an agent. Marked
-	// space_default = channel id; responsible_types stays empty so it
-	// answers its own chat and never steals surfaces from bound agents.
+	// space_default = channel id; responsible_types stays empty so it takes
+	// only what no other agent claims - every object whose `agent` is unset.
 	// Its space_activity tool is how it knows what's new when a human
 	// opens the conversation cold. ──
 	async function ensureSpaceAgents(): Promise<void> {
@@ -344,65 +341,6 @@ async function serve(): Promise<void> {
 	}
 	await ensureSpaceAgents();
 
-	/**
-	 * Kinds that never get their own mind.
-	 *
-	 * A machine object is NOT one of them: the resolver answers "self" for
-	 * it, so the only harness that can mint or answer is the box the object
-	 * describes - which is the point. That is how "install browserless" or
-	 * "why did last night's run fail" get answered by the machine that
-	 * knows, rather than by whichever agent happened to be nearby.
-	 */
-	const UNMINTABLE = new Set(["agent", "channel", "relation", "type", "template", "skill", "descriptor", "install", "program", "typescript", "json", "proto", "pinned_fact", "milestone"]);
-
-	/** Only an ordinary human discussion can cause an object agent to be minted. */
-	function lastMessageIsHumanIn(obj: ObjectJSON, ref: ConvRef): boolean {
-		const msgs = chatBlocks(obj, ref);
-		if (msgs.length === 0) return false;
-		const last = msgs[msgs.length - 1].block.content.custom?.meta ?? {};
-		if (last["origin"]) return false;
-		const author = last["author"] ?? "";
-		return !isAgentAuthor(author);
-	}
-
-	/** Object ids with a mint in flight. Claimed synchronously by the caller,
-	 * because the decision to mint and the create that follows are separated
-	 * by an await while one human message arrives as several commit events. */
-	const minting = new Set<string>();
-
-	async function mintBoundAgent(obj: ObjectJSON, channelId: string): Promise<string> {
-		// Ask the DAG before creating. `boundBy` only knows what this process
-		// has seen, and another machine can mint for the same object between
-		// our check and this call - twin agents on one object then answer
-		// every message twice and eventually answer each other.
-		const existing = await queryAll({ type: "agent", filters: [{ key: "bound_object", condition: "equal", value: obj.id }] });
-		if (existing.length > 0) {
-			const keep = existing.map((a) => a.id).sort()[0]; // every device picks the same twin
-			boundBy.set(obj.id, keep);
-			return keep;
-		}
-		// Model follows the space's existing agents so quality is uniform.
-		const sibling = [...served.values()].find((x) => x.channelId === channelId);
-		const model = sibling ? str((await fetchObject(sibling.agentId)).fields, "model") : "";
-		const name = str(obj.fields, "name") || obj.typeKey;
-		const { id } = await createObject(name, "agent", {
-			channel: sv(channelId),
-			bound_object: sv(obj.id),
-			kind: sv("assistant"),
-			iconEmoji: sv(str(obj.fields, "iconEmoji") || "🛰️"),
-			model: sv(model || agentKind("assistant").model),
-		});
-		boundBy.set(obj.id, id);
-		// Minting is also an assignment: this machine answers for what it
-		// minted, and the agent page shows it enabled here. Required now that
-		// the bound path honours the roster - otherwise a freshly minted agent
-		// would be served by nobody after the next restart.
-		agents.add(id);
-		await setEnabled(id, true);
-		console.log(`[harness] minted agent for "${name}" (${obj.id.slice(0, 8)}) → ${id.slice(0, 8)}`);
-		return id;
-	}
-
 	const busy = new Set<string>();
 	const active = new Map<string, string>(); // agentId → convKey of the in-flight turn
 	const dirty = new Map<string, Set<string>>(); // agentId → convKeys awaiting a turn
@@ -419,14 +357,45 @@ async function serve(): Promise<void> {
 
 	/**
 	 * An agent this machine may take into its roster on first contact: a
-	 * bound agent (follows its object), a space default (follows its
-	 * space), or one assigned here by `served_by` (setup from any client).
+	 * space default (follows its space) or one assigned here by `served_by`
+	 * (setup from any client). Agents named by objects served here are
+	 * adopted per object instead (`adoptForObject`).
 	 */
 	function adoptable(agent: ObjectJSON): boolean {
-		return !!str(agent.fields, "bound_object") || !!str(agent.fields, "space_default") || str(agent.fields, "served_by") === me;
+		return !!str(agent.fields, "space_default") || str(agent.fields, "served_by") === me;
 	}
 
-	async function mailboxAgent(endpoint: { objectId: string; agentId: string }): Promise<Served | null> {
+	/**
+	 * The agent an object names (`object.agent`), served here because this
+	 * machine serves the object - adopted into the local roster on first
+	 * contact, so a space takeover needs no per-agent toggling. Null when
+	 * the pointer is dangling or another bot answers for the agent.
+	 */
+	async function adoptForObject(obj: ObjectJSON): Promise<Served | null> {
+		const aid = str(obj.fields, "agent");
+		if (!aid || externalAgents.has(aid)) return null;
+		const known = served.get(aid);
+		if (known) return known;
+		const agent = await fetchObject(aid).catch(() => null);
+		if (agent?.typeKey !== "agent") return null;
+		if (!agents.has(aid)) {
+			agents.add(aid);
+			await setEnabled(aid, true);
+			console.log(`[harness] adopted ${str(agent.fields, "name") || aid.slice(0, 8)} (${aid.slice(0, 8)}) - this machine serves "${str(obj.fields, "name") || obj.id.slice(0, 8)}"`);
+		}
+		try {
+			const one = await buildServedOne(aid, defaultChannelId, true);
+			if (one) served.set(aid, one);
+			return one;
+		} catch (err) {
+			console.error(`[harness] failed to adopt agent ${aid.slice(0, 8)} for ${obj.id.slice(0, 8)}:`, err);
+			return null;
+		}
+	}
+
+	/** The agent behind a mailbox endpoint: the agent's home, or an object that names it. */
+	async function mailboxAgent(object: ObjectJSON, endpoint: { objectId: string; agentId: string }): Promise<Served | null> {
+		if (str(object.fields, "agent") === endpoint.agentId) return adoptForObject(object);
 		const agent = await fetchObject(endpoint.agentId);
 		if (agent.typeKey !== "agent" || str(agent.fields, "spawn_parent") || str(agent.fields, "external_responder")) return null;
 		if (agentSubject(agent) !== endpoint.objectId || !(await agentServedHere(agent))) return null;
@@ -436,7 +405,7 @@ async function serve(): Promise<void> {
 			agents.add(agent.id);
 		}
 		const known = served.get(agent.id);
-		if (known?.conv.objectId === endpoint.objectId) return known;
+		if (known) return known;
 		const one = await buildServedOne(agent.id, defaultChannelId);
 		if (one) served.set(agent.id, one);
 		return one;
@@ -448,8 +417,9 @@ async function serve(): Promise<void> {
 		if (busy.has(s.agentId)) return;
 		const entry = pendingInbox(object, s.agentId)[0];
 		if (!entry) return;
+		const conv = await transcriptFor(s, object);
 		await withTurn(s, { objectId: object.id, threadId: entry.threadId }, () =>
-			processInboxMessage(s.agentId, s.conv, entry, inboxOwner));
+			processInboxMessage(s.agentId, conv, entry, inboxOwner));
 	}
 
 	async function pumpMailbox(objectId: string, snapshot?: ObjectJSON): Promise<void> {
@@ -475,7 +445,7 @@ async function serve(): Promise<void> {
 			// An external responder owns this object's inbox as well: it claims,
 			// answers and delivers on its own. Outgoing copies were still pumped
 			// above, and a harness restart must not mark its claims interrupted.
-			if (externallyAnswered.has(objectId)) return;
+			if (externallyAnswered(object)) return;
 			if (object.typeKey === "install") {
 				await receiveCapabilityRequests(object, inboxOwner);
 				return;
@@ -493,7 +463,7 @@ async function serve(): Promise<void> {
 				}
 			}
 			for (const endpoint of recipients.values()) {
-				const s = await mailboxAgent(endpoint);
+				const s = await mailboxAgent(object, endpoint);
 				if (s) void driveInbox(s, object).catch((error) => console.error("[harness] inbox turn:", error));
 			}
 		} catch (error) {
@@ -614,7 +584,7 @@ async function serve(): Promise<void> {
 	}
 
 	async function drive(s: Served, surface: ConvRef): Promise<void> {
-		if (!(await servesHere(s.conv.objectId))) return;
+		if (!(await servesHere(surface.objectId))) return;
 		const key = convKey(surface);
 		if (busy.has(s.agentId)) {
 			if (key === active.get(s.agentId)) {
@@ -657,23 +627,12 @@ async function serve(): Promise<void> {
 
 	/**
 	 * The channel agent responsible for a type: explicit claim wins, else the
-	 * "*" (everything-else) agent, else a sole unconfigured agent handles all
-	 * (single-agent channels keep working without any assignment).
+	 * "*" (everything-else) agent, else the space's default mind - so an
+	 * object with no agent of its own is still answered, by the space.
 	 */
 	function responsibleFor(channelId: string, typeKey: string): Served | undefined {
 		const inChannel = [...served.values()].filter((s) => s.channelId === channelId);
-		const explicit = inChannel.find((s) => s.types.includes(typeKey));
-		if (explicit) return explicit;
-		const rest = inChannel.find((s) => s.types.includes("*"));
-		if (rest) return rest;
-		// A bound agent speaks for its own object, never for the space. When it
-		// was the only agent served here, this fallback handed it every new
-		// object in the space - so a person's agent answered a fresh task, and
-		// the task never got the agent of its own that minting would have given
-		// it. Two machines each with a different lone agent then answered the
-		// same task, and the pair talked past the human in their own thread.
-		if (inChannel.length === 1 && inChannel[0].types.length === 0 && !inChannel[0].bound) return inChannel[0];
-		return undefined;
+		return inChannel.find((s) => s.types.includes(typeKey)) ?? inChannel.find((s) => s.types.includes("*")) ?? inChannel.find((s) => s.spaceDefault === channelId);
 	}
 
 	/** Route an SSE object event to the agent whose surface it is. */
@@ -699,16 +658,15 @@ async function serve(): Promise<void> {
 			}
 			return; // agent objects are not surfaces
 		}
-		// Any agent object event (incl. one minted on another machine)
-		// keeps the bound index current - and an agent assigned here by
-		// `served_by` (a /setup from any client) is adopted on sight, so
-		// its first message needs no restart.
+		// An agent assigned here by `served_by` (a /setup from any client) is
+		// adopted on sight, so its first message needs no restart; any agent
+		// event keeps the external-responder set current.
 		if (!agents.has(objectId)) {
 			const maybe = await fetchObject(objectId).catch(() => null);
 			if (maybe?.typeKey === "agent") {
-				const b = str(maybe.fields, "bound_object");
-				if (b) boundBy.set(b, objectId);
-				if (!b && !str(maybe.fields, "spawn_parent") && str(maybe.fields, "served_by") === me) {
+				if (str(maybe.fields, "external_responder")) externalAgents.add(objectId);
+				else externalAgents.delete(objectId);
+				if (!str(maybe.fields, "spawn_parent") && str(maybe.fields, "served_by") === me) {
 					agents.add(objectId);
 					await setEnabled(objectId, true);
 					const one = await buildServedOne(objectId, defaultChannelId).catch((err) => {
@@ -759,73 +717,26 @@ async function serve(): Promise<void> {
 		if (obj.typeKey === "agent") return; // other agents' brains
 		const channelId = objectId === defaultChannelId || obj.typeKey === "channel" ? objectId : str(obj.fields, "channel") || defaultChannelId;
 
-		// ── Bound agent takes its own object's surface - if it is ours. ──
-		const boundAgent = boundBy.get(objectId);
-		if (boundAgent && externallyAnswered.has(objectId)) return;
-		if (boundAgent) {
-			// The object's server answers, nobody else - per-object serving
-			// replaces per-agent adoption races with one synced fact.
+		// ── The object's own agent (`object.agent`) answers - if the object
+		// is ours. The object's server answers, nobody else: per-object
+		// serving replaces per-agent adoption races with one synced fact. ──
+		if (str(obj.fields, "agent")) {
+			if (externallyAnswered(obj)) return;
 			if (!(await servesHere(objectId))) return;
-			// Serving the space means serving ALL its bound agents: a takeover
-			// adopts them into the local roster on first contact, so transfer
-			// needs no per-agent toggling.
-			if (!agents.has(boundAgent)) {
-				agents.add(boundAgent);
-				await setEnabled(boundAgent, true);
-				console.log(`[harness] adopted bound agent ${boundAgent.slice(0, 8)} - this machine serves its object`);
+			const s2 = await adoptForObject(obj);
+			if (s2) {
+				const pending2 = await pendingMessages(obj, humanRef(obj.id), s2.agentId);
+				if (pending2.length > 0) void drive(s2, humanRef(obj.id));
+				return;
 			}
-			let s2 = served.get(boundAgent);
-			if (!s2) {
-				try {
-					const built = await buildServedOne(boundAgent, defaultChannelId);
-					if (!built) return;
-					s2 = built;
-					served.set(boundAgent, s2);
-				} catch (err) {
-					console.error(`[harness] failed to adopt bound agent ${boundAgent.slice(0, 8)}:`, err);
-					return;
-				}
-			}
-			const pending2 = await pendingMessages(obj, humanRef(obj.id), s2.agentId);
-			if (pending2.length > 0) void drive(s2, humanRef(obj.id));
-			return;
+			// A dangling pointer falls through: the space answers as if unset.
 		}
 
-		// ── Explicitly responsible space agent answers, as before. ──
+		// ── Else the responsible space agent (by type, else the default). ──
 		const s = responsibleFor(channelId, obj.typeKey);
-		if (s && !(await servesHere(s.bound || s.agentId))) return;
-		if (s) {
-			const pending = await pendingMessages(obj, humanRef(obj.id), s.agentId);
-			if (pending.length > 0) void drive(s, humanRef(obj.id));
-			return;
-		}
-
-		// ── Nobody claims it: a HUMAN message on a discussable object
-		// mints the object's own agent and serves this very message. ──
-		if (UNMINTABLE.has(obj.typeKey)) return;
-		// Only the object's server mints - other machines stay silent, so
-		// a brand-new object gets exactly one agent.
-		if (!(await servesHere(objectId))) return;
-		// A stub read (no type) would mint a nameless agent stamped to the
-		// default space instead of the object's own - and a bound agent in
-		// the wrong space cannot even read the object it speaks for.
-		if (!obj.typeKey) return;
-		if (!lastMessageIsHumanIn(obj, humanRef(obj.id))) return;
-		// Claim the object before the first await: one message arrives as
-		// several events, and every one of them reaches this line.
-		if (minting.has(objectId)) return;
-		minting.add(objectId);
-		try {
-			const minted = await mintBoundAgent(obj, channelId);
-			const s3 = served.get(minted) ?? (await buildServedOne(minted, defaultChannelId));
-			if (!s3) return;
-			served.set(minted, s3);
-			void publishSystemSnapshot(s3.agentId, s3.conv);
-			const pending3 = await pendingMessages(obj, humanRef(obj.id), s3.agentId);
-			if (pending3.length > 0) void drive(s3, humanRef(obj.id));
-		} finally {
-			minting.delete(objectId);
-		}
+		if (!s || !(await servesHere(objectId))) return;
+		const pending = await pendingMessages(obj, humanRef(obj.id), s.agentId);
+		if (pending.length > 0) void drive(s, humanRef(obj.id));
 	}
 
 	startAuthServer(agents, (next) => {
@@ -874,9 +785,9 @@ async function serve(): Promise<void> {
 		async served(agentId) {
 			const known = served.get(agentId);
 			if (known) return known;
-			// An agent not in the local roster (a bound agent nobody has
-			// spoken to since boot) still answers its own schedule where its
-			// object resolves; buildServedOne stands down otherwise.
+			// An agent not in the local roster (one an object names, quiet
+			// since boot) still answers its own schedule where its object
+			// resolves; buildServedOne stands down otherwise.
 			const agent = await fetchObject(agentId).catch(() => null);
 			if (!agent || agent.typeKey !== "agent" || str(agent.fields, "spawn_parent")) return undefined;
 			const one = await buildServedOne(agentId, defaultChannelId);

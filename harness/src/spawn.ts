@@ -79,10 +79,10 @@ export async function spawnSubagent(task: string, templateName: string, parentCt
 		});
 
 		let submitted = "";
-		// A subagent's transcript is a thread on its own agent object: it is
-		// bound to nothing, so conv.ts:113-114 resolves the subject to the
-		// agent itself - where the old code posted when chat and agent were
-		// the same id.
+		// A subagent's transcript is a thread on its own agent object: no
+		// object names it, so conv.ts resolves the subject to the agent
+		// itself - where the old code posted when chat and agent were the
+		// same id.
 		const conv = await agentThread(await fetchObject(id));
 		await postTo(conv, task); // the task is the first user message
 		const finalText = await runTurn(id, conv, {

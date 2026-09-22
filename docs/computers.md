@@ -68,9 +68,9 @@ Machines are device facts, not space content. Two options:
   machine object. Verify `core/serving.odin` does this; if it does not, add the
   rule there (one place, every host) rather than in the harness.
 - The agent's prompt already carries `<capabilities-elsewhere>`, credentials and
-  holdups; a machine-bound agent should additionally get its own machine row
-  (capabilities, holdups, skills installed here) so "install browserless" is
-  answerable.
+  holdups; the agent serving a machine object (named by the machine's `agent`
+  field) should additionally get that machine row (capabilities, holdups,
+  skills installed here) so "install browserless" is answerable.
 - Guardrail: `machine_id` and `capabilities` are written by the machine itself.
   The agent must not set them — they are protected fields, so authority already
   refuses any non-owner write, but the tool layer should refuse too, with a clear

@@ -104,12 +104,12 @@ export function skillsPromptSection(skills: SkillListing[]): string {
 }
 
 /**
- * Prompt section for a bound agent: catalog capabilities other machines
+ * Prompt section for an object's agent: catalog capabilities other machines
  * have and this one lacks, so the agent knows that `object_require` can
  * move its object's work there (`docs/object-serving.md`). Keys the
  * object already requires are not repeated - if the work is still here,
- * requiring them again changes nothing. Empty for unbound agents (they
- * have no object to require on) and when nothing is missing.
+ * requiring them again changes nothing. Empty when the turn has no object
+ * (the agent's own page) and when nothing is missing.
  */
 export async function remoteCapabilitiesSection(objectId: string): Promise<string> {
 	if (!objectId) return "";

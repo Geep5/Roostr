@@ -53,9 +53,12 @@ export const parseConvKey = (key: string): ConvRef => {
 
 export const isHuman = (ref: ConvRef): boolean => ref.threadId === HUMAN_THREAD;
 
-/** The owning object is the address; the agent row is only its configuration. */
-export const agentSubject = (agent: Pick<ObjectJSON, "id" | "fields">): string =>
-	str(agent.fields, "bound_object") || str(agent.fields, "space_default") || agent.id;
+/**
+ * The agent's home: its space when it is the space default, else the agent
+ * object itself. Its transcripts for other objects live on THOSE objects
+ * (`object.agent` names it, N:1) - see `agentThreadOn`.
+ */
+export const agentSubject = (agent: Pick<ObjectJSON, "id" | "fields">): string => str(agent.fields, "space_default") || agent.id;
 
 /** The core decodes every thread and serves them on the object. */
 export async function conversationsOf(objectId: string): Promise<ConversationJSON[]> {
@@ -107,9 +110,9 @@ async function claim(key: string, open: () => Promise<ConvRef>): Promise<ConvRef
 }
 
 /**
- * The agent's own transcript: its holistic conversation, on the object it is
- * bound to - or on the agent object itself when it is bound to nothing, since
- * an agent is an object like any other.
+ * The agent's transcript on one object: its holistic conversation about
+ * that object - the object that names it (`object.agent`), its space, or the
+ * agent object itself, since an agent is an object like any other.
  *
  * Three ways to land on the right thread, in order:
  *
@@ -117,7 +120,7 @@ async function claim(key: string, open: () => Promise<ConvRef>): Promise<ConvRef
  *  2. else an `agent_private` thread on this subject with no OTHER live
  *     agent in it - adopt it, adding this agent to the participants. That is
  *     what a migrated transcript looks like: the vault had two agent objects
- *     bound to one person, their two chats merged into one thread, and the
+ *     minted for one person, their two chats merged into one thread, and the
  *     twin would otherwise open an empty second transcript and read as
  *     amnesiac - the exact failure the old lowest-id-wins rule existed for;
  *  3. else open one.
@@ -125,8 +128,7 @@ async function claim(key: string, open: () => Promise<ConvRef>): Promise<ConvRef
  * Deterministic across devices: when two harnesses race, the lowest thread
  * id wins, exactly as the lowest chat id used to.
  */
-export async function agentThread(agent: ObjectJSON): Promise<ConvRef> {
-	const subject = agentSubject(agent);
+export async function agentThreadOn(agent: ObjectJSON, subject: string): Promise<ConvRef> {
 	const title = str(agent.fields, "name") || "Agent";
 	return claim(`agent:${agent.id}:${subject}`, async () => {
 		const threads = (await conversationsOf(subject)).filter((c) => c.kind === "agent_private");
@@ -163,3 +165,6 @@ export async function agentThread(agent: ObjectJSON): Promise<ConvRef> {
 		return { objectId: subject, threadId: out.id };
 	});
 }
+
+/** The agent's own transcript, on its home (`agentSubject`). */
+export const agentThread = (agent: ObjectJSON): Promise<ConvRef> => agentThreadOn(agent, agentSubject(agent));

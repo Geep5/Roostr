@@ -116,7 +116,7 @@ export async function appendBody(objectId: string, text: string, under = ""): Pr
 export interface ToolContext {
 	agentId: string;
 	channelId: string;
-	/** Set for object-bound agents: the object this agent belongs to. */
+	/** The object this turn's transcript lives on (unset on the agent's own page). */
 	boundObject?: string;
 	/** Only human-rooted top-level turns may initiate another agent exchange. */
 	allowAsk?: boolean;
@@ -287,7 +287,6 @@ export async function fileCapabilityHoldup(capability: string, error: string, ct
 	try {
 		const agent = await fetchObject(ctx.agentId);
 		agentName = str(agent.fields, "name") || agentName;
-		objectId ||= str(agent.fields, "bound_object");
 		if (objectId) objectName = str((await fetchObject(objectId)).fields, "name");
 	} catch {
 		/* names are cosmetic */
@@ -312,11 +311,11 @@ const FLAG_ERROR_TOOL: RegisteredTool = {
 	def: {
 		name: "object_flag_error",
 		description:
-			"Flag your object as broken: set its Error property so the human sees it in their views (they can sort and filter by it). Pass a short reason. Call again with an empty message once the problem is resolved to clear it. Only object-bound agents can call this.",
+			"Flag the object of this conversation as broken: set its Error property so the human sees it in their views (they can sort and filter by it). Pass a short reason. Call again with an empty message once the problem is resolved to clear it. Only turns running on an object can call this.",
 		input_schema: { type: "object", properties: { message: { type: "string", description: "short reason; empty clears the flag" } } },
 	},
 	handler: async (input, ctx) => {
-		if (!ctx.boundObject) return "error: this agent is not bound to an object, so there is nothing to flag";
+		if (!ctx.boundObject) return "error: this turn is not running on an object, so there is nothing to flag";
 		const message = S(input.message).trim().slice(0, 300);
 		ctx.touched.add(ctx.boundObject);
 		if (!message) {
@@ -332,7 +331,7 @@ const REQUIRE_TOOL: RegisteredTool = {
 	def: {
 		name: "object_require",
 		description:
-			"Declare that your object's work needs a machine capability listed under <capabilities-elsewhere> (a catalog key such as browserless or google). Appends it to the object's `requires`; the machine that has the capability serves the object from the next turn on - nothing moves mid-turn. Only object-bound agents can call this. Tell the human the work moved, then finish the turn.",
+			"Declare that the object of this conversation needs a machine capability listed under <capabilities-elsewhere> (a catalog key such as browserless or google). Appends it to the object's `requires`; the machine that has the capability serves the object from the next turn on - nothing moves mid-turn. Only turns running on an object can call this. Tell the human the work moved, then finish the turn.",
 		input_schema: {
 			type: "object",
 			properties: { capability: { type: "string", description: "catalog capability key" } },
@@ -342,7 +341,7 @@ const REQUIRE_TOOL: RegisteredTool = {
 	handler: async (input, ctx) => {
 		const key = S(input.capability).trim();
 		if (!CATALOG.some((c) => c.key === key)) return `error: unknown capability "${key}"; known: ${CATALOG.map((c) => c.key).join(", ")}`;
-		if (!ctx.boundObject) return "error: this agent is not bound to an object, so there is nothing to require it on";
+		if (!ctx.boundObject) return "error: this turn is not running on an object, so there is nothing to require it on";
 		const obj = await fetchObject(ctx.boundObject);
 		const name = str(obj.fields, "name") || obj.id.slice(0, 8);
 		const had = list(obj.fields, "requires");
@@ -704,7 +703,7 @@ const TOOLS: RegisteredTool[] = [
 			input_schema: {
 				type: "object",
 				properties: {
-					id: { type: "string", description: "object id; omit for your bound object" },
+					id: { type: "string", description: "object id; omit for the object of this conversation" },
 					requires_auth: { type: "array", items: { type: "string" }, description: "identity selectors; [] clears the requirement" },
 					browserless: { type: "boolean" },
 					external_action: { type: "boolean" },
@@ -713,7 +712,7 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			const id = S(input.id) || ctx.boundObject || "";
-			if (!id) return "error: no object id and this agent has no bound object";
+			if (!id) return "error: no object id and this turn is not running on an object";
 			const obj = await assertInSpace(await fetchObject(id), ctx);
 			ctx.touched.add(obj.id);
 			const registry = await localAuthRegistry();
@@ -1020,11 +1019,11 @@ const EVAL_TOOLS: RegisteredTool[] = [
 		def: {
 			name: "neighborhood",
 			description: "Typed connections of an object - links in/out with property names, collection memberships, saved views matching it, and which neighbors have agents. Defaults to your own object. Free - hop the graph with this instead of waking anyone.",
-			input_schema: { type: "object", properties: { id: { type: "string", description: "object id; omit for your bound object" } } },
+			input_schema: { type: "object", properties: { id: { type: "string", description: "object id; omit for the object of this conversation" } } },
 		},
 		handler: async (input, ctx) => {
 			const id = S(input.id) || ctx.boundObject || "";
-			if (!id) throw new Error("no id given and this agent is not bound to an object");
+			if (!id) throw new Error("no id given and this turn is not running on an object");
 			await assertInSpace(await fetchObject(id), ctx);
 			return await buildNeighborhood(id, ctx.channelId);
 		},
@@ -1106,17 +1105,26 @@ const A2A_TOOL: RegisteredTool = {
 		for (const id of ids) {
 			const target = await fetchObject(id);
 			if (target.typeKey !== "channel" || target.id !== (await agentSpace(ctx))) await assertInSpace(target, ctx);
-			const holders = target.typeKey === "agent"
-				? [target]
-				: await queryAll({ type: "agent", filters: [{ key: target.typeKey === "channel" ? "space_default" : "bound_object", condition: "equal", value: id }] });
-			holders.sort((a, b) => a.id.localeCompare(b.id));
-			const holder = holders[0];
-			if (!holder) throw new Error(`no agent lives on "${str(target.fields, "name") || id}"; read that object directly`);
+			let holder: Pick<ObjectJSON, "id" | "typeKey" | "fields"> | undefined;
+			let endpointObjectId: string;
+			if (target.typeKey === "agent") {
+				holder = target;
+				endpointObjectId = agentSubject(target);
+			} else if (target.typeKey === "channel") {
+				const defaults = await queryAll({ type: "agent", filters: [{ key: "space_default", condition: "equal", value: id }] });
+				defaults.sort((a, b) => a.id.localeCompare(b.id));
+				holder = defaults[0];
+				endpointObjectId = target.id;
+			} else {
+				const aid = str(target.fields, "agent");
+				holder = aid ? await fetchObject(aid).catch(() => undefined) : undefined;
+				endpointObjectId = target.id;
+			}
+			if (!holder || holder.typeKey !== "agent") throw new Error(`no agent lives on "${str(target.fields, "name") || id}"; name one in its Agent property or read it directly`);
 			if (holder.id === ctx.agentId) throw new Error("an agent cannot send a request to itself");
-			const endpoint = { objectId: agentSubject(holder), agentId: holder.id };
+			const endpoint = { objectId: endpointObjectId, agentId: holder.id };
 			if (recipients.some((entry) => entry.objectId === endpoint.objectId)) throw new Error("each recipient object must be distinct");
 			recipients.push(endpoint);
-			names.push(str(holder.fields, "name") || endpoint.objectId);
 		}
 		const replyTo = S(input.reply_to);
 		const parent = replyTo ? subject.mailbox?.find((entry) => entry.message.id === replyTo)?.message : undefined;

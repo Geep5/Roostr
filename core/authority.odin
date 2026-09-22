@@ -36,7 +36,7 @@ Shared_Space :: struct {
 
 protected_field :: proc(key: string) -> bool {
 	switch key {
-	case "members", "owner", "keyId", "key", "keys", "served_by", "machine", "machine_id", "machineId", "bound_object": return true
+	case "members", "owner", "keyId", "key", "keys", "served_by", "machine", "machine_id", "machineId": return true
 	}
 	return false
 }

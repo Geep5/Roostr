@@ -606,6 +606,12 @@
        {
         "stringValue": "s"
        }
+      ],
+      [
+       "agent",
+       {
+        "stringValue": "agent"
+       }
       ]
      ],
      "blocks": [],
@@ -634,14 +640,7 @@
     {
      "id": "agent",
      "typeKey": "agent",
-     "fields": [
-      [
-       "bound_object",
-       {
-        "stringValue": "task"
-       }
-      ]
-     ],
+     "fields": [],
      "blocks": [],
      "deleted": true,
      "createdAt": 1,
@@ -2165,6 +2164,12 @@
        {
         "stringValue": "s"
        }
+      ],
+      [
+       "agent",
+       {
+        "stringValue": "agent"
+       }
       ]
      ],
      "blocks": [],
@@ -2193,14 +2198,7 @@
     {
      "id": "agent",
      "typeKey": "agent",
-     "fields": [
-      [
-       "bound_object",
-       {
-        "stringValue": "task"
-       }
-      ]
-     ],
+     "fields": [],
      "blocks": [],
      "deleted": true,
      "createdAt": 1,
