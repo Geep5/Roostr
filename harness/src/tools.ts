@@ -1077,6 +1077,10 @@ const EVAL_TOOLS: RegisteredTool[] = [
 // A request commits to the sender's DAG before any delivery or recipient turn.
 // Only human-rooted turns initiate agent requests; replies cannot fan out
 // fresh questions, and group membership is the explicit address snapshot.
+// The durable sender is the object this turn is ABOUT (`ctx.boundObject`),
+// not the agent's own home: an agent working on object X must let X keep
+// the request and see the reply. On the agent's own page there is no bound
+// object, so its home is the source.
 const A2A_TOOL: RegisteredTool = {
 	def: {
 		name: "agent_ask",
@@ -1096,10 +1100,10 @@ const A2A_TOOL: RegisteredTool = {
 	},
 	handler: async (input, ctx) => {
 		if (!ctx.allowAsk || ctx.depth !== 0) throw new Error("agent_ask is only available to human-rooted top-level turns");
+		const me = await fetchObject(ctx.agentId);
+		const subject = await fetchObject(ctx.boundObject ?? agentSubject(me));
 		const ids = [...new Set(A(input.object_ids))];
 		if (!ids.length || !S(input.text).trim()) throw new Error("recipient objects and nonempty text are required");
-		const me = await fetchObject(ctx.agentId);
-		const subject = await fetchObject(agentSubject(me));
 		const recipients: AgentEndpoint[] = [];
 		const names: string[] = [];
 		for (const id of ids) {
