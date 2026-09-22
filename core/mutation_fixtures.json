@@ -4968,6 +4968,68 @@
     ],
     "parentIds": [],
     "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-type-agent-new-id",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "type"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "new-id"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🤖"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "layout",
+       "value": {
+        "stringValue": "page"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
    }
   ],
   "expected_result": {
@@ -6875,6 +6937,68 @@
        "key": "iconEmoji",
        "value": {
         "stringValue": "🔌"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "layout",
+       "value": {
+        "stringValue": "page"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-type-agent-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "type"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🤖"
        }
       }
      },
@@ -8847,6 +8971,68 @@
        "key": "iconEmoji",
        "value": {
         "stringValue": "🔌"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "layout",
+       "value": {
+        "stringValue": "page"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-type-agent-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "type"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🤖"
        }
       }
      },

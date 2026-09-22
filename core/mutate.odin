@@ -1275,6 +1275,9 @@ BUNDLED_TYPES :: []Bundled_Type{
 	// on one machine (fields, so `error` reaches views).
 	{"descriptor", "Descriptor", "🗂️", "page"},
 	{"install", "Installation", "🔌", "page"},
+	// Minds are objects like everything else: a type row so they list in
+	// the sidebar and a bare "+ New" is a real agent the harness can adopt.
+	{"agent", "Agent", "🤖", "page"},
 }
 Table_Shape :: struct {
 	object_id:   string,
