@@ -409,6 +409,10 @@ async function serve(): Promise<void> {
 				object = await fetchObject(objectId);
 			}
 			if (!(await servesHere(objectId))) return;
+			// An external responder owns this object's inbox as well: it claims,
+			// answers and delivers on its own. Outgoing copies were still pumped
+			// above, and a harness restart must not mark its claims interrupted.
+			if (externallyAnswered.has(objectId)) return;
 			if (object.typeKey === "install") {
 				await receiveCapabilityRequests(object, inboxOwner);
 				return;
