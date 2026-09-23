@@ -104,13 +104,11 @@ checkpointed_object_ids :: proc(allocator := context.temp_allocator) -> [dynamic
 	return out
 }
 
-/** Hex change ids folded into the stored checkpoint, empty when none. */
-checkpoint_covered_hex :: proc(object_id: string, allocator := context.temp_allocator) -> map[string]bool {
-	out := make(map[string]bool, allocator = allocator)
-	cp, ok := load_checkpoint(object_id, context.temp_allocator)
-	if !ok do return out
-	for id in cp.covered_ids do out[string(hex.encode(id, allocator))] = true
-	return out
+/** Hash of the checkpoint on disk for `object_id`, "" when none. */
+stored_checkpoint_hash :: proc(object_id: string) -> string {
+	bytes, rerr := os.read_entire_file(checkpoint_path(object_id), context.temp_allocator)
+	if rerr != nil do return ""
+	return core.checkpoint_hash(bytes, context.temp_allocator)
 }
 
 // ── HTTP ─────────────────────────────────────────────────────────────
@@ -189,12 +187,13 @@ Checkpoint_Build :: struct {
 }
 
 /**
- * Build a checkpoint from this machine's full history of one object and
+ * Build a checkpoint from this machine's complete history of one object and
  * persist it (temp-allocated). Changes are decoded fresh rather than taken
  * from the cached state: covered_ids must be derived from what was actually
- * replayed. A stored prior checkpoint seeds the build only when
- * core.checkpoint_for_replay accepts it - the same gate compute_state applies
- * - so covered order stays the order a genesis replay would produce.
+ * replayed. The build always replays from genesis - a stored checkpoint
+ * never seeds it - and refuses while history is incomplete (a parent not on
+ * disk, or a stored checkpoint covering changes not on disk), so a replica
+ * still catching up cannot publish a partial-history state as canonical.
  */
 build_checkpoint :: proc(object_id: string) -> Checkpoint_Build {
 	if !object_id_safe(object_id) do return {error = "bad object id", status = "400 Bad Request"}
@@ -216,11 +215,15 @@ build_checkpoint :: proc(object_id: string) -> Checkpoint_Build {
 		}
 	}
 	prior, has_prior := load_checkpoint(object_id, context.temp_allocator)
-	seed: ^core.Checkpoint = has_prior ? core.checkpoint_for_replay(changes[:], &prior) : nil
-	if len(changes) == 0 && seed == nil do return {error = "unknown object", status = "404 Not Found"}
-	state, ok := core.compute_state(changes[:], context.temp_allocator, seed)
+	if len(changes) == 0 && !has_prior do return {error = "unknown object", status = "404 Not Found"}
+	// Checkpoint-only, a parent not on disk, or a stored checkpoint covering
+	// changes not on disk: this replica does not hold the whole history.
+	if len(changes) == 0 || !core.dag_closed(changes[:]) || (has_prior && !core.checkpoint_covers_all(changes[:], &prior)) {
+		return {error = "history incomplete", status = "409 Conflict"}
+	}
+	state, ok := core.compute_state(changes[:], context.temp_allocator)
 	if !ok do return {error = "object does not replay", status = "409 Conflict"}
-	cp := core.checkpoint_build(&state, changes[:], unix_ms(), seed, context.temp_allocator)
+	cp := core.checkpoint_build(&state, changes[:], unix_ms(), context.temp_allocator)
 	bytes := core.encode_checkpoint(cp, context.temp_allocator)
 	stored, wok := store_checkpoint(&cp, bytes)
 	if !wok do return {error = "cannot write checkpoint", status = "500 Internal Server Error"}
@@ -325,11 +328,16 @@ handle_checkpoints_import :: proc(sock: net.TCP_Socket, body: []byte) {
 		} else {
 			skipped += 1
 		}
+		hash := core.checkpoint_hash(data, context.temp_allocator)
 		row := core.jobj()
 		row["objectId"] = json.String(cp.object_id)
-		row["hash"] = json.String(core.checkpoint_hash(data, context.temp_allocator))
+		row["hash"] = json.String(hash)
 		row["covered"] = json.Integer(i64(len(cp.covered_ids)))
 		row["stored"] = json.Boolean(stored)
+		// The daemon holds these exact bytes now (just stored, or already
+		// had them). A subset or an incomparable fork reports false: it stays
+		// on the relay as harmless cache, never deleted, never mistaken for ours.
+		row["held"] = json.Boolean(stored || hash == stored_checkpoint_hash(cp.object_id))
 		heads := make([dynamic]json.Value, 0, len(cp.head_ids), context.temp_allocator)
 		for h in cp.head_ids do append(&heads, json.String(string(hex.encode(h, context.temp_allocator))))
 		row["heads"] = json.Array(heads)

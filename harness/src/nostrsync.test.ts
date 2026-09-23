@@ -26,7 +26,6 @@ let localChangeRows: Record<string, Array<{ id: string; b64: string }>>;
 let checkpointRows: Record<string, unknown>;
 let importCheckpoint: (body: { checkpoints: string[]; provenance?: unknown }) => Promise<Response>;
 let buildCheckpoint: (objectId: string) => Promise<Response>;
-let manifests: Event[];
 let published: Event[];
 let timeoutMock: Mock<typeof setTimeout>;
 let restore: Array<() => void>;
@@ -46,7 +45,7 @@ function chunks(createdAt = 10): Event[] {
 }
 async function state() {
 	intervals.find((timer) => timer.ms === 5000)!.callback();
-	return await Bun.file(join(root, "sync-state.json")).json() as { cursor: number; replaySince?: number; checkpointFloor?: number; checkpoints: Record<string, { hash: string; heads: string[]; covered: number; eventIds: string[] }> };
+	return await Bun.file(join(root, "sync-state.json")).json() as { cursor: number; replaySince?: number; checkpoints: Record<string, { hash: string; heads: string[]; eventIds: string[] }> };
 }
 async function until(predicate: () => boolean) {
 	for (let i = 0; i < 100; i++) {
@@ -88,7 +87,6 @@ beforeEach(async () => {
 	importCheckpoint = async () => Response.json({ imported: 0, rejected: 1, items: [] });
 	localChangeRows = {};
 	buildCheckpoint = async () => new Response("not found", { status: 404 });
-	manifests = [];
 	published = [];
 	restore = [];
 	const interval = spyOn(globalThis, "setInterval").mockImplementation(((callback: () => void, ms: number) => {
@@ -128,10 +126,7 @@ beforeEach(async () => {
 		},
 	}) as never);
 	restore.push(() => relay.mockRestore());
-	const query = spyOn(SimplePool.prototype, "querySync").mockImplementation(async (_relays, filter) => {
-		if (filter.kinds?.includes(30079)) return manifests;
-		return filter.kinds?.includes(1078) ? [event("YWJj", 100)] : [];
-	});
+	const query = spyOn(SimplePool.prototype, "querySync").mockImplementation(async (_relays, filter) => (filter.kinds?.includes(1078) ? [event("YWJj", 100)] : []));
 	restore.push(() => query.mockRestore());
 	const publish = spyOn(SimplePool.prototype, "publish").mockImplementation((_relays, item) => {
 		published.push(item);
@@ -310,12 +305,12 @@ test("a new suffix-only group fetches its unseen prefix older than the observed 
 	expect((await state()).replaySince).toBeUndefined();
 });
 
-test("a live checkpoint under our key is imported and becomes the relay's copy; a stale one is deleted", async () => {
+test("a live checkpoint under our key becomes the relay's copy only when the daemon holds it; a fork is left on the relay", async () => {
 	const imports: string[][] = [];
-	let stored = true;
+	let held = true;
 	importCheckpoint = async (body) => {
 		imports.push(body.checkpoints);
-		return Response.json({ imported: stored ? 1 : 0, rejected: 0, items: [{ objectId: "obj", hash: stored ? "h1" : "h0", heads: ["b", "a"], covered: 2, stored }] });
+		return Response.json({ imported: held ? 1 : 0, rejected: 0, items: [{ objectId: "obj", hash: held ? "h1" : "h0", heads: ["b", "a"], stored: held, held }] });
 	};
 	await startNostrSync();
 	const current = event("Q1Ax", 200, undefined, 1079);
@@ -324,16 +319,17 @@ test("a live checkpoint under our key is imported and becomes the relay's copy; 
 	expect(imports[0]).toEqual(["Q1Ax"]);
 	await settle();
 	const after = await state();
-	expect(after.checkpoints.obj).toEqual({ hash: "h1", heads: ["a", "b"], covered: 2, eventIds: [current.id] });
+	expect(after.checkpoints.obj).toEqual({ hash: "h1", heads: ["a", "b"], eventIds: [current.id] });
 	expect(after.cursor).toBe(200);
-	stored = false;
-	const stale = event("Q1Aw", 150, undefined, 1079);
-	liveEvent(stale);
-	await until(() => published.some((item) => item.kind === 5));
+	// Another device's checkpoint of a different branch: the daemon keeps
+	// ours, and the relay keeps theirs - it may be the only copy of that branch.
+	held = false;
+	const fork = event("Q1Aw", 150, undefined, 1079);
+	liveEvent(fork);
+	await until(() => imports.length === 2);
 	await settle();
-	const deletion = published.find((item) => item.kind === 5)!;
-	expect(deletion.tags).toEqual([["e", stale.id], ["k", "1079"]]);
-	expect((await state()).checkpoints.obj.eventIds).toEqual([current.id]);
+	expect(published.some((item) => item.kind === 5)).toBe(false);
+	expect((await state()).checkpoints.obj).toEqual({ hash: "h1", heads: ["a", "b"], eventIds: [current.id] });
 });
 
 test("vanish splits deletion requests so no kind-5 exceeds the relay's 256-tag plan bound", async () => {
@@ -348,20 +344,18 @@ test("vanish splits deletion requests so no kind-5 exceeds the relay's 256-tag p
 	expect(targeted).toEqual(new Set(history.map((item) => item.id)));
 });
 
-test("cold start walks changes from the manifest cursor and keeps checkpoints unbounded", async () => {
-	await writeFile(join(root, "sync-state.json"), JSON.stringify({ version: 1, cursor: 0, published: {}, vanishRequested: {} }));
-	manifests = [finalizeEvent({ kind: 30079, created_at: 900, tags: [["d", "roostr-checkpoint"]], content: nip44.encrypt(JSON.stringify({ cursor: 500, objects: 3 }), conversationKey) }, sk)];
+test("startup reconciles the whole 1078 history even when an old state file carries a checkpoint floor", async () => {
+	await writeFile(join(root, "sync-state.json"), JSON.stringify({ version: 1, cursor: 0, published: {}, vanishRequested: {}, checkpointFloor: 500, checkpointFloors: { abc: 700 } }));
 	await startNostrSync();
-	expect(filters.find((filter) => filter.kinds?.includes(1078))?.since).toBe(500);
-	expect(filters.find((filter) => filter.kinds?.includes(1079))?.since).toBeUndefined();
-	expect((await state()).checkpointFloor).toBe(500);
+	for (const filter of filters.filter((f) => f.kinds?.includes(1078))) expect(filter.since ?? 0).toBe(0);
+	expect(published.some((item) => item.kind === 30079)).toBe(false);
 });
 
-test("the checkpoint pass rebuilds moved objects, publishes 1079, retires the old event and stamps the manifest", async () => {
+test("the checkpoint pass rebuilds moved objects and publishes 1079 without deleting the old event or stamping a manifest", async () => {
 	const old = event("T0xE", 50, undefined, 1079);
 	history = [old, event("U1RM", 60, undefined, 1079)];
 	const onRelay: Record<string, { objectId: string; hash: string }> = { T0xE: { objectId: "obj", hash: "h0" }, U1RM: { objectId: "still", hash: "hs" } };
-	importCheckpoint = async (body) => Response.json({ imported: 1, rejected: 0, items: body.checkpoints.map((b64) => ({ ...onRelay[b64], heads: ["a"], covered: 1, stored: true })) });
+	importCheckpoint = async (body) => Response.json({ imported: 1, rejected: 0, items: body.checkpoints.map((b64) => ({ ...onRelay[b64], heads: ["a"], stored: true, held: true })) });
 	checkpointRows = { obj: { heads: ["b"], checkpointHeads: ["a"], checkpointHash: "h0", changes: 2, covered: 1 }, still: { heads: ["a"], checkpointHeads: ["a"], checkpointHash: "hs", changes: 1, covered: 1 } };
 	const builds: string[] = [];
 	buildCheckpoint = async (objectId) => {
@@ -372,29 +366,21 @@ test("the checkpoint pass rebuilds moved objects, publishes 1079, retires the ol
 	timeoutMock.mockImplementation(((callback: () => void) => realSetTimeout(callback, 0)) as unknown as typeof setTimeout);
 	await startNostrSync();
 	expect(builds).toEqual(["obj"]);
-	await until(() => published.some((item) => item.kind === 30079));
+	await until(() => published.some((item) => item.kind === 1079));
+	await settle();
 	const checkpoint = published.find((item) => item.kind === 1079)!;
 	expect(decrypt(checkpoint)).toBe("TkVX");
-	expect(published.find((item) => item.kind === 5)?.tags).toEqual([["e", old.id], ["k", "1079"]]);
-	const manifest = published.find((item) => item.kind === 30079)!;
-	expect(manifest.tags).toEqual([["d", "roostr-checkpoint"]]);
-	expect(JSON.parse(decrypt(manifest))).toEqual({ cursor: 100, objects: 2 });
-	expect((await state()).checkpoints.obj).toEqual({ hash: "h1", heads: ["b"], covered: 2, eventIds: [checkpoint.id] });
+	expect(published.some((item) => item.kind === 5)).toBe(false);
+	expect(published.some((item) => item.kind === 30079)).toBe(false);
+	expect((await state()).checkpoints.obj).toEqual({ hash: "h1", heads: ["b"], eventIds: [checkpoint.id] });
 });
 
-test("a cold start with only local changes stamps the manifest at pass time, not at the unseen relay cursor", async () => {
-	await writeFile(join(root, "sync-state.json"), JSON.stringify({ version: 1, cursor: 0, published: {}, vanishRequested: {} }));
-	localChangeRows = { obj: [{ id: "aa", b64: "YWJj" }] };
-	checkpointRows = { obj: { heads: ["aa"], changes: 1, covered: 0 } };
-	buildCheckpoint = async (objectId) => Response.json({ objectId, b64: "TkVX", hash: "h1", heads: ["aa"], covered: 1 });
+test("a build the daemon refuses (incomplete history) leaves the object syncing as changes", async () => {
+	checkpointRows = { obj: { heads: ["b"], checkpointHeads: ["a"], checkpointHash: "h0", changes: 2, covered: 1 } };
+	buildCheckpoint = async () => new Response("history incomplete", { status: 409 });
 	timeoutMock.mockImplementation(((callback: () => void) => realSetTimeout(callback, 0)) as unknown as typeof setTimeout);
-	const before = Math.floor(Date.now() / 1000);
 	await startNostrSync();
-	await until(() => published.some((item) => item.kind === 30079));
-	const change = published.find((item) => item.kind === 1078)!;
-	expect(decrypt(change)).toBe("YWJj");
-	expect(published.findIndex((item) => item.kind === 1079)).toBeGreaterThan(published.indexOf(change));
-	const { cursor } = JSON.parse(decrypt(published.find((item) => item.kind === 30079)!)) as { cursor: number };
-	expect(cursor).toBeGreaterThanOrEqual(before);
-	expect(cursor).toBeLessThanOrEqual(change.created_at);
+	await settle();
+	expect(published.some((item) => item.kind === 1079)).toBe(false);
+	expect((await state()).checkpoints.obj).toBeUndefined();
 });

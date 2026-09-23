@@ -12,7 +12,7 @@
  *   - Relays are transport, not truth: the .pb files stay canonical; the
  *     local Odin server imports idempotently and rejects bad addresses.
  *
- * Loop: startup backfill (relay since=cursor → import; manifest → publish
+ * Loop: startup backfill (relay history → import; local history → publish
  * unpublished) then live (SSE commit → publish; relay event → import).
  */
 
@@ -22,11 +22,8 @@ import { API, apiFetch, subscribe } from "./api";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 
 const CHANGE_KIND = 1078;
-/** One Checkpoint (docs/checkpoint-sync.md) per event; same envelope as 1078. */
+/** One Checkpoint (docs/checkpoint-sync.md) per object: a replay cache, same envelope as 1078. */
 const CHECKPOINT_KIND = 1079;
-/** Addressable manifest: "every object changed by relay time `cursor` is checkpointed". */
-const MANIFEST_KIND = 30079;
-const MANIFEST_D = "roostr-checkpoint";
 const CHECKPOINT_INTERVAL_MS = 10 * 60_000;
 /** NIP-59 gift wrap: space-key invites and join requests, addressed by npub. */
 const WRAP_KIND = 1059;
@@ -73,14 +70,6 @@ interface SyncState {
 	invitesSent?: Record<string, number>;
 	/** gift-wrap event ids already processed. */
 	wrapsSeen?: Record<string, true>;
-	/**
-	 * Manifest cursor this machine bootstrapped from: history older than it
-	 * is folded into checkpoints and was never stored here, so relay scans
-	 * start at the floor instead of zero.
-	 */
-	checkpointFloor?: number;
-	/** Same, per shared space owned by someone else: spaceTag -> owner's manifest cursor. */
-	checkpointFloors?: Record<string, number>;
 	/** Relay's checkpoint per object (own signer): heads it describes and the events carrying it. */
 	checkpoints?: Record<string, PublishedCheckpoint>;
 }
@@ -89,7 +78,6 @@ interface PublishedCheckpoint {
 	hash: string;
 	/** sorted hex heads */
 	heads: string[];
-	covered: number;
 	eventIds: string[];
 }
 
@@ -422,8 +410,9 @@ interface ImportedCheckpoint {
 	objectId: string;
 	hash: string;
 	heads: string[];
-	covered: number;
 	stored: boolean;
+	/** The daemon holds exactly these bytes after the import. */
+	held: boolean;
 }
 
 async function localCheckpointImport(b64s: string[], provenance?: SharedProvenance): Promise<{ imported: number; rejected: number; items: ImportedCheckpoint[] }> {
@@ -677,9 +666,6 @@ export async function startNostrSync(): Promise<void> {
 		return h.digest("hex").slice(0, 16);
 	}
 
-	/** created_at of the newest change event this process published; peers' events advance `state.cursor` instead. */
-	let publishedAt = 0;
-
 	/** Publish every part; the accepted event ids on success, null on any rejection. */
 	async function publishOnce(item: QueueItem): Promise<string[] | null> {
 		const parts: string[] = [];
@@ -703,7 +689,6 @@ export async function startNostrSync(): Promise<void> {
 				);
 				await Promise.any(pool.publish(id!.relays, event));
 				eventIds.push(event.id);
-				if (item.kind === CHANGE_KIND) publishedAt = Math.max(publishedAt, event.created_at);
 				if (parts.length > 1 && i < parts.length - 1) {
 					const { promise, resolve } = Promise.withResolvers<void>();
 					setTimeout(resolve, PUBLISH_SPACING_MS);
@@ -800,11 +785,13 @@ export async function startNostrSync(): Promise<void> {
 	}
 
 	/**
-	 * A 1079 from the relays. The daemon decides whether it supersedes the
-	 * stored one (covers more, then larger hash) and enforces the shared
-	 * owner rule via provenance. Under our own key it is also what the
-	 * relay holds for the object: remember it so the checkpoint pass does
-	 * not republish, or delete it when it is already stale here.
+	 * A 1079 from the relays. The daemon decides whether it takes it (covers a
+	 * superset of the stored one, then larger hash) and enforces the shared
+	 * owner rule via provenance. Under our own key, when the daemon holds
+	 * exactly these bytes afterwards, it is what the relay has for the object:
+	 * remember it so the checkpoint pass does not republish. Anything else
+	 * (a subset, an incomparable fork from another device) stays on the relay
+	 * as harmless cache - never deleted: it may be the only copy of a branch.
 	 */
 	async function importCheckpointB64(b64: string, space: SharedSpace | null, signer: string, eventIds: string[]): Promise<void> {
 		const provenance = space ? { spaceId: space.spaceId, keyId: space.keyId, signer } : undefined;
@@ -812,14 +799,11 @@ export async function startNostrSync(): Promise<void> {
 		if (res.rejected > 0) throw new Error("Checkpoint import rejected");
 		if (signer !== id!.pk) return;
 		for (const row of res.items) {
+			if (!row.held) continue;
 			const current = state.checkpoints![row.objectId];
-			if (row.stored || !current || current.hash === row.hash) {
-				const ids = current?.hash === row.hash ? [...new Set([...current.eventIds, ...eventIds])] : eventIds;
-				state.checkpoints![row.objectId] = { hash: row.hash, heads: [...row.heads].sort(), covered: row.covered, eventIds: ids };
-				dirty = true;
-			} else {
-				void publishDeleteRequests(pool, id!, eventIds, "checkpoint superseded", [CHECKPOINT_KIND]);
-			}
+			const ids = current?.hash === row.hash ? [...new Set([...current.eventIds, ...eventIds])] : eventIds;
+			state.checkpoints![row.objectId] = { hash: row.hash, heads: [...row.heads].sort(), eventIds: ids };
+			dirty = true;
 		}
 	}
 
@@ -1121,7 +1105,7 @@ export async function startNostrSync(): Promise<void> {
 		const events = new Map<string, Event>();
 		const scan = beginReplayScan(0);
 		const complete = await scanRelayHistory(pool, id!.relays, [{ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": tags }], (event) => events.set(event.id, event));
-		// Checkpoints first: the daemon then skips the covered changes instead of storing them.
+		// Checkpoints first so each object renders from its cache while its originals stream in.
 		const sorted = [...events.values()].sort((a, b) => b.kind - a.kind || a.created_at - b.created_at);
 		for (const event of sorted) await onRelayEvent(event);
 		finishReplayScan(scan, complete, false);
@@ -1272,35 +1256,12 @@ export async function startNostrSync(): Promise<void> {
 	//
 	// One 1079 per object this identity may speak for: every personal
 	// object and every object of a space it owns. A pass rebuilds where
-	// heads moved, publishes, deletes the superseded event, and - once
-	// nothing is outstanding - stamps a manifest saying "changes up to
-	// relay time C are folded in", which a cold device uses as its floor.
+	// heads moved and publishes. Checkpoints are replay caches: the 1078
+	// history stays the truth and every replica reconciles it in full, so
+	// a stale checkpoint on the relay is left alone rather than deleted.
 
 	function sameList(a: readonly string[], b: readonly string[]): boolean {
 		return a.length === b.length && a.every((x, i) => x === b[i]);
-	}
-
-	function manifestD(space: SharedSpace | null): string {
-		return space ? `${MANIFEST_D}/${space.spaceTag}` : MANIFEST_D;
-	}
-
-	async function publishManifest(space: SharedSpace | null, cursor: number, objects: number): Promise<void> {
-		const tags: string[][] = [["d", manifestD(space)]];
-		if (space) tags.push(["h", space.spaceTag]);
-		try {
-			const event = finalizeEvent(
-				{
-					kind: MANIFEST_KIND,
-					created_at: Math.floor(Date.now() / 1000),
-					tags,
-					content: nip44.encrypt(JSON.stringify({ cursor, objects }), space ? space.convKey : id!.conversationKey),
-				},
-				id!.sk,
-			);
-			await Promise.any(pool.publish(id!.relays, event));
-		} catch {
-			/* the next pass stamps again */
-		}
 	}
 
 	let checkpointBusy = false;
@@ -1308,86 +1269,42 @@ export async function startNostrSync(): Promise<void> {
 		if (checkpointBusy) return;
 		checkpointBusy = true;
 		try {
-			// The manifest claims "every change at or before `cursor` is folded
-			// into these checkpoints". They describe local state as of now, so
-			// nothing published later may be claimed - but the cold-start pass
-			// runs before any relay event advanced `state.cursor`, and our own
-			// changes queue ahead of the checkpoints in the same publish queue,
-			// so the watermark is read when the last checkpoint lands.
-			const passStart = Math.floor(Date.now() / 1000);
 			const rows = await localCheckpoints();
-			const cursor = () => Math.min(passStart, Math.max(state.cursor, publishedAt));
-			// Per manifest scope (null = personal): outstanding publishes and whether anything was skipped.
-			const scopes = new Map<SharedSpace | null, { outstanding: number; faults: number; objects: number }>();
-			scopes.set(null, { outstanding: 0, faults: 0, objects: 0 });
-			for (const space of sharedSpaces.values()) if (!space.owner || space.owner === id!.pk) scopes.set(space, { outstanding: 0, faults: 0, objects: 0 });
-			const stamp = (space: SharedSpace | null) => {
-				const scope = scopes.get(space)!;
-				if (scope.outstanding === 0 && scope.faults === 0) void publishManifest(space, cursor(), scope.objects);
-			};
 			let built = 0;
 			for (const [objectId, row] of Object.entries(rows)) {
 				if (vanished.has(objectId) || objectId === VANISH_LOG_ID || row.heads.length === 0) continue;
 				const space = sharedSpaces.get(spaceMap.get(objectId) ?? "") ?? null;
 				if (space?.owner && space.owner !== id!.pk) continue; // the owner's harness speaks for its space
-				const scope = scopes.get(space)!;
-				scope.objects++;
 				const heads = [...row.heads].sort();
 				const current = state.checkpoints![objectId];
 				if (row.checkpointHash && sameList([...(row.checkpointHeads ?? [])].sort(), heads) && current?.hash === row.checkpointHash) continue;
 				let cp: BuiltCheckpoint;
 				try {
+					// 409 while the daemon's history is incomplete (a parent or a
+					// covered original still missing): the object keeps syncing
+					// as changes and the next pass tries again.
 					cp = await localCheckpointBuild(objectId);
 				} catch (err) {
-					scope.faults++;
 					console.error(`[sync] checkpoint build failed for ${objectId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
 					continue;
 				}
 				built++;
 				if (cp.b64.length > CHUNK_CHARS * 64) {
-					scope.faults++;
 					console.error(`[sync] checkpoint for ${objectId.slice(0, 8)} exceeds 64 chunks; object keeps syncing as changes`);
 					continue;
 				}
 				if (current?.hash === cp.hash) continue; // the relay already holds these bytes
-				const previous = current?.eventIds ?? [];
-				const enqueued = enqueueCheckpoint(objectId, cp.hash, cp.b64, (eventIds) => {
-					state.checkpoints![objectId] = { hash: cp.hash, heads: [...cp.heads].sort(), covered: cp.covered, eventIds };
+				enqueueCheckpoint(objectId, cp.hash, cp.b64, (eventIds) => {
+					state.checkpoints![objectId] = { hash: cp.hash, heads: [...cp.heads].sort(), eventIds };
 					dirty = true;
-					if (previous.length > 0) void publishDeleteRequests(pool, id!, previous, "checkpoint superseded", [CHECKPOINT_KIND]);
-					scope.outstanding--;
-					stamp(space);
 				});
-				if (enqueued) scope.outstanding++;
 			}
 			if (built > 0) console.log(`[sync] checkpoint pass: ${built} rebuilt`);
-			for (const space of scopes.keys()) stamp(space);
 		} catch (err) {
 			console.error("[sync] checkpoint pass failed:", err instanceof Error ? err.message : err);
 		} finally {
 			checkpointBusy = false;
 		}
-	}
-
-	/**
-	 * Newest manifest for a scope, or null. Personal: ours. Shared: the
-	 * owner's, sealed under the space key.
-	 */
-	async function fetchManifest(space: SharedSpace | null): Promise<{ cursor: number; objects: number } | null> {
-		const author = space ? space.owner ?? id!.pk : id!.pk;
-		try {
-			const events = await pool.querySync(id!.relays, { kinds: [MANIFEST_KIND], authors: [author], "#d": [manifestD(space)] });
-			events.sort((a, b) => b.created_at - a.created_at);
-			for (const event of events) {
-				if (!verifyEvent(event)) continue;
-				const parsed = JSON.parse(nip44.decrypt(event.content, space ? space.convKey : id!.conversationKey)) as { cursor?: unknown; objects?: unknown };
-				if (typeof parsed.cursor !== "number" || !Number.isSafeInteger(parsed.cursor) || parsed.cursor < 0) continue;
-				return { cursor: parsed.cursor, objects: typeof parsed.objects === "number" ? parsed.objects : 0 };
-			}
-		} catch {
-			/* unreachable or garbled: caller falls back to the full walk */
-		}
-		return null;
 	}
 
 	// ── Startup: backfill both directions ─────────────────────────
@@ -1401,47 +1318,26 @@ export async function startNostrSync(): Promise<void> {
 	// Anything in the local manifest the relays didn't return gets
 	// re-published below. Negentropy can replace this scan later.
 	//
-	// Exception: a device that bootstrapped from checkpoints never held the
-	// changes older than the manifest cursor, so it has nothing to heal
-	// there and walks 1078 from that floor. Checkpoints (1079) are always
-	// scanned whole: one per object, and a stale one on the relay is what
-	// the pass below replaces.
+	// Checkpoints (1079) never shorten this walk: they are replay caches, and
+	// the 1078 history - including the vanish ledger - is what every replica
+	// must hold in full. They are scanned whole (one per object) so the pass
+	// below knows what the relay already carries.
 	state.published = {};
 	state.publishedSpace = {};
 	state.sharedQueued = {};
 	state.checkpoints = {};
-	state.checkpointFloors ??= {};
-	const cold = state.cursor === 0 && state.checkpointFloor === undefined && Object.keys(await localManifest()).length === 0;
-	if (cold) {
-		const mine = await fetchManifest(null);
-		if (mine) state.checkpointFloor = mine.cursor;
-		for (const space of sharedSpaces.values()) {
-			if (!space.owner || space.owner === id.pk) continue; // my own manifest covers spaces I publish for
-			const theirs = await fetchManifest(space);
-			if (theirs) state.checkpointFloors[space.spaceTag] = theirs.cursor;
-		}
-		if (mine || Object.keys(state.checkpointFloors).length > 0) console.log(`[sync] cold start: checkpoint floor ${state.checkpointFloor ?? 0}${Object.keys(state.checkpointFloors).length > 0 ? `, ${Object.keys(state.checkpointFloors).length} space floor(s)` : ""}`);
-		dirty = true;
-	}
-	const personalFloor = state.checkpointFloor ?? 0;
-	const spaceFloor = (space: SharedSpace) => (space.owner && space.owner !== id!.pk ? state.checkpointFloors![space.spaceTag] ?? 0 : personalFloor);
 	const backfillById = new Map<string, Event>();
 	const spaceTags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
-	const backfillFilters: Filter[] = [{ kinds: [CHANGE_KIND], authors: [id.pk], since: personalFloor }, { kinds: [CHECKPOINT_KIND], authors: [id.pk] }];
-	const tagsByFloor = new Map<number, string[]>();
-	for (const space of sharedSpaces.values()) {
-		const floor = spaceFloor(space);
-		tagsByFloor.set(floor, [...(tagsByFloor.get(floor) ?? []), space.spaceTag]);
-	}
-	for (const [floor, tags] of tagsByFloor) backfillFilters.push({ kinds: [CHANGE_KIND], "#h": tags, since: floor });
-	if (spaceTags.length > 0) backfillFilters.push({ kinds: [CHECKPOINT_KIND], "#h": spaceTags });
-	const backfillScan = beginReplayScan(Math.min(personalFloor, ...tagsByFloor.keys()));
+	const backfillFilters: Filter[] = [{ kinds: [CHANGE_KIND, CHECKPOINT_KIND], authors: [id.pk] }];
+	if (spaceTags.length > 0) backfillFilters.push({ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": spaceTags });
+	const backfillScan = beginReplayScan(0);
 	const backfillComplete = await scanRelayHistory(pool, id.relays, backfillFilters, (event) => backfillById.set(event.id, event));
 	const backfill = [...backfillById.values()];
 	console.log(`[sync] backfill: ${backfill.length} event(s) from relays`);
 	// Route every event through the chunk-aware path (sorted so multi-part
 	// groups assemble in one pass); onRelayEvent advances the cursor.
-	// Checkpoints first so the daemon skips the changes they cover.
+	// Checkpoints first so an object renders from its cache while its
+	// originals stream in.
 	backfill.sort((a, b) => b.kind - a.kind || a.created_at - b.created_at);
 	let assembled = 0;
 	for (const event of backfill) {

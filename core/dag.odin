@@ -168,18 +168,19 @@ find_heads :: proc(changes: []Change, allocator := context.allocator) -> [dynami
 
 // ── Checkpoints ──────────────────────────────────────────────────────
 //
-// A checkpoint names every change it folded in (covered_ids, in replay
-// order), so a peer holding only the checkpoint and a tail can tell
-// "already applied" from "concurrent, replay me" without the covered
-// history, and can continue the Kahn run exactly where the publisher's
-// stopped (topo_sort `after`).
+// A checkpoint is a replay cache, never the history: it names every change
+// it folded in (covered_ids, in replay order) so a peer can tell "already
+// applied" from "concurrent, replay me" and continue the Kahn run where the
+// publisher's stopped (topo_sort `after`). The original changes stay
+// canonical; every replica keeps them and reconciles them in full.
 //
 // Kahn order is not stable under extension: a concurrent change arriving
 // later with a smaller id sorts BEFORE already-covered changes in a full
-// replay. A checkpoint-only peer cannot reproduce that; its state is
-// transiently off for that object until the publisher - which always replays
-// full history - issues the next checkpoint. A full-history peer must call
-// checkpoint_is_prefix before trusting a checkpoint for its own replay.
+// replay. A full-history peer detects that (checkpoint_is_prefix) and replays
+// from genesis. A peer still missing covered originals may only continue
+// from the checkpoint when the tail provably queues after the whole covered
+// prefix (checkpoint_tail_continues); otherwise it shows the checkpoint
+// state alone until the originals arrive.
 
 /** Changes not folded into the checkpoint; input order preserved. */
 checkpoint_tail :: proc(changes: []Change, cp: ^Checkpoint, allocator := context.allocator) -> []Change {
@@ -208,16 +209,85 @@ checkpoint_is_prefix :: proc(changes: []Change, cp: ^Checkpoint) -> bool {
  *   - every covered change present but the order diverged (a concurrent
  *     change with a smaller id arrived after the checkpoint) → nil: replay
  *     from genesis;
- *   - covered changes missing → the checkpoint IS the history; use it.
+ *   - covered changes missing, but the held changes form a closed history
+ *     the checkpoint neither prefixes nor continues → nil: that is another
+ *     branch (or a forgery); what this replica holds is real history;
+ *   - covered changes missing otherwise → the checkpoint stands in for them
+ *     until they arrive; compute_state decides whether the tail may extend it.
  * Every host replays through compute_state, so the rule has one definition.
  */
 checkpoint_for_replay :: proc(changes: []Change, cp: ^Checkpoint) -> ^Checkpoint {
 	if cp == nil do return nil
+	if checkpoint_covers_all(changes, cp) do return checkpoint_is_prefix(changes, cp) ? cp : nil
+	if dag_closed(changes) && !checkpoint_tail_continues(checkpoint_tail(changes, cp, context.temp_allocator), cp) do return nil
+	return cp
+}
+
+/** True when every covered id is among `changes`. */
+checkpoint_covers_all :: proc(changes: []Change, cp: ^Checkpoint) -> bool {
 	present := make(map[string]bool, allocator = context.temp_allocator)
 	defer delete(present)
 	for c in changes do present[string(c.id)] = true
-	for id in cp.covered_ids do if string(id) not_in present do return cp
-	return checkpoint_is_prefix(changes, cp) ? cp : nil
+	for id in cp.covered_ids do if string(id) not_in present do return false
+	return true
+}
+
+/**
+ * True when replaying `tail` after the checkpoint provably reproduces the
+ * order a full replay would use, without the covered originals at hand.
+ *
+ * topo_sort is Kahn with a FIFO queue whose newly freed batch is sorted: a
+ * change enters the queue when its LAST parent is processed, behind
+ * everything already queued and sorted among the batch freed at that step.
+ * Inserting a tail root therefore never reorders covered changes among
+ * themselves; the one hazard is a covered change freed at the same step with
+ * the larger id, which the full run would place after the root while the
+ * checkpoint folded it in. Without the covered originals' parents that step's
+ * batch is unknowable, so the root's last covered parent must be a checkpoint
+ * head: nothing covered was freed by processing it. A parent that is neither
+ * covered nor in the tail is unknown history: not continuable.
+ */
+checkpoint_tail_continues :: proc(tail: []Change, cp: ^Checkpoint) -> bool {
+	covered_index := make(map[string]int, allocator = context.temp_allocator)
+	defer delete(covered_index)
+	for id, i in cp.covered_ids do covered_index[string(id)] = i
+	in_tail := make(map[string]bool, allocator = context.temp_allocator)
+	defer delete(in_tail)
+	for c in tail do in_tail[string(c.id)] = true
+	for c in tail {
+		release := -1
+		root := true
+		for p in c.parent_ids {
+			if in_tail[string(p)] {
+				root = false
+				continue
+			}
+			idx, covered := covered_index[string(p)]
+			if !covered do return false
+			if idx > release do release = idx
+		}
+		if !root do continue
+		if release < 0 do return len(cp.covered_ids) == 0
+		last := cp.covered_ids[release]
+		is_head := false
+		for h in cp.head_ids do if string(h) == string(last) {
+			is_head = true
+			break
+		}
+		if !is_head do return false
+	}
+	return true
+}
+
+/** True when every parent of every change is itself among `changes`. */
+dag_closed :: proc(changes: []Change) -> bool {
+	present := make(map[string]bool, allocator = context.temp_allocator)
+	defer delete(present)
+	for c in changes do present[string(c.id)] = true
+	for c in changes {
+		for p in c.parent_ids do if string(p) not_in present do return false
+	}
+	return true
 }
 
 /** Tail heads plus checkpoint heads no tail change has built on; sorted hex. */
@@ -241,13 +311,12 @@ checkpoint_heads :: proc(tail: []Change, cp: ^Checkpoint, allocator := context.a
 }
 
 /**
- * Fold a replayed state and the changes that produced it into a checkpoint.
- * `changes` must be exactly the set `state` was computed from; when `state`
- * was itself computed on top of `prior`, pass it so covered_ids continue
- * prior's replay order with the tail's. Anything else makes covered_ids lie
- * and every consumer drift.
+ * Fold a state replayed from genesis and the complete changes that produced
+ * it into a checkpoint. `changes` must be exactly the closed set `state` was
+ * computed from (dag_closed, no checkpoint seed); anything else makes
+ * covered_ids lie and every consumer drift.
  */
-checkpoint_build :: proc(state: ^Object_State, changes: []Change, now_ms: i64, prior: ^Checkpoint = nil, allocator := context.allocator) -> Checkpoint {
+checkpoint_build :: proc(state: ^Object_State, changes: []Change, now_ms: i64, allocator := context.allocator) -> Checkpoint {
 	cp: Checkpoint
 	cp.object_id = strings.clone(state.id, allocator)
 	cp.created_at = now_ms
@@ -256,19 +325,10 @@ checkpoint_build :: proc(state: ^Object_State, changes: []Change, now_ms: i64, p
 		raw, ok := hex.decode(transmute([]byte)h, allocator)
 		if ok do append(&cp.head_ids, raw)
 	}
-	if prior == nil {
-		sorted := topo_sort(changes, context.temp_allocator)
-		defer delete(sorted)
-		cp.covered_ids = make([dynamic][]byte, 0, len(sorted), allocator)
-		for c in sorted do append(&cp.covered_ids, slice.clone(c.id, allocator))
-	} else {
-		tail := checkpoint_tail(changes, prior, context.temp_allocator)
-		sorted := topo_sort(tail, context.temp_allocator, prior)
-		defer delete(sorted)
-		cp.covered_ids = make([dynamic][]byte, 0, len(prior.covered_ids) + len(sorted), allocator)
-		for id in prior.covered_ids do append(&cp.covered_ids, slice.clone(id, allocator))
-		for c in sorted do append(&cp.covered_ids, slice.clone(c.id, allocator))
-	}
+	sorted := topo_sort(changes, context.temp_allocator)
+	defer delete(sorted)
+	cp.covered_ids = make([dynamic][]byte, 0, len(sorted), allocator)
+	for c in sorted do append(&cp.covered_ids, slice.clone(c.id, allocator))
 	cp.state = Snapshot{
 		id         = cp.object_id,
 		type_key   = strings.clone(state.type_key, allocator),
@@ -287,9 +347,19 @@ checkpoint_hash :: proc(bytes: []byte, allocator := context.allocator) -> string
 	return hex_id(digest[:], allocator)
 }
 
-/** Store rule when two checkpoints describe one object: more covered wins, then the larger hash. */
+/**
+ * Store rule when two checkpoints describe one object: the candidate must
+ * cover everything the existing one covers (a strict superset wins, an
+ * incomparable branch never displaces what it does not contain); for the
+ * same covered set the larger hash wins so every replica converges.
+ */
 checkpoint_supersedes :: proc(candidate: ^Checkpoint, candidate_hash: string, existing: ^Checkpoint, existing_hash: string) -> bool {
-	if len(candidate.covered_ids) != len(existing.covered_ids) do return len(candidate.covered_ids) > len(existing.covered_ids)
+	if candidate.object_id != existing.object_id do return false
+	covered := make(map[string]bool, allocator = context.temp_allocator)
+	defer delete(covered)
+	for id in candidate.covered_ids do covered[string(id)] = true
+	for id in existing.covered_ids do if string(id) not_in covered do return false
+	if len(covered) > len(existing.covered_ids) do return true
 	return candidate_hash > existing_hash
 }
 
@@ -705,7 +775,9 @@ normalize :: proc(t: ^Block_Tree, before_counts: map[string]int) {
 // full-history peer and a checkpoint-only peer reach the same state and the
 // same heads from the same checkpoint; replay_test.odin pins that. A
 // full-history peer whose Kahn order diverged from the checkpoint's ignores
-// it (checkpoint_for_replay), so the state never depends on download order.
+// it (checkpoint_for_replay); a peer missing covered originals applies the
+// tail only when checkpoint_tail_continues proves the order, so the state
+// never depends on download order.
 compute_state :: proc(changes: []Change, allocator := context.allocator, checkpoint: ^Checkpoint = nil) -> (Object_State, bool) {
 	state: Object_State
 	checkpoint := checkpoint_for_replay(changes, checkpoint)
@@ -716,6 +788,9 @@ compute_state :: proc(changes: []Change, allocator := context.allocator, checkpo
 	if checkpoint != nil {
 		state.id = checkpoint.object_id
 		tail = checkpoint_tail(changes, checkpoint, context.temp_allocator)
+		// With every covered original present checkpoint_for_replay already
+		// proved the prefix; only a peer still missing them needs the gate.
+		if !checkpoint_covers_all(changes, checkpoint) && !checkpoint_tail_continues(tail, checkpoint) do tail = nil
 		state.heads = checkpoint_heads(tail, checkpoint, allocator)
 	} else {
 		state.id = changes[0].object_id

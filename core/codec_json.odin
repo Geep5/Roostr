@@ -233,6 +233,16 @@ codec_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		if !ok do return nil, "invalid protobuf change"
 		return change_to_json(change, ordered = true), ""
 	}
+	if action == "checkpoint_supersedes" {
+		// {candidate: base64, existing: base64} → bool, the one store rule.
+		candidate_bytes, cok := bytes_from_base64(json_str(payload, "candidate"))
+		existing_bytes, eok := bytes_from_base64(json_str(payload, "existing"))
+		if !cok || !eok do return nil, "invalid base64 checkpoint"
+		candidate, cdok := decode_checkpoint(candidate_bytes)
+		existing, edok := decode_checkpoint(existing_bytes)
+		if !cdok || !edok do return nil, "invalid protobuf checkpoint"
+		return json.Boolean(checkpoint_supersedes(&candidate, checkpoint_hash(candidate_bytes), &existing, checkpoint_hash(existing_bytes))), ""
+	}
 	if action != "encode" && action != "hash" do return nil, "unknown codec action"
 	value, _ := json_field(payload, "change")
 	change, ok := change_from_json(value)

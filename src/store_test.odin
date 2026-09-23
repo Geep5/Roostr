@@ -122,9 +122,10 @@ cached_name :: proc(object_id: string) -> (name: string, heads: int) {
 }
 
 /**
- * A machine that holds only a checkpoint and a tail must load the same object
- * a full-history machine does, and a checkpoint built on top of an earlier
- * one must fold everything in. This is the daemon side of docs/checkpoint-sync.md.
+ * A machine that holds only a checkpoint and a tail loads the same object a
+ * full-history machine does, but it may not publish a checkpoint until the
+ * covered originals are back on disk; once they are, the next checkpoint
+ * folds everything in. This is the daemon side of docs/checkpoint-sync.md.
  */
 @(private = "file")
 checkpoint_replaces_history :: proc(t: ^testing.T, root: string) {
@@ -142,8 +143,6 @@ checkpoint_replaces_history :: proc(t: ^testing.T, root: string) {
 	testing.expect(t, len(built.heads) == 1 && built.heads[0] == second_id, "checkpoint heads are the object's heads")
 	// covered_ids is the replay order: the create comes first.
 	testing.expect_value(t, string(hex.encode(built.checkpoint.covered_ids[0], context.temp_allocator)), first_id)
-	covered := checkpoint_covered_hex("obj-cp")
-	testing.expect(t, first_id in covered && second_id in covered, "import can tell covered changes apart")
 
 	// Simulate the checkpoint-only peer: drop the covered history.
 	dir, _ := filepath.join({root, "changes", "obj-cp"}, context.temp_allocator)
@@ -153,7 +152,7 @@ checkpoint_replaces_history :: proc(t: ^testing.T, root: string) {
 	testing.expect_value(t, name, "second")
 	testing.expect_value(t, heads, 1)
 
-	// A tail on top of the checkpoint replays; the next checkpoint continues it.
+	// A tail on top of the checkpoint replays for display...
 	third := change_for("obj-cp", "third")
 	ordered_remove(&third.ops, 0)
 	third.parent_ids = make([dynamic][]byte, context.temp_allocator)
@@ -162,14 +161,21 @@ checkpoint_replaces_history :: proc(t: ^testing.T, root: string) {
 	name, heads = cached_name("obj-cp")
 	testing.expect_value(t, name, "third")
 	testing.expect_value(t, heads, 1)
+	// ...but a partial-history replica cannot mint a checkpoint from it.
+	partial := build_checkpoint("obj-cp")
+	testing.expect_value(t, partial.error, "history incomplete")
+
+	// Once the covered originals are back the build continues from genesis.
+	commit_change(&first)
+	commit_change(&second)
 	next := build_checkpoint("obj-cp")
 	testing.expect_value(t, next.error, "")
 	testing.expect_value(t, len(next.checkpoint.covered_ids), 3)
 	testing.expect_value(t, string(hex.encode(next.checkpoint.covered_ids[2], context.temp_allocator)), third_id)
 
-	// The store keeps the larger covered set no matter which arrives later.
+	// The store keeps the superset no matter which arrives later.
 	stored, ok := store_checkpoint(&built.checkpoint, built.bytes)
-	testing.expect(t, ok && !stored, "a smaller checkpoint never replaces a larger one")
+	testing.expect(t, ok && !stored, "a covered subset never replaces its superset")
 	reloaded, has := load_checkpoint("obj-cp", context.temp_allocator)
 	testing.expect(t, has && len(reloaded.covered_ids) == 3)
 }
