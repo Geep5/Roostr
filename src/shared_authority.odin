@@ -31,7 +31,12 @@ shared_change_allowed :: proc(c: ^core.Change, p: Shared_Provenance, owner: stri
 	return ok
 }
 
-shared_import_allowed :: proc(c: ^core.Change, p: Shared_Provenance) -> bool {
+/**
+ * Resolve the installed space the provenance claims: key version must match
+ * and the owner (installed, else the verified local identity) must be a hex
+ * pubkey. False means nothing sealed under this provenance may be imported.
+ */
+shared_space_resolve :: proc(p: Shared_Provenance) -> (core.Shared_Space, bool) {
 	// Keyring metadata is installed by the trusted service, never imported DAG
 	// operations. A rotation invalidates all prior-key shared import capability.
 	sync.lock(&g_keys_mu)
@@ -45,20 +50,37 @@ shared_import_allowed :: proc(c: ^core.Change, p: Shared_Provenance) -> bool {
 	if local_owner do owner = core.json_str(keyring, "localPubkey")
 	valid := found && key_id == p.key_id && len(core.json_str(entry, "key")) == 64 && core.is_hex_pubkey(owner)
 	sync.unlock(&g_keys_mu)
-	if !valid do return false
+	if !valid do return {}, false
 	if local_owner {
 		sync.lock(&g_nostr_mu)
 		identity := nostr_read()
 		sync.unlock(&g_nostr_mu)
 		raw, ok := hex.decode(transmute([]byte)identity.privkey_hex, context.temp_allocator)
-		if !ok || len(raw) != 32 do return false
+		if !ok || len(raw) != 32 do return {}, false
 		digest := core.sha256(raw)
-		if core.json_str(keyring, "localIdentityHash") != string(hex.encode(digest[:], context.temp_allocator)) do return false
+		if core.json_str(keyring, "localIdentityHash") != string(hex.encode(digest[:], context.temp_allocator)) do return {}, false
 	}
+	return core.Shared_Space{p.space_id, p.key_id, owner}, true
+}
+
+shared_import_allowed :: proc(c: ^core.Change, p: Shared_Provenance) -> bool {
+	space, valid := shared_space_resolve(p)
+	if !valid do return false
 	sync.lock(&g_store.mu)
 	defer sync.unlock(&g_store.mu)
 	ensure_loaded()
-	return shared_change_allowed(c, p, owner, g_store.states)
+	return shared_change_allowed(c, p, space.owner, g_store.states)
+}
+
+/** Checkpoint counterpart of shared_import_allowed: owner-only, scope-checked. */
+shared_checkpoint_allowed :: proc(cp: ^core.Checkpoint, p: Shared_Provenance) -> bool {
+	space, valid := shared_space_resolve(p)
+	if !valid do return false
+	sync.lock(&g_store.mu)
+	defer sync.unlock(&g_store.mu)
+	ensure_loaded()
+	ok, _ := core.authorize_shared_checkpoint(cp, p, space, g_store.states[p.space_id], g_store.states[cp.object_id])
+	return ok
 }
 
 // Called before replacing the private identity, while g_nostr_mu is held.

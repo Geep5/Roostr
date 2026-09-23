@@ -63,6 +63,54 @@ corpus_contract :: proc(t: ^testing.T) {
 	refuses_a_truncated_frame(t)
 	push_without_reset_merges(t)
 	survives_the_blob_being_reused(t)
+	checkpoint_frames_seed_the_tail(t)
+}
+
+/**
+ * A checkpoint frame plus the object's tail must cache exactly what the full
+ * history caches: a cold browser loading from a relay checkpoint sees the
+ * same object as one that walked every change.
+ */
+@(private = "file")
+checkpoint_frames_seed_the_tail :: proc(t: ^testing.T) {
+	query_cache_reset()
+	create := note_changes("obj-cp", "First", 1)
+	first, _ := decode_change(create, context.temp_allocator)
+	rename: Change
+	rename.object_id = "obj-cp"
+	rename.timestamp = 2
+	rename.author = "fixture"
+	rename.parent_ids = make([dynamic][]byte, context.temp_allocator)
+	append(&rename.parent_ids, first.id)
+	rename.ops = make([dynamic]Operation, context.temp_allocator)
+	append(&rename.ops, Operation{kind = .Field_Set, key = "name", value = Value{kind = .String, str = "Second"}})
+	digest := sha256(encode_change(rename, true, context.temp_allocator))
+	rename.id = make([]byte, 32, context.temp_allocator)
+	copy(rename.id, digest[:])
+	tail := encode_change(rename, false, context.temp_allocator)
+
+	prefix := make([dynamic]Change, context.temp_allocator)
+	append(&prefix, first)
+	seed, _ := compute_state(prefix[:], context.temp_allocator)
+	cp := encode_checkpoint(checkpoint_build(&seed, prefix[:], 1, allocator = context.temp_allocator), context.temp_allocator)
+
+	set_request_blob(corpus_frame([][]byte{tail}, context.temp_allocator, [][]byte{cp}))
+	defer set_request_blob(nil)
+	request := jobj()
+	request["action"] = json.String("push")
+	request["reset"] = json.Boolean(true)
+	out, err := dispatch("corpus", json.Object(request))
+	testing.expect_value(t, err, "")
+	objects, _ := json_int(out, "objects")
+	testing.expect_value(t, objects, 1)
+	state, ok := query_cached_states["obj-cp"]
+	testing.expect(t, ok, "checkpointed object is cached")
+	if !ok do return
+	name, _ := fields_get(state.fields, "name")
+	testing.expect_value(t, name.str, "Second")
+	testing.expect_value(t, state.type_key, "note")
+	testing.expect_value(t, len(state.heads), 1)
+	testing.expect_value(t, state.heads[0], hex_id(rename.id, context.temp_allocator))
 }
 
 /**

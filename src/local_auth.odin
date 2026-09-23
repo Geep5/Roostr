@@ -340,7 +340,7 @@ local_authorize :: proc(sock: net.TCP_Socket, req: Request) -> bool {
 		return false
 	}
 	if role == .UI {
-		if req.method == "POST" && req.path == "/api/changes" { respond_error(sock, "service only", "403 Forbidden"); return false }
+		if req.method == "POST" && (req.path == "/api/changes" || strings.has_prefix(req.path, "/api/checkpoints")) { respond_error(sock, "service only", "403 Forbidden"); return false }
 		if req.method == "POST" && req.path == "/api/mutate" {
 			if !core.json_depth_ok(req.body) { respond_error(sock, "invalid JSON"); return false }
 			parsed, err := json.parse(req.body, allocator = context.temp_allocator)

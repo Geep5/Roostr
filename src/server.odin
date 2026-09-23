@@ -282,6 +282,12 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 		handle_changes_get(sock, req.path[len("/api/changes/"):])
 	case req.method == "POST" && req.path == "/api/changes":
 		handle_changes_import(sock, req.body)
+	case req.method == "GET" && req.path == "/api/checkpoints":
+		handle_checkpoints_list(sock)
+	case req.method == "POST" && req.path == "/api/checkpoints/build":
+		handle_checkpoint_build(sock, req.body)
+	case req.method == "POST" && req.path == "/api/checkpoints":
+		handle_checkpoints_import(sock, req.body)
 	case req.method == "GET" && req.path == "/api/vanished":
 		handle_vanished(sock)
 	case req.method == "GET" && req.path == "/api/settings":

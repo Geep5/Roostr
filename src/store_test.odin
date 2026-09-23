@@ -98,6 +98,80 @@ store_durability_contract :: proc(t: ^testing.T) {
 	store_invalidate()
 	_ = loaded_objects()
 	testing.expect_value(t, g_store.quarantined, 1)
+
+	checkpoint_replaces_history(t, root)
+}
+
+@(private = "file")
+cached_name :: proc(object_id: string) -> (name: string, heads: int) {
+	Out :: struct {
+		id:    string,
+		name:  string,
+		heads: int,
+	}
+	out := Out{id = object_id}
+	with_states(proc(states: map[string]^core.Object_State, user: rawptr) {
+		o := cast(^Out)user
+		state, ok := states[o.id]
+		if !ok do return
+		value, _ := core.fields_get(state.fields, "name")
+		o.name = strings.clone(value.str, context.temp_allocator)
+		o.heads = len(state.heads)
+	}, &out)
+	return out.name, out.heads
+}
+
+/**
+ * A machine that holds only a checkpoint and a tail must load the same object
+ * a full-history machine does, and a checkpoint built on top of an earlier
+ * one must fold everything in. This is the daemon side of docs/checkpoint-sync.md.
+ */
+@(private = "file")
+checkpoint_replaces_history :: proc(t: ^testing.T, root: string) {
+	first := change_for("obj-cp", "first")
+	first_id, _ := commit_change(&first)
+	second := change_for("obj-cp", "second")
+	ordered_remove(&second.ops, 0) // no second create
+	second.parent_ids = make([dynamic][]byte, context.temp_allocator)
+	append(&second.parent_ids, first.id)
+	second_id, _ := commit_change(&second)
+
+	built := build_checkpoint("obj-cp")
+	testing.expect_value(t, built.error, "")
+	testing.expect_value(t, len(built.checkpoint.covered_ids), 2)
+	testing.expect(t, len(built.heads) == 1 && built.heads[0] == second_id, "checkpoint heads are the object's heads")
+	// covered_ids is the replay order: the create comes first.
+	testing.expect_value(t, string(hex.encode(built.checkpoint.covered_ids[0], context.temp_allocator)), first_id)
+	covered := checkpoint_covered_hex("obj-cp")
+	testing.expect(t, first_id in covered && second_id in covered, "import can tell covered changes apart")
+
+	// Simulate the checkpoint-only peer: drop the covered history.
+	dir, _ := filepath.join({root, "changes", "obj-cp"}, context.temp_allocator)
+	testing.expect(t, os.remove_all(dir) == nil, "history removed")
+	store_invalidate()
+	name, heads := cached_name("obj-cp")
+	testing.expect_value(t, name, "second")
+	testing.expect_value(t, heads, 1)
+
+	// A tail on top of the checkpoint replays; the next checkpoint continues it.
+	third := change_for("obj-cp", "third")
+	ordered_remove(&third.ops, 0)
+	third.parent_ids = make([dynamic][]byte, context.temp_allocator)
+	append(&third.parent_ids, second.id)
+	third_id, _ := commit_change(&third)
+	name, heads = cached_name("obj-cp")
+	testing.expect_value(t, name, "third")
+	testing.expect_value(t, heads, 1)
+	next := build_checkpoint("obj-cp")
+	testing.expect_value(t, next.error, "")
+	testing.expect_value(t, len(next.checkpoint.covered_ids), 3)
+	testing.expect_value(t, string(hex.encode(next.checkpoint.covered_ids[2], context.temp_allocator)), third_id)
+
+	// The store keeps the larger covered set no matter which arrives later.
+	stored, ok := store_checkpoint(&built.checkpoint, built.bytes)
+	testing.expect(t, ok && !stored, "a smaller checkpoint never replaces a larger one")
+	reloaded, has := load_checkpoint("obj-cp", context.temp_allocator)
+	testing.expect(t, has && len(reloaded.covered_ids) == 3)
 }
 
 @(test)

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test, type Mock } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,10 +21,19 @@ let beforePage: (() => void) | undefined;
 let liveEvent: (event: Event) => void;
 let liveSubscriptions: number;
 let importChange: (b64: string) => Promise<Response>;
+let checkpointRows: Record<string, unknown>;
+let importCheckpoint: (body: { checkpoints: string[]; provenance?: unknown }) => Promise<Response>;
+let buildCheckpoint: (objectId: string) => Promise<Response>;
+let manifests: Event[];
+let published: Event[];
+let timeoutMock: Mock<typeof setTimeout>;
 let restore: Array<() => void>;
 
-function event(part: string, created_at: number, chunk?: [string, number, number]): Event {
-	return finalizeEvent({ kind: 1078, created_at, tags: chunk ? [["c", chunk[0], String(chunk[1]), String(chunk[2])]] : [], content: nip44.encrypt(part, conversationKey) }, sk);
+function event(part: string, created_at: number, chunk?: [string, number, number], kind = 1078): Event {
+	return finalizeEvent({ kind, created_at, tags: chunk ? [["c", chunk[0], String(chunk[1]), String(chunk[2])]] : [], content: nip44.encrypt(part, conversationKey) }, sk);
+}
+function decrypt(item: Event): string {
+	return nip44.decrypt(item.content, conversationKey);
 }
 function chunks(createdAt = 10): Event[] {
 	const b64 = "YWJjZGVm";
@@ -35,7 +44,7 @@ function chunks(createdAt = 10): Event[] {
 }
 async function state() {
 	intervals.find((timer) => timer.ms === 5000)!.callback();
-	return await Bun.file(join(root, "sync-state.json")).json() as { cursor: number; replaySince?: number };
+	return await Bun.file(join(root, "sync-state.json")).json() as { cursor: number; replaySince?: number; checkpointFloor?: number; checkpoints: Record<string, { hash: string; heads: string[]; covered: number; eventIds: string[] }> };
 }
 async function until(predicate: () => boolean) {
 	for (let i = 0; i < 100; i++) {
@@ -45,6 +54,14 @@ async function until(predicate: () => boolean) {
 		await promise;
 	}
 	throw new Error("Daemon operation did not settle");
+}
+/** A few real macrotask turns: lets awaited mock responses propagate into state. */
+async function settle() {
+	for (let i = 0; i < 5; i++) {
+		const { promise, resolve } = Promise.withResolvers<void>();
+		realSetTimeout(resolve, 1);
+		await promise;
+	}
 }
 async function watchdog() {
 	const previous = liveSubscriptions;
@@ -65,6 +82,11 @@ beforeEach(async () => {
 	beforePage = undefined;
 	liveSubscriptions = 0;
 	importChange = async () => Response.json({ imported: 1, rejected: 0, ids: ["change"] });
+	checkpointRows = {};
+	importCheckpoint = async () => Response.json({ imported: 0, rejected: 1, items: [] });
+	buildCheckpoint = async () => new Response("not found", { status: 404 });
+	manifests = [];
+	published = [];
 	restore = [];
 	const interval = spyOn(globalThis, "setInterval").mockImplementation(((callback: () => void, ms: number) => {
 		intervals.push({ callback, ms });
@@ -72,13 +94,16 @@ beforeEach(async () => {
 	}) as unknown as typeof setInterval);
 	restore.push(() => interval.mockRestore());
 	// Leave the daemon's paced publish loop asleep; no actual timers or sockets.
-	const timeout = spyOn(globalThis, "setTimeout").mockImplementation((() => 1) as unknown as typeof setTimeout);
-	restore.push(() => timeout.mockRestore());
+	timeoutMock = spyOn(globalThis, "setTimeout").mockImplementation((() => 1) as unknown as typeof setTimeout);
+	restore.push(() => timeoutMock.mockRestore());
 	const fetch = spyOn(auth, "apiFetch").mockImplementation(async (input, init) => {
 		const url = String(input);
 		if (url.endsWith("/api/changes") && init?.method === "POST") return importChange(JSON.parse(String(init.body)).changes[0]);
+		if (url.endsWith("/api/checkpoints") && init?.method === "POST") return importCheckpoint(JSON.parse(String(init.body)));
+		if (url.endsWith("/api/checkpoints/build")) return buildCheckpoint(JSON.parse(String(init?.body)).objectId);
 		if (url.endsWith("/api/objects")) return Response.json([]);
 		if (url.endsWith("/api/vanished")) return Response.json({ vanished: [] });
+		if (url.endsWith("/api/checkpoints")) return Response.json(checkpointRows);
 		if (url.endsWith("/api/changes")) return Response.json({});
 		throw new Error(`Unexpected local request: ${url}`);
 	});
@@ -98,9 +123,15 @@ beforeEach(async () => {
 		},
 	}) as never);
 	restore.push(() => relay.mockRestore());
-	const query = spyOn(SimplePool.prototype, "querySync").mockImplementation(async (_relays, filter) => filter.kinds?.includes(1078) ? [event("YWJj", 100)] : []);
+	const query = spyOn(SimplePool.prototype, "querySync").mockImplementation(async (_relays, filter) => {
+		if (filter.kinds?.includes(30079)) return manifests;
+		return filter.kinds?.includes(1078) ? [event("YWJj", 100)] : [];
+	});
 	restore.push(() => query.mockRestore());
-	const publish = spyOn(SimplePool.prototype, "publish").mockImplementation(() => [Promise.resolve("")]);
+	const publish = spyOn(SimplePool.prototype, "publish").mockImplementation((_relays, item) => {
+		published.push(item);
+		return [Promise.resolve("")];
+	});
 	restore.push(() => publish.mockRestore());
 	const live = spyOn(SimplePool.prototype, "subscribeMany").mockImplementation((_relays, filter, callbacks) => {
 		liveSubscriptions++;
@@ -272,4 +303,64 @@ test("a new suffix-only group fetches its unseen prefix older than the observed 
 	await watchdog();
 	expect(filters.at(-1)?.since).toBe(0);
 	expect((await state()).replaySince).toBeUndefined();
+});
+
+test("a live checkpoint under our key is imported and becomes the relay's copy; a stale one is deleted", async () => {
+	const imports: string[][] = [];
+	let stored = true;
+	importCheckpoint = async (body) => {
+		imports.push(body.checkpoints);
+		return Response.json({ imported: stored ? 1 : 0, rejected: 0, items: [{ objectId: "obj", hash: stored ? "h1" : "h0", heads: ["b", "a"], covered: 2, stored }] });
+	};
+	await startNostrSync();
+	const current = event("Q1Ax", 200, undefined, 1079);
+	liveEvent(current);
+	await until(() => imports.length === 1);
+	expect(imports[0]).toEqual(["Q1Ax"]);
+	await settle();
+	const after = await state();
+	expect(after.checkpoints.obj).toEqual({ hash: "h1", heads: ["a", "b"], covered: 2, eventIds: [current.id] });
+	expect(after.cursor).toBe(200);
+	stored = false;
+	const stale = event("Q1Aw", 150, undefined, 1079);
+	liveEvent(stale);
+	await until(() => published.some((item) => item.kind === 5));
+	await settle();
+	const deletion = published.find((item) => item.kind === 5)!;
+	expect(deletion.tags).toEqual([["e", stale.id], ["k", "1079"]]);
+	expect((await state()).checkpoints.obj.eventIds).toEqual([current.id]);
+});
+
+test("cold start walks changes from the manifest cursor and keeps checkpoints unbounded", async () => {
+	await writeFile(join(root, "sync-state.json"), JSON.stringify({ version: 1, cursor: 0, published: {}, vanishRequested: {} }));
+	manifests = [finalizeEvent({ kind: 30079, created_at: 900, tags: [["d", "roostr-checkpoint"]], content: nip44.encrypt(JSON.stringify({ cursor: 500, objects: 3 }), conversationKey) }, sk)];
+	await startNostrSync();
+	expect(filters.find((filter) => filter.kinds?.includes(1078))?.since).toBe(500);
+	expect(filters.find((filter) => filter.kinds?.includes(1079))?.since).toBeUndefined();
+	expect((await state()).checkpointFloor).toBe(500);
+});
+
+test("the checkpoint pass rebuilds moved objects, publishes 1079, retires the old event and stamps the manifest", async () => {
+	const old = event("T0xE", 50, undefined, 1079);
+	history = [old, event("U1RM", 60, undefined, 1079)];
+	const onRelay: Record<string, { objectId: string; hash: string }> = { T0xE: { objectId: "obj", hash: "h0" }, U1RM: { objectId: "still", hash: "hs" } };
+	importCheckpoint = async (body) => Response.json({ imported: 1, rejected: 0, items: body.checkpoints.map((b64) => ({ ...onRelay[b64], heads: ["a"], covered: 1, stored: true })) });
+	checkpointRows = { obj: { heads: ["b"], checkpointHeads: ["a"], checkpointHash: "h0", changes: 2, covered: 1 }, still: { heads: ["a"], checkpointHeads: ["a"], checkpointHash: "hs", changes: 1, covered: 1 } };
+	const builds: string[] = [];
+	buildCheckpoint = async (objectId) => {
+		builds.push(objectId);
+		return Response.json({ objectId, b64: "TkVX", hash: "h1", heads: ["b"], covered: 2 });
+	};
+	// Let the paced publish loop run for this test.
+	timeoutMock.mockImplementation(((callback: () => void) => realSetTimeout(callback, 0)) as unknown as typeof setTimeout);
+	await startNostrSync();
+	expect(builds).toEqual(["obj"]);
+	await until(() => published.some((item) => item.kind === 30079));
+	const checkpoint = published.find((item) => item.kind === 1079)!;
+	expect(decrypt(checkpoint)).toBe("TkVX");
+	expect(published.find((item) => item.kind === 5)?.tags).toEqual([["e", old.id], ["k", "1079"]]);
+	const manifest = published.find((item) => item.kind === 30079)!;
+	expect(manifest.tags).toEqual([["d", "roostr-checkpoint"]]);
+	expect(JSON.parse(decrypt(manifest))).toEqual({ cursor: 100, objects: 2 });
+	expect((await state()).checkpoints.obj).toEqual({ hash: "h1", heads: ["b"], covered: 2, eventIds: [checkpoint.id] });
 });

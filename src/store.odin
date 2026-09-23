@@ -134,6 +134,13 @@ ensure_loaded :: proc() {
 			}
 		}
 	}
+	// Objects known only by checkpoint (no change directory yet): a machine
+	// that bootstrapped from the relay's checkpoints and has no tail for them.
+	for object_id in checkpointed_object_ids() {
+		if object_id in g_store.states do continue
+		dir_path, _ := filepath.join({g_store.root, object_id}, context.temp_allocator)
+		load_object_dir(dir_path, object_id, alloc)
+	}
 	// Damage is a standing fact, not a boot event: report everything parked,
 	// so a restart cannot make missing changes look healed.
 	g_store.quarantined += count_quarantined()
@@ -166,40 +173,43 @@ count_quarantined :: proc() -> int {
 	return total
 }
 load_object_dir :: proc(dir_path: string, object_id: string, alloc := context.allocator) {
-	dir, derr := os.open(dir_path)
-	if derr != nil do return
-	defer os.close(dir)
-	files, ferr := os.read_dir(dir, -1, context.temp_allocator)
-	if ferr != nil do return
-
 	changes := make([dynamic]core.Change, alloc)
-	for f in files {
-		if !strings.has_suffix(f.name, ".pb") do continue
-		// A crash used to be able to leave a torn file at a final,
-		// content-addressed name, and nothing here compared the name with
-		// the bytes: the truncated change was replayed as genuine, and an
-		// undecodable one vanished in silence. The filename IS the hash, so
-		// check it, and quarantine whatever fails instead of guessing.
-		data, rerr := os.read_entire_file(f.fullpath, alloc)
-		if rerr != nil {
-			quarantine_change(f.fullpath, object_id, "unreadable")
-			continue
+	if dir, derr := os.open(dir_path); derr == nil {
+		defer os.close(dir)
+		files, ferr := os.read_dir(dir, -1, context.temp_allocator)
+		if ferr != nil do return
+		for f in files {
+			if !strings.has_suffix(f.name, ".pb") do continue
+			// A crash used to be able to leave a torn file at a final,
+			// content-addressed name, and nothing here compared the name with
+			// the bytes: the truncated change was replayed as genuine, and an
+			// undecodable one vanished in silence. The filename IS the hash, so
+			// check it, and quarantine whatever fails instead of guessing.
+			data, rerr := os.read_entire_file(f.fullpath, alloc)
+			if rerr != nil {
+				quarantine_change(f.fullpath, object_id, "unreadable")
+				continue
+			}
+			c, cok := core.decode_change(data, alloc)
+			if !cok {
+				quarantine_change(f.fullpath, object_id, "undecodable")
+				continue
+			}
+			if !change_matches_name(c, f.name) {
+				quarantine_change(f.fullpath, object_id, "address mismatch")
+				continue
+			}
+			append(&changes, c)
 		}
-		c, cok := core.decode_change(data, alloc)
-		if !cok {
-			quarantine_change(f.fullpath, object_id, "undecodable")
-			continue
-		}
-		if !change_matches_name(c, f.name) {
-			quarantine_change(f.fullpath, object_id, "address mismatch")
-			continue
-		}
-		append(&changes, c)
 	}
-	if len(changes) == 0 do return
+	// compute_state decides whether the stored checkpoint seeds the replay
+	// (core.checkpoint_for_replay) or IS the history (covered never downloaded).
+	checkpoint: ^core.Checkpoint
+	if cp, ok := load_checkpoint(object_id, alloc); ok do checkpoint = new_clone(cp, alloc)
+	if len(changes) == 0 && checkpoint == nil do return
 
 	context.allocator = alloc
-	state, ok := core.compute_state(changes[:], alloc)
+	state, ok := core.compute_state(changes[:], alloc, checkpoint)
 	if !ok do return
 	sp := new(core.Object_State, alloc)
 	sp^ = state

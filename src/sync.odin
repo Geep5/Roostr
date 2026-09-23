@@ -185,6 +185,7 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 	vanished := vanished_ids()
 	touched := make(map[string]bool, context.temp_allocator)
 	ids := make([dynamic]json.Value, context.temp_allocator)
+	covered_by_object := make(map[string]map[string]bool, context.temp_allocator)
 
 	for item in arr {
 		s, sok := item.(json.String)
@@ -240,6 +241,19 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 		dir, _ := filepath.join({g_store.root, c.object_id}, context.temp_allocator)
 		path, _ := filepath.join({dir, strings.concatenate({hex_str, ".pb"}, context.temp_allocator)}, context.temp_allocator)
 		if os.exists(path) {
+			skipped += 1
+			append(&ids, json.String(hex_str))
+			continue
+		}
+		// Already folded into this object's checkpoint: storing it again would
+		// only be dropped from the tail at replay. Reported so the harness
+		// marks it published rather than echoing it at the relay.
+		covered, has_covered := &covered_by_object[c.object_id]
+		if !has_covered {
+			covered_by_object[strings.clone(c.object_id, context.temp_allocator)] = checkpoint_covered_hex(c.object_id)
+			covered = &covered_by_object[c.object_id]
+		}
+		if hex_str in covered {
 			skipped += 1
 			append(&ids, json.String(hex_str))
 			continue

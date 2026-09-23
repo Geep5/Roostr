@@ -10,6 +10,7 @@ package core
 // operations during replay, but both its full state AND every supplied
 // operation must pass.
 
+import "core:encoding/base64"
 import "core:encoding/json"
 import "core:strings"
 
@@ -185,6 +186,35 @@ authorize_shared_change :: proc(c: ^Change, p: Shared_Provenance, space: Shared_
 	return true, ""
 }
 
+/**
+ * A checkpoint bypasses per-op authority, so only the space OWNER's are
+ * accepted, and the folded state must be scoped to the space it arrived
+ * through: an owner of space A must not be able to overwrite an object that
+ * lives elsewhere by wrapping a checkpoint in A's key.
+ */
+authorize_shared_checkpoint :: proc(cp: ^Checkpoint, p: Shared_Provenance, space: Shared_Space,
+	trusted_space: ^Object_State, existing: ^Object_State) -> (ok: bool, reason: string) {
+	if p.space_id == "" || p.space_id != space.space_id || p.key_id != space.key_id do return false, "provenance does not match the installed space key"
+	if !is_hex_pubkey(p.signer) do return false, "signer is not a hex pubkey"
+	if space.owner == "" || p.signer != space.owner do return false, "only the space owner may publish checkpoints"
+	if trusted_space != nil && (trusted_space.type_key != "channel" || trusted_space.id != space.space_id || trusted_space.deleted) {
+		return false, "space object is not a live channel"
+	}
+	if cp.object_id == "" || cp.object_id == VANISH_LOG_ID do return false, "object id is not shareable"
+	snap := &cp.state
+	if snap.type_key == "" || snap.type_key == VANISH_LOG_TYPE do return false, "checkpoint does not describe a shareable object"
+	if cp.object_id == space.space_id {
+		if snap.type_key != "channel" do return false, "space checkpoint is not a channel"
+	} else if snap.type_key == "channel" || field_string(snap.fields, "channel") != space.space_id {
+		return false, "checkpoint is not scoped to the space"
+	}
+	if existing != nil {
+		if existing.type_key != snap.type_key do return false, "checkpoint changes the object type"
+		if cp.object_id != space.space_id && field_string(existing.fields, "channel") != space.space_id do return false, "existing object belongs to another scope"
+	}
+	return true, ""
+}
+
 /** Vanished object ids → purge timestamp (ms) from the ledger state, if any. */
 vanished_from_ledger :: proc(ledger: ^Object_State, allocator := context.temp_allocator) -> map[string]i64 {
 	out := make(map[string]i64, allocator = allocator)
@@ -202,10 +232,23 @@ vanished_from_ledger :: proc(ledger: ^Object_State, allocator := context.temp_al
 
 sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	switch json_str(payload, "action") {
-	case "authorize":
-		change_value, _ := json_field(payload, "change")
-		change, cok := change_from_json(change_value)
-		if !cok do return nil, "invalid change JSON"
+	case "authorize", "authorizeCheckpoint":
+		is_checkpoint := json_str(payload, "action") == "authorizeCheckpoint"
+		change: Change
+		checkpoint: Checkpoint
+		if is_checkpoint {
+			// {checkpoint: base64 bytes}
+			raw, derr := base64.decode(json_str(payload, "checkpoint"), allocator = context.temp_allocator)
+			if derr != nil do return nil, "invalid checkpoint base64"
+			cok: bool
+			checkpoint, cok = decode_checkpoint(raw, context.temp_allocator)
+			if !cok do return nil, "invalid checkpoint bytes"
+		} else {
+			change_value, _ := json_field(payload, "change")
+			cok: bool
+			change, cok = change_from_json(change_value)
+			if !cok do return nil, "invalid change JSON"
+		}
 		prov_value, _ := json_field(payload, "provenance")
 		provenance := Shared_Provenance{json_str(prov_value, "spaceId"), 0, strings.to_lower(json_str(prov_value, "signer"), context.temp_allocator)}
 		provenance.key_id, _ = json_int(prov_value, "keyId")
@@ -216,7 +259,13 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		if !tok do return nil, "invalid trustedSpace state"
 		existing, eok := optional_state(payload, "existing")
 		if !eok do return nil, "invalid existing state"
-		ok, reason := authorize_shared_change(&change, provenance, space, trusted, existing)
+		ok: bool
+		reason: string
+		if is_checkpoint {
+			ok, reason = authorize_shared_checkpoint(&checkpoint, provenance, space, trusted, existing)
+		} else {
+			ok, reason = authorize_shared_change(&change, provenance, space, trusted, existing)
+		}
 		out := jobj()
 		out["ok"] = json.Boolean(ok)
 		out["reason"] = json.String(reason)
@@ -268,6 +317,15 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		imported, _ := json_bool(payload, "imported")
 		out := jobj()
 		if sync_settle(json_str(payload, "chunkKey"), imported) do out["replayGroups"] = sync_replay_groups_json()
+		return json.Object(out), ""
+	case "retire":
+		// {since} → {replayGroups?}: a complete scan from `since` could not
+		// resolve these groups; drop the obligations instead of re-scanning forever.
+		if !sync_session.active do return nil, "no sync session"
+		since, has_since := json_int(payload, "since")
+		if !has_since do return nil, "retire needs since"
+		out := jobj()
+		if sync_retire(since) do out["replayGroups"] = sync_replay_groups_json()
 		return json.Object(out), ""
 	case "state":
 		if !sync_session.active do return nil, "no sync session"

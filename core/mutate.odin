@@ -1441,8 +1441,16 @@ mutation_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
    if !ok do return nil, "invalid change"
    append(&changes, change)
   }
+  checkpoint, checkpoint_error := optional_checkpoint(payload)
+  if checkpoint_error != "" do return nil, checkpoint_error
+  heads: [dynamic]string
+  if checkpoint != nil {
+   heads = checkpoint_heads(checkpoint_tail(changes[:], checkpoint, context.temp_allocator), checkpoint, context.temp_allocator)
+  } else {
+   heads = find_heads(changes[:], context.temp_allocator)
+  }
   result := make([dynamic]json.Value, context.temp_allocator)
-  for id in find_heads(changes[:], context.temp_allocator) do append(&result, json.String(id))
+  for id in heads do append(&result, json.String(id))
   return json.Array(result), ""
  }
  params, has_params := json_field(payload, "params")

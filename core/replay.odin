@@ -33,14 +33,17 @@ replay_tree_valid :: proc(t: ^Block_Tree) -> bool {
 }
 
 // Stateless JSON boundary shared by the browser WASM bridge and native callers.
-// Payload: {changes: ChangeJSON[]}. Result: ObjectJSON, or null for no changes.
+// Payload: {changes: ChangeJSON[], checkpoint?: base64 Checkpoint bytes}.
+// Result: ObjectJSON, or null for no changes and no checkpoint.
 replay_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	if _, ok := payload.(json.Object); !ok do return nil, "replay payload must be an object"
 	wire, present := json_field(payload, "changes")
 	if !present do return nil, "replay requires changes"
 	items, ok := wire.(json.Array)
 	if !ok do return nil, "replay changes must be an array"
-	if len(items) == 0 do return nil, ""
+	checkpoint, checkpoint_error := optional_checkpoint(payload)
+	if checkpoint_error != "" do return nil, checkpoint_error
+	if len(items) == 0 && checkpoint == nil do return nil, ""
 
 	changes := make([]Change, len(items), context.allocator)
 	ids := make(map[string]bool, allocator = context.temp_allocator)
@@ -59,13 +62,30 @@ replay_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		if !valid do return nil, "invalid replay change"
 		if change.object_id == "" do return nil, "replay change requires objectId"
 		if i > 0 && change.object_id != changes[0].object_id do return nil, "replay changes must belong to one object"
+		if checkpoint != nil && change.object_id != checkpoint.object_id do return nil, "replay checkpoint describes another object"
 		if len(change.id) == 0 do return nil, "replay change requires id"
 		id := hex_id(change.id, context.temp_allocator)
 		if ids[id] do return nil, "duplicate replay change id"
 		ids[id] = true
 		changes[i] = change
 	}
-	state, valid := compute_state(changes)
+	state, valid := compute_state(changes, checkpoint = checkpoint)
 	if !valid do return nil, "replay changes and block references must be acyclic"
 	return object_to_json_value(&state), ""
+}
+
+/** `checkpoint: base64` → decoded Checkpoint, or nil when absent/null. */
+optional_checkpoint :: proc(payload: json.Value) -> (^Checkpoint, string) {
+	value, present := json_field(payload, "checkpoint")
+	if !present || value == nil do return nil, ""
+	if _, is_null := value.(json.Null); is_null do return nil, ""
+	text, is_string := value.(json.String)
+	if !is_string do return nil, "checkpoint must be base64 text"
+	bytes, ok := bytes_from_base64(string(text))
+	if !ok do return nil, "invalid base64 checkpoint"
+	cp, cok := decode_checkpoint(bytes)
+	if !cok do return nil, "invalid protobuf checkpoint"
+	out := new(Checkpoint)
+	out^ = cp
+	return out, ""
 }

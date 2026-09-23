@@ -1,7 +1,8 @@
 package core
 
-// Receive-side sync session: turns verified kind-1078 relay events into
-// importable changes. Owns chunk-group reassembly, the cursor high-water
+// Receive-side sync session: turns verified kind-1078 (change) and kind-1079
+// (checkpoint) relay events into importable items. Owns chunk-group
+// reassembly, the cursor high-water
 // mark and replay-group bookkeeping, and reports replay faults the host
 // must fold into its history floor. Like the query cache it persists across
 // requests in runtime.default_allocator(); every string it keeps is cloned
@@ -17,6 +18,7 @@ import "core:mem"
 import "core:strings"
 
 SYNC_CHANGE_KIND :: 1078
+SYNC_CHECKPOINT_KIND :: 1079
 SYNC_GROUP_TTL_MS :: 300_000
 SYNC_MAX_GROUPS :: 128
 SYNC_MAX_GROUP_BYTES :: 16 * 1024 * 1024
@@ -200,12 +202,14 @@ digits :: proc(s: string) -> (int, bool) {
 	return n, true
 }
 
-// One verified kind-1078 event → at most one importable change. Mirrors the
+// One verified kind-1078/1079 event → at most one importable item. Mirrors the
 // former RelaySync.eventToChange step for step; see the ingest response
-// contract in sync_dispatch.
+// contract in sync_dispatch. A checkpoint item carries `checkpoint` instead
+// of `change`; the HOST decides whether its signer may checkpoint the object
+// (self for personal objects, the space owner for shared ones).
 sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 	kind, _ := json_int(event, "kind")
-	if kind != SYNC_CHANGE_KIND do return
+	if kind != SYNC_CHANGE_KIND && kind != SYNC_CHECKPOINT_KIND do return
 	tags := json_array(event, "tags")
 	if h, ok := event_tag(tags, "h"); ok do r.h_tag = tag_string(h, 1)
 	pubkey := json_str(event, "pubkey")
@@ -254,8 +258,10 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 		}
 		space_id, key_id := "", i64(0)
 		if space != nil do space_id, key_id = space.space_id, space.key_id
+		// Kind last so sync_retire can tell checkpoint groups apart; older
+		// persisted 4-element keys parse as change groups.
 		key_parts := make([dynamic]json.Value, context.temp_allocator)
-		append(&key_parts, json.String(pubkey), json.String(space_id), json.Integer(key_id), json.String(gid))
+		append(&key_parts, json.String(pubkey), json.String(space_id), json.Integer(key_id), json.String(gid), json.Integer(kind))
 		key := sync_intern(string(marshal(json.Array(key_parts))))
 		if key in sync_session.imported_groups || key in sync_session.importing_groups do return
 		if sync_replay_group_note(key, created_at) do r.replay_changed = true
@@ -300,19 +306,42 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 		sync_group_destroy(key, group)
 	}
 
-	verify := jobj()
-	verify["bytes"] = json.String(full)
-	if gid != "" do verify["gid"] = json.String(gid)
-	verified, verify_error := wire_verify(json.Object(verify))
-	if verify_error != "" {
-		r.decode_failure = true
-		sync_fault(&r, replay_at)
-		return
-	}
-	if chunk_key != "" do sync_session.importing_groups[chunk_key] = true
 	item := jobj()
 	item["bytes"] = json.String(full)
-	item["change"], _ = json_field(verified, "change")
+	if kind == SYNC_CHECKPOINT_KIND {
+		if gid != "" && wire_group_id(full, context.temp_allocator) != gid {
+			r.decode_failure = true
+			sync_fault(&r, replay_at)
+			return
+		}
+		bytes, bok := bytes_from_base64(full, context.temp_allocator)
+		cp, cok := decode_checkpoint(bytes, context.temp_allocator)
+		if !bok || !cok {
+			r.decode_failure = true
+			sync_fault(&r, replay_at)
+			return
+		}
+		summary := jobj()
+		summary["objectId"] = json.String(cp.object_id)
+		heads := make([dynamic]json.Value, context.temp_allocator)
+		for id in cp.head_ids do append(&heads, json.String(hex_id(id, context.temp_allocator)))
+		summary["headIds"] = json.Array(heads)
+		summary["covered"] = json.Integer(i64(len(cp.covered_ids)))
+		summary["hash"] = json.String(checkpoint_hash(bytes, context.temp_allocator))
+		item["checkpoint"] = json.Object(summary)
+	} else {
+		verify := jobj()
+		verify["bytes"] = json.String(full)
+		if gid != "" do verify["gid"] = json.String(gid)
+		verified, verify_error := wire_verify(json.Object(verify))
+		if verify_error != "" {
+			r.decode_failure = true
+			sync_fault(&r, replay_at)
+			return
+		}
+		item["change"], _ = json_field(verified, "change")
+	}
+	if chunk_key != "" do sync_session.importing_groups[chunk_key] = true
 	if chunk_key != "" do item["chunkKey"] = json.String(chunk_key)
 	if space != nil {
 		provenance := jobj()
@@ -344,6 +373,33 @@ sync_settle :: proc(chunk_key: string, imported: bool) -> (changed: bool) {
 		return true
 	}
 	return false
+}
+
+// True for a group key naming kind-1079 chunks (see sync_ingest key layout).
+sync_key_is_checkpoint :: proc(key: string) -> bool {
+	parsed, err := json.parse(transmute([]byte)key, allocator = context.temp_allocator, parse_integers = true)
+	if err != nil do return false
+	parts, ok := parsed.(json.Array)
+	if !ok || len(parts) < 5 do return false
+	kind, kok := parts[4].(json.Integer)
+	return kok && kind == SYNC_CHECKPOINT_KIND
+}
+
+// A history scan from `since` finished on every relay without completing
+// these CHECKPOINT groups: the publisher superseded that checkpoint and
+// NIP-09 took its chunks, so the parts will never arrive and the newer
+// checkpoint already covers the object. Keeping the obligation would
+// re-scan forever. Change groups are never retired: a change no relay
+// returned is missing data, and the floor must stay until a covering
+// repair. Groups still being imported are the host's to settle.
+sync_retire :: proc(since: i64) -> (changed: bool) {
+	obligations := make([dynamic]string, context.temp_allocator)
+	for key, at in sync_session.replay_groups do if at >= since && key not_in sync_session.importing_groups && sync_key_is_checkpoint(key) do append(&obligations, key)
+	for key in obligations do delete_key(&sync_session.replay_groups, key)
+	partial := make([dynamic]string, context.temp_allocator)
+	for key, group in sync_session.groups do if group.at >= since && key not_in sync_session.importing_groups && sync_key_is_checkpoint(key) do append(&partial, key)
+	for key in partial do sync_group_destroy(key, sync_session.groups[key])
+	return len(obligations) > 0 || len(partial) > 0
 }
 
 sync_replay_groups_json :: proc() -> json.Value {

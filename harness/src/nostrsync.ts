@@ -22,6 +22,12 @@ import { API, apiFetch, subscribe } from "./api";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 
 const CHANGE_KIND = 1078;
+/** One Checkpoint (docs/checkpoint-sync.md) per event; same envelope as 1078. */
+const CHECKPOINT_KIND = 1079;
+/** Addressable manifest: "every object changed by relay time `cursor` is checkpointed". */
+const MANIFEST_KIND = 30079;
+const MANIFEST_D = "roostr-checkpoint";
+const CHECKPOINT_INTERVAL_MS = 10 * 60_000;
 /** NIP-59 gift wrap: space-key invites and join requests, addressed by npub. */
 const WRAP_KIND = 1059;
 const INVITE_RUMOR_KIND = 24891;
@@ -63,6 +69,24 @@ interface SyncState {
 	invitesSent?: Record<string, number>;
 	/** gift-wrap event ids already processed. */
 	wrapsSeen?: Record<string, true>;
+	/**
+	 * Manifest cursor this machine bootstrapped from: history older than it
+	 * is folded into checkpoints and was never stored here, so relay scans
+	 * start at the floor instead of zero.
+	 */
+	checkpointFloor?: number;
+	/** Same, per shared space owned by someone else: spaceTag -> owner's manifest cursor. */
+	checkpointFloors?: Record<string, number>;
+	/** Relay's checkpoint per object (own signer): heads it describes and the events carrying it. */
+	checkpoints?: Record<string, PublishedCheckpoint>;
+}
+
+interface PublishedCheckpoint {
+	hash: string;
+	/** sorted hex heads */
+	heads: string[];
+	covered: number;
+	eventIds: string[];
 }
 
 function statePath(): string {
@@ -72,11 +96,11 @@ function statePath(): string {
 async function readState(): Promise<SyncState> {
 	try {
 		const parsed = (await Bun.file(statePath()).json()) as SyncState;
-		if (parsed?.version === 1) return { ...parsed, pendingChunkGroups: parsed.pendingChunkGroups ?? {}, vanishScanVersion: 2, vanishRequested: parsed.vanishScanVersion === 2 ? (parsed.vanishRequested ?? {}) : {}, publishedSpace: parsed.publishedSpace ?? {}, sharedQueued: parsed.sharedQueued ?? {}, invitesSent: parsed.invitesSent ?? {}, wrapsSeen: parsed.wrapsSeen ?? {} };
+		if (parsed?.version === 1) return { ...parsed, pendingChunkGroups: parsed.pendingChunkGroups ?? {}, vanishScanVersion: 2, vanishRequested: parsed.vanishScanVersion === 2 ? (parsed.vanishRequested ?? {}) : {}, publishedSpace: parsed.publishedSpace ?? {}, sharedQueued: parsed.sharedQueued ?? {}, invitesSent: parsed.invitesSent ?? {}, wrapsSeen: parsed.wrapsSeen ?? {}, checkpoints: parsed.checkpoints ?? {} };
 	} catch {
 		/* fresh */
 	}
-	return { version: 1, published: {}, cursor: 0, pendingChunkGroups: {}, vanishScanVersion: 2, vanishRequested: {}, publishedSpace: {}, sharedQueued: {}, invitesSent: {}, wrapsSeen: {} };
+	return { version: 1, published: {}, cursor: 0, pendingChunkGroups: {}, vanishScanVersion: 2, vanishRequested: {}, publishedSpace: {}, sharedQueued: {}, invitesSent: {}, wrapsSeen: {}, checkpoints: {} };
 }
 
 function writeState(state: SyncState): void {
@@ -359,6 +383,51 @@ async function localImport(b64s: string[], provenance?: SharedProvenance): Promi
 	return (await res.json()) as { imported: number; rejected: number; ids: string[] };
 }
 
+interface CheckpointRow {
+	heads: string[];
+	checkpointHeads: string[] | null;
+	/** "" when no checkpoint is stored. */
+	checkpointHash: string;
+	changes: number;
+	covered: number;
+}
+
+/** Per object: current heads vs. the stored checkpoint's heads. */
+async function localCheckpoints(): Promise<Record<string, CheckpointRow>> {
+	const res = await apiFetch(`${API}/api/checkpoints`);
+	if (!res.ok) throw new Error(`Checkpoint list failed: ${res.status}`);
+	return (await res.json()) as Record<string, CheckpointRow>;
+}
+
+interface BuiltCheckpoint {
+	objectId: string;
+	b64: string;
+	hash: string;
+	heads: string[];
+	covered: number;
+}
+
+/** Build from full local history and persist; the daemon owns the bytes. */
+async function localCheckpointBuild(objectId: string): Promise<BuiltCheckpoint> {
+	const res = await apiFetch(`${API}/api/checkpoints/build`, { method: "POST", body: JSON.stringify({ objectId }) });
+	if (!res.ok) throw new Error(`Checkpoint build failed: ${res.status}`);
+	return (await res.json()) as BuiltCheckpoint;
+}
+
+interface ImportedCheckpoint {
+	objectId: string;
+	hash: string;
+	heads: string[];
+	covered: number;
+	stored: boolean;
+}
+
+async function localCheckpointImport(b64s: string[], provenance?: SharedProvenance): Promise<{ imported: number; rejected: number; items: ImportedCheckpoint[] }> {
+	const res = await apiFetch(`${API}/api/checkpoints`, { method: "POST", body: JSON.stringify({ checkpoints: b64s, provenance }) });
+	if (!res.ok) throw new Error(`Checkpoint import failed: ${res.status}`);
+	return (await res.json()) as { imported: number; rejected: number; items: ImportedCheckpoint[] };
+}
+
 /** Object ids the local ledger says are vanished (src/vanish.odin). */
 async function localVanished(): Promise<Set<string>> {
 	try {
@@ -454,14 +523,14 @@ async function collectEventIds(pool: SimplePool, id: Identity, objectIds: string
 	const tagList = [...allTags];
 	const filters: Filter[] = [];
 	for (let i = 0; i < tagList.length; i += HTAG_BATCH) {
-		filters.push({ kinds: [CHANGE_KIND], authors: [id.pk], "#h": tagList.slice(i, i + HTAG_BATCH) });
+		filters.push({ kinds: [CHANGE_KIND, CHECKPOINT_KIND], authors: [id.pk], "#h": tagList.slice(i, i + HTAG_BATCH) });
 	}
 	const complete = await scanRelayHistory(pool, id.relays, filters, (event) => found.add(event.id));
 	return { eventIds: [...found], complete };
 }
 
 /** Count requests accepted somewhere; completion requires every relay to accept every batch. */
-async function publishDeleteRequests(pool: SimplePool, id: Identity, eventIds: string[], reason: string): Promise<{ requests: number; complete: boolean }> {
+async function publishDeleteRequests(pool: SimplePool, id: Identity, eventIds: string[], reason: string, kinds: number[] = [CHANGE_KIND, CHECKPOINT_KIND]): Promise<{ requests: number; complete: boolean }> {
 	let sent = 0;
 	let complete = id.relays.length > 0;
 	for (let i = 0; i < eventIds.length; i += DELETE_BATCH) {
@@ -470,7 +539,7 @@ async function publishDeleteRequests(pool: SimplePool, id: Identity, eventIds: s
 			{
 				kind: DELETE_KIND,
 				created_at: Math.floor(Date.now() / 1000),
-				tags: [...batch.map((eid) => ["e", eid]), ["k", String(CHANGE_KIND)]],
+				tags: [...batch.map((eid) => ["e", eid]), ...kinds.map((kind) => ["k", String(kind)])],
 				content: reason,
 			},
 			id.sk,
@@ -521,13 +590,17 @@ export async function startNostrSync(): Promise<void> {
 	// durable as long as the daemon lives.
 	const PUBLISH_SPACING_MS = 120;
 	interface QueueItem {
+		kind: typeof CHANGE_KIND | typeof CHECKPOINT_KIND;
 		objectId: string;
+		/** change hex id; the checkpoint hash for CHECKPOINT_KIND. */
 		changeHex: string;
 		b64: string;
 		attempts: number;
 		notBefore: number;
 		/** present = publish under this space's key instead of self. */
 		space?: SharedSpace;
+		/** CHECKPOINT_KIND: runs with the relay event ids once every part is accepted. */
+		onPublished?: (eventIds: string[]) => void;
 	}
 	const queue: QueueItem[] = [];
 	const queued = new Set<string>();
@@ -538,17 +611,35 @@ export async function startNostrSync(): Promise<void> {
 	let spaceMap = new Map<string, string>();
 
 	function spaceKeyFor(item: QueueItem): string {
+		if (item.kind === CHECKPOINT_KIND) return `cp/${item.objectId}/${item.changeHex}`;
 		return item.space ? `${item.space.spaceId}/${item.space.keyId}/${item.changeHex}` : item.changeHex;
+	}
+
+	/** Already on the relays (or queued), per the state this machine keeps. */
+	function alreadyPublished(item: QueueItem): boolean {
+		if (item.kind === CHECKPOINT_KIND) return state.checkpoints![item.objectId]?.hash === item.changeHex;
+		return item.space ? !!state.publishedSpace![spaceKeyFor(item)] : !!state.published[item.changeHex];
 	}
 
 	function enqueue(objectId: string, changeHex: string, b64: string): void {
 		if (vanished.has(objectId)) return;
 		const space = sharedSpaces.get(spaceMap.get(objectId) ?? "");
-		const doneKey = space ? `${space.spaceId}/${space.keyId}/${changeHex}` : changeHex;
-		const done = space ? state.publishedSpace![doneKey] : state.published[changeHex];
-		if (done || queued.has(doneKey)) return;
+		const item: QueueItem = { kind: CHANGE_KIND, objectId, changeHex, b64, attempts: 0, notBefore: 0, space };
+		const doneKey = spaceKeyFor(item);
+		if (alreadyPublished(item) || queued.has(doneKey)) return;
 		queued.add(doneKey);
-		queue.push({ objectId, changeHex, b64, attempts: 0, notBefore: 0, space });
+		queue.push(item);
+	}
+	/** A checkpoint supersedes the object's previous one on the relays; `onPublished` gets the event ids. False = nothing to do. */
+	function enqueueCheckpoint(objectId: string, hash: string, b64: string, onPublished: (eventIds: string[]) => void): boolean {
+		if (vanished.has(objectId)) return false;
+		const space = sharedSpaces.get(spaceMap.get(objectId) ?? "");
+		const item: QueueItem = { kind: CHECKPOINT_KIND, objectId, changeHex: hash, b64, attempts: 0, notBefore: 0, space, onPublished };
+		const doneKey = spaceKeyFor(item);
+		if (alreadyPublished(item) || queued.has(doneKey)) return false;
+		queued.add(doneKey);
+		queue.push(item);
+		return true;
 	}
 
 	/** Retry until every configured relay was scanned and accepted every deletion batch. */
@@ -582,10 +673,12 @@ export async function startNostrSync(): Promise<void> {
 		return h.digest("hex").slice(0, 16);
 	}
 
-	async function publishOnce(item: QueueItem): Promise<boolean> {
+	/** Publish every part; the accepted event ids on success, null on any rejection. */
+	async function publishOnce(item: QueueItem): Promise<string[] | null> {
 		const parts: string[] = [];
 		for (let i = 0; i < item.b64.length; i += CHUNK_CHARS) parts.push(item.b64.slice(i, i + CHUNK_CHARS));
 		const gid = parts.length > 1 ? chunkGroupId(item.b64) : "";
+		const eventIds: string[] = [];
 		try {
 			for (let i = 0; i < parts.length; i++) {
 				const tags: string[][] = item.space
@@ -594,7 +687,7 @@ export async function startNostrSync(): Promise<void> {
 				if (gid) tags.push(["c", gid, String(i), String(parts.length)]);
 				const event = finalizeEvent(
 					{
-						kind: CHANGE_KIND,
+						kind: item.kind,
 						created_at: Math.floor(Date.now() / 1000),
 						tags,
 						content: nip44.encrypt(parts[i], item.space ? item.space.convKey : id!.conversationKey),
@@ -602,20 +695,21 @@ export async function startNostrSync(): Promise<void> {
 					id!.sk,
 				);
 				await Promise.any(pool.publish(id!.relays, event));
+				eventIds.push(event.id);
 				if (parts.length > 1 && i < parts.length - 1) {
 					const { promise, resolve } = Promise.withResolvers<void>();
 					setTimeout(resolve, PUBLISH_SPACING_MS);
 					await promise;
 				}
 			}
-			return true;
+			return eventIds;
 		} catch (err) {
 			if (failuresLogged < 5) {
 				failuresLogged++;
 				const reasons = err instanceof AggregateError ? err.errors.map((e) => String(e).slice(0, 80)).join(" | ") : String(err).slice(0, 120);
 				console.error(`[sync] publish rejected (attempt ${item.attempts + 1}): ${reasons}`);
 			}
-			return false;
+			return null;
 		}
 	}
 
@@ -632,13 +726,14 @@ export async function startNostrSync(): Promise<void> {
 			const [item] = queue.splice(idx, 1);
 			const doneKey = spaceKeyFor(item);
 			// A vanish can land while the change is already queued (or mid-backoff).
-			const already = item.space ? state.publishedSpace![doneKey] : state.published[item.changeHex];
-			if (already || vanished.has(item.objectId)) {
+			if (alreadyPublished(item) || vanished.has(item.objectId)) {
 				queued.delete(doneKey);
 				continue;
 			}
-			if (await publishOnce(item)) {
-				if (item.space) state.publishedSpace![doneKey] = true;
+			const eventIds = await publishOnce(item);
+			if (eventIds) {
+				if (item.kind === CHECKPOINT_KIND) item.onPublished?.(eventIds);
+				else if (item.space) state.publishedSpace![doneKey] = true;
 				else state.published[item.changeHex] = true;
 				queued.delete(doneKey);
 				dirty = true;
@@ -666,7 +761,7 @@ export async function startNostrSync(): Promise<void> {
 	const MAX_CHUNK_GROUPS = 128;
 	const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
 	const CHUNK_TTL_MS = 5 * 60_000;
-	const chunkGroups = new Map<string, { total: number; parts: Map<number, string>; bytes: number; expires: number; since: number }>();
+	const chunkGroups = new Map<string, { total: number; parts: Map<number, string>; eventIds: string[]; bytes: number; expires: number; since: number }>();
 	let chunkBytes = 0;
 	function dropChunkGroup(key: string): void {
 		const group = chunkGroups.get(key);
@@ -694,6 +789,34 @@ export async function startNostrSync(): Promise<void> {
 			else state.published[hex] = true;
 		}
 		dirty = true;
+	}
+
+	/**
+	 * A 1079 from the relays. The daemon decides whether it supersedes the
+	 * stored one (covers more, then larger hash) and enforces the shared
+	 * owner rule via provenance. Under our own key it is also what the
+	 * relay holds for the object: remember it so the checkpoint pass does
+	 * not republish, or delete it when it is already stale here.
+	 */
+	async function importCheckpointB64(b64: string, space: SharedSpace | null, signer: string, eventIds: string[]): Promise<void> {
+		const provenance = space ? { spaceId: space.spaceId, keyId: space.keyId, signer } : undefined;
+		const res = await localCheckpointImport([b64], provenance);
+		if (res.rejected > 0) throw new Error("Checkpoint import rejected");
+		if (signer !== id!.pk) return;
+		for (const row of res.items) {
+			const current = state.checkpoints![row.objectId];
+			if (row.stored || !current || current.hash === row.hash) {
+				const ids = current?.hash === row.hash ? [...new Set([...current.eventIds, ...eventIds])] : eventIds;
+				state.checkpoints![row.objectId] = { hash: row.hash, heads: [...row.heads].sort(), covered: row.covered, eventIds: ids };
+				dirty = true;
+			} else {
+				void publishDeleteRequests(pool, id!, eventIds, "checkpoint superseded", [CHECKPOINT_KIND]);
+			}
+		}
+	}
+
+	function importEvent(kind: number, b64: string, space: SharedSpace | null, signer: string, eventIds: string[]): Promise<void> {
+		return kind === CHECKPOINT_KIND ? importCheckpointB64(b64, space, signer, eventIds) : importB64(b64, space, signer);
 	}
 
 	/** Try self key, then every shared-space key. */
@@ -769,7 +892,7 @@ export async function startNostrSync(): Promise<void> {
 		let importing = false;
 		activeImports++;
 		try {
-			if (event.kind !== CHANGE_KIND || !verifyEvent(event)) return;
+			if ((event.kind !== CHANGE_KIND && event.kind !== CHECKPOINT_KIND) || !verifyEvent(event)) return;
 			const dec = decryptEvent(event);
 			if (!dec) return;
 			const { part, space } = dec;
@@ -777,7 +900,7 @@ export async function startNostrSync(): Promise<void> {
 			if (chunkTags.length > 1) return;
 			if (chunkTags.length === 0) {
 				importing = true;
-				await importB64(part, space, event.pubkey);
+				await importEvent(event.kind, part, space, event.pubkey, [event.id]);
 			} else {
 				const [, gid, idxStr, totalStr] = chunkTags[0];
 				if (!gid || !/^[0-9a-f]{16}$/.test(gid) || !/^(0|[1-9][0-9]*)$/.test(idxStr ?? "") || !/^[1-9][0-9]*$/.test(totalStr ?? "")) return;
@@ -785,7 +908,7 @@ export async function startNostrSync(): Promise<void> {
 				const total = Number(totalStr);
 				if (!Number.isSafeInteger(total) || total < 2 || total > 64 || !Number.isSafeInteger(index) || index >= total) return;
 				if (part.length === 0 || part.length > CHUNK_CHARS || !/^[A-Za-z0-9+/=]+$/.test(part)) return;
-				const groupKey = JSON.stringify([event.pubkey, space?.spaceId ?? null, space?.keyId ?? null, gid]);
+				const groupKey = JSON.stringify([event.kind, event.pubkey, space?.spaceId ?? null, space?.keyId ?? null, gid]);
 				if (completedChunkGroups.has(groupKey)) {
 					if (event.created_at > state.cursor) {
 						state.cursor = event.created_at;
@@ -812,7 +935,7 @@ export async function startNostrSync(): Promise<void> {
 						recordReplayFault(event.created_at);
 						return;
 					}
-					group = { total, parts: new Map(), bytes: 0, expires: Date.now() + CHUNK_TTL_MS, since: event.created_at };
+					group = { total, parts: new Map(), eventIds: [], bytes: 0, expires: Date.now() + CHUNK_TTL_MS, since: event.created_at };
 					chunkGroups.set(groupKey, group);
 				}
 				group.since = Math.min(group.since, event.created_at);
@@ -822,6 +945,7 @@ export async function startNostrSync(): Promise<void> {
 						return;
 					}
 					group.parts.set(index, part);
+					group.eventIds.push(event.id);
 					group.bytes += part.length;
 					chunkBytes += part.length;
 				}
@@ -836,7 +960,7 @@ export async function startNostrSync(): Promise<void> {
 				}
 				importing = true;
 				try {
-					await importB64(full, space, event.pubkey);
+					await importEvent(event.kind, full, space, event.pubkey, group.eventIds);
 					if (chunkGroups.get(groupKey) === group) {
 						completedChunkGroups.add(groupKey);
 						delete state.pendingChunkGroups![groupKey];
@@ -988,8 +1112,9 @@ export async function startNostrSync(): Promise<void> {
 		if (tags.length === 0) return;
 		const events = new Map<string, Event>();
 		const scan = beginReplayScan(0);
-		const complete = await scanRelayHistory(pool, id!.relays, [{ kinds: [CHANGE_KIND], "#h": tags }], (event) => events.set(event.id, event));
-		const sorted = [...events.values()].sort((a, b) => a.created_at - b.created_at);
+		const complete = await scanRelayHistory(pool, id!.relays, [{ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": tags }], (event) => events.set(event.id, event));
+		// Checkpoints first: the daemon then skips the covered changes instead of storing them.
+		const sorted = [...events.values()].sort((a, b) => b.kind - a.kind || a.created_at - b.created_at);
 		for (const event of sorted) await onRelayEvent(event);
 		finishReplayScan(scan, complete, false);
 		if (sorted.length > 0) console.log(`[sync] joined-space backfill: ${sorted.length} event(s)`);
@@ -1135,6 +1260,121 @@ export async function startNostrSync(): Promise<void> {
 		}
 	}
 
+	// ── Checkpoints (docs/checkpoint-sync.md) ──────────────────────
+	//
+	// One 1079 per object this identity may speak for: every personal
+	// object and every object of a space it owns. A pass rebuilds where
+	// heads moved, publishes, deletes the superseded event, and - once
+	// nothing is outstanding - stamps a manifest saying "changes up to
+	// relay time C are folded in", which a cold device uses as its floor.
+
+	function sameList(a: readonly string[], b: readonly string[]): boolean {
+		return a.length === b.length && a.every((x, i) => x === b[i]);
+	}
+
+	function manifestD(space: SharedSpace | null): string {
+		return space ? `${MANIFEST_D}/${space.spaceTag}` : MANIFEST_D;
+	}
+
+	async function publishManifest(space: SharedSpace | null, cursor: number, objects: number): Promise<void> {
+		const tags: string[][] = [["d", manifestD(space)]];
+		if (space) tags.push(["h", space.spaceTag]);
+		try {
+			const event = finalizeEvent(
+				{
+					kind: MANIFEST_KIND,
+					created_at: Math.floor(Date.now() / 1000),
+					tags,
+					content: nip44.encrypt(JSON.stringify({ cursor, objects }), space ? space.convKey : id!.conversationKey),
+				},
+				id!.sk,
+			);
+			await Promise.any(pool.publish(id!.relays, event));
+		} catch {
+			/* the next pass stamps again */
+		}
+	}
+
+	let checkpointBusy = false;
+	async function checkpointPass(): Promise<void> {
+		if (checkpointBusy) return;
+		checkpointBusy = true;
+		try {
+			const rows = await localCheckpoints();
+			const cursor = state.cursor;
+			// Per manifest scope (null = personal): outstanding publishes and whether anything was skipped.
+			const scopes = new Map<SharedSpace | null, { outstanding: number; faults: number; objects: number }>();
+			scopes.set(null, { outstanding: 0, faults: 0, objects: 0 });
+			for (const space of sharedSpaces.values()) if (!space.owner || space.owner === id!.pk) scopes.set(space, { outstanding: 0, faults: 0, objects: 0 });
+			const stamp = (space: SharedSpace | null) => {
+				const scope = scopes.get(space)!;
+				if (scope.outstanding === 0 && scope.faults === 0) void publishManifest(space, cursor, scope.objects);
+			};
+			let built = 0;
+			for (const [objectId, row] of Object.entries(rows)) {
+				if (vanished.has(objectId) || objectId === VANISH_LOG_ID || row.heads.length === 0) continue;
+				const space = sharedSpaces.get(spaceMap.get(objectId) ?? "") ?? null;
+				if (space?.owner && space.owner !== id!.pk) continue; // the owner's harness speaks for its space
+				const scope = scopes.get(space)!;
+				scope.objects++;
+				const heads = [...row.heads].sort();
+				const current = state.checkpoints![objectId];
+				if (row.checkpointHash && sameList([...(row.checkpointHeads ?? [])].sort(), heads) && current?.hash === row.checkpointHash) continue;
+				let cp: BuiltCheckpoint;
+				try {
+					cp = await localCheckpointBuild(objectId);
+				} catch (err) {
+					scope.faults++;
+					console.error(`[sync] checkpoint build failed for ${objectId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
+					continue;
+				}
+				built++;
+				if (cp.b64.length > CHUNK_CHARS * 64) {
+					scope.faults++;
+					console.error(`[sync] checkpoint for ${objectId.slice(0, 8)} exceeds 64 chunks; object keeps syncing as changes`);
+					continue;
+				}
+				if (current?.hash === cp.hash) continue; // the relay already holds these bytes
+				const previous = current?.eventIds ?? [];
+				const enqueued = enqueueCheckpoint(objectId, cp.hash, cp.b64, (eventIds) => {
+					state.checkpoints![objectId] = { hash: cp.hash, heads: [...cp.heads].sort(), covered: cp.covered, eventIds };
+					dirty = true;
+					if (previous.length > 0) void publishDeleteRequests(pool, id!, previous, "checkpoint superseded", [CHECKPOINT_KIND]);
+					scope.outstanding--;
+					stamp(space);
+				});
+				if (enqueued) scope.outstanding++;
+			}
+			if (built > 0) console.log(`[sync] checkpoint pass: ${built} rebuilt`);
+			for (const space of scopes.keys()) stamp(space);
+		} catch (err) {
+			console.error("[sync] checkpoint pass failed:", err instanceof Error ? err.message : err);
+		} finally {
+			checkpointBusy = false;
+		}
+	}
+
+	/**
+	 * Newest manifest for a scope, or null. Personal: ours. Shared: the
+	 * owner's, sealed under the space key.
+	 */
+	async function fetchManifest(space: SharedSpace | null): Promise<{ cursor: number; objects: number } | null> {
+		const author = space ? space.owner ?? id!.pk : id!.pk;
+		try {
+			const events = await pool.querySync(id!.relays, { kinds: [MANIFEST_KIND], authors: [author], "#d": [manifestD(space)] });
+			events.sort((a, b) => b.created_at - a.created_at);
+			for (const event of events) {
+				if (!verifyEvent(event)) continue;
+				const parsed = JSON.parse(nip44.decrypt(event.content, space ? space.convKey : id!.conversationKey)) as { cursor?: unknown; objects?: unknown };
+				if (typeof parsed.cursor !== "number" || !Number.isSafeInteger(parsed.cursor) || parsed.cursor < 0) continue;
+				return { cursor: parsed.cursor, objects: typeof parsed.objects === "number" ? parsed.objects : 0 };
+			}
+		} catch {
+			/* unreachable or garbled: caller falls back to the full walk */
+		}
+		return null;
+	}
+
 	// ── Startup: backfill both directions ─────────────────────────
 	console.log(`[sync] identity ${id.pk.slice(0, 8)}… relays: ${id.relays.join(", ")}`);
 	await refreshShared();
@@ -1145,20 +1385,49 @@ export async function startNostrSync(): Promise<void> {
 	// published-set can't be trusted) and rebuild it from relay reality.
 	// Anything in the local manifest the relays didn't return gets
 	// re-published below. Negentropy can replace this scan later.
+	//
+	// Exception: a device that bootstrapped from checkpoints never held the
+	// changes older than the manifest cursor, so it has nothing to heal
+	// there and walks 1078 from that floor. Checkpoints (1079) are always
+	// scanned whole: one per object, and a stale one on the relay is what
+	// the pass below replaces.
 	state.published = {};
 	state.publishedSpace = {};
 	state.sharedQueued = {};
+	state.checkpoints = {};
+	state.checkpointFloors ??= {};
+	const cold = state.cursor === 0 && state.checkpointFloor === undefined && Object.keys(await localManifest()).length === 0;
+	if (cold) {
+		const mine = await fetchManifest(null);
+		if (mine) state.checkpointFloor = mine.cursor;
+		for (const space of sharedSpaces.values()) {
+			if (!space.owner || space.owner === id.pk) continue; // my own manifest covers spaces I publish for
+			const theirs = await fetchManifest(space);
+			if (theirs) state.checkpointFloors[space.spaceTag] = theirs.cursor;
+		}
+		if (mine || Object.keys(state.checkpointFloors).length > 0) console.log(`[sync] cold start: checkpoint floor ${state.checkpointFloor ?? 0}${Object.keys(state.checkpointFloors).length > 0 ? `, ${Object.keys(state.checkpointFloors).length} space floor(s)` : ""}`);
+		dirty = true;
+	}
+	const personalFloor = state.checkpointFloor ?? 0;
+	const spaceFloor = (space: SharedSpace) => (space.owner && space.owner !== id!.pk ? state.checkpointFloors![space.spaceTag] ?? 0 : personalFloor);
 	const backfillById = new Map<string, Event>();
 	const spaceTags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
-	const backfillFilters: Filter[] = [{ kinds: [CHANGE_KIND], authors: [id.pk] }];
-	if (spaceTags.length > 0) backfillFilters.push({ kinds: [CHANGE_KIND], "#h": spaceTags });
-	const backfillScan = beginReplayScan(0);
+	const backfillFilters: Filter[] = [{ kinds: [CHANGE_KIND], authors: [id.pk], since: personalFloor }, { kinds: [CHECKPOINT_KIND], authors: [id.pk] }];
+	const tagsByFloor = new Map<number, string[]>();
+	for (const space of sharedSpaces.values()) {
+		const floor = spaceFloor(space);
+		tagsByFloor.set(floor, [...(tagsByFloor.get(floor) ?? []), space.spaceTag]);
+	}
+	for (const [floor, tags] of tagsByFloor) backfillFilters.push({ kinds: [CHANGE_KIND], "#h": tags, since: floor });
+	if (spaceTags.length > 0) backfillFilters.push({ kinds: [CHECKPOINT_KIND], "#h": spaceTags });
+	const backfillScan = beginReplayScan(Math.min(personalFloor, ...tagsByFloor.keys()));
 	const backfillComplete = await scanRelayHistory(pool, id.relays, backfillFilters, (event) => backfillById.set(event.id, event));
 	const backfill = [...backfillById.values()];
 	console.log(`[sync] backfill: ${backfill.length} event(s) from relays`);
 	// Route every event through the chunk-aware path (sorted so multi-part
 	// groups assemble in one pass); onRelayEvent advances the cursor.
-	backfill.sort((a, b) => a.created_at - b.created_at);
+	// Checkpoints first so the daemon skips the changes they cover.
+	backfill.sort((a, b) => b.kind - a.kind || a.created_at - b.created_at);
 	let assembled = 0;
 	for (const event of backfill) {
 		await onRelayEvent(event);
@@ -1207,6 +1476,10 @@ export async function startNostrSync(): Promise<void> {
 	// member is on the published allowlist.
 	await publishAllowlist();
 	await reconcileInvites();
+	// Checkpoints ride the same queue behind the changes just enqueued, so
+	// a peer that receives the checkpoint first only skips what it covers.
+	await checkpointPass();
+	setInterval(() => void checkpointPass(), CHECKPOINT_INTERVAL_MS);
 	persist();
 
 	// ── Live: both directions ──────────────────────────────────────
@@ -1272,14 +1545,14 @@ export async function startNostrSync(): Promise<void> {
 		}
 		liveSubs = [];
 		liveSubs.push(
-			pool.subscribeMany(id!.relays, { kinds: [CHANGE_KIND], authors: [id!.pk], since: Math.min(state.cursor, state.replaySince ?? state.cursor) }, {
+			pool.subscribeMany(id!.relays, { kinds: [CHANGE_KIND, CHECKPOINT_KIND], authors: [id!.pk], since: Math.min(state.cursor, state.replaySince ?? state.cursor) }, {
 				onevent: (event) => void onRelayEvent(event),
 			}),
 		);
 		const tags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
 		if (tags.length > 0) {
 			liveSubs.push(
-				pool.subscribeMany(id!.relays, { kinds: [CHANGE_KIND], "#h": tags, since: Math.min(state.cursor, state.replaySince ?? state.cursor) }, {
+				pool.subscribeMany(id!.relays, { kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": tags, since: Math.min(state.cursor, state.replaySince ?? state.cursor) }, {
 					onevent: (event) => void onRelayEvent(event),
 				}),
 			);
@@ -1301,8 +1574,8 @@ export async function startNostrSync(): Promise<void> {
 	async function relayHead(): Promise<number | null> {
 		const tags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
 		const query = Promise.all([
-			pool.querySync(id!.relays, { kinds: [CHANGE_KIND], authors: [id!.pk], limit: 1 }),
-			tags.length > 0 ? pool.querySync(id!.relays, { kinds: [CHANGE_KIND], "#h": tags, limit: 1 }) : Promise.resolve([] as Event[]),
+			pool.querySync(id!.relays, { kinds: [CHANGE_KIND, CHECKPOINT_KIND], authors: [id!.pk], limit: 1 }),
+			tags.length > 0 ? pool.querySync(id!.relays, { kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": tags, limit: 1 }) : Promise.resolve([] as Event[]),
 		]);
 		const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000));
 		const res = await Promise.race([query, timeout]);
@@ -1317,11 +1590,11 @@ export async function startNostrSync(): Promise<void> {
 		// full-history repair; successful groups are deduplicated above.
 		const since = Object.keys(state.pendingChunkGroups!).length > 0 ? 0 : Math.min(state.cursor, state.replaySince ?? state.cursor);
 		const byId = new Map<string, Event>();
-		const filters: Filter[] = [{ kinds: [CHANGE_KIND], authors: [id!.pk], since }];
-		if (tags.length > 0) filters.push({ kinds: [CHANGE_KIND], "#h": tags, since });
+		const filters: Filter[] = [{ kinds: [CHANGE_KIND, CHECKPOINT_KIND], authors: [id!.pk], since }];
+		if (tags.length > 0) filters.push({ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": tags, since });
 		const scan = beginReplayScan(since);
 		const complete = await scanRelayHistory(pool, id!.relays, filters, (event) => byId.set(event.id, event));
-		const events = [...byId.values()].sort((a, b) => a.created_at - b.created_at);
+		const events = [...byId.values()].sort((a, b) => b.kind - a.kind || a.created_at - b.created_at);
 		for (const event of events) await onRelayEvent(event);
 		const currentTags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
 		finishReplayScan(scan, complete, currentTags.length === tags.length && currentTags.every((tag) => tags.includes(tag)));

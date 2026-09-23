@@ -46,17 +46,17 @@ vanished_ids :: proc(allocator := context.temp_allocator) -> map[string]i64 {
 	return vanished_locked(allocator)
 }
 
-/** Delete an object's change directory. Returns files removed. */
+/** Delete an object's change directory and checkpoint. Returns files removed. */
 purge_object_files :: proc(object_id: string) -> int {
 	if object_id == "" || object_id == VANISH_LOG_ID do return 0
 	if strings.contains(object_id, "/") || strings.contains(object_id, "..") do return 0
+	removed := purge_checkpoint(object_id) ? 1 : 0
 	dir_path, _ := filepath.join({g_store.root, object_id}, context.temp_allocator)
 	dir, derr := os.open(dir_path)
-	if derr != nil do return 0
+	if derr != nil do return removed
 	files, ferr := os.read_dir(dir, -1, context.temp_allocator)
 	os.close(dir)
-	if ferr != nil do return 0
-	removed := 0
+	if ferr != nil do return removed
 	for f in files {
 		if os.remove(f.fullpath) == nil do removed += 1
 	}

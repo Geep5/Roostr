@@ -53,7 +53,13 @@ hex_id :: proc(id: []byte, allocator := context.allocator) -> string {
 	return string(hex.encode(id, allocator))
 }
 
-topo_sort :: proc(changes: []Change, allocator := context.allocator) -> [dynamic]^Change {
+// Kahn with lexicographic hex tie-break. With `after`, `changes` is the tail
+// beyond a checkpoint and the sort continues the full-history Kahn run:
+// a tail change all of whose parents are covered was queued when its LAST
+// covered parent was processed (its index in `covered_ids`, which is stored
+// in replay order), so buckets by that step, each bucket sorted, reproduce
+// the queue the full run had when the covered prefix was exhausted.
+topo_sort :: proc(changes: []Change, allocator := context.allocator, after: ^Checkpoint = nil) -> [dynamic]^Change {
 	by_hex := make(map[string]^Change, allocator = allocator)
 	in_degree := make(map[string]int, allocator = allocator)
 	children := make(map[string][dynamic]string, allocator = allocator)
@@ -89,10 +95,43 @@ topo_sort :: proc(changes: []Change, allocator := context.allocator) -> [dynamic
 
 	queue := make([dynamic]string, allocator)
 	defer delete(queue)
-	for h, deg in in_degree {
-		if deg == 0 do append(&queue, h)
+	if after == nil {
+		for h, deg in in_degree {
+			if deg == 0 do append(&queue, h)
+		}
+		slice.sort(queue[:])
+	} else {
+		covered_index := make(map[string]int, allocator = context.temp_allocator)
+		defer delete(covered_index)
+		for id, i in after.covered_ids do covered_index[string(id)] = i
+		// release step per free tail change: -1 = genuine root, else the
+		// index of its last covered parent.
+		buckets := make(map[int][dynamic]string, allocator = context.temp_allocator)
+		defer {
+			for _, v in buckets do delete(v)
+			delete(buckets)
+		}
+		for &c, i in changes {
+			if in_degree[hexes[i]] != 0 do continue
+			release := -1
+			for p in c.parent_ids do if idx, ok := covered_index[string(p)]; ok && idx > release do release = idx
+			list, ok := &buckets[release]
+			if !ok {
+				buckets[release] = make([dynamic]string, context.temp_allocator)
+				list = &buckets[release]
+			}
+			append(list, hexes[i])
+		}
+		steps := make([dynamic]int, context.temp_allocator)
+		defer delete(steps)
+		for step in buckets do append(&steps, step)
+		slice.sort(steps[:])
+		for step in steps {
+			bucket := buckets[step]
+			slice.sort(bucket[:])
+			append(&queue, ..bucket[:])
+		}
 	}
-	slice.sort(queue[:])
 
 	result := make([dynamic]^Change, allocator)
 	for len(queue) > 0 {
@@ -125,6 +164,133 @@ find_heads :: proc(changes: []Change, allocator := context.allocator) -> [dynami
 	}
 	slice.sort(heads[:])
 	return heads
+}
+
+// ── Checkpoints ──────────────────────────────────────────────────────
+//
+// A checkpoint names every change it folded in (covered_ids, in replay
+// order), so a peer holding only the checkpoint and a tail can tell
+// "already applied" from "concurrent, replay me" without the covered
+// history, and can continue the Kahn run exactly where the publisher's
+// stopped (topo_sort `after`).
+//
+// Kahn order is not stable under extension: a concurrent change arriving
+// later with a smaller id sorts BEFORE already-covered changes in a full
+// replay. A checkpoint-only peer cannot reproduce that; its state is
+// transiently off for that object until the publisher - which always replays
+// full history - issues the next checkpoint. A full-history peer must call
+// checkpoint_is_prefix before trusting a checkpoint for its own replay.
+
+/** Changes not folded into the checkpoint; input order preserved. */
+checkpoint_tail :: proc(changes: []Change, cp: ^Checkpoint, allocator := context.allocator) -> []Change {
+	covered := make(map[string]bool, allocator = context.temp_allocator)
+	defer delete(covered)
+	for id in cp.covered_ids do covered[string(id)] = true
+	tail := make([dynamic]Change, 0, len(changes), allocator)
+	for c in changes do if string(c.id) not_in covered do append(&tail, c)
+	return tail[:]
+}
+
+/** True when the checkpoint's covered ids are exactly the first entries of the full replay order. */
+checkpoint_is_prefix :: proc(changes: []Change, cp: ^Checkpoint) -> bool {
+	if len(cp.covered_ids) > len(changes) do return false
+	sorted := topo_sort(changes, context.temp_allocator)
+	defer delete(sorted)
+	if len(sorted) != len(changes) do return false
+	for id, i in cp.covered_ids do if string(sorted[i].id) != string(id) do return false
+	return true
+}
+
+/**
+ * Pick how a stored checkpoint takes part in an object's replay:
+ *   - every covered change present and the checkpoint is a prefix of the
+ *     full Kahn order → seed from it (same answer, shorter replay);
+ *   - every covered change present but the order diverged (a concurrent
+ *     change with a smaller id arrived after the checkpoint) → nil: replay
+ *     from genesis;
+ *   - covered changes missing → the checkpoint IS the history; use it.
+ * Every host replays through compute_state, so the rule has one definition.
+ */
+checkpoint_for_replay :: proc(changes: []Change, cp: ^Checkpoint) -> ^Checkpoint {
+	if cp == nil do return nil
+	present := make(map[string]bool, allocator = context.temp_allocator)
+	defer delete(present)
+	for c in changes do present[string(c.id)] = true
+	for id in cp.covered_ids do if string(id) not_in present do return cp
+	return checkpoint_is_prefix(changes, cp) ? cp : nil
+}
+
+/** Tail heads plus checkpoint heads no tail change has built on; sorted hex. */
+checkpoint_heads :: proc(tail: []Change, cp: ^Checkpoint, allocator := context.allocator) -> [dynamic]string {
+	referenced := make(map[string]bool, allocator = context.temp_allocator)
+	defer delete(referenced)
+	for c in tail {
+		for p in c.parent_ids do referenced[hex_id(p, context.temp_allocator)] = true
+	}
+	heads := make([dynamic]string, allocator)
+	for c in tail {
+		h := hex_id(c.id, allocator)
+		if !referenced[h] do append(&heads, h)
+	}
+	for id in cp.head_ids {
+		h := hex_id(id, allocator)
+		if !referenced[h] && !slice.contains(heads[:], h) do append(&heads, h)
+	}
+	slice.sort(heads[:])
+	return heads
+}
+
+/**
+ * Fold a replayed state and the changes that produced it into a checkpoint.
+ * `changes` must be exactly the set `state` was computed from; when `state`
+ * was itself computed on top of `prior`, pass it so covered_ids continue
+ * prior's replay order with the tail's. Anything else makes covered_ids lie
+ * and every consumer drift.
+ */
+checkpoint_build :: proc(state: ^Object_State, changes: []Change, now_ms: i64, prior: ^Checkpoint = nil, allocator := context.allocator) -> Checkpoint {
+	cp: Checkpoint
+	cp.object_id = strings.clone(state.id, allocator)
+	cp.created_at = now_ms
+	cp.head_ids = make([dynamic][]byte, 0, len(state.heads), allocator)
+	for h in state.heads {
+		raw, ok := hex.decode(transmute([]byte)h, allocator)
+		if ok do append(&cp.head_ids, raw)
+	}
+	if prior == nil {
+		sorted := topo_sort(changes, context.temp_allocator)
+		defer delete(sorted)
+		cp.covered_ids = make([dynamic][]byte, 0, len(sorted), allocator)
+		for c in sorted do append(&cp.covered_ids, slice.clone(c.id, allocator))
+	} else {
+		tail := checkpoint_tail(changes, prior, context.temp_allocator)
+		sorted := topo_sort(tail, context.temp_allocator, prior)
+		defer delete(sorted)
+		cp.covered_ids = make([dynamic][]byte, 0, len(prior.covered_ids) + len(sorted), allocator)
+		for id in prior.covered_ids do append(&cp.covered_ids, slice.clone(id, allocator))
+		for c in sorted do append(&cp.covered_ids, slice.clone(c.id, allocator))
+	}
+	cp.state = Snapshot{
+		id         = cp.object_id,
+		type_key   = strings.clone(state.type_key, allocator),
+		fields     = slice.clone_to_dynamic(state.fields[:], allocator),
+		blocks     = slice.clone_to_dynamic(state.blocks[:], allocator),
+		deleted    = state.deleted,
+		created_at = state.created_at,
+		updated_at = state.updated_at,
+	}
+	return cp
+}
+
+/** sha256 of the encoded bytes: dedup and tie-break key, never a trust anchor. */
+checkpoint_hash :: proc(bytes: []byte, allocator := context.allocator) -> string {
+	digest := sha256(bytes)
+	return hex_id(digest[:], allocator)
+}
+
+/** Store rule when two checkpoints describe one object: more covered wins, then the larger hash. */
+checkpoint_supersedes :: proc(candidate: ^Checkpoint, candidate_hash: string, existing: ^Checkpoint, existing_hash: string) -> bool {
+	if len(candidate.covered_ids) != len(existing.covered_ids) do return len(candidate.covered_ids) > len(existing.covered_ids)
+	return candidate_hash > existing_hash
 }
 
 // ── Block tree ───────────────────────────────────────────────────────
@@ -534,59 +700,80 @@ normalize :: proc(t: ^Block_Tree, before_counts: map[string]int) {
 
 // ── State computation ────────────────────────────────────────────────
 
-compute_state :: proc(changes: []Change, allocator := context.allocator) -> (Object_State, bool) {
+// Replays `changes` from genesis, or - given a checkpoint - replays only the
+// tail (changes not in `covered_ids`) on top of the checkpoint's state. A
+// full-history peer and a checkpoint-only peer reach the same state and the
+// same heads from the same checkpoint; replay_test.odin pins that. A
+// full-history peer whose Kahn order diverged from the checkpoint's ignores
+// it (checkpoint_for_replay), so the state never depends on download order.
+compute_state :: proc(changes: []Change, allocator := context.allocator, checkpoint: ^Checkpoint = nil) -> (Object_State, bool) {
 	state: Object_State
-	if len(changes) == 0 do return state, false
-	state.id = changes[0].object_id
+	checkpoint := checkpoint_for_replay(changes, checkpoint)
+	if len(changes) == 0 && checkpoint == nil do return state, false
 	state.fields = make([dynamic]Value_Entry, allocator)
-	state.heads = find_heads(changes, allocator)
 
-	sorted := topo_sort(changes, context.temp_allocator)
+	tail := changes
+	if checkpoint != nil {
+		state.id = checkpoint.object_id
+		tail = checkpoint_tail(changes, checkpoint, context.temp_allocator)
+		state.heads = checkpoint_heads(tail, checkpoint, allocator)
+	} else {
+		state.id = changes[0].object_id
+		state.heads = find_heads(changes, allocator)
+	}
+
+	sorted := topo_sort(tail, context.temp_allocator, checkpoint)
 	defer delete(sorted)
-	if len(sorted) != len(changes) do return state, false
+	if len(sorted) != len(tail) do return state, false
 
-	// Most recent snapshot (by timestamp) skips the replay prefix.
-	snapshot_idx := -1
-	snapshot_ts: i64 = -1
-	for c, i in sorted {
-		if c.has_snapshot && c.timestamp > snapshot_ts {
-			snapshot_idx = i
-			snapshot_ts = c.timestamp
+	seed: ^Snapshot
+	start_idx := 0
+	max_ts: i64 = 0
+	if checkpoint != nil {
+		seed = &checkpoint.state
+		max_ts = checkpoint.state.updated_at
+	} else {
+		// Legacy in-DAG snapshot (Change.snapshot): most recent by timestamp
+		// skips the replay prefix. Nothing produces these; fixtures pin them.
+		snapshot_idx := -1
+		snapshot_ts: i64 = -1
+		for c, i in sorted {
+			if c.has_snapshot && c.timestamp > snapshot_ts {
+				snapshot_idx = i
+				snapshot_ts = c.timestamp
+			}
+		}
+		if snapshot_idx >= 0 {
+			seed = &sorted[snapshot_idx].snapshot
+			start_idx = snapshot_idx + 1
 		}
 	}
 
 	initial_blocks: []Block
-	start_idx := 0
-	if snapshot_idx >= 0 {
-		snap := sorted[snapshot_idx].snapshot
-		state.type_key = snap.type_key
-		state.deleted = snap.deleted
-		state.created_at = snap.created_at
-		state.updated_at = snap.updated_at
-		for e in snap.fields do fields_set(&state.fields, e.key, e.value)
-		initial_blocks = snap.blocks[:]
-		start_idx = snapshot_idx + 1
-		// Deprecated snap.content → __content__ block handled below via tree.
+	if seed != nil {
+		state.type_key = seed.type_key
+		state.deleted = seed.deleted
+		state.created_at = seed.created_at
+		state.updated_at = seed.updated_at
+		for e in seed.fields do fields_set(&state.fields, e.key, e.value)
+		initial_blocks = seed.blocks[:]
 	}
 
 	t := tree_build(initial_blocks, allocator)
 	if !replay_tree_valid(&t) do return state, false
-	if snapshot_idx >= 0 {
-		snap := sorted[snapshot_idx].snapshot
-		if len(snap.content) > 0 && "__content__" not_in t.by_id {
-			b := new(Block, allocator)
-			b.id = "__content__"
-			b.children_ids = make([dynamic]string, allocator)
-			b.content.kind = .Custom
-			b.content.custom.content_type = "glon/raw"
-			b.content.custom.data = snap.content
-			t.by_id[b.id] = b
-			append(&t.storage, b)
-			append(&t.root_ids, b.id)
-		}
+	// Deprecated Snapshot.content → __content__ block.
+	if seed != nil && len(seed.content) > 0 && "__content__" not_in t.by_id {
+		b := new(Block, allocator)
+		b.id = "__content__"
+		b.children_ids = make([dynamic]string, allocator)
+		b.content.kind = .Custom
+		b.content.custom.content_type = "glon/raw"
+		b.content.custom.data = seed.content
+		t.by_id[b.id] = b
+		append(&t.storage, b)
+		append(&t.root_ids, b.id)
 	}
 
-	max_ts: i64 = 0
 	for i in start_idx ..< len(sorted) {
 		change := sorted[i]
 		if change.timestamp > max_ts do max_ts = change.timestamp

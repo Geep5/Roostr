@@ -151,6 +151,17 @@ Change :: struct {
 	snapshot:     Snapshot,
 }
 
+// A computed state plus the exact change ids folded into it. Never a Change:
+// it lives beside the DAG (checkpoints/<objectId>.pb, kind 1079), so no peer
+// has to store one per compaction pass. docs/checkpoint-sync.md.
+Checkpoint :: struct {
+	object_id:   string,
+	head_ids:    [dynamic][]byte,
+	covered_ids: [dynamic][]byte,
+	state:       Snapshot,
+	created_at:  i64,
+}
+
 // ── Wire reader ──────────────────────────────────────────────────────
 
 Reader :: struct {
@@ -705,6 +716,34 @@ decode_change :: proc(data: []byte, allocator := context.allocator) -> (Change, 
 	return c, !r.err
 }
 
+decode_checkpoint :: proc(data: []byte, allocator := context.allocator) -> (Checkpoint, bool) {
+	context.allocator = allocator
+	if !valid_message(data, .Checkpoint) do return {}, false
+	r := Reader{data = data}
+	cp: Checkpoint
+	for r.pos < len(r.data) && !r.err {
+		tag := read_varint(&r)
+		switch tag >> 3 {
+		case 1:
+			cp.object_id = read_string(&r)
+		case 2:
+			append(&cp.head_ids, read_bytes(&r))
+		case 3:
+			append(&cp.covered_ids, read_bytes(&r))
+		case 4:
+			cp.state = decode_snapshot(read_bytes(&r), allocator)
+		case 5:
+			cp.created_at = as_i64(read_varint(&r))
+		case:
+			skip_field(&r, tag & 7)
+		}
+	}
+	if r.err || cp.object_id == "" || cp.state.id != cp.object_id do return {}, false
+	for id in cp.head_ids do if len(id) != 32 do return {}, false
+	for id in cp.covered_ids do if len(id) != 32 do return {}, false
+	return cp, true
+}
+
 // ── Wire writer ──────────────────────────────────────────────────────
 
 Writer :: struct {
@@ -1013,6 +1052,20 @@ encode_snapshot :: proc(s: Snapshot, w: ^Writer) {
 	write_i64_field(w, 8, s.updated_at)
 }
 
+encode_checkpoint :: proc(cp: Checkpoint, allocator := context.allocator) -> []byte {
+	w: Writer
+	w.buf = make([dynamic]byte, allocator)
+	write_string_field(&w, 1, cp.object_id)
+	for id in cp.head_ids do write_len_prefixed(&w, 2, id)
+	for id in cp.covered_ids do write_len_prefixed(&w, 3, id)
+	sw: Writer
+	encode_snapshot(cp.state, &sw)
+	write_len_prefixed(&w, 4, sw.buf[:])
+	delete(sw.buf)
+	write_i64_field(&w, 5, cp.created_at)
+	return w.buf[:]
+}
+
 // ── Decode limits ────────────────────────────────────────────────────
 // A length-delimited repeated field costs ~2 wire bytes per element but
 // allocates a full model struct per element (~850 B per Operation): a
@@ -1022,12 +1075,16 @@ encode_snapshot :: proc(s: Snapshot, w: ^Writer) {
 // Legitimate documents sit orders of magnitude below every cap.
 MAX_DECODE_ITEMS :: 100_000 // Change.ops, Snapshot.blocks/fields, Value list items/map entries, Block field maps
 MAX_DECODE_REFS :: 50_000   // Block.children_ids, String_List values (e.g. tags), text marks, custom meta pairs
+MAX_CHECKPOINT_COVERED :: CORPUS_MAX_CHANGES // Checkpoint.covered_ids: one object's whole history, at most
 
 // Per-field element cap for repeated length-delimited fields; 0 = uncapped.
 wire_count_cap :: proc(message: Wire_Message, field: u64) -> int {
 	#partial switch message {
 	case .Change:
 		if field == 4 do return MAX_DECODE_ITEMS // ops
+	case .Checkpoint:
+		if field == 2 do return MAX_DECODE_ITEMS // head_ids
+		if field == 3 do return MAX_CHECKPOINT_COVERED // covered_ids
 	case .Snapshot:
 		if field == 3 do return MAX_DECODE_ITEMS // fields
 		if field == 5 do return MAX_DECODE_ITEMS // blocks
@@ -1049,7 +1106,7 @@ wire_count_cap :: proc(message: Wire_Message, field: u64) -> int {
 // Check all nested messages before model allocation. Unknown fields remain
 // forward compatible, but malformed known payloads never produce partial changes.
 Wire_Message :: enum {
-	Scalar, Change, Operation, Snapshot, Value, Value_Map, Value_Entry,
+	Scalar, Change, Checkpoint, Operation, Snapshot, Value, Value_Map, Value_Entry,
 	Value_List, String_List, Link, Block, Content, Text, Mark, Custom,
 	String_Entry, Layout, Row, Empty, Create, Field_Set, Field_Delete,
 	Block_Add, Block_Remove, Block_Update, Block_Move, Align, Background,
@@ -1060,6 +1117,8 @@ wire_field :: proc(message: Wire_Message, field: u64) -> (wire: u64, nested: Wir
 	switch message {
 	case .Change:
 		switch field { case 1, 2, 3, 6: case 4: nested = .Operation; case 5: wire = 0; case 7: nested = .Snapshot; case: known = false }
+	case .Checkpoint:
+		switch field { case 1, 2, 3: case 4: nested = .Snapshot; case 5: wire = 0; case: known = false }
 	case .Operation:
 		switch field {
 		case 1: nested = .Create

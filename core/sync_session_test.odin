@@ -190,7 +190,7 @@ sync_session_reassembles_out_of_order_chunks :: proc(t: ^testing.T) {
 	change, _ := json_field(item, "change")
 	testing.expect(t, json_str(change, "objectId") == "big-1")
 	chunk_key := json_str(item, "chunkKey")
-	expected_key := fmt.tprintf(`["%s","space-1",1,"%s"]`, writer, tag_string(event_tag(json_array(events[1], "tags"), "c") or_else nil, 1))
+	expected_key := fmt.tprintf(`["%s","space-1",1,"%s",1078]`, writer, tag_string(event_tag(json_array(events[1], "tags"), "c") or_else nil, 1))
 	testing.expectf(t, chunk_key == expected_key, "chunk key %s", chunk_key)
 	provenance, _ := json_field(item, "provenance")
 	testing.expect(t, json_str(provenance, "spaceId") == "space-1" && json_str(provenance, "signer") == writer)
@@ -281,6 +281,46 @@ sync_session_restores_replay_groups_and_rejects_without_session :: proc(t: ^test
 	testing.expect(t, has_floor && floor == 42, "persisted replay groups restore the floor")
 	cursor, _ := json_int(state, "cursor")
 	testing.expect(t, cursor == 7)
+}
+
+// A clean scan retires open CHECKPOINT groups (their chunks were NIP-09'd
+// with the superseded checkpoint) but never change groups: a missing change
+// keeps its replay floor until a covering repair.
+@(private = "file")
+sync_session_retire_drops_only_checkpoint_groups :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	open_session(t)
+	defer sync_session_close()
+	writer := strings.repeat("ef", 32, context.temp_allocator)
+	change_parts := seal_events(t, wire_change(t, "big-c", 70_000), "big-c", true, writer, 400)
+	cp_parts := seal_events(t, wire_change(t, "big-k", 70_000), "big-k", true, writer, 500)
+	for part in cp_parts {
+		obj := part.(json.Object)
+		obj["kind"] = json.Integer(SYNC_CHECKPOINT_KIND)
+	}
+	ingest(t, change_parts[0], 1_000)
+	ingest(t, cp_parts[0], 1_000)
+	state := call(t, "state", jobj())
+	open_groups, _ := json_int(state, "groups")
+	testing.expect(t, open_groups == 2)
+
+	retire := jobj()
+	retire["since"] = json.Integer(450)
+	r := call(t, "retire", retire)
+	groups, changed := json_field(r, "replayGroups")
+	testing.expect(t, changed && len(groups.(json.Array)) == 1, "the checkpoint group at 500 is retired")
+	state = call(t, "state", jobj())
+	open_groups, _ = json_int(state, "groups")
+	floor, _ := json_int(state, "replayFloor")
+	testing.expectf(t, open_groups == 1 && floor == 400, "groups=%d floor=%d", open_groups, floor)
+
+	retire["since"] = json.Integer(0)
+	r = call(t, "retire", retire)
+	_, changed = json_field(r, "replayGroups")
+	testing.expect(t, !changed, "a change group is never retired by an empty scan")
+	state = call(t, "state", jobj())
+	floor, _ = json_int(state, "replayFloor")
+	testing.expect(t, floor == 400)
 }
 
 
@@ -435,5 +475,6 @@ sync_session_contract :: proc(t: ^testing.T) {
 	sync_session_reassembles_out_of_order_chunks(t)
 	sync_session_faults_on_conflict_expiry_and_limits(t)
 	sync_session_restores_replay_groups_and_rejects_without_session(t)
+	sync_session_retire_drops_only_checkpoint_groups(t)
 	sync_session_outbox_order_backoff_and_sealing(t)
 }
