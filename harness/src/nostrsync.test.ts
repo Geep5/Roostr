@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { finalizeEvent, getPublicKey, nip44, SimplePool, type Event, type Filter } from "nostr-tools";
 import * as api from "./api";
 import * as auth from "./local-api-auth";
-import { startNostrSync } from "./nostrsync";
+import { startNostrSync, vanishOnRelays } from "./nostrsync";
 
 const sk = new Uint8Array(32).fill(1);
 const pk = getPublicKey(sk);
@@ -120,7 +120,7 @@ beforeEach(async () => {
 			filters.push(filter);
 			queueMicrotask(() => {
 				beforePage?.();
-				for (const item of history) if (item.created_at >= (filter.since ?? 0)) callbacks.onevent(item);
+				for (const item of history) if (item.created_at >= (filter.since ?? 0) && item.created_at <= (filter.until ?? Infinity)) callbacks.onevent(item);
 				if (incomplete) callbacks.onclose();
 				else callbacks.oneose();
 			});
@@ -334,6 +334,18 @@ test("a live checkpoint under our key is imported and becomes the relay's copy; 
 	const deletion = published.find((item) => item.kind === 5)!;
 	expect(deletion.tags).toEqual([["e", stale.id], ["k", "1079"]]);
 	expect((await state()).checkpoints.obj.eventIds).toEqual([current.id]);
+});
+
+test("vanish splits deletion requests so no kind-5 exceeds the relay's 256-tag plan bound", async () => {
+	history = Array.from({ length: 300 }, (_, i) => event("YWJj", 1000 + i));
+	timeoutMock.mockImplementation(((callback: () => void) => realSetTimeout(callback, 0)) as unknown as typeof setTimeout);
+	const { events, requests } = await vanishOnRelays(["obj"]);
+	expect(events).toBe(300);
+	const deletions = published.filter((item) => item.kind === 5);
+	expect(deletions.length).toBe(requests);
+	expect(deletions.every((item) => item.tags.length <= 256)).toBe(true);
+	const targeted = new Set(deletions.flatMap((item) => item.tags.filter((tag) => tag[0] === "e").map((tag) => tag[1])));
+	expect(targeted).toEqual(new Set(history.map((item) => item.id)));
 });
 
 test("cold start walks changes from the manifest cursor and keeps checkpoints unbounded", async () => {

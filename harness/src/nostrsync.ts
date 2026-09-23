@@ -38,8 +38,12 @@ const KEYRING_KIND = 30078;
 const KEYRING_D = "roostr-keyring";
 /** NIP-09 deletion request. Advisory: relays SHOULD honour it, MAY ignore it. */
 const DELETE_KIND = 5;
-/** `e` tags per deletion request — relays cap event size, so batch. */
-const DELETE_BATCH = 400;
+/**
+ * `e` tags per deletion request. RoostrRelay examines at most 256 tags of a
+ * kind-5 (`MAX_PLAN_TAGS`) and rejects anything longer; two `k` tags ride
+ * along, so 254 victims per request is the largest batch it fully applies.
+ */
+const DELETE_BATCH = 254;
 /** The synced vanish ledger (see src/vanish.odin); never published as data to delete. */
 const VANISH_LOG_ID = "__vanished__";
 
