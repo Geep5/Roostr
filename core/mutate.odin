@@ -596,7 +596,7 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		if key == "done" && value.kind == .Bool && value.b {
 			if current, recurring := repeat_state_value(input, object_id); recurring {
 				now_ms, tz_offset_min := repeat_clock(parsed, input)
-				advanced, err := repeat_advance_ops(current, now_ms, tz_offset_min, "last_done")
+				advanced, err := repeat_advance_ops(current, now_ms, tz_offset_min)
 				if err != "" do return plan, err
 				mutation_add(&plan, input, object_id, {Operation{kind = .Field_Set, key = REPEAT_KEY, value = advanced}, Operation{kind = .Field_Set, key = "done", value = bool_value(false)}})
 				repeat_result(&plan, advanced)
@@ -635,13 +635,13 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		mutation_add(&plan, input, object_id, {Operation{kind = .Field_Delete, key = REPEAT_KEY}})
 		return plan, ""
 
-	case "occurrence_complete", "occurrence_skip":
+	case "occurrence_complete":
 		object_id := json_str(parsed, "object_id")
 		if object_id == "" do return plan, "object_id required"
 		current, recurring := repeat_state_value(input, object_id)
 		if !recurring do return plan, "object does not repeat"
 		now_ms, tz_offset_min := repeat_clock(parsed, input)
-		advanced, err := repeat_advance_ops(current, now_ms, tz_offset_min, action == "occurrence_complete" ? "last_done" : "last_skipped")
+		advanced, err := repeat_advance_ops(current, now_ms, tz_offset_min)
 		if err != "" do return plan, err
 		mutation_add(&plan, input, object_id, {Operation{kind = .Field_Set, key = REPEAT_KEY, value = advanced}})
 		repeat_result(&plan, advanced)

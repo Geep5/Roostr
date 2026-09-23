@@ -11,7 +11,7 @@ package core
 //     anchor: ms of the day the cadence counts from (start of local day),
 //     next: ms of the current occurrence,
 //     fired_for / fired_at / fired_by: idempotency mark for `next`,
-//     last_done, last_skipped, count, last_run: {at, machine, conversation, error}
+//     last_done, count, last_run: {at, machine, conversation, error}
 //   }
 //
 // A recurring object is never done: completing it advances `next`. Time
@@ -237,7 +237,7 @@ repeat_value :: proc(rule: Repeat_Rule, next_day: i64, tz_offset_min: i64, previ
 	put(&v, "anchor", int_value(rule.anchor))
 	put(&v, "next", int_value(repeat_local_to_ms(next_day, rule.time, tz_offset_min)))
 	if has_previous {
-		for key in ([]string{"last_done", "last_skipped", "count", "last_run"}) {
+		for key in ([]string{"last_done", "count", "last_run"}) {
 			if e, ok := repeat_entry(previous, key); ok do put(&v, key, mutation_clone_value(e))
 		}
 	}
@@ -280,8 +280,8 @@ repeat_clock :: proc(parsed: json.Value, input: Mutation_Input) -> (now_ms, tz_o
 	return
 }
 
-/** Completing or skipping the current occurrence advances `next` past now. */
-repeat_advance_ops :: proc(current: Value, now_ms, tz_offset_min: i64, mark: string) -> (Value, string) {
+/** Completing the current occurrence advances `next` past now and counts it. */
+repeat_advance_ops :: proc(current: Value, now_ms, tz_offset_min: i64) -> (Value, string) {
 	rule, ok := repeat_rule_from_value(current)
 	if !ok do return {}, "object has no valid repeat rule"
 	next_ms, has_next := repeat_entry_int(current, "next")
@@ -290,11 +290,9 @@ repeat_advance_ops :: proc(current: Value, now_ms, tz_offset_min: i64, mark: str
 	current_day := floor_div(next_ms + tz_offset_min * REPEAT_MIN_MS, REPEAT_DAY_MS)
 	next_day := repeat_advance(rule, current_day, now_local)
 	out := repeat_with(current, "next", int_value(repeat_local_to_ms(next_day, rule.time, tz_offset_min)))
-	out = repeat_with(out, mark, int_value(now_ms))
-	if mark == "last_done" {
-		count, _ := repeat_entry_int(out, "count")
-		out = repeat_with(out, "count", int_value(count + 1))
-	}
+	out = repeat_with(out, "last_done", int_value(now_ms))
+	count, _ := repeat_entry_int(out, "count")
+	out = repeat_with(out, "count", int_value(count + 1))
 	for key in ([]string{"fired_for", "fired_at", "fired_by"}) do out = repeat_without(out, key)
 	return out, ""
 }
