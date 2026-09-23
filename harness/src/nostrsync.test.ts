@@ -21,6 +21,8 @@ let beforePage: (() => void) | undefined;
 let liveEvent: (event: Event) => void;
 let liveSubscriptions: number;
 let importChange: (b64: string) => Promise<Response>;
+/** Local daemon's change manifest (objectId -> change hexes) and each change's bytes. */
+let localChangeRows: Record<string, Array<{ id: string; b64: string }>>;
 let checkpointRows: Record<string, unknown>;
 let importCheckpoint: (body: { checkpoints: string[]; provenance?: unknown }) => Promise<Response>;
 let buildCheckpoint: (objectId: string) => Promise<Response>;
@@ -84,6 +86,7 @@ beforeEach(async () => {
 	importChange = async () => Response.json({ imported: 1, rejected: 0, ids: ["change"] });
 	checkpointRows = {};
 	importCheckpoint = async () => Response.json({ imported: 0, rejected: 1, items: [] });
+	localChangeRows = {};
 	buildCheckpoint = async () => new Response("not found", { status: 404 });
 	manifests = [];
 	published = [];
@@ -99,12 +102,14 @@ beforeEach(async () => {
 	const fetch = spyOn(auth, "apiFetch").mockImplementation(async (input, init) => {
 		const url = String(input);
 		if (url.endsWith("/api/changes") && init?.method === "POST") return importChange(JSON.parse(String(init.body)).changes[0]);
+		const perObject = url.match(/\/api\/changes\/([^/]+)$/);
+		if (perObject) return Response.json({ changes: localChangeRows[perObject[1]] ?? [] });
 		if (url.endsWith("/api/checkpoints") && init?.method === "POST") return importCheckpoint(JSON.parse(String(init.body)));
 		if (url.endsWith("/api/checkpoints/build")) return buildCheckpoint(JSON.parse(String(init?.body)).objectId);
 		if (url.endsWith("/api/objects")) return Response.json([]);
 		if (url.endsWith("/api/vanished")) return Response.json({ vanished: [] });
 		if (url.endsWith("/api/checkpoints")) return Response.json(checkpointRows);
-		if (url.endsWith("/api/changes")) return Response.json({});
+		if (url.endsWith("/api/changes")) return Response.json(Object.fromEntries(Object.entries(localChangeRows).map(([objectId, rows]) => [objectId, rows.map((row) => row.id)])));
 		throw new Error(`Unexpected local request: ${url}`);
 	});
 	restore.push(() => fetch.mockRestore());
@@ -363,4 +368,21 @@ test("the checkpoint pass rebuilds moved objects, publishes 1079, retires the ol
 	expect(manifest.tags).toEqual([["d", "roostr-checkpoint"]]);
 	expect(JSON.parse(decrypt(manifest))).toEqual({ cursor: 100, objects: 2 });
 	expect((await state()).checkpoints.obj).toEqual({ hash: "h1", heads: ["b"], covered: 2, eventIds: [checkpoint.id] });
+});
+
+test("a cold start with only local changes stamps the manifest at pass time, not at the unseen relay cursor", async () => {
+	await writeFile(join(root, "sync-state.json"), JSON.stringify({ version: 1, cursor: 0, published: {}, vanishRequested: {} }));
+	localChangeRows = { obj: [{ id: "aa", b64: "YWJj" }] };
+	checkpointRows = { obj: { heads: ["aa"], changes: 1, covered: 0 } };
+	buildCheckpoint = async (objectId) => Response.json({ objectId, b64: "TkVX", hash: "h1", heads: ["aa"], covered: 1 });
+	timeoutMock.mockImplementation(((callback: () => void) => realSetTimeout(callback, 0)) as unknown as typeof setTimeout);
+	const before = Math.floor(Date.now() / 1000);
+	await startNostrSync();
+	await until(() => published.some((item) => item.kind === 30079));
+	const change = published.find((item) => item.kind === 1078)!;
+	expect(decrypt(change)).toBe("YWJj");
+	expect(published.findIndex((item) => item.kind === 1079)).toBeGreaterThan(published.indexOf(change));
+	const { cursor } = JSON.parse(decrypt(published.find((item) => item.kind === 30079)!)) as { cursor: number };
+	expect(cursor).toBeGreaterThanOrEqual(before);
+	expect(cursor).toBeLessThanOrEqual(change.created_at);
 });

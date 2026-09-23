@@ -673,6 +673,9 @@ export async function startNostrSync(): Promise<void> {
 		return h.digest("hex").slice(0, 16);
 	}
 
+	/** created_at of the newest change event this process published; peers' events advance `state.cursor` instead. */
+	let publishedAt = 0;
+
 	/** Publish every part; the accepted event ids on success, null on any rejection. */
 	async function publishOnce(item: QueueItem): Promise<string[] | null> {
 		const parts: string[] = [];
@@ -696,6 +699,7 @@ export async function startNostrSync(): Promise<void> {
 				);
 				await Promise.any(pool.publish(id!.relays, event));
 				eventIds.push(event.id);
+				if (item.kind === CHANGE_KIND) publishedAt = Math.max(publishedAt, event.created_at);
 				if (parts.length > 1 && i < parts.length - 1) {
 					const { promise, resolve } = Promise.withResolvers<void>();
 					setTimeout(resolve, PUBLISH_SPACING_MS);
@@ -1300,15 +1304,22 @@ export async function startNostrSync(): Promise<void> {
 		if (checkpointBusy) return;
 		checkpointBusy = true;
 		try {
+			// The manifest claims "every change at or before `cursor` is folded
+			// into these checkpoints". They describe local state as of now, so
+			// nothing published later may be claimed - but the cold-start pass
+			// runs before any relay event advanced `state.cursor`, and our own
+			// changes queue ahead of the checkpoints in the same publish queue,
+			// so the watermark is read when the last checkpoint lands.
+			const passStart = Math.floor(Date.now() / 1000);
 			const rows = await localCheckpoints();
-			const cursor = state.cursor;
+			const cursor = () => Math.min(passStart, Math.max(state.cursor, publishedAt));
 			// Per manifest scope (null = personal): outstanding publishes and whether anything was skipped.
 			const scopes = new Map<SharedSpace | null, { outstanding: number; faults: number; objects: number }>();
 			scopes.set(null, { outstanding: 0, faults: 0, objects: 0 });
 			for (const space of sharedSpaces.values()) if (!space.owner || space.owner === id!.pk) scopes.set(space, { outstanding: 0, faults: 0, objects: 0 });
 			const stamp = (space: SharedSpace | null) => {
 				const scope = scopes.get(space)!;
-				if (scope.outstanding === 0 && scope.faults === 0) void publishManifest(space, cursor, scope.objects);
+				if (scope.outstanding === 0 && scope.faults === 0) void publishManifest(space, cursor(), scope.objects);
 			};
 			let built = 0;
 			for (const [objectId, row] of Object.entries(rows)) {

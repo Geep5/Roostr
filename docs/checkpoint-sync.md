@@ -157,7 +157,13 @@ Every `CHECKPOINT_INTERVAL_MS` and after the startup reconcile:
    {objectId}` → checkpoint bytes, persisted by the daemon.
 3. Seal and publish as 1079; on success NIP-09 the previous event ids for that
    object and remember the new ones.
-4. When the whole pass succeeded: publish 30079 with the harness cursor.
+4. When the whole pass succeeded: publish 30079 with
+   `min(passStart, max(relay cursor, newest own 1078 created_at))`. The
+   checkpoints describe local state as of `passStart`, so nothing later may be
+   claimed; the lower terms matter on a cold start, where the relay cursor is
+   still 0 while this pass's own changes drain ahead of its checkpoints in the
+   same publish queue. Corollary relied on below: every 1079 of a pass has
+   `created_at >= passStart >= cursor`.
 
 A checkpoint that will not fit in 64 chunks is skipped and logged; the object
 keeps syncing as changes.
@@ -189,12 +195,20 @@ machine; fingerprints differ from a full-history machine by design.
   `putCheckpoint` applies the covered-then-hash rule and returns whether the
   row changed; `objectIds()` and the boot scan union change and checkpoint
   keys, so an object held only as a checkpoint is queryable.
-- `RelaySync.walkHistory`: a full walk (`since <= 1`) fetches each scope's
-  manifest once, persists the cursor as that scope's floor, and issues two
-  filters per scope: `1078 since: max(since, floor)` and `1079 since`
-  (unbounded on a full walk). Pages import checkpoints before changes. After
-  a clean complete walk it calls the core's `retire` (rule above). Live
-  subscriptions and head checks use `kinds:[1078, 1079]`.
+- `RelaySync.walkHistory`: a full walk (`since <= 1`) resolves each scope's
+  floor once (`checkpointFloor`: the publisher's manifest cursor, persisted)
+  and issues two filters per scope: `1078 since: max(since, floor)` and
+  `1079 since` (unbounded on a full walk). Pages import checkpoints before
+  changes. At EOSE it first drains live events and imports still in flight
+  (the live subscription replays the same backlog concurrently; an event
+  mid-import is not a fault), then calls the core's `retire` (rule above) and
+  judges completion.
+- Live subscriptions use `kinds:[1078, 1079]` with
+  `since: max(cursor + 1, min(floors of the covered scopes))`; an
+  unbootstrapped `start()` resolves the floors before subscribing. Without
+  that, a fresh device replayed the whole vault through the live stream while
+  the walk skipped it. Sound by the corollary above: nothing that can still
+  arrive live sits below a floor.
 - Trust: personal 1079 must be signed by this key (core session rule); shared
   1079 goes through `authorizeSharedCheckpoint` (owner only, scoped to the
   space). The browser never publishes checkpoints or manifests.
