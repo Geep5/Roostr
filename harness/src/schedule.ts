@@ -177,16 +177,10 @@ async function ownerOf(obj: ObjectJSON): Promise<{ agentId: string; conv: ConvRe
 		const s = await host.served(id);
 		if (s) return s;
 	}
-	// A new recurring object names no agent yet. The default owner is
-	// the local machine's agent for this space: the serving machine owns
-	// the occurrence, and `host.served` stands down if resolution moves it.
-	const channelId = str(obj.fields, "channel");
-	if (!channelId) return undefined;
-	const defaults = await queryAll({ type: "agent", filters: [{ key: "space_default", condition: "equal", value: channelId }] });
-	for (const a of defaults.map((a) => a.id).sort()) {
-		const s = await host.served(a);
-		if (s) return s;
-	}
+	// No agent named at all: there is no default mind to fall back to. Say
+	// so on the object's Error badge (the same honest-error convention as
+	// capability holdups) and do not fire.
+	if (candidates.length === 0) await setField(obj.id, "error", sv("recurring object has no agent; add one to its Agent property"));
 	return undefined;
 }
 
@@ -229,10 +223,11 @@ async function dispatch(d: Due, me: string): Promise<void> {
 	if (error) run.error = error;
 	await mutate("run_record", { object_id: obj.id, run });
 	// The error badge: a failed run sets it; a clean run clears what a
-	// failed run wrote - never a human's or another writer's message.
+	// failed run wrote (or the no-agent badge, once the object names one) -
+	// never a human's or another writer's message.
 	const badge = str(obj.fields, "error");
 	if (error) await setField(obj.id, "error", sv(`run failed: ${error}`.slice(0, 300)));
-	else if (badge.startsWith("run failed:")) await deleteField(obj.id, "error");
+	else if (badge.startsWith("run failed:") || badge.startsWith("recurring object has no agent")) await deleteField(obj.id, "error");
 	} finally {
 		turnEnded?.();
 	}

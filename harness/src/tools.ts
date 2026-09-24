@@ -1131,12 +1131,8 @@ const A2A_TOOL: RegisteredTool = {
 			if (target.typeKey === "agent") {
 				holder = target;
 				endpointObjectId = agentSubject(target);
-			} else if (target.typeKey === "channel") {
-				const defaults = await queryAll({ type: "agent", filters: [{ key: "space_default", condition: "equal", value: id }] });
-				defaults.sort((a, b) => a.id.localeCompare(b.id));
-				holder = defaults[0];
-				endpointObjectId = target.id;
 			} else {
+				// A space is an object: its agents are on its own guest list.
 				const guests = guestAgents(target.fields).filter((aid) => aid !== ctx.agentId);
 				if (guests.length === 0) throw new Error(`"${str(target.fields, "name") || id}" has no other agent on its guest list; add one with object_set_field(id, "agent", "<agent id>") first`);
 				// One recipient per object: the first guest that is not the asker.

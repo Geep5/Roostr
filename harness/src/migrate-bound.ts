@@ -16,7 +16,7 @@
  * resolve legacy a2a participant endpoints. Idempotent: a field is deleted
  * only after its pointer landed, and re-running finds no `bound_object`.
  */
-import { deleteField, fetchObject, lv, queryAll, setField, str, sv } from "./api";
+import { deleteField, fetchObject, guestAgents, lv, queryAll, setField, str, sv } from "./api";
 
 /**
  * `agent` became a link list (the object's guest list). An object still
@@ -36,6 +36,38 @@ export async function migrateAgentLists(): Promise<{ converted: number }> {
 		}
 	}
 	return { converted };
+}
+
+/**
+ * `space_default` (agent-side: this agent is the space's default mind) is
+ * retired - a space's agents are named on the space object's own `agent`
+ * guest list like any other object's. Each agent still carrying the field
+ * joins that space's guest list, then loses the field. Idempotent: a
+ * re-run finds no `space_default`.
+ */
+export async function migrateSpaceDefaults(): Promise<{ moved: number }> {
+	let moved = 0;
+	for (const agent of await queryAll({ type: "agent", filters: [{ key: "space_default", condition: "notEmpty" }] })) {
+		const spaceId = str(agent.fields, "space_default");
+		const name = str(agent.fields, "name") || agent.id.slice(0, 8);
+		try {
+			const space = await fetchObject(spaceId).catch(() => null);
+			if (space && !space.deleted) {
+				const guests = guestAgents(space.fields);
+				if (!guests.includes(agent.id)) {
+					await setField(space.id, "agent", lv([...guests, agent.id]));
+					moved++;
+					console.log(`[migrate] "${name}" -> guest of space "${str(space.fields, "name") || space.id.slice(0, 8)}"`);
+				}
+			} else {
+				console.log(`[migrate] "${name}" defaulted to vanished space ${spaceId.slice(0, 8)}; field dropped`);
+			}
+			await deleteField(agent.id, "space_default");
+		} catch (err) {
+			console.error(`[migrate] space_default cutover failed for "${name}":`, err instanceof Error ? err.message : err);
+		}
+	}
+	return { moved };
 }
 
 export async function migrateBoundAgents(): Promise<{ moved: number; conflicts: number }> {

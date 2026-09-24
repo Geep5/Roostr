@@ -1068,7 +1068,6 @@ cascade_agent :: proc(c: ^Cascade_Ctx, states: map[string]^Object_State, aid: st
 	// its binned agent along, not orphan the tombstone.
 	agent := states[aid]
 	if agent == nil || agent.type_key != "agent" do return
-	if field_string(agent.fields, "space_default") != "" do return
 	for _, s in states {
 		if s.deleted || s.id == c.object_id || !object_has_own_agent(s.type_key) do continue
 		if object_names_agent(s.fields, aid) do return // still someone's mind

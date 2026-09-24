@@ -28,7 +28,7 @@ import { frameMessage, ingestIntoChat, ingestedOriginBlocks, pendingMessages, se
 import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { migrateExchanges } from "./migrate-exchanges";
-import { migrateAgentLists, migrateBoundAgents } from "./migrate-bound";
+import { migrateAgentLists, migrateBoundAgents, migrateSpaceDefaults } from "./migrate-bound";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
 import { arm as armScheduler, startScheduler } from "./schedule";
@@ -107,13 +107,11 @@ async function setup(): Promise<void> {
 
 interface Served {
 	agentId: string;
-	/** The agent's home transcript: on its space (a default) or its own page. Turns on objects that name it run on those objects. */
+	/** The agent's home transcript on its own object. Turns on objects that name it run on those objects. */
 	conv: ConvRef;
 	channelId: string;
 	/** Type keys this agent is responsible for; "*" = everything else. Its kind's list when the object has none. */
 	types: string[];
-	/** The space this agent is the default mind of, or "". */
-	spaceDefault: string;
 	name: string;
 	icon: string;
 }
@@ -170,7 +168,6 @@ async function buildServedOne(agentId: string, defaultChannel: string, forObject
 		conv,
 		channelId,
 		types: responsibleTypes(agent),
-		spaceDefault: str(agent.fields, "space_default"),
 		name: str(agent.fields, "name") || agentId.slice(0, 8),
 		icon: str(agent.fields, "iconEmoji"),
 	};
@@ -284,6 +281,8 @@ async function serve(): Promise<void> {
 	// the legacy field for the last time.
 	console.log("[harness] bound-agent migration:", JSON.stringify(await migrateBoundAgents()));
 	console.log("[harness] agent-list migration:", JSON.stringify(await migrateAgentLists()));
+	// space_default -> the space's own guest list; spaces no longer imply a mind.
+	console.log("[harness] space-default migration:", JSON.stringify(await migrateSpaceDefaults()));
 	// Checkout bindings: statuses refresh at boot and on every UI write.
 	validateBindings().catch((err) => console.error("[harness] binding validation failed:", err?.message ?? err));
 	const agents = await servedAgents();
@@ -301,47 +300,6 @@ async function serve(): Promise<void> {
 	const externallyAnswered = (obj: ObjectJSON): boolean => guestAgents(obj.fields).some((id) => externalAgents.has(id));
 	console.log(`[harness] ${externalAgents.size} externally answered agent(s) known`);
 
-	// ── Default space agent: every space served here gets one mind of its
-	// own, so "ask the space" works before any object has an agent. Marked
-	// space_default = channel id; responsible_types stays empty so it takes
-	// only what no other agent claims - every object whose `agent` is unset.
-	// Its space_activity tool is how it knows what's new when a human
-	// opens the conversation cold. ──
-	async function ensureSpaceAgents(): Promise<void> {
-		const channels = (await queryAll({ type: "channel" })).map((c) => ({ id: c.id, name: str(c.fields, "name") || "Space" }));
-		for (const c of channels) {
-			if (!(await servesHere(c.id))) continue;
-			let minted = false;
-			let id = (await queryAll({ type: "agent", filters: [{ key: "space_default", condition: "equal", value: c.id }] }))[0]?.id;
-			if (!id) {
-				minted = true;
-				const kind = agentKind("assistant");
-				id = (
-					await createObject(c.name, "agent", {
-						channel: sv(c.id),
-						space_default: sv(c.id),
-						kind: sv(kind.key),
-						iconEmoji: sv("🛰️"),
-						model: sv(kind.model),
-					})
-				).id;
-				console.log(`[harness] minted default agent for space "${c.name}" → ${id.slice(0, 8)}`);
-			}
-			if (!agents.has(id)) {
-				agents.add(id);
-				await setEnabled(id, true);
-			}
-			if (!served.has(id)) {
-				const one = await buildServedOne(id, defaultChannelId);
-				if (one) served.set(id, one);
-			}
-			// The front door used to be a `chat` object pinned in the
-			// sidebar. The space's own discussion is that front door now, so
-			// there is nothing to pin: a space is already in the sidebar.
-		}
-	}
-	await ensureSpaceAgents();
-
 	const busy = new Set<string>();
 	const active = new Map<string, string>(); // agentId → convKey of the in-flight turn
 	const dirty = new Map<string, Set<string>>(); // agentId → convKeys awaiting a turn
@@ -357,13 +315,12 @@ async function serve(): Promise<void> {
 	const me = await machineId();
 
 	/**
-	 * An agent this machine may take into its roster on first contact: a
-	 * space default (follows its space) or one assigned here by `served_by`
-	 * (setup from any client). Agents named by objects served here are
-	 * adopted per object instead (`adoptForObject`).
+	 * An agent this machine may take into its roster on first contact: one
+	 * assigned here by `served_by` (setup from any client). Agents named by
+	 * objects served here are adopted per object instead (`adoptForObject`).
 	 */
 	function adoptable(agent: ObjectJSON): boolean {
-		return !!str(agent.fields, "space_default") || str(agent.fields, "served_by") === me;
+		return str(agent.fields, "served_by") === me;
 	}
 
 	/**
@@ -627,12 +584,12 @@ async function serve(): Promise<void> {
 
 	/**
 	 * The channel agent responsible for a type: explicit claim wins, else the
-	 * "*" (everything-else) agent, else the space's default mind - so an
-	 * object with no agent of its own is still answered, by the space.
+	 * "*" (everything-else) agent. Undefined when no agent in the channel
+	 * claims the type - a space no longer implies a mind.
 	 */
 	function responsibleFor(channelId: string, typeKey: string): Served | undefined {
 		const inChannel = [...served.values()].filter((s) => s.channelId === channelId);
-		return inChannel.find((s) => s.types.includes(typeKey)) ?? inChannel.find((s) => s.types.includes("*")) ?? inChannel.find((s) => s.spaceDefault === channelId);
+		return inChannel.find((s) => s.types.includes(typeKey)) ?? inChannel.find((s) => s.types.includes("*"));
 	}
 
 	/** Route an SSE object event to the agent whose surface it is. */

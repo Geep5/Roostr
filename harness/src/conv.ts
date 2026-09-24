@@ -54,11 +54,11 @@ export const parseConvKey = (key: string): ConvRef => {
 export const isHuman = (ref: ConvRef): boolean => ref.threadId === HUMAN_THREAD;
 
 /**
- * The agent's home: its space when it is the space default, else the agent
- * object itself. Its transcripts for other objects live on THOSE objects
- * (`object.agent` names it, N:1) - see `agentThreadOn`.
+ * The agent's home: the agent object itself. Its transcripts for other
+ * objects live on THOSE objects (`object.agent` names it, N:1) - see
+ * `agentThreadOn`.
  */
-export const agentSubject = (agent: Pick<ObjectJSON, "id" | "fields">): string => str(agent.fields, "space_default") || agent.id;
+export const agentSubject = (agent: Pick<ObjectJSON, "id" | "fields">): string => agent.id;
 
 /** The core decodes every thread and serves them on the object. */
 export async function conversationsOf(objectId: string): Promise<ConversationJSON[]> {

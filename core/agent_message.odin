@@ -367,11 +367,9 @@ message_endpoint_error :: proc(e: Agent_Endpoint, states: map[string]^Object_Sta
 		return "" // A not-yet-synced endpoint may remain pending.
 	}
 	if agent.deleted || agent.type_key != "agent" do return "endpoint agent must be a live agent"
-	// An agent speaks for its own object, its space (space_default), or any
-	// object whose guest list (`object.agent`) names it.
-	subject := field_string(agent.fields, "space_default")
-	if subject == "" do subject = agent.id
-	if subject != e.object_id && (target == nil || !object_names_agent(target.fields, agent.id)) do return "agent does not belong to endpoint object"
+	// An agent speaks for its own object, or for an object whose guest list
+	// (`object.agent`) names it. Nothing answers by default.
+	if e.object_id != agent.id && (target == nil || !object_names_agent(target.fields, agent.id)) do return "agent does not belong to endpoint object"
 	if message_space(agent) != message_space(source) && !(operation == "" && !sender && message_service_reply_to(source, e.object_id, reply_to)) do return "endpoint agent must belong to the same space"
 	return ""
 }

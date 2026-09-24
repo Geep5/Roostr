@@ -650,11 +650,19 @@ mailbox_human_self_groups_and_agent_binding_boundaries :: proc(t: ^testing.T) {
 	append(&message.recipients, Agent_Endpoint{object_id = target})
 	_, duplicate_error := mail_send(&v, message)
 	testing.expect(t, duplicate_error != "", "recipient snapshot is distinct by object")
-	default_agent := mail_object(t, &v, "agent", space, space)
-	space_message := mail_envelope("space-default", space, Agent_Endpoint{object_id = target})
-	space_message.sender.agent_id = default_agent
-	_, default_error := mail_send(&v, space_message)
-	testing.expect(t, default_error == "", default_error)
+	guest := mail_object(t, &v, "agent", space)
+	mail_assign(t, &v, target, guest)
+	// The guest speaks for `target` from its own home object.
+	guest_message := mail_envelope("space-guest", guest, Agent_Endpoint{object_id = target})
+	guest_message.sender.agent_id = guest
+	_, guest_error := mail_send(&v, guest_message)
+	testing.expect(t, guest_error == "", guest_error)
+	// A guest answering from the shared object addresses another guest, never itself.
+	stranger := mail_object(t, &v, "agent", space)
+	stray_message := mail_envelope("stray-agent", target, Agent_Endpoint{object_id = target})
+	stray_message.sender.agent_id = stranger
+	_, stray_error := mail_send(&v, stray_message)
+	testing.expect(t, stray_error != "", "an agent not on the guest list does not speak for the object")
 }
 
 @(test)
