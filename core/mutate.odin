@@ -1126,6 +1126,10 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// address here with @. Rendered as a link badge; its picker is limited to
 	// the space's agent type. Nothing answers an object without being on it.
 	{"agent", "object", "Agent", "🤖", false, false, 0},
+	// Which installations (a machine's credentials/logins) this object uses.
+	// Rendered as credential badges that read status from the resolved
+	// machine's install rows; secrets never enter the object.
+	{"install", "object", "Credentials", "🔌", false, false, 0},
 	// A "current problem" badge: the scheduler, a holdup, an agent, or a
 	// human sets it; visible and editable like any property so views can
 	// filter and sort by it. Automation prefixes its messages ("run failed:",
@@ -1198,10 +1202,10 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			ops := make([dynamic]Operation, context.temp_allocator)
 			if e.emoji != r.emoji do append(&ops, Operation{kind = .Field_Set, key = "iconEmoji", value = string_value(r.emoji)})
 			if e.format != "" && e.format != r.format do append(&ops, Operation{kind = .Field_Set, key = "format", value = string_value(r.format)})
-			// Agent and served_by pickers are restricted to one bundled type;
-			// older rows predate the restriction and get it here.
-			if r.key == "agent" || r.key == "served_by" {
-				target := r.key == "agent" ? "agent" : "machine"
+			// Agent, served_by and install pickers are restricted to one bundled
+			// type; older rows predate the restriction and get it here.
+			if r.key == "agent" || r.key == "served_by" || r.key == "install" {
+				target := r.key
 				types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
 				mutation_add(plan, input, e.id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
 			}
@@ -1224,9 +1228,9 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "options", value = list_value(empty)},
 		}
 		mutation_add(plan, input, id, ops)
-		if r.key == "agent" || r.key == "served_by" {
+		if r.key == "agent" || r.key == "served_by" || r.key == "install" {
 			// Picker restriction: the space's own bundled type (deterministic id).
-			target := r.key == "agent" ? "agent" : "machine"
+			target := r.key
 			types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
 			mutation_add(plan, input, id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
 		}
