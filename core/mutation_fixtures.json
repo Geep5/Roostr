@@ -3671,7 +3671,7 @@
       "fieldSet": {
        "key": "format",
        "value": {
-        "stringValue": "shorttext"
+        "stringValue": "object"
        }
       }
      },
@@ -3695,7 +3695,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": true
+        "boolValue": false
        }
       }
      },
@@ -3711,7 +3711,7 @@
       "fieldSet": {
        "key": "maxCount",
        "value": {
-        "intValue": 0
+        "intValue": 1
        }
       }
      },
@@ -3729,6 +3729,29 @@
        "value": {
         "valuesValue": {
          "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-served_by-new-id",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-machine-new-id"
+          }
+         ]
         }
        }
       }
@@ -6695,7 +6718,7 @@
       "fieldSet": {
        "key": "format",
        "value": {
-        "stringValue": "shorttext"
+        "stringValue": "object"
        }
       }
      },
@@ -6719,7 +6742,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": true
+        "boolValue": false
        }
       }
      },
@@ -6735,7 +6758,7 @@
       "fieldSet": {
        "key": "maxCount",
        "value": {
-        "intValue": 0
+        "intValue": 1
        }
       }
      },
@@ -6753,6 +6776,29 @@
        "value": {
         "valuesValue": {
          "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-served_by-s",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-machine-s"
+          }
+         ]
         }
        }
       }
@@ -8786,7 +8832,7 @@
       "fieldSet": {
        "key": "format",
        "value": {
-        "stringValue": "shorttext"
+        "stringValue": "object"
        }
       }
      },
@@ -8810,7 +8856,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": true
+        "boolValue": false
        }
       }
      },
@@ -8826,7 +8872,7 @@
       "fieldSet": {
        "key": "maxCount",
        "value": {
-        "intValue": 0
+        "intValue": 1
        }
       }
      },
@@ -8844,6 +8890,29 @@
        "value": {
         "valuesValue": {
          "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-served_by-s",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-machine-s"
+          }
+         ]
         }
        }
       }

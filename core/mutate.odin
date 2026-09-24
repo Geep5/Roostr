@@ -1115,8 +1115,12 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	{"done", "checkbox", "Done", "✅", false, false, 0},
 	// Rendered by the Repeat cell, not the generic property editor.
 	{"repeat", "repeat", "Repeat", "↻", true, false, 0},
-	// Per-object serving (serving.odin); rendered by the serving chip.
-	{"served_by", "shorttext", "Served by", "🖥️", true, false, 0},
+	// Per-object serving: who runs this object, and the capabilities it needs.
+	// `served_by` links the machine object (the serving chip is retired);
+	// `requires` stays a list of capability keys the engine's resolver
+	// compares against each machine's published `capabilities` - needs are
+	// what a machine has, so they are not objects.
+	{"served_by", "object", "Served by", "🖥️", false, false, 1},
 	{"requires", "tag", "Requires", "🧩", true, false, 0},
 	// The object's guest list: agents a human (or one of those agents) may
 	// address here with @. Rendered as a link badge; its picker is limited to
@@ -1142,9 +1146,10 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
  */
 mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input, channel_id: string) {
 	Present :: struct {
-		id:    string,
-		name:  string,
-		emoji: string,
+		id:     string,
+		name:   string,
+		emoji:  string,
+		format: string,
 	}
 	rels := make(map[string]Present)
 	defer delete(rels)
@@ -1173,6 +1178,7 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			e := Present{id = strings.clone(s.id, context.temp_allocator)}
 			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do e.name = strings.clone(v.str, context.temp_allocator)
 			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do e.emoji = strings.clone(v.str, context.temp_allocator)
+			if v, ok := fields_get(s.fields, "format"); ok && v.kind == .String do e.format = strings.clone(v.str, context.temp_allocator)
 			if s.type_key == "relation" {
 				if prior, exists := c.rels^[key.str]; !exists || e.id < prior.id do c.rels^[strings.clone(key.str, context.temp_allocator)] = e
 			} else {
@@ -1189,10 +1195,17 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 
 	for r in BUNDLED_RELATIONS {
 		if e, ok := rels[r.key]; ok {
-			if e.emoji != r.emoji {
-				ops := []Operation{{kind = .Field_Set, key = "iconEmoji", value = string_value(r.emoji)}}
-				mutation_add(plan, input, e.id, ops)
+			ops := make([dynamic]Operation, context.temp_allocator)
+			if e.emoji != r.emoji do append(&ops, Operation{kind = .Field_Set, key = "iconEmoji", value = string_value(r.emoji)})
+			if e.format != "" && e.format != r.format do append(&ops, Operation{kind = .Field_Set, key = "format", value = string_value(r.format)})
+			// Agent and served_by pickers are restricted to one bundled type;
+			// older rows predate the restriction and get it here.
+			if r.key == "agent" || r.key == "served_by" {
+				target := r.key == "agent" ? "agent" : "machine"
+				types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
+				mutation_add(plan, input, e.id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
 			}
+			if len(ops) > 0 do mutation_add(plan, input, e.id, ops[:])
 			continue
 		}
 		id := fmt.tprintf("bundled-rel-%s-%s", r.key, prefix)
@@ -1211,9 +1224,10 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "options", value = list_value(empty)},
 		}
 		mutation_add(plan, input, id, ops)
-		if r.key == "agent" {
-			// Picker restriction: the space's own bundled agent type (deterministic id).
-			types_list := []Value{string_value(fmt.tprintf("bundled-type-agent-%s", prefix))}
+		if r.key == "agent" || r.key == "served_by" {
+			// Picker restriction: the space's own bundled type (deterministic id).
+			target := r.key == "agent" ? "agent" : "machine"
+			types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
 			mutation_add(plan, input, id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
 		}
 	}

@@ -103,7 +103,13 @@ resolve_server :: proc(object: ^Object_State, space: ^Object_State, machines: []
 	}
 
 	pin := ""
-	if object != nil do pin = field_string(object.fields, SERVED_BY_KEY)
+	if object != nil {
+		pin = field_string(object.fields, SERVED_BY_KEY)
+		if pin == "" {
+			// served_by became an object relation: the machine object id rides as a link.
+			if v, ok := fields_get(object.fields, SERVED_BY_KEY); ok && v.kind == .Link do pin = v.link_target
+		}
+	}
 	dflt := pin
 	if dflt == "" && space != nil do dflt = field_string(space.fields, SERVED_BY_KEY)
 
