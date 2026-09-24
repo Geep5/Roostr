@@ -80,19 +80,26 @@ credentials or installation work to a different machine by changing
 `served_by` or `requires`. Requests and results live in installation mailboxes;
 the owner requires paired-human approval before local side effects.
 
-### Agents follow their objects
+### Agents are invited, then addressed
 
-```
-server(obj) where obj.agent = a  →  resolve_server(a, ...)
-```
+An object's `agent` property is its **guest list**: a link relation (format
+`object`, typed to the space's `agent` type, many) naming the agents a
+person - or one of those agents - may address here. Nothing answers an
+object uninvited: a plain discussion post wakes nobody; an `@`-mention
+sends a mailbox envelope to one guest, and only guests appear in the `@`
+menu. There is no implicit "answered by" agent and no space-default
+fallback for discussions.
 
-An object names the agent that answers for it via its `agent` field. That
-agent is itself an object and resolves on its own row; the object the
-agent serves then runs wherever the agent resolves. The binding lives on
-the object (not on the agent), so an agent can serve many objects.
-`ScheduleHost.served(agentId)` in `harness/src/index.ts` becomes
-"agent resolves to me, or any object with `agent` set to it resolves to
-me"; the serving gate resolves `obj.agent ?? obj` through the engine.
+Agents grow the list themselves: `object_set_field(id, "agent", <agent id>)`
+appends (never replaces), so "ask Sarah about this" is add-then-`agent_ask`.
+`agent_ask` refuses a recipient object whose guest list lacks another agent,
+and an agent answering another agent may ask on, bounded to `A2A_MAX_HOPS`
+(3) agent-authored messages per exchange. Co-guests on one object address
+each other directly; the object's DAG holds both copies.
+
+Serving is unchanged: the object resolves on its own row and every guest
+runs where the object resolves. The harness adopts each guest into its
+roster when it serves the object (`adoptForObject`).
 
 ### Recurring objects
 

@@ -24,7 +24,7 @@
  * occurrences (sleep, downtime) fire on the next arm, each once.
  */
 
-import { deleteField, fetchObject, mutate, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { deleteField, fetchObject, guestAgents, mutate, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { addConvBlock, convKey, humanRef, type ConvRef } from "./conv";
 import { primeServing, servesHere } from "./machine";
 import { machineId } from "./roster";
@@ -163,10 +163,7 @@ async function fire(): Promise<void> {
 
 /** Agent ids a field may name: a string, a link, or a list of either. */
 function agentIdsOf(v: ValueJSON | undefined): string[] {
-	if (!v) return [];
-	if (v.stringValue) return [v.stringValue];
-	if (v.linkValue?.targetId) return [v.linkValue.targetId];
-	return (v.valuesValue?.items ?? []).flatMap(agentIdsOf);
+	return guestAgents({ agent: v as ValueJSON });
 }
 
 /**

@@ -189,6 +189,18 @@ export const flag = (fields: Record<string, ValueJSON>, key: string): boolean =>
 export const list = (fields: Record<string, ValueJSON>, key: string): string[] =>
 	(fields[key]?.valuesValue?.items ?? []).map((i) => i.stringValue ?? "").filter(Boolean);
 
+/**
+ * The object's guest list: agent ids its `agent` property names. Reads the
+ * link list, and the single string the field held before it became one.
+ */
+export const guestAgents = (fields: Record<string, ValueJSON>): string[] => {
+	const v = fields["agent"];
+	if (!v) return [];
+	if (v.stringValue) return [v.stringValue];
+	if (v.linkValue?.targetId) return [v.linkValue.targetId];
+	return (v.valuesValue?.items ?? []).flatMap((i) => (i.stringValue ? [i.stringValue] : i.linkValue?.targetId ? [i.linkValue.targetId] : []));
+};
+
 export const sv = (s: string): ValueJSON => ({ stringValue: s });
 export const iv = (n: number): ValueJSON => ({ intValue: Math.round(n) });
 export const fv = (n: number): ValueJSON => ({ floatValue: n });

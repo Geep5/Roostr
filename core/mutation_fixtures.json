@@ -3836,6 +3836,125 @@
    {
     "author": "alice",
     "id": "",
+    "objectId": "bundled-rel-agent-new-id",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "new-id"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "object"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🤖"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 0
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-agent-new-id",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-agent-new-id"
+          }
+         ]
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
     "objectId": "bundled-rel-error-new-id",
     "ops": [
      {
@@ -6741,6 +6860,125 @@
    {
     "author": "alice",
     "id": "",
+    "objectId": "bundled-rel-agent-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "object"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🤖"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 0
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-agent-s",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-agent-s"
+          }
+         ]
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
     "objectId": "bundled-rel-error-s",
     "ops": [
      {
@@ -8702,6 +8940,125 @@
        "value": {
         "valuesValue": {
          "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-agent-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "object"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Agent"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🤖"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 0
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-agent-s",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-agent-s"
+          }
+         ]
         }
        }
       }

@@ -9,7 +9,7 @@
  * primer tells agents to query before they ever consider waking a peer.
  */
 
-import { API, apiFetch, fetchObject, query, queryAll, str, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { API, apiFetch, fetchObject, guestAgents, query, queryAll, str, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 
 // ── space filter (objects with no stamp belong to the default space) ──
 
@@ -181,11 +181,11 @@ export async function buildSpaceMap(spaceId: string): Promise<string> {
 	const objectsOf = new Map<string, string[]>();
 	const rows = await queryAll({ filters: [sf, { key: "agent", condition: "notEmpty" }] });
 	for (const r of rows) {
-		const aid = str(r.fields, "agent");
-		if (!aid) continue;
-		const list = objectsOf.get(aid) ?? [];
-		list.push(str(r.fields, "name") || r.id.slice(0, 8));
-		objectsOf.set(aid, list);
+		for (const aid of guestAgents(r.fields)) {
+			const list = objectsOf.get(aid) ?? [];
+			list.push(str(r.fields, "name") || r.id.slice(0, 8));
+			objectsOf.set(aid, list);
+		}
 	}
 	const agentLines: string[] = [];
 	for (const a of agents) {
@@ -240,7 +240,7 @@ export async function buildNeighborhood(objectId: string, spaceId: string): Prom
 
 	// Neighbors that name an agent: askable minds.
 	const hasAgent = new Set<string>();
-	for (const r of rows) if (str(r.fields, "agent")) hasAgent.add(r.id);
+	for (const r of rows) if (guestAgents(r.fields).length) hasAgent.add(r.id);
 	const tag = (id: string): string => {
 		const n = names.get(id);
 		const agent = hasAgent.has(id) ? ", has agent" : "";

@@ -25,6 +25,7 @@ import {
 	type ValueJSON,
 	API,
 	apiFetch,
+	guestAgents,
 } from "./api";
 import { invalidateServing, machines, serverOf } from "./machine";
 import { machineId } from "./roster";
@@ -682,16 +683,25 @@ const TOOLS: RegisteredTool[] = [
 		def: {
 			name: "object_set_field",
 			description:
-				"Set a field on an object (e.g. name, status, done, dueDate). The value is written in the relation's own type: checkbox fields take true/false, number fields a number, date fields epoch milliseconds or an ISO date; anything else is text. Setting done=true on a recurring object completes its current occurrence.",
+				"Set a field on an object (e.g. name, status, done, dueDate). The value is written in the relation's own type: checkbox fields take true/false, number fields a number, date fields epoch milliseconds or an ISO date; anything else is text. Setting done=true on a recurring object completes its current occurrence. key=agent ADDS the given agent id(s) to the object's guest list (who may be @-asked here); it never removes anyone.",
 			input_schema: { type: "object", properties: { id: { type: "string" }, key: { type: "string" }, value: { type: "string" } }, required: ["id", "key", "value"] },
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
-			await assertInSpace(await fetchObject(S(input.id)), ctx);
-			const value = typedValue((await relationDefs(await agentSpace(ctx))).get(S(input.key))?.format, S(input.value));
+			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx);
+			const key = S(input.key);
+			let value = typedValue((await relationDefs(await agentSpace(ctx))).get(key)?.format, S(input.value));
+			if (key === "agent") {
+				const adding = S(input.value).split(",").map((s) => s.trim()).filter(Boolean);
+				for (const aid of adding) {
+					const agent = await fetchObject(aid).catch(() => null);
+					if (agent?.typeKey !== "agent") throw new Error(`"${aid}" is not an agent object`);
+				}
+				value = lv([...new Set([...guestAgents(obj.fields), ...adding])]);
+			}
 			// The clock rides along for the one case the engine needs it: done
 			// on a recurring object advances the occurrence in local time.
-			await mutate("set_field", { object_id: S(input.id), key: S(input.key), value, ...localClock() });
+			await mutate("set_field", { object_id: obj.id, key, value, ...localClock() });
 			return "ok";
 		},
 	},
@@ -1081,11 +1091,18 @@ const EVAL_TOOLS: RegisteredTool[] = [
 // not the agent's own home: an agent working on object X must let X keep
 // the request and see the reply. On the agent's own page there is no bound
 // object, so its home is the source.
+//
+// Guest list rule: a recipient object must name the asked agent in its
+// `agent` property. Adding someone to that list IS the way to bring them in
+// (object_set_field agent += id). Agent-to-agent asks are allowed but
+// bounded: A2A_MAX_HOPS agent-authored messages per exchange, so two minds
+// cannot volley forever.
+const A2A_MAX_HOPS = 3;
 const A2A_TOOL: RegisteredTool = {
 	def: {
 		name: "agent_ask",
 		description:
-			"Send a durable question to one or more existing object agents. Every recipient receives its own DAG copy and answers asynchronously on its serving machine, including after being offline. Read replies with discussion_read using the returned threadId. Agents never create minds. Specify the complete group audience for each message; a reply preserves its exchange_id and reply_to.",
+			"Send a durable question to agents on an object's guest list (its Agent property). Every recipient receives its own DAG copy and answers asynchronously on its serving machine, including after being offline. Read replies with discussion_read using the returned threadId. To ask an agent that is not yet on the object, add it first with object_set_field(key=agent). Agents never create minds. Specify the complete group audience for each message; a reply preserves its exchange_id and reply_to.",
 		input_schema: {
 			type: "object",
 			properties: {
@@ -1099,7 +1116,7 @@ const A2A_TOOL: RegisteredTool = {
 		},
 	},
 	handler: async (input, ctx) => {
-		if (!ctx.allowAsk || ctx.depth !== 0) throw new Error("agent_ask is only available to human-rooted top-level turns");
+		if (ctx.depth !== 0) throw new Error("agent_ask is only available to top-level turns, not sub-agents");
 		const me = await fetchObject(ctx.agentId);
 		const subject = await fetchObject(ctx.boundObject ?? agentSubject(me));
 		const ids = [...new Set(A(input.object_ids))];
@@ -1120,11 +1137,13 @@ const A2A_TOOL: RegisteredTool = {
 				holder = defaults[0];
 				endpointObjectId = target.id;
 			} else {
-				const aid = str(target.fields, "agent");
-				holder = aid ? await fetchObject(aid).catch(() => undefined) : undefined;
+				const guests = guestAgents(target.fields).filter((aid) => aid !== ctx.agentId);
+				if (guests.length === 0) throw new Error(`"${str(target.fields, "name") || id}" has no other agent on its guest list; add one with object_set_field(id, "agent", "<agent id>") first`);
+				// One recipient per object: the first guest that is not the asker.
+				holder = await fetchObject(guests[0]).catch(() => undefined);
 				endpointObjectId = target.id;
 			}
-			if (!holder || holder.typeKey !== "agent") throw new Error(`no agent lives on "${str(target.fields, "name") || id}"; name one in its Agent property or read it directly`);
+			if (!holder || holder.typeKey !== "agent") throw new Error(`the agent named on "${str(target.fields, "name") || id}" does not exist`);
 			if (holder.id === ctx.agentId) throw new Error("an agent cannot send a request to itself");
 			const endpoint = { objectId: endpointObjectId, agentId: holder.id };
 			if (recipients.some((entry) => entry.objectId === endpoint.objectId)) throw new Error("each recipient object must be distinct");
@@ -1135,6 +1154,12 @@ const A2A_TOOL: RegisteredTool = {
 		if (replyTo && !parent) throw new Error("reply_to must identify a message on your own object");
 		const exchangeId = S(input.exchange_id) || parent?.exchangeId || crypto.randomUUID();
 		if (parent && parent.exchangeId !== exchangeId) throw new Error("reply belongs to a different exchange");
+		if (!ctx.allowAsk) {
+			// Answering another agent: allowed, but every hop is an agent-authored
+			// message in this exchange. Past the cap, finish with a plain reply.
+			const hops = (subject.mailbox ?? []).filter((entry) => entry.message.exchangeId === exchangeId && entry.message.sender.agentId).length;
+			if (hops >= A2A_MAX_HOPS) throw new Error(`this exchange already has ${hops} agent-to-agent messages (limit ${A2A_MAX_HOPS}); answer in your reply instead of asking again`);
+		}
 		const message: AgentMessage = {
 			id: crypto.randomUUID(), exchangeId,
 			sender: { objectId: subject.id, agentId: me.id }, recipients,
@@ -1149,7 +1174,7 @@ const A2A_TOOL: RegisteredTool = {
 export function toolDefs(template: string, depth: number, allowAsk = false): ToolDef[] {
 	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read", "capability_list"]);
 	let defs = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, REQUIRE_TOOL, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL].map((t) => t.def);
-	if (template === "" && depth === 0 && allowAsk) defs.push(A2A_TOOL.def);
+	if (template === "" && depth === 0) defs.push(A2A_TOOL.def);
 	if (template === "explore") defs = defs.filter((d) => READ_ONLY.has(d.name));
 	const out = [...defs];
 	if (template === "installer") {

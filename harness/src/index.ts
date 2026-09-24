@@ -10,7 +10,7 @@
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
-import { API, apiFetch, chatPost, deleteField, fetchObject, list, lv, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
+import { API, apiFetch, chatPost, deleteField, fetchObject, guestAgents, list, lv, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
 import { AGENT_KINDS, agentKind } from "./kinds";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
@@ -28,7 +28,7 @@ import { frameMessage, ingestIntoChat, ingestedOriginBlocks, pendingMessages, se
 import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { migrateExchanges } from "./migrate-exchanges";
-import { migrateBoundAgents } from "./migrate-bound";
+import { migrateAgentLists, migrateBoundAgents } from "./migrate-bound";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
 import { arm as armScheduler, startScheduler } from "./schedule";
@@ -182,7 +182,7 @@ async function buildServedOne(agentId: string, defaultChannel: string, forObject
  * conversation about it; else the agent's home.
  */
 async function transcriptFor(s: Served, surface: ObjectJSON): Promise<ConvRef> {
-	if (str(surface.fields, "agent") !== s.agentId) return s.conv;
+	if (!guestAgents(surface.fields).includes(s.agentId)) return s.conv;
 	return agentThreadOn(await fetchObject(s.agentId), surface.id);
 }
 
@@ -283,6 +283,7 @@ async function serve(): Promise<void> {
 	// bound_object -> object.agent, after the exchange migration has read
 	// the legacy field for the last time.
 	console.log("[harness] bound-agent migration:", JSON.stringify(await migrateBoundAgents()));
+	console.log("[harness] agent-list migration:", JSON.stringify(await migrateAgentLists()));
 	// Checkout bindings: statuses refresh at boot and on every UI write.
 	validateBindings().catch((err) => console.error("[harness] binding validation failed:", err?.message ?? err));
 	const agents = await servedAgents();
@@ -297,7 +298,7 @@ async function serve(): Promise<void> {
 	for (const a of await queryAll({ type: "agent" })) {
 		if (str(a.fields, "external_responder")) externalAgents.add(a.id);
 	}
-	const externallyAnswered = (obj: ObjectJSON): boolean => externalAgents.has(str(obj.fields, "agent"));
+	const externallyAnswered = (obj: ObjectJSON): boolean => guestAgents(obj.fields).some((id) => externalAgents.has(id));
 	console.log(`[harness] ${externalAgents.size} externally answered agent(s) known`);
 
 	// ── Default space agent: every space served here gets one mind of its
@@ -366,14 +367,13 @@ async function serve(): Promise<void> {
 	}
 
 	/**
-	 * The agent an object names (`object.agent`), served here because this
-	 * machine serves the object - adopted into the local roster on first
-	 * contact, so a space takeover needs no per-agent toggling. Null when
-	 * the pointer is dangling or another bot answers for the agent.
+	 * One agent on an object's guest list (`object.agent`), served here
+	 * because this machine serves the object - adopted into the local roster
+	 * on first contact, so a space takeover needs no per-agent toggling. Null
+	 * when the pointer is dangling or another bot answers for the agent.
 	 */
-	async function adoptForObject(obj: ObjectJSON): Promise<Served | null> {
-		const aid = str(obj.fields, "agent");
-		if (!aid || externalAgents.has(aid)) return null;
+	async function adoptForObject(obj: ObjectJSON, aid: string): Promise<Served | null> {
+		if (!aid || !guestAgents(obj.fields).includes(aid) || externalAgents.has(aid)) return null;
 		const known = served.get(aid);
 		if (known) return known;
 		const agent = await fetchObject(aid).catch(() => null);
@@ -395,7 +395,7 @@ async function serve(): Promise<void> {
 
 	/** The agent behind a mailbox endpoint: the agent's home, or an object that names it. */
 	async function mailboxAgent(object: ObjectJSON, endpoint: { objectId: string; agentId: string }): Promise<Served | null> {
-		if (str(object.fields, "agent") === endpoint.agentId) return adoptForObject(object);
+		if (guestAgents(object.fields).includes(endpoint.agentId)) return adoptForObject(object, endpoint.agentId);
 		const agent = await fetchObject(endpoint.agentId);
 		if (agent.typeKey !== "agent" || str(agent.fields, "spawn_parent") || str(agent.fields, "external_responder")) return null;
 		if (agentSubject(agent) !== endpoint.objectId || !(await agentServedHere(agent))) return null;
@@ -715,28 +715,14 @@ async function serve(): Promise<void> {
 			void armScheduler();
 		}
 		if (obj.typeKey === "agent") return; // other agents' brains
-		const channelId = objectId === defaultChannelId || obj.typeKey === "channel" ? objectId : str(obj.fields, "channel") || defaultChannelId;
-
-		// ── The object's own agent (`object.agent`) answers - if the object
-		// is ours. The object's server answers, nobody else: per-object
-		// serving replaces per-agent adoption races with one synced fact. ──
-		if (str(obj.fields, "agent")) {
-			if (externallyAnswered(obj)) return;
-			if (!(await servesHere(objectId))) return;
-			const s2 = await adoptForObject(obj);
-			if (s2) {
-				const pending2 = await pendingMessages(obj, humanRef(obj.id), s2.agentId);
-				if (pending2.length > 0) void drive(s2, humanRef(obj.id));
-				return;
-			}
-			// A dangling pointer falls through: the space answers as if unset.
-		}
-
-		// ── Else the responsible space agent (by type, else the default). ──
-		const s = responsibleFor(channelId, obj.typeKey);
-		if (!s || !(await servesHere(objectId))) return;
-		const pending = await pendingMessages(obj, humanRef(obj.id), s.agentId);
-		if (pending.length > 0) void drive(s, humanRef(obj.id));
+		// ── A plain discussion post wakes no agent. The object's guest list
+		// (`object.agent`) is who MAY be addressed here; addressing is an
+		// @-mention, which arrives as a mailbox envelope and is pumped by
+		// pumpMailbox below. Nothing answers uninvited. ──
+		if (guestAgents(obj.fields).length === 0 || externallyAnswered(obj)) return;
+		if (!(await servesHere(objectId))) return;
+		for (const aid of guestAgents(obj.fields)) void adoptForObject(obj, aid);
+		void pumpMailbox(objectId, obj);
 	}
 
 	startAuthServer(agents, (next) => {

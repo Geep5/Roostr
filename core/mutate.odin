@@ -1043,44 +1043,53 @@ relation_value_cascade :: proc(states: map[string]^Object_State, object_id: stri
 // Mirrors the harness's UNMINTABLE set (harness/src/index.ts).
 AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "type", "template", "skill", "descriptor", "install", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
 
+/** Agents on an object's guest list. `agent` was a single string before it became a link list; both shapes read. */
+object_agents :: proc(fields: [dynamic]Value_Entry, allocator := context.temp_allocator) -> [dynamic]string {
+	return field_strings(fields, "agent", allocator)
+}
+
+object_names_agent :: proc(fields: [dynamic]Value_Entry, agent_id: string) -> bool {
+	for id in object_agents(fields) do if id == agent_id do return true
+	return false
+}
+
 object_has_own_agent :: proc(type_key: string) -> bool {
 	for t in AGENTLESS_TYPES do if t == type_key do return false
 	return true
 }
+Cascade_Ctx :: struct {
+	out:       ^[dynamic]string,
+	object_id: string,
+}
+
+@(private = "file")
+cascade_agent :: proc(c: ^Cascade_Ctx, states: map[string]^Object_State, aid: string) {
+	// Deleted agents cascade too: vanishing a binned object must take
+	// its binned agent along, not orphan the tombstone.
+	agent := states[aid]
+	if agent == nil || agent.type_key != "agent" do return
+	if field_string(agent.fields, "space_default") != "" do return
+	for _, s in states {
+		if s.deleted || s.id == c.object_id || !object_has_own_agent(s.type_key) do continue
+		if object_names_agent(s.fields, aid) do return // still someone's mind
+	}
+	append(c.out, strings.clone(aid, context.temp_allocator))
+	for _, s in states {
+		if s.type_key != "chat" do continue
+		// The agent's own holistic chat, not a shared pair chat.
+		if p, pok := fields_get(s.fields, "a2a_pair"); pok && p.kind == .String && p.str != "" do continue
+		if object_names_agent(s.fields, aid) do append(c.out, strings.clone(s.id, context.temp_allocator))
+	}
+}
+
 object_agent_cascade :: proc(states: map[string]^Object_State, object_id: string) -> [dynamic]string {
 	out := make([dynamic]string, context.temp_allocator)
-	Ctx :: struct {
-		out:       ^[dynamic]string,
-		object_id: string,
-	}
-	ctx := Ctx{&out, object_id}
+	ctx := Cascade_Ctx{&out, object_id}
 	mutation_with_states(states, proc(states: map[string]^Object_State, user: rawptr) {
-		c := cast(^struct {
-			out:       ^[dynamic]string,
-			object_id: string,
-		})user
+		c := cast(^Cascade_Ctx)user
 		self := states[c.object_id]
 		if self == nil do return
-		aid := field_string(self.fields, "agent")
-		if aid == "" do return
-		// Deleted agents cascade too: vanishing a binned object must take
-		// its binned agent along, not orphan the tombstone.
-		agent := states[aid]
-		if agent == nil || agent.type_key != "agent" do return
-		if field_string(agent.fields, "space_default") != "" do return
-		for _, s in states {
-			if s.deleted || s.id == c.object_id || !object_has_own_agent(s.type_key) do continue
-			if field_string(s.fields, "agent") == aid do return // still someone's mind
-		}
-		append(c.out, strings.clone(aid, context.temp_allocator))
-		for _, s in states {
-			if s.type_key != "chat" do continue
-			// The agent's own holistic chat, not a shared pair chat.
-			if p, pok := fields_get(s.fields, "a2a_pair"); pok && p.kind == .String && p.str != "" do continue
-			if field_string(s.fields, "agent") == aid {
-				append(c.out, strings.clone(s.id, context.temp_allocator))
-			}
-		}
+		for aid in object_agents(self.fields) do cascade_agent(c, states, aid)
 	}, &ctx)
 	slice.sort(out[:])
 	return out
@@ -1110,6 +1119,10 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// Per-object serving (serving.odin); rendered by the serving chip.
 	{"served_by", "shorttext", "Served by", "🖥️", true, false, 0},
 	{"requires", "tag", "Requires", "🧩", true, false, 0},
+	// The object's guest list: agents a human (or one of those agents) may
+	// address here with @. Rendered as a link badge; its picker is limited to
+	// the space's agent type. Nothing answers an object without being on it.
+	{"agent", "object", "Agent", "🤖", false, false, 0},
 	// A "current problem" badge: the scheduler, a holdup, an agent, or a
 	// human sets it; visible and editable like any property so views can
 	// filter and sort by it. Automation prefixes its messages ("run failed:",
@@ -1199,6 +1212,11 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "options", value = list_value(empty)},
 		}
 		mutation_add(plan, input, id, ops)
+		if r.key == "agent" {
+			// Picker restriction: the space's own bundled agent type (deterministic id).
+			types_list := []Value{string_value(fmt.tprintf("bundled-type-agent-%s", prefix))}
+			mutation_add(plan, input, id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
+		}
 	}
 	for t in BUNDLED_TYPES {
 		if e, ok := types[t.key]; ok {

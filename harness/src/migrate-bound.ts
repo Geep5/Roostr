@@ -16,7 +16,27 @@
  * resolve legacy a2a participant endpoints. Idempotent: a field is deleted
  * only after its pointer landed, and re-running finds no `bound_object`.
  */
-import { deleteField, fetchObject, queryAll, setField, str, sv } from "./api";
+import { deleteField, fetchObject, lv, queryAll, setField, str, sv } from "./api";
+
+/**
+ * `agent` became a link list (the object's guest list). An object still
+ * holding the older single string is rewritten to a one-element list.
+ * Idempotent: a list value is left alone.
+ */
+export async function migrateAgentLists(): Promise<{ converted: number }> {
+	let converted = 0;
+	for (const row of await queryAll({ filters: [{ key: "agent", condition: "notEmpty" }] })) {
+		const single = row.fields["agent"]?.stringValue;
+		if (!single) continue;
+		try {
+			await setField(row.id, "agent", lv([single]));
+			converted++;
+		} catch (err) {
+			console.error(`[migrate] agent list cutover failed for ${row.id.slice(0, 8)}:`, err instanceof Error ? err.message : err);
+		}
+	}
+	return { converted };
+}
 
 export async function migrateBoundAgents(): Promise<{ moved: number; conflicts: number }> {
 	let moved = 0;
@@ -29,7 +49,7 @@ export async function migrateBoundAgents(): Promise<{ moved: number; conflicts: 
 			if (obj && !obj.deleted) {
 				const existing = str(obj.fields, "agent");
 				if (!existing) {
-					await setField(obj.id, "agent", sv(agent.id));
+					await setField(obj.id, "agent", lv([agent.id]));
 					moved++;
 					console.log(`[migrate] "${name}" -> agent of "${str(obj.fields, "name") || obj.id.slice(0, 8)}"`);
 				} else if (existing !== agent.id) {
