@@ -19,9 +19,10 @@
  * answers history; a restart with marks on disk resumes where it stopped.
  */
 
-import { addBlock, fetchObject, list, str, type BlockJSON, type ObjectJSON } from "./api";
+import { addBlock, fetchObject, str, type BlockJSON, type ObjectJSON } from "./api";
 import { addConvBlock, convBlocks, type ConvRef } from "./conv";
 import { passwordCredential } from "./credentials";
+import { requiredKeys } from "./capabilities";
 import { agentKind } from "./kinds";
 
 const DISCORD_API = "https://discord.com/api/v10";
@@ -533,7 +534,7 @@ export function startDiscordManager(host: {
 			for (const { agentId, objectId } of host.served()) {
 				const agent = await fetchObject(agentId).catch(() => null);
 				if (!agent) continue;
-				const requires = [...agentKind(str(agent.fields, "kind")).requires, ...list(agent.fields, "requires")];
+				const requires = [...agentKind(str(agent.fields, "kind")).requires, ...(await requiredKeys(agent.fields))];
 				if (!requires.includes("discord-bot")) continue;
 				const cfg = discordConfigFor(agent);
 				if (!cfg) continue;

@@ -25,6 +25,7 @@ package core
 // own transcript.
 
 import "core:encoding/json"
+import "core:strings"
 
 SERVED_BY_KEY :: "served_by"
 REQUIRES_KEY :: "requires"
@@ -40,7 +41,9 @@ Serving :: struct {
 }
 
 // Strings of a list-valued field: String_List (`listValue`) or a List of
-// strings (`valuesValue`) - hosts write both shapes. Empty for anything else.
+// strings or links (`valuesValue`) - hosts write any of these shapes.
+// `requires` links capability objects; `served_by` links a machine. Empty
+// for anything else.
 field_strings :: proc(fields: [dynamic]Value_Entry, key: string, allocator := context.temp_allocator) -> [dynamic]string {
 	out := make([dynamic]string, allocator)
 	v, ok := fields_get(fields, key)
@@ -49,9 +52,14 @@ field_strings :: proc(fields: [dynamic]Value_Entry, key: string, allocator := co
 	case .String_List:
 		for s in v.strings do if s != "" do append(&out, s)
 	case .List:
-		for item in v.items do if item.kind == .String && item.str != "" do append(&out, item.str)
+		for item in v.items {
+			if item.kind == .String && item.str != "" do append(&out, item.str)
+			else if item.kind == .Link && item.link_target != "" do append(&out, item.link_target)
+		}
 	case .String:
 		if v.str != "" do append(&out, v.str)
+	case .Link:
+		if v.link_target != "" do append(&out, v.link_target)
 	}
 	return out
 }
@@ -77,7 +85,37 @@ insert_sorted :: proc(ids: ^[dynamic]string, id: string) {
 	append(ids, id)
 }
 
-resolve_server :: proc(object: ^Object_State, space: ^Object_State, machines: []Object_State, allocator := context.temp_allocator) -> Serving {
+// A machine serves a requirement only when it hosts the required capability
+// object AND that capability's install is active. An unset or inactive
+// capability does not exist for the resolver - it is not offered to an agent
+// and its machine does not count.
+capability_servers :: proc(states: map[string]^Object_State, capability_id: string, allocator := context.temp_allocator) -> [dynamic]string {
+	out := make([dynamic]string, allocator)
+	cap := states[capability_id]
+	if cap == nil || cap.deleted || cap.type_key != "capability" do return out
+	machine := field_string(cap.fields, "served_by")
+	if machine == "" {
+		if v, ok := fields_get(cap.fields, "served_by"); ok && v.kind == .Link do machine = v.link_target
+	}
+	if machine == "" do return out
+	// The capability's install must be active. It links the install object,
+	// else a same-key same-machine install is the fallback while links migrate.
+	install_id := field_string(cap.fields, "install")
+	if install_id == "" {
+		if v, ok := fields_get(cap.fields, "install"); ok && v.kind == .Link do install_id = v.link_target
+	}
+	inst := states[install_id]
+	if inst == nil {
+		for _, s in states {
+			if s.deleted || s.type_key != "install" do continue
+			if field_string(s.fields, "key") == field_string(cap.fields, "key") && field_string(s.fields, "machine_id") == machine do inst = s
+		}
+	}
+	if inst != nil && field_string(inst.fields, "status") == "active" do append(&out, machine)
+	return out
+}
+
+resolve_server :: proc(object: ^Object_State, space: ^Object_State, states: map[string]^Object_State, allocator := context.temp_allocator) -> Serving {
 	out: Serving
 	out.candidates = make([dynamic]string, allocator)
 	if object != nil do out.requires = field_strings(object.fields, REQUIRES_KEY, allocator)
@@ -92,10 +130,31 @@ resolve_server :: proc(object: ^Object_State, space: ^Object_State, machines: []
 		return out
 	}
 
-	for &m in machines {
-		id := field_string(m.fields, MACHINE_ID_KEY)
-		if id == "" do continue
-		if has_all(field_strings(m.fields, CAPABILITIES_KEY), out.requires) do insert_sorted(&out.candidates, id)
+	// A machine is a candidate iff it serves every required capability. With
+	// no requirements every live machine is a candidate (the space default or
+	// a pin decides between them).
+	if len(out.requires) == 0 {
+		for _, m in states {
+			if m.deleted || m.type_key != "machine" do continue
+			if id := field_string(m.fields, MACHINE_ID_KEY); id != "" do insert_sorted(&out.candidates, id)
+		}
+	} else {
+		server_sets := make([dynamic][dynamic]string, allocator)
+		for req in out.requires {
+			append(&server_sets, capability_servers(states, req, allocator))
+		}
+		for _, m in states {
+			if m.deleted || m.type_key != "machine" do continue
+			id := field_string(m.fields, MACHINE_ID_KEY)
+			if id == "" do continue
+			ok := true
+			for servers in server_sets {
+				hosted := false
+				for s in servers do if s == id { hosted = true; break }
+				if !hosted { ok = false; break }
+			}
+			if ok do insert_sorted(&out.candidates, id)
+		}
 	}
 	capable :: proc(s: ^Serving, id: string) -> bool {
 		for c in s.candidates do if c == id do return true
@@ -158,7 +217,28 @@ serving_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 				append(&machines, state)
 			}
 		}
-		return serving_to_json(resolve_server(object, space, machines[:])), ""
+		states := make(map[string]^Object_State, context.temp_allocator)
+		if object != nil do states[object.id] = object
+		if space != nil do states[space.id] = space
+		for &m in machines {
+			states[strings.clone(m.id, context.temp_allocator)] = &m
+		}
+		// Capability objects ride a separate `capabilities` array: the resolver
+		// needs them (and their installs) alongside the machines.
+		caps := make([dynamic]Object_State, context.temp_allocator)
+		if list, present := json_field(payload, "capabilities"); present {
+			arr, aok := list.(json.Array)
+			if !aok do return nil, "capabilities must be an array"
+			for item in arr {
+				state, mok := object_from_json(item, context.temp_allocator, clone_json = false)
+				if !mok do return nil, "invalid capability state"
+				append(&caps, state)
+			}
+		}
+		for &c in caps {
+			states[strings.clone(c.id, context.temp_allocator)] = &c
+		}
+		return serving_to_json(resolve_server(object, space, states)), ""
 	}
 	return nil, "unknown serving action"
 }
@@ -173,11 +253,7 @@ resolve_server_in :: proc(states: map[string]^Object_State, object_id: string, a
 	if object != nil do space_id = field_string(object.fields, "channel")
 	if space_id == "" do space_id = oldest_channel_id(states)
 	space := states[space_id]
-	machines := make([dynamic]Object_State, allocator)
-	for _, s in states {
-		if s.type_key == "machine" && !s.deleted do append(&machines, s^)
-	}
-	return resolve_server(object, space, machines[:], allocator)
+	return resolve_server(object, space, states, allocator)
 }
 
 serving_to_json :: proc(s: Serving, allocator := context.temp_allocator) -> json.Value {

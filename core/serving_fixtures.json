@@ -32,13 +32,6 @@
      "fields": {
       "machine_id": {
        "stringValue": "studio"
-      },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
-       }
       }
      }
     }
@@ -78,7 +71,359 @@
       "valuesValue": {
        "items": [
         {
-         "stringValue": "browserless"
+         "linkValue": {
+          "targetId": "c-browserless",
+          "relationKey": "requires"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c-browserless",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "served_by": {
+       "linkValue": {
+        "targetId": "studio",
+        "relationKey": "served_by"
+       }
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i-browserless",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i-browserless",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "status": {
+       "stringValue": "active"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "studio",
+    "reason": "capability",
+    "requires": [
+     "c-browserless"
+    ],
+    "candidates": [
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "stickiness: the default keeps work it can do",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "requires": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "c1",
+          "relationKey": "requires"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "studio"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "alpha"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c1",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "served_by": {
+       "linkValue": {
+        "targetId": "studio",
+        "relationKey": "served_by"
+       }
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i1",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i1",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "status": {
+       "stringValue": "active"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "studio",
+    "reason": "space-capable",
+    "requires": [
+     "c1"
+    ],
+    "candidates": [
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "a requirement is satisfied by one of two machines",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "requires": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "c-alpha",
+          "relationKey": "requires"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m3",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "alpha"
+      }
+     }
+    },
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c-alpha",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "served_by": {
+       "stringValue": "alpha"
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i-alpha",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i-alpha",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "alpha"
+      },
+      "status": {
+       "stringValue": "active"
+      }
+     }
+    },
+    {
+     "id": "c-studio",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "served_by": {
+       "linkValue": {
+        "targetId": "studio",
+        "relationKey": "served_by"
+       }
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i-studio",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i-studio",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "status": {
+       "stringValue": "active"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "alpha",
+    "reason": "capability",
+    "requires": [
+     "c-alpha"
+    ],
+    "candidates": [
+     "alpha"
+    ]
+   }
+  },
+  {
+   "name": "all requirements must be present",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "requires": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "c-gws",
+          "relationKey": "requires"
+         }
+        },
+        {
+         "linkValue": {
+          "targetId": "c-browserless",
+          "relationKey": "requires"
+         }
         }
        ]
       }
@@ -110,234 +455,80 @@
      "fields": {
       "machine_id": {
        "stringValue": "studio"
-      },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless",
-         "gws"
-        ]
-       }
       }
      }
     }
    ],
-   "expected": {
-    "machineId": "studio",
-    "reason": "capability",
-    "requires": [
-     "browserless"
-    ],
-    "candidates": [
-     "studio"
-    ]
-   }
-  },
-  {
-   "name": "stickiness: the default keeps work it can do",
-   "object": {
-    "id": "o",
-    "typeKey": "task",
-    "fields": {
-     "requires": {
-      "listValue": {
-       "values": [
-        "browserless"
-       ]
-      }
-     }
-    }
-   },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "studio"
-     }
-    }
-   },
-   "machines": [
+   "capabilities": [
     {
-     "id": "m1",
-     "typeKey": "machine",
+     "id": "c-gws",
+     "typeKey": "capability",
      "fields": {
-      "machine_id": {
-       "stringValue": "alpha"
+      "key": {
+       "stringValue": "gws"
       },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
+      "served_by": {
+       "linkValue": {
+        "targetId": "laptop",
+        "relationKey": "served_by"
+       }
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i-gws",
+        "relationKey": "install"
        }
       }
      }
     },
     {
-     "id": "m2",
-     "typeKey": "machine",
+     "id": "i-gws",
+     "typeKey": "install",
      "fields": {
-      "machine_id": {
-       "stringValue": "studio"
+      "key": {
+       "stringValue": "gws"
       },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
-       }
-      }
-     }
-    }
-   ],
-   "expected": {
-    "machineId": "studio",
-    "reason": "space-capable",
-    "requires": [
-     "browserless"
-    ],
-    "candidates": [
-     "alpha",
-     "studio"
-    ]
-   }
-  },
-  {
-   "name": "tie-break: smallest machine id among capable",
-   "object": {
-    "id": "o",
-    "typeKey": "task",
-    "fields": {
-     "requires": {
-      "listValue": {
-       "values": [
-        "gws"
-       ]
-      }
-     }
-    }
-   },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "laptop"
-     }
-    }
-   },
-   "machines": [
-    {
-     "id": "m3",
-     "typeKey": "machine",
-     "fields": {
-      "machine_id": {
-       "stringValue": "zeta"
-      },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "gws"
-        ]
-       }
-      }
-     }
-    },
-    {
-     "id": "m2",
-     "typeKey": "machine",
-     "fields": {
-      "machine_id": {
-       "stringValue": "beta"
-      },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "gws",
-         "browserless"
-        ]
-       }
-      }
-     }
-    },
-    {
-     "id": "m1",
-     "typeKey": "machine",
-     "fields": {
-      "machine_id": {
-       "stringValue": "laptop"
-      }
-     }
-    }
-   ],
-   "expected": {
-    "machineId": "beta",
-    "reason": "capability",
-    "requires": [
-     "gws"
-    ],
-    "candidates": [
-     "beta",
-     "zeta"
-    ]
-   }
-  },
-  {
-   "name": "all requirements must be present",
-   "object": {
-    "id": "o",
-    "typeKey": "task",
-    "fields": {
-     "requires": {
-      "listValue": {
-       "values": [
-        "gws",
-        "browserless"
-       ]
-      }
-     }
-    }
-   },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "laptop"
-     }
-    }
-   },
-   "machines": [
-    {
-     "id": "m1",
-     "typeKey": "machine",
-     "fields": {
       "machine_id": {
        "stringValue": "laptop"
       },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "gws"
-        ]
+      "status": {
+       "stringValue": "active"
+      }
+     }
+    },
+    {
+     "id": "c-browserless",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "served_by": {
+       "linkValue": {
+        "targetId": "studio",
+        "relationKey": "served_by"
+       }
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i-browserless",
+        "relationKey": "install"
        }
       }
      }
     },
     {
-     "id": "m2",
-     "typeKey": "machine",
+     "id": "i-browserless",
+     "typeKey": "install",
      "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
       "machine_id": {
        "stringValue": "studio"
       },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
-       }
+      "status": {
+       "stringValue": "active"
       }
      }
     }
@@ -346,8 +537,191 @@
     "machineId": "laptop",
     "reason": "unsatisfied",
     "requires": [
-     "gws",
-     "browserless"
+     "c-gws",
+     "c-browserless"
+    ],
+    "candidates": []
+   }
+  },
+  {
+   "name": "capability with no served_by serves nobody",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "requires": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "c1",
+          "relationKey": "requires"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c1",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i1",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i1",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "status": {
+       "stringValue": "active"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "unsatisfied",
+    "requires": [
+     "c1"
+    ],
+    "candidates": []
+   }
+  },
+  {
+   "name": "capability with an inactive install serves nobody",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "requires": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "c1",
+          "relationKey": "requires"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "laptop"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c1",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "served_by": {
+       "stringValue": "studio"
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i1",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i1",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "status": {
+       "stringValue": "installing"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "unsatisfied",
+    "requires": [
+     "c1"
     ],
     "candidates": []
    }
@@ -362,9 +736,14 @@
       "stringValue": "studio"
      },
      "requires": {
-      "listValue": {
-       "values": [
-        "browserless"
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "c1",
+          "relationKey": "requires"
+         }
+        }
        ]
       }
      }
@@ -386,13 +765,6 @@
      "fields": {
       "machine_id": {
        "stringValue": "alpha"
-      },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
-       }
       }
      }
     },
@@ -402,13 +774,44 @@
      "fields": {
       "machine_id": {
        "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c1",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
       },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
+      "served_by": {
+       "linkValue": {
+        "targetId": "studio",
+        "relationKey": "served_by"
        }
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i1",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i1",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "status": {
+       "stringValue": "active"
       }
      }
     }
@@ -417,10 +820,9 @@
     "machineId": "studio",
     "reason": "pinned",
     "requires": [
-     "browserless"
+     "c1"
     ],
     "candidates": [
-     "alpha",
      "studio"
     ]
    }
@@ -463,9 +865,14 @@
       "stringValue": "laptop"
      },
      "requires": {
-      "listValue": {
-       "values": [
-        "browserless"
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "c1",
+          "relationKey": "requires"
+         }
+        }
        ]
       }
      }
@@ -496,13 +903,44 @@
      "fields": {
       "machine_id": {
        "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c1",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
       },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
+      "served_by": {
+       "linkValue": {
+        "targetId": "studio",
+        "relationKey": "served_by"
        }
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i1",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i1",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "status": {
+       "stringValue": "active"
       }
      }
     }
@@ -511,7 +949,7 @@
     "machineId": "laptop",
     "reason": "pinned-uncapable",
     "requires": [
-     "browserless"
+     "c1"
     ],
     "candidates": [
      "studio"
@@ -525,10 +963,17 @@
     "typeKey": "task",
     "fields": {
      "requires": {
-      "listValue": {
-       "values": [
-        "",
-        "browserless"
+      "valuesValue": {
+       "items": [
+        {
+         "stringValue": ""
+        },
+        {
+         "linkValue": {
+          "targetId": "c1",
+          "relationKey": "requires"
+         }
+        }
        ]
       }
      }
@@ -563,13 +1008,38 @@
      "fields": {
       "machine_id": {
        "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c1",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
       },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
+      "served_by": {
+       "linkValue": {
+        "targetId": "studio",
+        "relationKey": "served_by"
        }
+      }
+     }
+    },
+    {
+     "id": "i1",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "status": {
+       "stringValue": "active"
       }
      }
     }
@@ -578,11 +1048,104 @@
     "machineId": "studio",
     "reason": "capability",
     "requires": [
-     "browserless"
+     "c1"
     ],
     "candidates": [
      "studio"
     ]
+   }
+  },
+  {
+   "name": "an install answers for its owning machine",
+   "object": {
+    "id": "i-self",
+    "typeKey": "install",
+    "fields": {
+     "machine_id": {
+      "stringValue": "owner"
+     },
+     "served_by": {
+      "stringValue": "other"
+     },
+     "requires": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "c1",
+          "relationKey": "requires"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "space": {
+    "id": "s",
+    "typeKey": "channel",
+    "fields": {
+     "served_by": {
+      "stringValue": "other"
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "other"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c1",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "served_by": {
+       "linkValue": {
+        "targetId": "other",
+        "relationKey": "served_by"
+       }
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i1",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i1",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "other"
+      },
+      "status": {
+       "stringValue": "active"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "owner",
+    "reason": "self",
+    "requires": [
+     "c1"
+    ],
+    "candidates": []
    }
   },
   {
@@ -615,6 +1178,18 @@
     42
    ],
    "error": "invalid machine state"
+  },
+  {
+   "name": "malformed capability entry is an error",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {}
+   },
+   "capabilities": [
+    42
+   ],
+   "error": "invalid capability state"
   },
   {
    "name": "a machine object answers for itself",

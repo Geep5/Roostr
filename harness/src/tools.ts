@@ -11,7 +11,6 @@ import {
 	fetchObject,
 	fv,
 	iv,
-	list,
 	lv,
 	deleteField,
 	mutate,
@@ -41,6 +40,7 @@ import { authRequirementsOf, localAuthRegistry, resolveAuthRequirements, validat
 import { HUMAN_THREAD, agentSubject, convBlocks, humanRef, postTo } from "./conv";
 import { sendMessage } from "./mailbox";
 import { fetchInstallations } from "./descriptors";
+import { chooseCapability, fetchCapabilities, linkValue, requiredKeys, requirementKeys, requiresItems } from "./capabilities";
 import { requestCapability, type CapabilityOperation } from "./capability-messages";
 import type { AgentEndpoint, AgentMessage } from "./api";
 
@@ -274,7 +274,9 @@ function domToText(html: string): string {
 async function resolutionNote(capability: string, ctx: ToolContext): Promise<string> {
 	if (!ctx.boundObject) return "";
 	const s = await serverOf(ctx.boundObject).catch(() => null);
-	if (!s || !s.requires.includes(capability)) return "";
+	// The engine returns requires verbatim: capability object ids where the
+	// object links them, catalog keys where legacy strings remain.
+	if (!s || !requirementKeys(s.requires, await fetchCapabilities()).includes(capability)) return "";
 	if (s.reason === "pinned-uncapable") return ` (serving: pinned-uncapable - the object is pinned to this machine, which lacks ${capability})`;
 	if (s.reason === "unsatisfied") return ` (serving: unsatisfied - no machine has ${capability})`;
 	return "";
@@ -332,7 +334,7 @@ const REQUIRE_TOOL: RegisteredTool = {
 	def: {
 		name: "object_require",
 		description:
-			"Declare that the object of this conversation needs a machine capability listed under <capabilities-elsewhere> (a catalog key such as browserless or google). Appends it to the object's `requires`; the machine that has the capability serves the object from the next turn on - nothing moves mid-turn. Only turns running on an object can call this. Tell the human the work moved, then finish the turn.",
+			"Declare that the object of this conversation needs a machine capability listed under <capabilities-elsewhere> (a catalog key such as browserless or google). Links the matching capability object in the object's `requires`; the machine that serves the capability serves the object from the next turn on - nothing moves mid-turn. Only turns running on an object can call this. Tell the human the work moved, then finish the turn.",
 		input_schema: {
 			type: "object",
 			properties: { capability: { type: "string", description: "catalog capability key" } },
@@ -345,13 +347,18 @@ const REQUIRE_TOOL: RegisteredTool = {
 		if (!ctx.boundObject) return "error: this turn is not running on an object, so there is nothing to require it on";
 		const obj = await fetchObject(ctx.boundObject);
 		const name = str(obj.fields, "name") || obj.id.slice(0, 8);
-		const had = list(obj.fields, "requires");
-		if (!had.includes(key)) {
-			await setField(obj.id, "requires", lv([...had, key]));
+		const caps = await fetchCapabilities();
+		const me = await machineId();
+		// A capability with no object yet is not offered: refuse rather than
+		// write a requirement nothing can ever resolve.
+		const chosen = chooseCapability(caps.filter((c) => c.key === key), me);
+		if (!chosen) return `error: no machine offers "${key}" yet - it appears under <capabilities-elsewhere> once a machine installs and enables it. Nothing was required; tell the human.`;
+		if (!(await requiredKeys(obj.fields, caps)).includes(key)) {
+			await setField(obj.id, "requires", { valuesValue: { items: [...requiresItems(obj.fields), linkValue(chosen.id)] } });
 			ctx.touched.add(obj.id);
 		}
 		invalidateServing();
-		const [s, me, roster] = await Promise.all([serverOf(obj.id), machineId(), machines()]);
+		const [s, roster] = await Promise.all([serverOf(obj.id), machines()]);
 		if (s.reason === "pinned-uncapable" || s.reason === "unsatisfied") {
 			const why = s.reason === "pinned-uncapable" ? `"${name}" is pinned to a machine that lacks ${key}` : `no machine has ${key}`;
 			await fileCapabilityHoldup(key, `object_require(${key}): ${why}`, ctx);

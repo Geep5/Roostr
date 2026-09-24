@@ -14,11 +14,12 @@
  */
 
 import { createObject, fetchObject, mutate, str, queryAll } from "./api";
-import { machines, publishCapabilities } from "./machine";
+import { machines, publishMachine } from "./machine";
 import { machineId } from "./roster";
 import { humanRef, postTo } from "./conv";
-import { activeCredentialKeys, credentialStatus } from "./credentials";
+import { CREDENTIALS, activeCredentialKeys, credentialStatus } from "./credentials";
 import { publishHoldup, publishInstallations, publishGoogleInstallations, clearInstallationError } from "./descriptors";
+import { activeCapabilityKeys, syncCapabilities, type CapabilitySeed } from "./capabilities";
 import { objectText } from "./skills";
 
 export interface CatalogEntry {
@@ -200,28 +201,37 @@ async function writeState(state: StateFile): Promise<void> {
 }
 
 /**
- * What this machine can do for an object that `requires` it: catalog
- * skills installed AND enabled here, plus active service credentials
- * (credentials.ts - an X login is a capability exactly like browserless).
+ * What this machine can do for an object that `requires` it, as capability
+ * seeds: catalog skills installed AND enabled here, plus active service
+ * credentials (credentials.ts - an X login is a capability exactly like
+ * browserless). Each seed becomes one capability object naming this
+ * machine as `served_by`.
  */
-function capabilityKeys(state: StateFile): string[] {
-	return [...new Set([...CATALOG.filter((c) => state.skills[c.key]?.enabled && state.skills[c.key]?.installed).map((c) => c.key), ...activeCredentialKeys()])].sort();
+function capabilitySeeds(state: StateFile): CapabilitySeed[] {
+	const skills = CATALOG.filter((c) => state.skills[c.key]?.enabled && state.skills[c.key]?.installed).map((c) => ({ key: c.key, name: c.name, description: c.description }));
+	const active = new Set(activeCredentialKeys());
+	const logins = CREDENTIALS.filter((c) => active.has(c.key)).map((c) => ({ key: c.key, name: c.label, description: c.note }));
+	return [...skills, ...logins];
 }
 
-/** A skill state change: persist, then publish the capability set to this machine's object (a write only on change). */
+/**
+ * A skill state change: persist, then republish. Install rows go first so
+ * the capability objects' `install` links point at rows that already exist;
+ * both come from the same state, at the same moment, so they cannot disagree.
+ */
 async function saveSkills(state: StateFile): Promise<void> {
 	await writeState(state);
-	await publishCapabilities(capabilityKeys(state));
-	// The flat capability list and the per-skill rows come from the same
-	// state, at the same moment, so they cannot disagree.
+	await publishMachine();
 	await publishInstallations(state.skills, credentialStatus());
+	await syncCapabilities(capabilitySeeds(state));
 }
 
 /** Credential changes call this: the published set follows the store. */
 export async function republishCapabilities(): Promise<void> {
 	const state = await readState();
-	await publishCapabilities(capabilityKeys(state));
+	await publishMachine();
 	await publishInstallations(state.skills, credentialStatus());
+	await syncCapabilities(capabilitySeeds(state));
 }
 
 /**
@@ -240,9 +250,22 @@ export async function publishInstallationState(): Promise<void> {
 	}
 }
 
-/** This machine's capability keys; the boot path publishes them so the machine object exists before anything is served. */
+/**
+ * Publish this machine's capability objects from current state. Boot calls
+ * it after publishInstallationState, so every `install` link lands on a row
+ * that exists.
+ */
+export async function publishCapabilityObjects(): Promise<void> {
+	await syncCapabilities(capabilitySeeds(await readState()));
+}
+
+/**
+ * This machine's fully-set-up capability keys: the capability objects that
+ * name it as `served_by` AND whose install is active. Anything short of
+ * that is not offered - not to agents, not to the resolver.
+ */
 export async function capabilities(): Promise<string[]> {
-	return capabilityKeys(await readState());
+	return activeCapabilityKeys();
 }
 
 /**
@@ -307,13 +330,6 @@ export async function skillReady(key: string): Promise<{ ok: boolean; reason: st
 	if (!st.installed) return { ok: false, reason: `${entry.name} is not installed on this machine` };
 	return { ok: true, reason: "" };
 }
-
-/** Catalog skills enabled on this device. */
-export async function enabledCatalogKeys(): Promise<Set<string>> {
-	const state = await readState();
-	return new Set(CATALOG.filter((c) => state.skills[c.key]?.enabled).map((c) => c.key));
-}
-
 
 // -- Live jobs ----------------------------------------------------
 

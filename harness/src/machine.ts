@@ -13,14 +13,15 @@
  * A machine always serves its own `machine` object, so a human can address
  * any machine through that object's discussion.
  *
- * Nothing here is liveness. The machine object carries `machine_id`,
- * `name` (hostname) and `capabilities` (catalog skills installed and
- * enabled here) - durable facts, each written only when it changes, so
- * restarts are free.
+ * Nothing here is liveness. The machine object carries `machine_id` and
+ * `name` (hostname) - durable facts, each written only when it changes, so
+ * restarts are free. What the machine can DO is no longer a field here: it
+ * is the capability objects (type `capability`, capabilities.ts) that name
+ * it as `served_by` and whose install is active.
  */
 
 import { hostname } from "node:os";
-import { createObject, list, lv, queryAll, servingFor, setField, str, sv, type Serving, type ValueJSON } from "./api";
+import { createObject, queryAll, servingFor, setField, str, sv, type Serving, type ValueJSON } from "./api";
 import { machineId } from "./roster";
 import { agentSubject } from "./conv";
 
@@ -32,7 +33,6 @@ export interface MachineRow {
 	objectId: string;
 	machineId: string;
 	name: string;
-	capabilities: string[];
 }
 
 let rosterCache: { at: number; rows: MachineRow[] } | null = null;
@@ -49,7 +49,7 @@ export async function machines(): Promise<MachineRow[]> {
 	if (rosterCache && Date.now() - rosterCache.at < TTL_MS) return rosterCache.rows;
 	const rows = (await queryAll({ type: MACHINE_TYPE })).map((m) => {
 		const id = str(m.fields, "machine_id");
-		return { objectId: m.id, machineId: id, name: str(m.fields, "name") || id.slice(0, 8), capabilities: list(m.fields, "capabilities") };
+		return { objectId: m.id, machineId: id, name: str(m.fields, "name") || id.slice(0, 8) };
 	});
 	rosterCache = { at: Date.now(), rows };
 	return rows;
@@ -108,40 +108,30 @@ export async function convergeSpaceServing(): Promise<void> {
 	invalidateServing();
 }
 
-/** Same set, order-insensitive - capabilities are a set, not a list. */
-function sameSet(a: string[], b: string[]): boolean {
-	if (a.length !== b.length) return false;
-	const sa = [...a].sort();
-	const sb = [...b].sort();
-	return sa.every((v, i) => v === sb[i]);
-}
-
 /**
- * Publish this machine's capabilities (catalog keys installed and enabled
- * here). Creates this machine's object on first call, keeps `name` at the
- * hostname, and writes `capabilities` only when the set changed.
+ * Register this machine: create its object on first call, keep `name` at
+ * the hostname. Capabilities no longer ride on the machine object - the
+ * capability objects (capabilities.ts) are what serving resolves against.
  */
-export async function publishCapabilities(keys: string[]): Promise<void> {
+export async function publishMachine(): Promise<void> {
 	const id = await machineId();
 	const host = hostname();
-	const caps = [...keys].sort();
 	try {
 		const mine = (await queryAll({ type: MACHINE_TYPE })).find((m) => str(m.fields, "machine_id") === id);
 		if (!mine) {
-			await createObject(host, MACHINE_TYPE, { machine_id: sv(id), capabilities: lv(caps) });
-			console.log(`[harness] registered this machine as "${host}" with capabilities [${caps.join(", ")}]`);
+			await createObject(host, MACHINE_TYPE, { machine_id: sv(id) });
+			console.log(`[harness] registered this machine as "${host}"`);
 			invalidateServing();
 			return;
 		}
-		if (str(mine.fields, "name") !== host) await setField(mine.id, "name", sv(host));
-		if (sameSet(list(mine.fields, "capabilities"), caps)) return;
-		await setField(mine.id, "capabilities", lv(caps));
-		invalidateServing();
-		console.log(`[harness] capabilities now [${caps.join(", ")}] on "${host}"`);
+		if (str(mine.fields, "name") !== host) {
+			await setField(mine.id, "name", sv(host));
+			invalidateServing();
+		}
 	} catch (err) {
-		// The published set is what OTHER machines resolve against, never a
+		// Registration is what OTHER machines resolve against, never a
 		// precondition for serving here: a daemon that is not up yet must not
 		// stop the harness.
-		console.error("[harness] could not publish capabilities:", err instanceof Error ? err.message : err);
+		console.error("[harness] could not register this machine:", err instanceof Error ? err.message : err);
 	}
 }

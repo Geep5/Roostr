@@ -38,17 +38,30 @@ serving_fixture_contract :: proc(t: ^testing.T) {
 @(test)
 installation_serving_never_leaves_its_owning_machine :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
-	object := Object_State{type_key = "install", fields = make([dynamic]Value_Entry)}
-	append(&object.fields, Value_Entry{key = "machine_id", value = string_value("owner")}, Value_Entry{key = "served_by", value = string_value("other")}, Value_Entry{key = "requires", value = string_value("missing-capability")})
-	space := Object_State{fields = make([dynamic]Value_Entry)}
+	// The requirement is genuinely served elsewhere: "other" hosts the
+	// capability and its install is active. An install still answers for its
+	// owning machine - it never borrows the machine that could do the work.
+	object := Object_State{id = "i-self", type_key = "install", fields = make([dynamic]Value_Entry)}
+	append(&object.fields, Value_Entry{key = "machine_id", value = string_value("owner")}, Value_Entry{key = "served_by", value = string_value("other")}, Value_Entry{key = "requires", value = list_value([]Value{Value{kind = .Link, link_target = "c1", link_relation = "requires"}})})
+	space := Object_State{id = "s", fields = make([dynamic]Value_Entry)}
 	append(&space.fields, Value_Entry{key = "served_by", value = string_value("other")})
-	machine := Object_State{type_key = "machine", fields = make([dynamic]Value_Entry)}
-	append(&machine.fields, Value_Entry{key = "machine_id", value = string_value("other")}, Value_Entry{key = "capabilities", value = string_value("missing-capability")})
-	serving := resolve_server(&object, &space, {machine})
+	machine := Object_State{id = "m", type_key = "machine", fields = make([dynamic]Value_Entry)}
+	append(&machine.fields, Value_Entry{key = "machine_id", value = string_value("other")})
+	capability := Object_State{id = "c1", type_key = "capability", fields = make([dynamic]Value_Entry)}
+	append(&capability.fields, Value_Entry{key = "key", value = string_value("browserless")}, Value_Entry{key = "served_by", value = string_value("other")}, Value_Entry{key = "install", value = Value{kind = .Link, link_target = "i-cap", link_relation = "install"}})
+	cap_install := Object_State{id = "i-cap", type_key = "install", fields = make([dynamic]Value_Entry)}
+	append(&cap_install.fields, Value_Entry{key = "key", value = string_value("browserless")}, Value_Entry{key = "machine_id", value = string_value("other")}, Value_Entry{key = "status", value = string_value("active")})
+	states := make(map[string]^Object_State, context.temp_allocator)
+	states["i-self"] = &object
+	states["s"] = &space
+	states["m"] = &machine
+	states["c1"] = &capability
+	states["i-cap"] = &cap_install
+	serving := resolve_server(&object, &space, states)
 	testing.expect_value(t, serving.machine_id, "owner")
 	// A partially synced install without machine_id cannot borrow a space
 	// default and accidentally offer approval on a different machine.
 	object.fields[0].value = string_value("")
-	unowned := resolve_server(&object, &space, {machine})
+	unowned := resolve_server(&object, &space, states)
 	testing.expect_value(t, unowned.machine_id, "")
 }

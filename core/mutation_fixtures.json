@@ -3749,7 +3749,7 @@
         "valuesValue": {
          "items": [
           {
-           "stringValue": "bundled-type-served_by-new-id"
+           "stringValue": "bundled-type-machine-new-id"
           }
          ]
         }
@@ -3790,7 +3790,7 @@
       "fieldSet": {
        "key": "format",
        "value": {
-        "stringValue": "tag"
+        "stringValue": "object"
        }
       }
      },
@@ -3848,6 +3848,29 @@
        "value": {
         "valuesValue": {
          "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-requires-new-id",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-requires-new-id"
+          }
+         ]
         }
        }
       }
@@ -5205,6 +5228,68 @@
        "key": "iconEmoji",
        "value": {
         "stringValue": "🔌"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "layout",
+       "value": {
+        "stringValue": "page"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-type-capability-new-id",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "type"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "new-id"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "capability"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Capability"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧩"
        }
       }
      },
@@ -6915,7 +7000,7 @@
         "valuesValue": {
          "items": [
           {
-           "stringValue": "bundled-type-served_by-s"
+           "stringValue": "bundled-type-machine-s"
           }
          ]
         }
@@ -6956,7 +7041,7 @@
       "fieldSet": {
        "key": "format",
        "value": {
-        "stringValue": "tag"
+        "stringValue": "object"
        }
       }
      },
@@ -7014,6 +7099,29 @@
        "value": {
         "valuesValue": {
          "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-requires-s",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-requires-s"
+          }
+         ]
         }
        }
       }
@@ -7457,6 +7565,68 @@
        "key": "iconEmoji",
        "value": {
         "stringValue": "🔌"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "layout",
+       "value": {
+        "stringValue": "page"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-type-capability-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "type"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "capability"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Capability"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧩"
        }
       }
      },
@@ -9148,7 +9318,7 @@
         "valuesValue": {
          "items": [
           {
-           "stringValue": "bundled-type-served_by-s"
+           "stringValue": "bundled-type-machine-s"
           }
          ]
         }
@@ -9189,7 +9359,7 @@
       "fieldSet": {
        "key": "format",
        "value": {
-        "stringValue": "tag"
+        "stringValue": "object"
        }
       }
      },
@@ -9247,6 +9417,29 @@
        "value": {
         "valuesValue": {
          "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-requires-s",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-requires-s"
+          }
+         ]
         }
        }
       }
@@ -9752,6 +9945,68 @@
        "key": "iconEmoji",
        "value": {
         "stringValue": "🔌"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "layout",
+       "value": {
+        "stringValue": "page"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-type-capability-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "type"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "capability"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Capability"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧩"
        }
       }
      },

@@ -114,9 +114,9 @@ export interface Serving {
 	/** "" when the space has no default and no machine qualifies. */
 	machineId: string;
 	reason: "self" | "pinned" | "pinned-uncapable" | "space" | "space-capable" | "capability" | "unsatisfied";
-	/** The object's `requires` list. */
+	/** The object's `requires`, verbatim: capability object ids where links were written, legacy catalog keys where strings remain. */
 	requires: string[];
-	/** Machine ids whose `capabilities` cover `requires`, sorted. */
+	/** Machine ids serving every required capability (capability object + active install), sorted. */
 	candidates: string[];
 }
 

@@ -12,9 +12,9 @@
  *   `--user-data-dir` pointing at the same profile and act logged in.
  *
  * Secrets never leave the machine and never enter the DAG. What syncs is
- * only the FACT of capability: an active credential's key joins the
- * machine's published `capabilities` (skillmgr), so an object that
- * `requires: ["x"]` resolves to a machine that can actually auth.
+ * only the FACT of capability: an active credential becomes a capability
+ * object served_by this machine (skillmgr/capabilities), so an object that
+ * requires it resolves to a machine that can actually auth.
  */
 import { copyFileSync, chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";

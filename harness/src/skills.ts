@@ -65,8 +65,13 @@ export interface SkillListing {
  * on the kind, by skill name); empty means everything above.
  */
 export async function listSkills(agentId?: string): Promise<SkillListing[]> {
-	const { CATALOG, enabledCatalogKeys } = await import("./skillmgr");
-	const enabled = await enabledCatalogKeys();
+	// Dynamic: skillmgr imports objectText from this module, so a static
+	// import here would be a module cycle.
+	const { CATALOG, capabilities } = await import("./skillmgr");
+	// A catalog skill is offered only once its capability object on this
+	// machine is fully set up (served_by + active install) - before that the
+	// skill stays invisible, however the toggle looks.
+	const ready = new Set(await capabilities());
 	const managed = new Set(CATALOG.map((c) => c.name.toLowerCase()));
 	const agent = agentId ? await fetchObject(agentId).catch(() => null) : null;
 	const only = new Set(agentKind(agent ? str(agent.fields, "kind") : "").skills.map((k) => k.toLowerCase()));
@@ -84,7 +89,7 @@ export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 			const key = s.name.toLowerCase();
 			if (only.size > 0 && !only.has(key)) return false;
 			if (!managed.has(key)) return true;
-			return enabled.has(key);
+			return ready.has(key);
 		});
 }
 
@@ -113,14 +118,20 @@ export function skillsPromptSection(skills: SkillListing[]): string {
  */
 export async function remoteCapabilitiesSection(objectId: string): Promise<string> {
 	if (!objectId) return "";
-	// Dynamic, as in listSkills: skillmgr imports objectText from here.
+	// Dynamic, as in listSkills: skillmgr imports objectText from this
+	// module, and capabilities.ts pulls in descriptors -> skillmgr.
 	const { CATALOG, capabilities } = await import("./skillmgr");
+	const { fetchCapabilities, fullySetUp, requirementKeys } = await import("./capabilities");
 	const me = await machineId();
-	const [local, roster, serving] = await Promise.all([capabilities(), machines(), serverOf(objectId)]);
+	const [local, roster, serving, caps] = await Promise.all([capabilities(), machines(), serverOf(objectId), fetchCapabilities()]);
+	const required = requirementKeys(serving.requires, caps);
+	const nameOf = new Map(roster.map((m) => [m.machineId, m.name]));
 	const lines: string[] = [];
 	for (const c of CATALOG) {
-		if (local.includes(c.key) || serving.requires.includes(c.key)) continue;
-		const where = roster.filter((m) => m.machineId !== me && m.capabilities.includes(c.key)).map((m) => m.name);
+		if (local.includes(c.key) || required.includes(c.key)) continue;
+		const where = caps
+			.filter((cap) => cap.key === c.key && fullySetUp(cap) && cap.servedBy !== me)
+			.map((cap) => nameOf.get(cap.servedBy) ?? cap.servedBy.slice(0, 8));
 		if (where.length > 0) lines.push(`- ${c.key} (${where.join(", ")})`);
 	}
 	if (lines.length === 0) return "";

@@ -1116,12 +1116,12 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// Rendered by the Repeat cell, not the generic property editor.
 	{"repeat", "repeat", "Repeat", "↻", true, false, 0},
 	// Per-object serving: who runs this object, and the capabilities it needs.
-	// `served_by` links the machine object (the serving chip is retired);
-	// `requires` stays a list of capability keys the engine's resolver
-	// compares against each machine's published `capabilities` - needs are
-	// what a machine has, so they are not objects.
+	// `served_by` links the machine object; `requires` links capability
+	// objects (type `capability`). A capability is only usable once it is
+	// served by a machine with an active install - before that it does not
+	// count for the resolver and is not offered to an agent.
 	{"served_by", "object", "Served by", "🖥️", false, false, 1},
-	{"requires", "tag", "Requires", "🧩", true, false, 0},
+	{"requires", "object", "Requires", "🧩", true, false, 0},
 	// The object's guest list: agents a human (or one of those agents) may
 	// address here with @. Rendered as a link badge; its picker is limited to
 	// the space's agent type. Nothing answers an object without being on it.
@@ -1204,8 +1204,8 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			if e.format != "" && e.format != r.format do append(&ops, Operation{kind = .Field_Set, key = "format", value = string_value(r.format)})
 			// Agent, served_by and install pickers are restricted to one bundled
 			// type; older rows predate the restriction and get it here.
-			if r.key == "agent" || r.key == "served_by" || r.key == "install" {
-				target := r.key
+			if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" {
+				target := r.key == "served_by" ? "machine" : r.key
 				types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
 				mutation_add(plan, input, e.id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
 			}
@@ -1228,9 +1228,9 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "options", value = list_value(empty)},
 		}
 		mutation_add(plan, input, id, ops)
-		if r.key == "agent" || r.key == "served_by" || r.key == "install" {
+		if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" {
 			// Picker restriction: the space's own bundled type (deterministic id).
-			target := r.key
+			target := r.key == "served_by" ? "machine" : r.key
 			types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
 			mutation_add(plan, input, id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
 		}
@@ -1323,6 +1323,9 @@ BUNDLED_TYPES :: []Bundled_Type{
 	// on one machine (fields, so `error` reaches views).
 	{"descriptor", "Descriptor", "🗂️", "page"},
 	{"install", "Installation", "🔌", "page"},
+	// A capability: one skill offered by one machine. Served by that machine
+	// with an active install before it is usable or offered to an agent.
+	{"capability", "Capability", "🧩", "page"},
 	// Minds are objects like everything else: a type row so they list in
 	// the sidebar and a bare "+ New" is a real agent the harness can adopt.
 	{"agent", "Agent", "🤖", "page"},

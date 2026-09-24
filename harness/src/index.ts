@@ -15,13 +15,15 @@ import { AGENT_KINDS, agentKind } from "./kinds";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
-import { capabilities, convergeCatalogScope, publishInstallationState } from "./skillmgr";
+import { capabilities, convergeCatalogScope, publishCapabilityObjects, publishInstallationState } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tools";
 import { startAuthServer } from "./authserver";
 import { machineId, readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
-import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, publishCapabilities, servesHere } from "./machine";
-import { publishDescriptors } from "./descriptors";
+import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, publishMachine, servesHere } from "./machine";
+import { publishDescriptors, INSTALL_TYPE } from "./descriptors";
+import { CAPABILITY_TYPE, requiredKeys, requiresValueForKeys } from "./capabilities";
+import { migrateCapabilities } from "./migrate-capabilities";
 import { validateBindings } from "./workspace";
 import { startDiscordManager } from "./discord";
 import { frameMessage, ingestIntoChat, ingestedOriginBlocks, pendingMessages, setMark } from "./surfaces";
@@ -89,7 +91,7 @@ async function setup(): Promise<void> {
 		kind: sv(kind.key),
 		model: sv(argValue("--model") || kind.model),
 		served_by: sv(await machineId()),
-		requires: lv(kind.requires),
+		requires: await requiresValueForKeys(kind.requires),
 		responsible_types: lv(kind.responsibleTypes),
 	};
 	if (argValue("--channel")) fields.channel = sv(argValue("--channel"));
@@ -265,13 +267,17 @@ async function handleSurface(s: Served, surface: ConvRef): Promise<boolean> {
 async function serve(): Promise<void> {
 	const inboxOwner = `${await machineId()}:${crypto.randomUUID()}`;
 	setCapabilityRequestOwner(inboxOwner);
-	await publishCapabilities(await capabilities()); // register this machine before serving resolves against the roster
+	await publishMachine(); // register this machine before serving resolves against the roster
 	// Publish what a skill or login IS, as data, so a client can render its
 	// setup form without a compiled-in table (docs/descriptors.md).
 	await publishDescriptors();
 	// And what is TRUE here per skill and login: one row per (thing ×
 	// machine), carrying `error` where a view can see it.
 	await publishInstallationState();
+	// What this machine can DO, as one capability object per (skill/login ×
+	// this machine) linking its install row - after the installs exist, so
+	// every link lands. Invisible to agents and the resolver until active.
+	await publishCapabilityObjects();
 	await convergeCatalogScope();
 	await convergeSpaceServing();
 	await convergeAgentKinds();
@@ -283,6 +289,8 @@ async function serve(): Promise<void> {
 	console.log("[harness] agent-list migration:", JSON.stringify(await migrateAgentLists()));
 	// space_default -> the space's own guest list; spaces no longer imply a mind.
 	console.log("[harness] space-default migration:", JSON.stringify(await migrateSpaceDefaults()));
+	// machine.capabilities -> capability objects; requires keys -> capability links.
+	console.log("[harness] capability migration:", JSON.stringify(await migrateCapabilities()));
 	// Checkout bindings: statuses refresh at boot and on every UI write.
 	validateBindings().catch((err) => console.error("[harness] binding validation failed:", err?.message ?? err));
 	const agents = await servedAgents();
@@ -454,7 +462,7 @@ async function serve(): Promise<void> {
 	async function requirementsHoldup(s: Served): Promise<string> {
 		const agent = await fetchObject(s.agentId).catch(() => null);
 		if (!agent) return "";
-		const required = [...new Set([...agentKind(str(agent.fields, "kind")).requires, ...list(agent.fields, "requires")])];
+		const required = [...new Set([...agentKind(str(agent.fields, "kind")).requires, ...(await requiredKeys(agent.fields))])];
 		const have = required.length > 0 ? await capabilities() : [];
 		const missing = required.filter((k) => !have.includes(k));
 		if (missing.length === 0) {
@@ -664,10 +672,11 @@ async function serve(): Promise<void> {
 		// A rule edit (repeat_set/clear, an occurrence completed or fired)
 		// may move the earliest occurrence.
 		if (obj.fields["repeat"]) void armScheduler();
-		// Serving inputs changed: capabilities on a machine object, a pin
-		// (served_by) or requires on any object. Refresh the resolver cache
-		// and re-arm, so the next event and the clock follow the new answer.
-		if (obj.typeKey === MACHINE_TYPE || obj.fields["served_by"] || obj.fields["requires"]) {
+		// Serving inputs changed: a machine or capability object, an install
+		// status flip, a pin (served_by) or requires on any object. Refresh
+		// the resolver cache and re-arm, so the next event and the clock
+		// follow the new answer.
+		if (obj.typeKey === MACHINE_TYPE || obj.typeKey === CAPABILITY_TYPE || obj.typeKey === INSTALL_TYPE || obj.fields["served_by"] || obj.fields["requires"]) {
 			invalidateServing();
 			void armScheduler();
 		}

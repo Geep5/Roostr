@@ -100,8 +100,8 @@ export function resetScheduler(): void {
 /**
  * Point the timer at the earliest unfired occurrence. Cheap to call on
  * every commit that could move it (a `repeat` edit, a `served_by` or
- * `requires` change, a machine's capabilities): concurrent calls coalesce
- * into one re-query.
+ * `requires` change, a capability or install flip): concurrent calls
+ * coalesce into one re-query.
  */
 export async function arm(): Promise<void> {
 	if (arming) {
