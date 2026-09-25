@@ -20,7 +20,7 @@ import { fileCapabilityHoldup } from "./tools";
 import { startAuthServer } from "./authserver";
 import { machineId, readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
-import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, publishMachine, servesHere } from "./machine";
+import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, publishMachine, serverOf, servesHere } from "./machine";
 import { publishDescriptors, INSTALL_TYPE } from "./descriptors";
 import { CAPABILITY_TYPE, requiredKeys, requiresValueForKeys } from "./capabilities";
 import { migrateCapabilities } from "./migrate-capabilities";
@@ -295,6 +295,28 @@ async function serve(): Promise<void> {
 	validateBindings().catch((err) => console.error("[harness] binding validation failed:", err?.message ?? err));
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
+
+	const NO_SERVER_ERROR = "no machine serves this agent: no server pin, no space default, and no machine's capabilities cover its requirements";
+
+	/**
+	 * The silence killer: an agent nothing serves gets the reason on its
+	 * `error` property (visible on its page, sortable), and loses it the
+	 * moment serving resolves again. Only this marker is touched - a "needs
+	 * x:" holdup badge belongs to requirementsHoldup.
+	 */
+	const convergeAgentErrors = async (): Promise<void> => {
+		for (const agent of await queryAll({ type: "agent" })) {
+			if (str(agent.fields, "spawn_parent") || str(agent.fields, "external_responder")) continue;
+			const error = str(agent.fields, "error");
+			const marked = error.startsWith("no machine serves this agent");
+			if ((await serverOf(agent.id)).machineId === "") {
+				if (!marked) await setField(agent.id, "error", sv(NO_SERVER_ERROR));
+			} else if (marked) {
+				await deleteField(agent.id, "error");
+			}
+		}
+	};
+	await convergeAgentErrors();
 
 	// ── External responders ─────────────────────────────────────────
 	// Agents another bot answers for: the harness stays silent on every
@@ -696,6 +718,7 @@ async function serve(): Promise<void> {
 		for (const id of next) agents.add(id);
 		void buildServed(agents).then((next) => {
 			served = next;
+			void convergeAgentErrors();
 			for (const s of served.values()) {
 				void publishSystemSnapshot(s.agentId, s.conv);
 				// Only if the chat is actually waiting on us. An unconditional

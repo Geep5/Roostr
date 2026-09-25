@@ -1,4 +1,5 @@
 import { fetchObject, mutate, setField, str, sv, type AgentEndpoint, type AgentMessage, type MailboxEntry, type ObjectJSON } from "./api";
+import { serverOf } from "./machine";
 
 /** A reply addresses the original group, not just the last speaker. */
 export function replyRecipients(message: AgentMessage, responder: AgentEndpoint): AgentEndpoint[] {
@@ -44,6 +45,20 @@ export async function deliverOutbox(object: ObjectJSON): Promise<void> {
 			// delivered this copy. Never decide from the caller's old snapshot.
 			const latest = entryOf(await fetchObject(object.id), candidate.message.id);
 			if (!latest || !needsDelivery(latest, recipient.objectId)) continue;
+			// A recipient nothing serves never processes its inbox: fail the
+			// delivery now, with the reason, instead of letting it sit. Only a
+			// definitive empty resolution fails - an unreachable resolver
+			// delivers normally, because unsure is not unserved.
+			const resolved = await serverOf(recipient.objectId).catch(() => null);
+			if (resolved !== null && resolved.machineId === "") {
+				await mutate("message_delivery_error", {
+					object_id: object.id,
+					message_id: latest.message.id,
+					recipient_object_id: recipient.objectId,
+					error: "no machine serves this object",
+				});
+				continue;
+			}
 			try {
 				await mutate("message_deliver", {
 					sender_object_id: object.id,

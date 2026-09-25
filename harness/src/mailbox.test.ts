@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mutate, type AgentMessage, type MailboxEntry, type ObjectJSON } from "./api";
 import { claimMessage, deliverOutbox, finishMessage, pendingInbox, recoverInbox, replyRecipients, sendMessage } from "./mailbox";
+import { invalidateServing } from "./machine";
 
 const originalFetch = globalThis.fetch;
 let previousRoot: string | undefined;
@@ -12,6 +13,7 @@ let root = "";
 beforeEach(async () => {
 	previousRoot = process.env.GLON_DATA;
 	root = await mkdtemp(join(tmpdir(), "roostr-mailbox-"));
+	invalidateServing();
 	await writeFile(join(root, "api-token"), "a".repeat(64), { mode: 0o600 });
 	process.env.GLON_DATA = root;
 });
@@ -50,9 +52,17 @@ function mailboxServer() {
 	const objects = new Map(["a", "b", "c"].map((id) => [id, object(id)]));
 	const failing = new Set<string>();
 	const loseResponse = new Set<string>();
+	const unserved = new Set<string>();
 	const deliveryAttempts: string[] = [];
 	globalThis.fetch = (async (input, init) => {
 		const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+		if (path === "/api/serving") {
+			const body = JSON.parse(String(init?.body));
+			const out: Record<string, { machineId: string; reason: string; requires: string[]; candidates: string[] }> = {};
+			for (const id of body.objectIds ?? []) out[id] = { machineId: unserved.has(id) ? "" : "machine-1", reason: "space", requires: [], candidates: [] };
+			return Response.json(out);
+		}
+
 		if (path.startsWith("/api/objects/")) {
 			const found = objects.get(path.slice("/api/objects/".length));
 			return Response.json(found ?? {}, { status: found ? 200 : 404 });
@@ -104,7 +114,7 @@ function mailboxServer() {
 		}
 		return Response.json({ ok: true });
 	}) as typeof fetch;
-	return { objects, failing, loseResponse, deliveryAttempts };
+	return { objects, failing, loseResponse, unserved, deliveryAttempts };
 }
 
 test("an interrupted group delivery retains the source and resumes from durable state after restart", async () => {
@@ -135,6 +145,17 @@ test("a lost delivery response cannot turn an already durable delivery into a fa
 	expect(server.objects.get("a")!.mailbox![0].deliveries.map((delivery) => delivery.status)).toEqual(["delivered", "delivered"]);
 	expect(server.objects.get("b")!.mailbox!.map((entry) => entry.message.id)).toEqual(["question"]);
 	expect(server.deliveryAttempts).toEqual(["b", "c"]);
+});
+test("delivery to a recipient no machine serves fails with the reason instead of sitting", async () => {
+	const server = mailboxServer();
+	server.unserved.add("c");
+	await sendMessage(message());
+	await deliverOutbox(server.objects.get("a")!);
+	const deliveries = server.objects.get("a")!.mailbox![0].deliveries;
+	expect(deliveries.map((delivery) => delivery.status)).toEqual(["delivered", "failed"]);
+	expect(deliveries[1].error).toBe("no machine serves this object");
+	expect(server.objects.get("c")!.mailbox!.map((entry) => entry.message.id)).toEqual([]);
+	invalidateServing();
 });
 
 test("restart recovery fails stranded work without replaying completed, historical, or current-owner turns", async () => {
