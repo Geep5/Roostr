@@ -143,6 +143,46 @@ export async function requiresValueForKeys(keys: string[]): Promise<ValueJSON> {
 	}
 	return { valuesValue: { items } };
 }
+/**
+ * The space each capability key belongs to. One vault scan: the space whose
+ * objects require the key most, then a space named like the capability,
+ * else the vault's default (oldest) space. syncCapabilities converges every
+ * capability object's `channel` to this; install rows follow it.
+ */
+async function integrationSpaces(seeds: CapabilitySeed[], channels: QueryRow[]): Promise<Map<string, string>> {
+	const live = new Set(channels.map((c) => c.id));
+	const capKeyById = new Map((await queryAll({ type: CAPABILITY_TYPE })).map((r) => [r.id, str(r.fields, "key")]));
+	// key -> channel -> objects requiring it there
+	const usage = new Map<string, Map<string, number>>();
+	for (const row of await queryAll({})) {
+		const ch = str(row.fields, "channel");
+		if (!ch || !live.has(ch)) continue;
+		for (const item of requiresItems(row.fields)) {
+			const key = item.stringValue || capKeyById.get(item.linkValue?.targetId ?? "") || "";
+			if (!key) continue;
+			const byChannel = usage.get(key) ?? new Map<string, number>();
+			byChannel.set(ch, (byChannel.get(ch) ?? 0) + 1);
+			usage.set(key, byChannel);
+		}
+	}
+	const home = [...channels].sort((a, b) => a.createdAt - b.createdAt)[0]?.id ?? "";
+	const out = new Map<string, string>();
+	for (const seed of seeds) {
+		const byChannel = usage.get(seed.key);
+		const best = byChannel ? [...byChannel.entries()].sort((a, b) => b[1] - a[1])[0][0] : "";
+		if (best) {
+			out.set(seed.key, best);
+			continue;
+		}
+		const named = channels.find((c) => {
+			const n = str(c.fields, "name").toLowerCase();
+			return n && (n === seed.key.toLowerCase() || n === seed.name.toLowerCase());
+		});
+		out.set(seed.key, named?.id ?? home);
+	}
+	return out;
+}
+
 
 /**
  * Reconcile this machine's capability objects with `seeds` (the skills and
@@ -160,20 +200,28 @@ export async function syncCapabilities(seeds: CapabilitySeed[]): Promise<void> {
 		const id = await machineId();
 		const installs = await fetchInstallations();
 		const installIdFor = (key: string) => installs.find((i) => i.machineId === id && i.key === key && !i.account)?.id ?? "";
+		const channels = await queryAll({ type: "channel" });
+		const spaces = await integrationSpaces(seeds, channels);
 		const mine = (await queryAll({ type: CAPABILITY_TYPE })).filter((r) => linkTarget(r.fields, "served_by") === id);
 		const wanted = new Map(seeds.map((s) => [s.key, s]));
 		for (const [key, seed] of wanted) {
 			const installId = installIdFor(key);
+			const space = spaces.get(key) ?? "";
 			const hit = mine.find((r) => str(r.fields, "key") === key);
 			if (!hit) {
 				await createObject(seed.name, CAPABILITY_TYPE, {
 					key: sv(key),
 					served_by: linkValue(id),
 					...(installId ? { install: linkValue(installId) } : {}),
+					...(space ? { channel: sv(space) } : {}),
 					description: sv(seed.description),
 				});
 				continue;
 			}
+			// The channel is machine-derived, not a preference: an integration
+			// belongs to the space it serves, and rows created before that rule
+			// carry the daemon's creation fallback - converge those too.
+			if (space && str(hit.fields, "channel") !== space) await setField(hit.id, "channel", sv(space));
 			if (linkTarget(hit.fields, "install") !== installId) {
 				if (installId) await setField(hit.id, "install", linkValue(installId));
 				else await deleteField(hit.id, "install");

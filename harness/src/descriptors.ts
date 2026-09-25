@@ -246,6 +246,8 @@ export interface InstallationRow {
 	auth: AuthMethod | "";
 	error: string;
 	checkedAt: number;
+	/** Owning space; "" for rows published before installs followed their capability. */
+	channel: string;
 }
 
 function rowToInstallation(r: { id: string; fields: Record<string, ValueJSON> }): InstallationRow {
@@ -258,6 +260,7 @@ function rowToInstallation(r: { id: string; fields: Record<string, ValueJSON> })
 		auth: (str(r.fields, "auth") || "") as AuthMethod | "",
 		error: str(r.fields, "error"),
 		checkedAt: r.fields["checked_at"]?.intValue ?? 0,
+		channel: str(r.fields, "channel"),
 	};
 }
 
@@ -292,6 +295,18 @@ export async function publishInstallation(key: string, state: InstallationState)
 	const id = await machineId();
 	const host = hostname();
 	const hit = (await fetchInstallations()).find((row) => row.machineId === id && row.key === key && (key !== "google" || row.account === (state.account ?? "")));
+	// An install lives in its integration's space: this machine's capability
+	// object for the key (whose channel a human can re-file), else any
+	// machine's, else the vault's default space. Converges pre-existing rows
+	// that were stamped with the daemon's creation fallback.
+	const caps = await queryAll({ type: "capability" });
+	const capOf = (r: (typeof caps)[number]) => r.fields["served_by"]?.linkValue?.targetId ?? r.fields["served_by"]?.stringValue ?? "";
+	const cap = caps.find((r) => str(r.fields, "key") === key && capOf(r) === id) ?? caps.find((r) => str(r.fields, "key") === key);
+	let channel = cap ? str(cap.fields, "channel") : "";
+	if (!channel) {
+		const channels = await queryAll({ type: "channel" });
+		channel = [...channels].sort((a, b) => a.createdAt - b.createdAt)[0]?.id ?? "";
+	}
 	const now = Date.now();
 	const wanted: Record<string, ValueJSON> = {
 		key: sv(key),
@@ -300,6 +315,7 @@ export async function publishInstallation(key: string, state: InstallationState)
 		account: sv(state.account ?? ""),
 		auth: sv(state.auth ?? ""),
 		error: sv(state.error ?? ""),
+		...(channel ? { channel: sv(channel) } : {}),
 		checked_at: iv(now),
 	};
 	if (!hit) {
@@ -315,6 +331,7 @@ export async function publishInstallation(key: string, state: InstallationState)
 		account: hit.account,
 		auth: hit.auth,
 		error: hit.error,
+		channel: hit.channel,
 	};
 	const changed = Object.entries(wanted).filter(([field, value]) => {
 		if (field === "checked_at") return false;
