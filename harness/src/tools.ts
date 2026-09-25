@@ -28,7 +28,8 @@ import {
 } from "./api";
 import { invalidateServing, machines, serverOf } from "./machine";
 import { machineId } from "./roster";
-import { CATALOG, fileHoldup, listHoldups, skillReady } from "./skillmgr";
+import { CATALOG, fileHoldup, skillReady } from "./skillmgr";
+import { myInstallations, type InstallationRow } from "./descriptors";
 import { browserProfileDir, credentialStatus } from "./credentials";
 import { credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
 import { isAgentAuthor } from "./surfaces";
@@ -578,10 +579,10 @@ const TOOLS: RegisteredTool[] = [
 				}
 			}
 			if (msgs.length > 0) out.push("", "LATEST HUMAN MESSAGES:", ...msgs.slice(-5));
-			const holdups = await listHoldups().catch(() => []);
-			if (holdups.length > 0) {
+			const failing = [...(await myInstallations().catch(() => new Map<string, InstallationRow>())).values()].filter((r) => r.error !== "");
+			if (failing.length > 0) {
 				out.push("", "OPEN HOLDUPS (capabilities missing):");
-				for (const h of holdups.slice(0, 5)) out.push(`- ${h.capability}: ${h.error.slice(0, 140)} (x${h.count})`);
+				for (const r of failing.slice(0, 5)) out.push(`- ${r.key}: ${r.error.slice(0, 140)}`);
 			}
 			return out.join("\n");
 		},

@@ -10,9 +10,8 @@ import { SimplePool, finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
 import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
-import { clearHoldup, listHoldups, machineLocalState, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
+import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, finishCapabilityLogin, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
-import { deleteField, fetchObject, str } from "./api";
 import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
 import { WorkspaceAccessError } from "./workspace";
 import type { SpaceJoinLink } from "./nostrsync";
@@ -189,13 +188,6 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					onRosterChange(next);
 					return json({ ok: true, roster: next });
 				}
-				if (req.method === "GET" && url.pathname === "/machine-state") {
-					// The machine's private ledger: holdups, live job phases, job
-					// logs. Everything the panel shows ABOUT capabilities comes
-					// from descriptor/install/capability objects instead.
-					const [holdups, local] = await Promise.all([listHoldups(), machineLocalState()]);
-					return json({ holdups, ...local });
-				}
 				if (req.method === "GET" && url.pathname === "/workspace") {
 					const { readBinding } = await import("./workspace");
 					const space = url.searchParams.get("space") ?? "";
@@ -225,22 +217,6 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					const body = (await req.json()) as { key?: string };
 					const { clearJoinRequest } = await import("./nostrsync");
 					await clearJoinRequest(body.key ?? "");
-					return json({ ok: true });
-				}
-				if (req.method === "POST" && url.pathname === "/skills/holdup-clear") {
-					const body = (await req.json()) as { id?: string };
-					// The holdup wrote an error badge on its object ("needs
-					// <cap>: ..."); clearing the holdup clears exactly that.
-					const h = (await listHoldups()).find((x) => x.id === (body.id ?? ""));
-					await clearHoldup(body.id ?? "");
-					if (h?.objectId) {
-						try {
-							const obj = await fetchObject(h.objectId);
-							if (str(obj.fields, "error").startsWith(`needs ${h.capability}:`)) await deleteField(h.objectId, "error");
-						} catch {
-							/* badge clearing is best-effort */
-						}
-					}
 					return json({ ok: true });
 				}
 				if (req.method === "POST" && url.pathname.startsWith("/skills/")) {

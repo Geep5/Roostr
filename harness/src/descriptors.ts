@@ -381,6 +381,19 @@ export async function clearInstallationError(key: string): Promise<void> {
 }
 
 /**
+ * A healed capability retracts its blocked-object badges: the tool that
+ * filed "needs <key>: …" is not around to retract it, so the sweep happens
+ * where the healing is observed. There is no holdup list anymore - the
+ * badge and the install error are the whole record, and both clear here.
+ */
+async function sweepHoldupBadges(key: string): Promise<void> {
+	const rows = await queryAll({ filters: [{ key: "error", condition: "notEmpty" }] }).catch(() => []);
+	for (const row of rows) {
+		if (str(row.fields, "error").startsWith(`needs ${key}:`)) await mutate("delete_field", { object_id: row.id, key: "error" }).catch(() => {});
+	}
+}
+
+/**
  * Publish this machine's installation rows for every catalog entry, from the
  * state that already decides `capabilities`. Called wherever capabilities are
  * published, so the detailed truth and the flat list never disagree.
@@ -401,8 +414,9 @@ export async function publishInstallations(
 		const status: InstallStatus = !st?.installed ? "missing" : st.enabled ? "active" : "disabled";
 		const previous = mine.get(entry.key);
 		// Only a working skill clears its own error; a missing or disabled one
-		// keeps whatever the last failure said.
+		// keeps whatever the last failure said. A heal also retracts badges.
 		const error = status === "active" ? "" : (previous?.error ?? "");
+		if (status === "active" && previous?.error) void sweepHoldupBadges(entry.key);
 		await publishInstallation(entry.key, { status, error, auth: "none" });
 	}
 	for (const credential of credentials) {
@@ -421,6 +435,7 @@ export async function publishInstallations(
 			});
 			continue;
 		}
+		if (previous?.error) void sweepHoldupBadges(credential.key);
 		await publishInstallation(credential.key, { status: "active", auth, account: previous?.account ?? "", error: "" });
 	}
 }

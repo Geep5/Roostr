@@ -18,7 +18,7 @@ import { machines, publishMachine } from "./machine";
 import { machineId } from "./roster";
 import { humanRef, postTo } from "./conv";
 import { CREDENTIALS, activeCredentialKeys, credentialStatus } from "./credentials";
-import { publishHoldup, publishInstallations, publishGoogleInstallations, clearInstallationError } from "./descriptors";
+import { publishHoldup, publishInstallations, publishGoogleInstallations } from "./descriptors";
 import { activeCapabilityKeys, syncCapabilities, type CapabilitySeed } from "./capabilities";
 import { objectText } from "./skills";
 
@@ -243,11 +243,8 @@ export async function publishInstallationState(): Promise<void> {
 	const state = await readState();
 	await publishInstallations(state.skills, credentialStatus());
 	await publishGoogleInstallations();
-	// Holdups filed before rows existed would stay invisible forever, which
-	// is the exact failure this replaces: mirror the standing ones once.
-	for (const holdup of state.holdups ?? []) {
-		await publishHoldup(holdup.capability, holdup.error);
-	}
+	// Holdups are install errors now; the file's old list is not replayed -
+	// a stale row would re-break a healed install on every boot.
 }
 
 /**
@@ -287,38 +284,14 @@ export async function convergeCatalogScope(): Promise<void> {
 	}
 }
 
-// ── Holdups: the machine's ledger of blocked capability calls ─────
+// ── Holdups: blocked capability calls ─────
 //
-// Filed by brokered tools when a capability is missing or broken;
-// listed in the Machine panel; cleared by the human after fixing.
-
-export async function listHoldups(): Promise<Holdup[]> {
-	return (await readState()).holdups ?? [];
-}
+// A holdup IS the installation's `error` row now - visible, sortable, and
+// self-healing when the capability next publishes active. There is no list
+// to clear; the machine-local ledger that used to back one is gone.
 
 export async function fileHoldup(h: Omit<Holdup, "id" | "count" | "firstAt" | "updatedAt">): Promise<void> {
-	const state = await readState();
-	state.holdups ??= [];
-	const existing = state.holdups.find((x) => x.capability === h.capability && x.agentId === h.agentId);
-	if (existing) {
-		existing.error = h.error;
-		existing.count += 1;
-		existing.updatedAt = Date.now();
-	} else {
-		state.holdups.push({ ...h, id: crypto.randomUUID(), count: 1, firstAt: Date.now(), updatedAt: Date.now() });
-	}
-	await writeState(state);
-	// Until now a holdup only ever existed in this file: no view, no query,
-	// no badge. Mirror it onto the installation's `error` so it is a row.
 	void publishHoldup(h.capability, h.error);
-}
-
-export async function clearHoldup(id: string): Promise<void> {
-	const state = await readState();
-	const gone = (state.holdups ?? []).find((x) => x.id === id);
-	state.holdups = (state.holdups ?? []).filter((x) => x.id !== id);
-	await writeState(state);
-	if (gone) void clearInstallationError(gone.capability);
 }
 
 /** Is a catalog capability ready to serve? Reason strings are shown to agents and humans. */
@@ -340,19 +313,6 @@ interface Job {
 
 const jobs = new Map<string, Job>();
 
-/**
- * The machine's private execution state: live job phases and the last log
- * per key. Served at /machine-state; statuses that belong in the DAG are
- * published onto installation objects instead (publishInstallations).
- */
-export async function machineLocalState(): Promise<{ phases: Record<string, string>; logs: Record<string, string> }> {
-	const phases: Record<string, string> = {};
-	for (const [key, job] of jobs) phases[key] = job.phase;
-	const logs: Record<string, string> = {};
-	const state = await readState();
-	for (const [key, s] of Object.entries(state.skills)) if (s.log) logs[key] = s.log;
-	return { phases, logs };
-}
 
 // -- Helpers ------------------------------------------------------
 
