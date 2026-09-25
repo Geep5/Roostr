@@ -10,9 +10,7 @@ import { SimplePool, finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
 import { agentTurnStatus } from "./index";
 import { readRoster, setEnabled } from "./roster";
-import { clearHoldup, listHoldups, skillStatus, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
-import { credentialStatus } from "./credentials";
-import { listGoogleAccounts } from "./google";
+import { clearHoldup, listHoldups, machineLocalState, setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, finishCapabilityLogin, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
 import { deleteField, fetchObject, str } from "./api";
 import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
@@ -191,9 +189,12 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					onRosterChange(next);
 					return json({ ok: true, roster: next });
 				}
-				if (req.method === "GET" && url.pathname === "/skills") {
-					const [skills, holdups] = await Promise.all([skillStatus(), listHoldups()]);
-					return json({ skills, holdups });
+				if (req.method === "GET" && url.pathname === "/machine-state") {
+					// The machine's private ledger: holdups, live job phases, job
+					// logs. Everything the panel shows ABOUT capabilities comes
+					// from descriptor/install/capability objects instead.
+					const [holdups, local] = await Promise.all([listHoldups(), machineLocalState()]);
+					return json({ holdups, ...local });
 				}
 				if (req.method === "GET" && url.pathname === "/workspace") {
 					const { readBinding } = await import("./workspace");
@@ -225,12 +226,6 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					const { clearJoinRequest } = await import("./nostrsync");
 					await clearJoinRequest(body.key ?? "");
 					return json({ ok: true });
-				}
-				if (req.method === "GET" && url.pathname === "/credentials") {
-					return json({ credentials: credentialStatus() });
-				}
-				if (req.method === "GET" && url.pathname === "/google/accounts") {
-					return json({ accounts: await listGoogleAccounts() });
 				}
 				if (req.method === "POST" && url.pathname === "/skills/holdup-clear") {
 					const body = (await req.json()) as { id?: string };

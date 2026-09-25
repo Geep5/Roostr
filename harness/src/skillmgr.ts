@@ -340,6 +340,20 @@ interface Job {
 
 const jobs = new Map<string, Job>();
 
+/**
+ * The machine's private execution state: live job phases and the last log
+ * per key. Served at /machine-state; statuses that belong in the DAG are
+ * published onto installation objects instead (publishInstallations).
+ */
+export async function machineLocalState(): Promise<{ phases: Record<string, string>; logs: Record<string, string> }> {
+	const phases: Record<string, string> = {};
+	for (const [key, job] of jobs) phases[key] = job.phase;
+	const logs: Record<string, string> = {};
+	const state = await readState();
+	for (const [key, s] of Object.entries(state.skills)) if (s.log) logs[key] = s.log;
+	return { phases, logs };
+}
+
 // -- Helpers ------------------------------------------------------
 
 async function sh(cmd: string): Promise<{ ok: boolean; out: string }> {
@@ -421,21 +435,6 @@ export async function setSkillPrompt(key: string, text: string): Promise<void> {
 	await mutate("block_add", { object_id: id, block: { content: { text: { text, style: 0 } } } });
 }
 
-// -- Status -------------------------------------------------------
-
-export interface SkillStatus {
-	key: string;
-	name: string;
-	description: string;
-	phase: SkillPhase;
-	installed: boolean;
-	log: string;
-	authHint?: string;
-	/** The live prompt body from the skill object (empty until seeded). */
-	prompt: string;
-	/** The catalog's stock prompt - the "reinstall" target. */
-	defaultPrompt: string;
-}
 
 /** Local execution state without loading prompts or running install/auth gates. */
 export async function skillOperationState(key: string): Promise<{ phase: SkillPhase; installed: boolean }> {
@@ -445,38 +444,6 @@ export async function skillOperationState(key: string): Promise<{ phase: SkillPh
 	return { phase, installed: state?.installed ?? false };
 }
 
-export async function skillStatus(): Promise<SkillStatus[]> {
-	const state = await readState();
-	const prompts = new Map<string, string>();
-	for (const c of CATALOG) {
-		try {
-			const id = await findSkillObject(c);
-			prompts.set(c.key, id ? objectText(await fetchObject(id)) : "");
-		} catch {
-			prompts.set(c.key, "");
-		}
-	}
-	return CATALOG.map((c) => {
-		const job = jobs.get(c.key);
-		const s = state.skills[c.key];
-		let phase: SkillPhase = "off";
-		if (job) phase = job.phase;
-		else if (s?.enabled) phase = "on";
-		else if (s?.log?.startsWith("[needs-auth]")) phase = "needs-auth";
-		else if (s?.log?.startsWith("[failed]")) phase = "failed";
-		return {
-			key: c.key,
-			name: c.name,
-			description: c.description,
-			phase,
-			installed: s?.installed ?? false,
-			log: job ? job.log.join("") : (s?.log ?? ""),
-			authHint: c.authHint,
-			prompt: prompts.get(c.key) ?? "",
-			defaultPrompt: c.skillBody,
-		};
-	});
-}
 
 // -- Gates --------------------------------------------------------
 
