@@ -1041,7 +1041,7 @@ relation_value_cascade :: proc(states: map[string]^Object_State, object_id: stri
 // Types that never have an agent of their own; an `agent` field on them
 // means something else (a chat's owner, an installation's requester).
 // Mirrors the harness's UNMINTABLE set (harness/src/index.ts).
-AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "type", "template", "skill", "descriptor", "install", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
+AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "type", "skill", "descriptor", "install", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
 
 /** Agents on an object's guest list. `agent` was a single string before it became a link list; both shapes read. */
 object_agents :: proc(fields: [dynamic]Value_Entry, allocator := context.temp_allocator) -> [dynamic]string {
