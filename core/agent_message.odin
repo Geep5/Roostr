@@ -551,9 +551,14 @@ message_mutation :: proc(plan: ^Mutation_Plan, parsed: json.Value, input: Mutati
 	plan.result["claimed"] = json.Boolean(false)
 	if m.historical do return ""
 	switch status {
+	case "held":
+		// Delivered but unrunnable right now (missing requirements): visible,
+		// carries the reason, and stays claimable - not a terminal failure.
+		if current.status != "pending" && current.status != "held" do return ""
+		return message_write_status(plan, input, s, m, "", Message_Status{status = "held", error = json_str(parsed, "error")})
 	case "processing":
 		if owner == "" do return "processing owner required"
-		if current.status != "pending" && current.status != "awaiting_approval" do return ""
+		if current.status != "pending" && current.status != "awaiting_approval" && current.status != "held" do return ""
 		if err := message_write_status(plan, input, s, m, "", Message_Status{status = "processing", owner = owner}); err != "" do return err
 		plan.result["claimed"] = json.Boolean(true)
 		return ""

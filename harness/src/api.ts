@@ -61,7 +61,7 @@ export interface MessageDelivery {
 }
 
 export interface MessageProcessing {
-	status: "pending" | "awaiting_approval" | "processing" | "processed" | "failed";
+	status: "pending" | "awaiting_approval" | "processing" | "processed" | "failed" | "held";
 	owner: string;
 	error: string;
 	at: number;

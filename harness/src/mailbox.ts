@@ -99,7 +99,8 @@ export async function finishMessage(objectId: string, messageId: string, owner: 
 export function pendingInbox(object: ObjectJSON, agentId: string): MailboxEntry[] {
 	return (object.mailbox ?? []).filter((entry) =>
 		entry.incoming && !entry.message.historical && !entry.message.operation &&
-		entry.processing.status === "pending" &&
+		// "held" is pending with a reason attached: re-checked every pump, claimed when it heals.
+		(entry.processing.status === "pending" || entry.processing.status === "held") &&
 		entry.message.recipients.some((recipient) => recipient.objectId === object.id && recipient.agentId === agentId),
 	).sort((a, b) => a.message.sentAt - b.message.sentAt ||
 		(a.message.id < b.message.id ? -1 : a.message.id > b.message.id ? 1 : 0));

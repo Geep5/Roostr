@@ -444,7 +444,7 @@ async function serve(): Promise<void> {
 			}
 			const recipients = new Map<string, { objectId: string; agentId: string }>();
 			for (const entry of object.mailbox ?? []) {
-				if (!entry.incoming || entry.message.historical || entry.message.operation || entry.processing.status !== "pending") continue;
+				if (!entry.incoming || entry.message.historical || entry.message.operation || (entry.processing.status !== "pending" && entry.processing.status !== "held")) continue;
 				for (const endpoint of entry.message.recipients) {
 					if (endpoint.objectId === objectId && endpoint.agentId) recipients.set(endpoint.agentId, endpoint);
 				}
@@ -455,7 +455,6 @@ async function serve(): Promise<void> {
 			}
 		} catch (error) {
 			console.error(`[harness] mailbox ${objectId}:`, error);
-		} finally {
 			mailboxInFlight.delete(objectId);
 		}
 	}
@@ -503,6 +502,18 @@ async function serve(): Promise<void> {
 	}
 
 	/**
+	 * A held turn still owes the reader its reason: stamp it on the pending
+	 * inbox entry's processing receipt (stays pending - the work runs when
+	 * the requirement heals and a claim overwrites the receipt).
+	 */
+	async function holdInboxEntry(surface: ConvRef, agentId: string, reason: string): Promise<void> {
+		const object = await fetchObject(surface.objectId).catch(() => null);
+		const entry = object ? pendingInbox(object, agentId)[0] : undefined;
+		if (!entry) return;
+		await mutate("message_processing", { object_id: surface.objectId, message_id: entry.message.id, status: "held", owner: "", error: reason }).catch(() => {});
+	}
+
+	/**
 	 * Hold the agent's turn slot around `body`: status reporting, error
 	 * capture, then the drain (chat first, queued surfaces after). Resolves
 	 * to the failure message, "" on success - the scheduler records it.
@@ -521,6 +532,7 @@ async function serve(): Promise<void> {
 		const held = await requirementsHoldup(s);
 		if (held) {
 			report("error", held);
+			await holdInboxEntry(surface, s.agentId, held);
 			return held;
 		}
 		busy.add(s.agentId);
