@@ -20,10 +20,28 @@
  * it as `served_by` and whose install is active.
  */
 
-import { hostname } from "node:os";
+import { execSync } from "node:child_process";
+import { hostname, platform } from "node:os";
 import { createObject, queryAll, servingFor, setField, str, sv, type Serving, type ValueJSON } from "./api";
 import { machineId } from "./roster";
 import { agentSubject } from "./conv";
+
+/**
+ * The computer's stable display name: the human-chosen ComputerName on
+ * macOS, the hostname elsewhere. `os.hostname()` on a Mac is the mDNS
+ * name, which grows a -842/-874 suffix every time the router reassigns it -
+ * the machine object looked "newly renamed" on every boot.
+ */
+function stableHostName(): string {
+	if (platform() === "darwin") {
+		try {
+			return execSync("scutil --get ComputerName", { encoding: "utf8" }).trim() || hostname();
+		} catch {
+			return hostname();
+		}
+	}
+	return hostname();
+}
 
 export const MACHINE_TYPE = "machine";
 
@@ -111,11 +129,10 @@ export async function convergeSpaceServing(): Promise<void> {
 /**
  * Register this machine: create its object on first call, keep `name` at
  * the hostname. Capabilities no longer ride on the machine object - the
- * capability objects (capabilities.ts) are what serving resolves against.
  */
 export async function publishMachine(): Promise<void> {
 	const id = await machineId();
-	const host = hostname();
+	const host = stableHostName();
 	try {
 		const mine = (await queryAll({ type: MACHINE_TYPE })).find((m) => str(m.fields, "machine_id") === id);
 		if (!mine) {
@@ -124,7 +141,9 @@ export async function publishMachine(): Promise<void> {
 			invalidateServing();
 			return;
 		}
-		if (str(mine.fields, "name") !== host) {
+		// Rename only a transient (mDNS) or empty name - never a custom one.
+		const current = str(mine.fields, "name");
+		if (current !== host && (current === "" || current === hostname())) {
 			await setField(mine.id, "name", sv(host));
 			invalidateServing();
 		}
