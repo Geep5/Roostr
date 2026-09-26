@@ -1,16 +1,29 @@
 # Roostr
 
-Anytype-style notes on the **glon** substrate, built on Odin + Svelte:
-a native backend serving a content-addressed protobuf Change-DAG, with
-the block editor / queries / channels / discussions SPA as a pure
-client. Nostr-ready: your key is your identity, sync rides relays.
+A local-first workspace where every object has its own agent.
+
+Notes, tasks, people, projects: each is an object in a content-addressed
+protobuf Change-DAG, each object carries a mailbox, and any of them can
+be served by an agent. You talk to a thing where it lives — one object,
+or several gathered into a group exchange — and the answer lands in that
+object's own history. Agents run on machines you pair explicitly, ask a
+paired human before they act on any capability, and never see a
+credential: passwords, keys and tokens stay on the machine that approved
+them.
+
+The substrate is **glon**, built on Odin + Svelte: a native backend
+serving the Change-DAG, with the object editor / queries / channels /
+discussions SPA as a pure client. Your Nostr key is your identity, sync
+rides relays. Native and browser builds run the same Odin domain engine —
+the browser gets it as WebAssembly, so the web view works offline with a
+durable outbox and no account at all.
 
 (Formerly "glonOdin" — the TS reference implementation lives in
 `projekt/3/glon`.)
 
-Native and browser builds use the same Odin domain engine. Raw
-`~/.glon/changes/<objectId>/<hex>.pb` bytes remain authoritative; legacy
-content addresses are verified over their original bytes, not a re-encoding.
+Raw `~/.glon/changes/<objectId>/<hex>.pb` bytes remain authoritative;
+legacy content addresses are verified over their original bytes, not a
+re-encoding.
 
 ## Run
 

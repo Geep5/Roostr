@@ -3695,7 +3695,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -3933,7 +3933,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -4052,7 +4052,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -4171,7 +4171,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -4228,6 +4228,198 @@
            "stringValue": "bundled-type-prompt-new-id"
           }
          ]
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-model-new-id",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "new-id"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "model"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "shorttext"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Model"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧠"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 0
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-responsible_types-new-id",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "new-id"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "responsible_types"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "tag"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Responsible types"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧩"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 0
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
         }
        }
       }
@@ -7127,7 +7319,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -7365,7 +7557,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -7484,7 +7676,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -7603,7 +7795,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -7660,6 +7852,198 @@
            "stringValue": "bundled-type-prompt-s"
           }
          ]
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-model-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "model"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "shorttext"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Model"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧠"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 0
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-responsible_types-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "responsible_types"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "tag"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Responsible types"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧩"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 0
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
         }
        }
       }
@@ -9626,7 +10010,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -9864,7 +10248,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -9983,7 +10367,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -10102,7 +10486,7 @@
       "fieldSet": {
        "key": "hidden",
        "value": {
-        "boolValue": false
+        "boolValue": true
        }
       }
      },
@@ -10159,6 +10543,198 @@
            "stringValue": "bundled-type-prompt-s"
           }
          ]
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-model-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "model"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "shorttext"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Model"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧠"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 0
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-responsible_types-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "responsible_types"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "tag"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Responsible types"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧩"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 0
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
         }
        }
       }

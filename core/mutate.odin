@@ -1120,20 +1120,25 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// objects (type `capability`). A capability is only usable once it is
 	// served by a machine with an active install - before that it does not
 	// count for the resolver and is not offered to an agent.
-	{"served_by", "object", "Served by", "🖥️", false, false, 1},
+	{"served_by", "object", "Served by", "🖥️", true, false, 1},
 	{"requires", "object", "Requires", "🧩", true, false, 0},
 	// The object's guest list: agents a human (or one of those agents) may
 	// address here with @. Rendered as a link badge; its picker is limited to
 	// the space's agent type. Nothing answers an object without being on it.
-	{"agent", "object", "Agent", "🤖", false, false, 0},
+	// Agent-related properties are hidden from query/collection views by
+	// default (FeaturedProps shows them on the object page regardless).
+	{"agent", "object", "Agent", "🤖", true, false, 0},
 	// Which installations (a machine's credentials/logins) this object uses.
 	// Rendered as credential badges that read status from the resolved
 	// machine's install rows; secrets never enter the object.
-	{"install", "object", "Credentials", "🔌", false, false, 0},
+	{"install", "object", "Credentials", "🔌", true, false, 0},
 	// An agent's configuration is a system_prompt object: standing prompt,
 	// model, requires, skills. `prompt` links one; the harness reads it
 	// through the link, not a hardcoded kind.
-	{"prompt", "object", "System prompt", "🧠", false, false, 1},
+	{"prompt", "object", "System prompt", "🧠", true, false, 1},
+	// Per-agent overrides, set like any property (blank = follow the prompt).
+	{"model", "shorttext", "Model", "🧠", true, false, 0},
+	{"responsible_types", "tag", "Responsible types", "🧩", true, false, 0},
 	// A "current problem" badge: the scheduler, a holdup, an agent, or a
 	// human sets it; visible and editable like any property so views can
 	// filter and sort by it. Automation prefixes its messages ("run failed:",
