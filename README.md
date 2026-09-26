@@ -18,13 +18,6 @@ rides relays. Native and browser builds run the same Odin domain engine —
 the browser gets it as WebAssembly, so the web view works offline with a
 durable outbox and no account at all.
 
-(Formerly "glonOdin" — the TS reference implementation lives in
-`projekt/3/glon`.)
-
-Raw `~/.glon/changes/<objectId>/<hex>.pb` bytes remain authoritative;
-legacy content addresses are verified over their original bytes, not a
-re-encoding.
-
 ## Run
 
 ```bash
