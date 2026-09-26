@@ -85,6 +85,89 @@ POST /api/mutate             {action, ...} — create, block_add/update/move/rem
 GET  /api/events             SSE: {"objectId"} per committed change
 ```
 
+## For external machines (bots outside Roostr)
+
+A local agent that lives *outside* Roostr (a Discord bot, a CLI, a cron job)
+works the same way a Roostr agent does: it manipulates objects and, if it wants
+an agent to answer, configures one through properties. This is the contract.
+
+### The object model
+
+Everything is an object in a content-addressed Change-DAG, space-scoped.
+Types: `note`, `task`, `person`, `agent`, `capability`, `install`, `machine`,
+`system_prompt`, `channel` (a space). Objects carry typed **properties**; the
+same properties you set in the UI are the ones you set through the API.
+
+Read and write against the daemon (auth: `Authorization: Bearer <GLON_DATA/api-token>`):
+
+```bash
+# Query objects
+curl -X POST http://127.0.0.1:7333/api/query -H "Authorization: Bearer $TOK" \
+  -d '{"type":"task","filters":[{"key":"channel","condition":"equal","value":"<spaceId>"}]}'
+
+# Read one object (full state: fields, blocks, mailbox)
+curl http://127.0.0.1:7333/api/objects/<objectId> -H "Authorization: Bearer $TOK"
+
+# Write a property
+curl -X POST http://127.0.0.1:7333/api/mutate -H "Authorization: Bearer $TOK" \
+  -d '{"action":"set_field","object_id":"<objectId>","key":"status","value":{"stringValue":"In progress"}}'
+
+# Create an object
+curl -X POST http://127.0.0.1:7333/api/mutate -H "Authorization: Bearer $TOK" \
+  -d '{"action":"create","name":"My task","type_key":"task","fields":{"channel":{"stringValue":"<spaceId>"}}}'
+
+# Watch changes (SSE, one {"objectId"} per commit)
+curl http://127.0.0.1:7333/api/events -H "Authorization: Bearer $TOK"
+```
+
+### Configuring an agent through properties
+
+An agent is a blank object you configure by setting its properties — the same
+properties you'd click in the UI. There is no setup wizard and no `kind` field.
+
+- **`served_by`** (link → `machine` object): the computer it runs on.
+- **`prompt`** (link → `system_prompt` object): its configuration (standing
+  prompt, model, requires, skills). Edit or point at a different prompt object.
+- **`model`**, **`responsible_types`** (text/tag): per-agent overrides.
+- **`requires`** (links → `capability` objects): what the machine must provide.
+- **`install`** (links → `install` objects): credentials it authenticates with.
+
+To make a working agent: create the object, set `served_by` to a machine, set
+`prompt` to a `system_prompt` object, then enable it on that machine's roster:
+
+```bash
+curl -X POST http://127.0.0.1:7334/agents/toggle -H "Authorization: Bearer $TOK" \
+  -H "Content-Type: application/json" -d '{"id":"<agentId>","enabled":true}'
+```
+
+To address an agent: `POST /api/mutate` `chat_post` with `@<AgentName>` in the
+text on the object's `__discussion__` thread. A mention is the wake signal;
+nothing answers uninvited. The reply lands in the same thread.
+
+### Verifying an agent is working
+
+On the machine's harness (`:7334`, same bearer token):
+
+```bash
+# This machine's id and host
+curl http://127.0.0.1:7334/machine -H "Authorization: Bearer $TOK"
+
+# Every agent on the roster and which are currently served here
+curl http://127.0.0.1:7334/agents -H "Authorization: Bearer $TOK"
+# → { roster: [ids], serving: [ids currently answering] }
+
+# Live turn state: idle / working / error, with the surface and detail
+curl http://127.0.0.1:7334/agent/status -H "Authorization: Bearer $TOK"
+# → { agents: [{ id, name, icon, state, surface, detail, ts }] }
+```
+
+An agent is working when it is in `serving`, its state is `idle` or `working`
+(not `error`), and a `chat_post` with its `@Name` on a configured object gets a
+reply in `__discussion__`. An `error` state carries the reason (a missing
+capability, a credential that needs approval). Capability and credential
+requests that need a human are under `GET /capability-requests`; a paired human
+approves them (they never run on receipt).
+
 ## Verified
 
 - Native/WASM codec, replay, query, mutation and wire fixtures are in `core/` and
