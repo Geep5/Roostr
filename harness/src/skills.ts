@@ -12,7 +12,7 @@ import { fetchObject, query, queryAll, str, type ObjectJSON } from "./api";
 import { machines, serverOf } from "./machine";
 import { machineId } from "./roster";
 import { blockLine } from "./surfaces";
-import { agentKind } from "./kinds";
+import { DEFAULT_PROMPT, promptFor } from "./prompts";
 
 /**
  * Serialize an object's blocks in tree order.
@@ -61,8 +61,9 @@ export interface SkillListing {
  *
  * Spaces do not enter into it: an agent already belongs to exactly one,
  * so ownership is the finer grain and a global skill stays reachable
- * from anywhere. An agent's kind may narrow the list further (`skills`
- * on the kind, by skill name); empty means everything above.
+ * from anywhere. An agent's system prompt may narrow the list further
+ * (the prompt object's `skills` links, by skill name); empty means
+ * everything above.
  */
 export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 	// Dynamic: skillmgr imports objectText from this module, so a static
@@ -74,7 +75,7 @@ export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 	const ready = new Set(await capabilities());
 	const managed = new Set(CATALOG.map((c) => c.name.toLowerCase()));
 	const agent = agentId ? await fetchObject(agentId).catch(() => null) : null;
-	const only = new Set(agentKind(agent ? str(agent.fields, "kind") : "").skills.map((k) => k.toLowerCase()));
+	const only = new Set((agent ? await promptFor(agent) : DEFAULT_PROMPT).skills.map((k) => k.toLowerCase()));
 	const rows = await queryAll({ type: "skill" });
 	return rows
 		.map((r) => ({

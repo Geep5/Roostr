@@ -21,7 +21,7 @@ import { channelInstructions, listSkills, remoteCapabilitiesSection, skillsPromp
 import { credentialsPromptLine } from "./credentials";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceAt, workspaceContext, workspacePromptSection } from "./workspace";
-import { agentKind } from "./kinds";
+import { promptFor } from "./prompts";
 import { digest } from "./memory";
 import { authContractPrompt, authRequirementsOf, localAuthRegistry, resolveAuthRequirements } from "./authreq";
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
@@ -125,10 +125,11 @@ export interface SystemPart {
 async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: ConversationView, opts: RunOptions): Promise<SystemPart[]> {
 	// The object this transcript is about: the object naming this agent
 	// (`object.agent`) when the thread lives on it; nothing when the thread is
-	// the agent's own page or its space (those get the kind's standing prompt).
+	// the agent's own page or its space (those get the prompt's standing text).
 	const objectId = host.id === agent.id || host.typeKey === "channel" ? "" : host.id;
-	// The kind's standing prompt is the default a blank `system` falls back to.
-	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || (objectId ? OBJECT_AGENT_PRIMER : agentKind(str(agent.fields, "kind")).system) }];
+	// The prompt's standing prompt is the default a blank `system` falls back to.
+	const spec = await promptFor(agent);
+	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || (objectId ? OBJECT_AGENT_PRIMER : spec.system) }];
 	if (objectId) {
 		try {
 			const bc = await objectContext(objectId, str(agent.fields, "channel"));
@@ -168,7 +169,7 @@ async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: Conve
 	if (instructions) parts.push({ label: "Space instructions", text: instructions });
 	// Machine-local by design: this section exists only on the machine
 	// holding the checkout - which the serving gate guarantees is the one
-	// running this turn. An agent's own `repo_path` (a kind field) beats
+	// running this turn. An agent's own `repo_path` (an agent field) beats
 	// the space's binding.
 	try {
 		const repo = str(agent.fields, "repo_path");
@@ -258,7 +259,7 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		ctx.workspacePath = (await (repo ? workspaceAt(repo) : workspaceContext(ctx.channelId)).catch(() => null))?.path;
 		const ratio = tokenRatio(agent);
 		const cfg = compactionConfig(agent);
-		const model = str(agent.fields, "model") || agentKind(str(agent.fields, "kind")).model;
+		const model = str(agent.fields, "model") || (await promptFor(agent)).model;
 		// Re-read every iteration with everything else, so revoking the grant
 		// takes effect on the agent's next tool call rather than its next turn.
 		const tools = toolDefs(opts.template ?? "", ctx.depth, ctx.allowAsk);

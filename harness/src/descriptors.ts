@@ -26,7 +26,7 @@
 import { API, apiFetch, createObject, fetchObject, mutate, queryAll, str, sv, iv, type ValueJSON } from "./api";
 import { CREDENTIALS } from "./credentials";
 import { CATALOG } from "./skillmgr";
-import { AGENT_KINDS, type AgentKindEntry } from "./kinds";
+import { PROMPT_SEEDS, type AgentKindEntry } from "./prompts";
 import { machineId } from "./roster";
 import { listGoogleAccounts } from "./google";
 import { hostname } from "node:os";
@@ -158,7 +158,7 @@ export function catalogDescriptors(author: string): DescriptorJSON[] {
 	return [
 		...CATALOG.map((c) => skillDescriptor(c, author)),
 		...CREDENTIALS.map((c) => credentialDescriptor(c, author)),
-		...AGENT_KINDS.map((c) => agentDescriptor(c, author)),
+		...PROMPT_SEEDS.map((c) => agentDescriptor(c, author)),
 	];
 }
 

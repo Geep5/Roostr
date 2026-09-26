@@ -10,7 +10,7 @@
 import { expect, test } from "bun:test";
 import { catalogDescriptors } from "./descriptors";
 import { CREDENTIALS } from "./credentials";
-import { AGENT_KINDS } from "./kinds";
+import { PROMPT_SEEDS } from "./prompts";
 import { CATALOG } from "./skillmgr";
 
 const AUTHOR = "npub1fcppsmdf84swh33vqwklscppskw5j8tcu280n27ejlz53lvl5xcqxj0vl2";
@@ -18,7 +18,7 @@ const cards = catalogDescriptors(AUTHOR);
 const byKey = new Map(cards.map((c) => [c.key, c]));
 
 test("every catalog entry becomes exactly one card", () => {
-	expect(cards.length).toBe(CATALOG.length + CREDENTIALS.length + AGENT_KINDS.length);
+	expect(cards.length).toBe(CATALOG.length + CREDENTIALS.length + PROMPT_SEEDS.length);
 	expect(new Set(cards.map((c) => c.key)).size).toBe(cards.length);
 	for (const c of cards) {
 		expect(c.author).toBe(AUTHOR);

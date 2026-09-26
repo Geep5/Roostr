@@ -1130,6 +1130,10 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// Rendered as credential badges that read status from the resolved
 	// machine's install rows; secrets never enter the object.
 	{"install", "object", "Credentials", "🔌", false, false, 0},
+	// An agent's configuration is a system_prompt object: standing prompt,
+	// model, requires, skills. `prompt` links one; the harness reads it
+	// through the link, not a hardcoded kind.
+	{"prompt", "object", "System prompt", "🧠", false, false, 1},
 	// A "current problem" badge: the scheduler, a holdup, an agent, or a
 	// human sets it; visible and editable like any property so views can
 	// filter and sort by it. Automation prefixes its messages ("run failed:",
@@ -1204,7 +1208,7 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			if e.format != "" && e.format != r.format do append(&ops, Operation{kind = .Field_Set, key = "format", value = string_value(r.format)})
 			// Agent, served_by and install pickers are restricted to one bundled
 			// type; older rows predate the restriction and get it here.
-			if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" {
+			if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" || r.key == "prompt" {
 				target := r.key == "served_by" ? "machine" : r.key
 				types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
 				mutation_add(plan, input, e.id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
@@ -1228,7 +1232,7 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "options", value = list_value(empty)},
 		}
 		mutation_add(plan, input, id, ops)
-		if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" {
+		if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" || r.key == "prompt" {
 			// Picker restriction: the space's own bundled type (deterministic id).
 			target := r.key == "served_by" ? "machine" : r.key
 			types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
@@ -1326,6 +1330,9 @@ BUNDLED_TYPES :: []Bundled_Type{
 	// A capability: one skill offered by one machine. Served by that machine
 	// with an active install before it is usable or offered to an agent.
 	{"capability", "Capability", "🧩", "page"},
+	// An agent's configuration: standing prompt, model, requires, skills.
+	// An agent links one with `prompt`; there is no hardcoded kind.
+	{"system_prompt", "System prompt", "🧠", "page"},
 	// Minds are objects like everything else: a type row so they list in
 	// the sidebar and a bare "+ New" is a real agent the harness can adopt.
 	{"agent", "Agent", "🤖", "page"},

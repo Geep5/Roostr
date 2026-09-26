@@ -4120,6 +4120,125 @@
    {
     "author": "alice",
     "id": "",
+    "objectId": "bundled-rel-prompt-new-id",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "new-id"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "object"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "System prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧠"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 1
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-prompt-new-id",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-prompt-new-id"
+          }
+         ]
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
     "objectId": "bundled-rel-error-new-id",
     "ops": [
      {
@@ -5290,6 +5409,68 @@
        "key": "iconEmoji",
        "value": {
         "stringValue": "🧩"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "layout",
+       "value": {
+        "stringValue": "page"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-type-system_prompt-new-id",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "type"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "new-id"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "system_prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "System prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧠"
        }
       }
      },
@@ -7371,6 +7552,125 @@
    {
     "author": "alice",
     "id": "",
+    "objectId": "bundled-rel-prompt-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "object"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "System prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧠"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 1
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-prompt-s",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-prompt-s"
+          }
+         ]
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
     "objectId": "bundled-rel-error-s",
     "ops": [
      {
@@ -7627,6 +7927,68 @@
        "key": "iconEmoji",
        "value": {
         "stringValue": "🧩"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "layout",
+       "value": {
+        "stringValue": "page"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-type-system_prompt-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "type"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "system_prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "System prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧠"
        }
       }
      },
@@ -9689,6 +10051,125 @@
    {
     "author": "alice",
     "id": "",
+    "objectId": "bundled-rel-prompt-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "relation"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "format",
+       "value": {
+        "stringValue": "object"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "System prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧠"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "hidden",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "readOnly",
+       "value": {
+        "boolValue": false
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "maxCount",
+       "value": {
+        "intValue": 1
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "options",
+       "value": {
+        "valuesValue": {
+         "items": []
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-rel-prompt-s",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "object_types",
+       "value": {
+        "valuesValue": {
+         "items": [
+          {
+           "stringValue": "bundled-type-prompt-s"
+          }
+         ]
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
     "objectId": "bundled-rel-error-s",
     "ops": [
      {
@@ -10007,6 +10488,68 @@
        "key": "iconEmoji",
        "value": {
         "stringValue": "🧩"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "layout",
+       "value": {
+        "stringValue": "page"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "bundled",
+       "value": {
+        "boolValue": true
+       }
+      }
+     }
+    ],
+    "parentIds": [],
+    "timestamp": 1234
+   },
+   {
+    "author": "alice",
+    "id": "",
+    "objectId": "bundled-type-system_prompt-s",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "type"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "channel",
+       "value": {
+        "stringValue": "s"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "key",
+       "value": {
+        "stringValue": "system_prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "System prompt"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "iconEmoji",
+       "value": {
+        "stringValue": "🧠"
        }
       }
      },

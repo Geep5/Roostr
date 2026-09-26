@@ -23,7 +23,7 @@ import { addBlock, fetchObject, str, type BlockJSON, type ObjectJSON } from "./a
 import { addConvBlock, convBlocks, type ConvRef } from "./conv";
 import { passwordCredential } from "./credentials";
 import { requiredKeys } from "./capabilities";
-import { agentKind } from "./kinds";
+import { promptFor } from "./prompts";
 
 const DISCORD_API = "https://discord.com/api/v10";
 const POLL_MS = 3_000;
@@ -514,11 +514,11 @@ export function startDiscord(opts: {
 // ── Manager: pollers follow the served set ────────────────────────
 
 /**
- * Keep one poller per served agent whose kind talks to Discord: the kind
- * (or the agent's own `requires`) names `discord-bot`, the agent names a
- * channel, and this machine holds the token. Re-read every 15 s so an
- * agent adopted, reconfigured or dropped after boot follows without a
- * restart; `sync()` forces a pass.
+ * Keep one poller per served agent whose prompt talks to Discord: the
+ * system prompt (or the agent's own `requires`) names `discord-bot`, the
+ * agent names a channel, and this machine holds the token. Re-read every
+ * 15 s so an agent adopted, reconfigured or dropped after boot follows
+ * without a restart; `sync()` forces a pass.
  */
 export function startDiscordManager(host: {
 	served(): Array<{ agentId: string; objectId: string }>;
@@ -534,7 +534,7 @@ export function startDiscordManager(host: {
 			for (const { agentId, objectId } of host.served()) {
 				const agent = await fetchObject(agentId).catch(() => null);
 				if (!agent) continue;
-				const requires = [...agentKind(str(agent.fields, "kind")).requires, ...(await requiredKeys(agent.fields))];
+				const requires = [...(await promptFor(agent)).requires, ...(await requiredKeys(agent.fields))];
 				if (!requires.includes("discord-bot")) continue;
 				const cfg = discordConfigFor(agent);
 				if (!cfg) continue;

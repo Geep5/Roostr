@@ -10,8 +10,8 @@
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
-import { API, apiFetch, chatPost, deleteField, fetchObject, guestAgents, list, lv, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
-import { AGENT_KINDS, agentKind } from "./kinds";
+import { API, apiFetch, chatPost, deleteField, fetchObject, guestAgents, list, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
+import { PROMPT_SEEDS, ensureSystemPrompt, promptFor } from "./prompts";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
@@ -22,8 +22,9 @@ import { machineId, readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, publishMachine, serverOf, servesHere } from "./machine";
 import { publishDescriptors, INSTALL_TYPE } from "./descriptors";
-import { CAPABILITY_TYPE, requiredKeys, requiresValueForKeys } from "./capabilities";
+import { CAPABILITY_TYPE, linkValue, requiredKeys } from "./capabilities";
 import { migrateCapabilities } from "./migrate-capabilities";
+import { migratePrompts } from "./migrate-prompts";
 import { validateBindings } from "./workspace";
 import { startDiscordManager } from "./discord";
 import { chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, pendingMessages, setMark } from "./surfaces";
@@ -60,23 +61,12 @@ async function servedAgents(): Promise<Set<string>> {
 	return out;
 }
 
-/**
- * Backfill `kind` on agents minted before kinds existed: they were all
- * assistants, and the runner's defaults key on the field being present.
- */
-async function convergeAgentKinds(): Promise<void> {
-	for (const a of await queryAll({ type: "agent" })) {
-		if (str(a.fields, "spawn_parent") || str(a.fields, "kind")) continue;
-		await setField(a.id, "kind", sv("assistant"));
-	}
-}
-
 async function setup(): Promise<void> {
 	const name = argValue("--name") || "Agent";
 	const kindKey = argValue("--kind") || "assistant";
-	const kind = AGENT_KINDS.find((k) => k.key === kindKey);
-	if (!kind) {
-		console.log(`unknown kind "${kindKey}"; kinds: ${AGENT_KINDS.map((k) => k.key).join(", ")}`);
+	const seed = PROMPT_SEEDS.find((k) => k.key === kindKey);
+	if (!seed) {
+		console.log(`unknown kind "${kindKey}"; kinds: ${PROMPT_SEEDS.map((k) => k.key).join(", ")}`);
 		return;
 	}
 	const existing = await query({ type: "agent", filters: [{ key: "name", condition: "equal", value: name }] });
@@ -84,27 +74,29 @@ async function setup(): Promise<void> {
 		console.log(`agent "${name}" already exists: ${existing[0].id}`);
 		return;
 	}
-	// Same shape the website's /setup writes: the kind's defaults copied
-	// onto the object, this machine pinned as its server, non-secret kind
-	// fields as plain strings. Secrets go to the credential store, never here.
+	// The standing configuration is a system_prompt object the agent links:
+	// the seed's object in this space, created on first use and shared by
+	// every agent seeded from it here. Only per-agent overrides land on the
+	// agent object: an explicit --model, and the seed's non-secret setup
+	// fields. Secrets go to the credential store, never here.
+	const channel = argValue("--channel");
+	const prompt = await ensureSystemPrompt(seed, channel);
 	const fields: Record<string, ValueJSON> = {
-		kind: sv(kind.key),
-		model: sv(argValue("--model") || kind.model),
+		prompt: linkValue(prompt.id),
 		served_by: sv(await machineId()),
-		requires: await requiresValueForKeys(kind.requires),
-		responsible_types: lv(kind.responsibleTypes),
 	};
-	if (argValue("--channel")) fields.channel = sv(argValue("--channel"));
-	for (const f of kind.fields) {
+	if (channel) fields.channel = sv(channel);
+	if (argValue("--model")) fields.model = sv(argValue("--model"));
+	for (const f of seed.fields) {
 		if (f.secret) continue;
-		const value = argValue(`--${f.key}`) || kind.defaults[f.key];
+		const value = argValue(`--${f.key}`) || seed.defaults[f.key];
 		if (value) fields[f.key] = sv(value);
 	}
 	const { id } = await createObject(name, "agent", fields);
 	// Setup on this machine claims serving responsibility here — "mine"
 	// is a local fact, not a synced one.
 	await setEnabled(id, true);
-	console.log(`created ${kind.key} agent "${name}": ${id} (enabled on this machine${kind.requires.length ? `; requires ${kind.requires.join(", ")}` : ""})`);
+	console.log(`created ${seed.key} agent "${name}": ${id} (enabled on this machine; prompt "${seed.promptName}" ${prompt.created ? "created" : "linked"}${seed.requires.length ? `; requires ${seed.requires.join(", ")}` : ""})`);
 }
 
 interface Served {
@@ -112,7 +104,7 @@ interface Served {
 	/** The agent's home transcript on its own object. Turns on objects that name it run on those objects. */
 	conv: ConvRef;
 	channelId: string;
-	/** Type keys this agent is responsible for; "*" = everything else. Its kind's list when the object has none. */
+	/** Type keys this agent is responsible for; "*" = everything else. Its prompt's list when the object has none. */
 	types: string[];
 	name: string;
 	icon: string;
@@ -169,7 +161,7 @@ async function buildServedOne(agentId: string, defaultChannel: string, forObject
 		agentId,
 		conv,
 		channelId,
-		types: responsibleTypes(agent),
+		types: await responsibleTypes(agent),
 		name: str(agent.fields, "name") || agentId.slice(0, 8),
 		icon: str(agent.fields, "iconEmoji"),
 	};
@@ -185,9 +177,9 @@ async function transcriptFor(s: Served, surface: ObjectJSON): Promise<ConvRef> {
 	return agentThreadOn(await fetchObject(s.agentId), surface.id);
 }
 
-/** The object's own list when set (even empty), else the kind's default. */
-function responsibleTypes(agent: ObjectJSON): string[] {
-	return agent.fields["responsible_types"] ? list(agent.fields, "responsible_types") : agentKind(str(agent.fields, "kind")).responsibleTypes;
+/** The object's own list when set (even empty), else its prompt's. */
+async function responsibleTypes(agent: ObjectJSON): Promise<string[]> {
+	return agent.fields["responsible_types"] ? list(agent.fields, "responsible_types") : (await promptFor(agent)).responsibleTypes;
 }
 
 /** agentId → Served; rebuilt on roster change. */
@@ -280,7 +272,6 @@ async function serve(): Promise<void> {
 	await publishCapabilityObjects();
 	await convergeCatalogScope();
 	await convergeSpaceServing();
-	await convergeAgentKinds();
 	const migration = await migrateExchanges({ apply: true });
 	console.log("[harness] exchange migration:", JSON.stringify(migration));
 	// bound_object -> object.agent, after the exchange migration has read
@@ -291,6 +282,9 @@ async function serve(): Promise<void> {
 	console.log("[harness] space-default migration:", JSON.stringify(await migrateSpaceDefaults()));
 	// machine.capabilities -> capability objects; requires keys -> capability links.
 	console.log("[harness] capability migration:", JSON.stringify(await migrateCapabilities()));
+	// agent.kind -> a linked system_prompt object; after capabilities exist so
+	// the prompt's requires links land on capability objects.
+	console.log("[harness] prompt migration:", JSON.stringify(await migratePrompts()));
 	// Checkout bindings: statuses refresh at boot and on every UI write.
 	validateBindings().catch((err) => console.error("[harness] binding validation failed:", err?.message ?? err));
 	const agents = await servedAgents();
@@ -471,7 +465,7 @@ async function serve(): Promise<void> {
 	}
 
 	/**
-	 * Why the agent cannot run here, or "" when it can: its kind's
+	 * Why the agent cannot run here, or "" when it can: its prompt's
 	 * `requires` (and its own) name capabilities this machine lacks. The
 	 * resolver still says "pinned-uncapable" for it, so the agent stays
 	 * ours - it just does not take turns, and the holdup says why: filed
@@ -483,7 +477,7 @@ async function serve(): Promise<void> {
 	async function requirementsHoldup(s: Served): Promise<string> {
 		const agent = await fetchObject(s.agentId).catch(() => null);
 		if (!agent) return "";
-		const required = [...new Set([...agentKind(str(agent.fields, "kind")).requires, ...(await requiredKeys(agent.fields))])];
+		const required = [...new Set([...(await promptFor(agent)).requires, ...(await requiredKeys(agent.fields))])];
 		const have = required.length > 0 ? await capabilities() : [];
 		const missing = required.filter((k) => !have.includes(k));
 		if (missing.length === 0) {
@@ -653,7 +647,7 @@ async function serve(): Promise<void> {
 			const s = served.get(objectId);
 			if (s) {
 				const agent = await fetchObject(objectId).catch(() => null);
-				if (agent) s.types = responsibleTypes(agent);
+				if (agent) s.types = await responsibleTypes(agent);
 			}
 			return; // agent objects are not surfaces
 		}
@@ -812,7 +806,7 @@ async function serve(): Promise<void> {
 	});
 
 	// Discord channels are surfaces too: one poller per served agent whose
-	// kind talks to Discord, following `served` as agents come and go. The
+	// prompt talks to Discord, following `served` as agents come and go. The
 	// turn goes through withTurn, so a held-up agent answers nothing and
 	// the failure text is what the channel sees.
 	startDiscordManager({
