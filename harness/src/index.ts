@@ -26,7 +26,7 @@ import { CAPABILITY_TYPE, requiredKeys, requiresValueForKeys } from "./capabilit
 import { migrateCapabilities } from "./migrate-capabilities";
 import { validateBindings } from "./workspace";
 import { startDiscordManager } from "./discord";
-import { frameMessage, ingestIntoChat, ingestedOriginBlocks, pendingMessages, setMark } from "./surfaces";
+import { chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, pendingMessages, setMark } from "./surfaces";
 import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { migrateExchanges } from "./migrate-exchanges";
@@ -715,14 +715,36 @@ async function serve(): Promise<void> {
 			void armScheduler();
 		}
 		if (obj.typeKey === "agent") return; // other agents' brains
-		// ── A plain discussion post wakes no agent. The object's guest list
-		// (`object.agent`) is who MAY be addressed here; addressing is an
-		// @-mention, which arrives as a mailbox envelope and is pumped by
-		// pumpMailbox below. Nothing answers uninvited. ──
+		// ── One conversation per object (`__discussion__`). Humans and agents
+		// post there; an @-mention of a guest is the wake signal for that
+		// guest. A post with no tag wakes nobody; the reply lands in the same
+		// thread. Exchanges are only for explicit group/agent-to-agent asks. ──
 		if (guestAgents(obj.fields).length === 0 || externallyAnswered(obj)) return;
 		if (!(await servesHere(objectId))) return;
 		for (const aid of guestAgents(obj.fields)) void adoptForObject(obj, aid);
 		void pumpMailbox(objectId, obj);
+
+		// ── @-mentions in the human thread: wake each tagged guest. ──
+		await wakeMentionedGuests(obj);
+	}
+
+	/** Wake every guest the newest human discussion message @-mentions. */
+	async function wakeMentionedGuests(obj: ObjectJSON): Promise<void> {
+		const msgs = chatBlocks(obj, humanRef(obj.id))
+			.map((row, index) => ({ ...row, index, ts: Number(row.block.content.custom?.meta?.["ts"] ?? 0) }))
+			.sort((a, b) => a.ts - b.ts || a.index - b.index);
+		if (msgs.length === 0) return;
+		const newest = msgs[msgs.length - 1].block.content.custom?.meta?.["text"] ?? "";
+		if (!newest.includes("@")) return;
+		for (const aid of guestAgents(obj.fields)) {
+			const agent = await fetchObject(aid).catch(() => null);
+			if (!agent) continue;
+			const name = str(agent.fields, "name");
+			if (!name) continue;
+			if (!new RegExp(`@${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(newest)) continue;
+			const s2 = await adoptForObject(obj, aid);
+			if (s2) void drive(s2, humanRef(obj.id));
+		}
 	}
 
 	startAuthServer(agents, (next) => {
