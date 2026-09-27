@@ -8,7 +8,7 @@
  *   OMP lift: touched-object ids are carried across stacked compactions.
  */
 
-import { fetchObject, flag, str, type ObjectJSON } from "./api";
+import { choice, fetchObject, flag, str, type ObjectJSON } from "./api";
 import { addConvBlock, type ConvRef } from "./conv";
 import { estimateAskTokens, estimateTokens, findCutIndex, itemText, type ConversationView } from "./conversation";
 import { callLLM } from "./llm";
@@ -38,7 +38,7 @@ export function compactionConfig(obj: ObjectJSON): CompactionConfig {
 		contextWindow: numField("compaction_context_window", DEFAULT_CONTEXT_WINDOW),
 		reserveTokens: numField("compaction_reserve_tokens", DEFAULT_RESERVE_TOKENS),
 		keepRecentTokens: numField("compaction_keep_recent_tokens", DEFAULT_KEEP_RECENT_TOKENS),
-		model: str(obj.fields, "compaction_model") || str(obj.fields, "model") || "mock",
+		model: choice(obj.fields, "compaction_model") || choice(obj.fields, "model") || "mock",
 	};
 }
 

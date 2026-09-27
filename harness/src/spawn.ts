@@ -5,7 +5,8 @@
  * submit_result tool and persisted on the subagent object.
  */
 
-import { createObject, fetchObject, iv, setField, str, sv } from "./api";
+import { choice, createObject, fetchObject, iv, setField, str, sv } from "./api";
+import { promptFor } from "./prompts";
 import { runTurn } from "./runner";
 import { MAX_SPAWN_DEPTH, SPAWN_CONCURRENCY } from "./types";
 import type { ToolContext } from "./tools";
@@ -70,11 +71,15 @@ export async function spawnSubagent(task: string, templateName: string, parentCt
 
 	await semaphore.acquire();
 	try {
+		// The parent's effective model (its pick, else its prompt's) and its
+		// prompt object: a subagent runs on the same visible configuration.
+		const model = choice(parent.fields, "model") || (await promptFor(parent)).model;
 		const { id } = await createObject(`sub: ${task.slice(0, 48)}`, "agent", {
 			spawn_parent: sv(parentCtx.agentId),
 			spawn_depth: iv(parentCtx.depth + 1),
 			spawn_template: sv(template.name),
-			model: sv(str(parent.fields, "model") || "mock"),
+			model: sv(model),
+			...(parent.fields["prompt"] ? { prompt: parent.fields["prompt"] } : {}),
 			...(str(parent.fields, "channel") ? { channel: sv(str(parent.fields, "channel")) } : {}),
 		});
 

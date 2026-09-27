@@ -15,14 +15,15 @@
  * the `kind` field is deleted once the link lands, and a re-run finds
  * no `kind`.
  */
-import { deleteField, queryAll, setField, str } from "./api";
+import { deleteField, queryAll, setField, str, sv } from "./api";
 import { linkValue } from "./capabilities";
-import { DEFAULT_PROMPT, PROMPT_SEEDS, ensureSystemPrompt } from "./prompts";
+import { DEFAULT_PROMPT, DEFAULT_SYSTEM, LEGACY_DEFAULT_SYSTEM, PROMPT_SEEDS, SYSTEM_PROMPT_TYPE, ensureAgentPrompt, ensureSystemPrompt } from "./prompts";
 
-export async function migratePrompts(): Promise<{ created: number; reused: number; linked: number }> {
+export async function migratePrompts(): Promise<{ created: number; reused: number; linked: number; upgraded: number }> {
 	let created = 0;
 	let reused = 0;
 	let linked = 0;
+	let upgraded = 0;
 	for (const agent of await queryAll({ type: "agent", filters: [{ key: "kind", condition: "notEmpty" }] })) {
 		const key = str(agent.fields, "kind");
 		const seed = PROMPT_SEEDS.find((s) => s.key === key) ?? DEFAULT_PROMPT;
@@ -38,5 +39,26 @@ export async function migratePrompts(): Promise<{ created: number; reused: numbe
 			console.error(`[migrate] prompt cutover failed for "${name}":`, err instanceof Error ? err.message : err);
 		}
 	}
-	return { created, reused, linked };
+	// No agent runs on a prompt the UI does not show: every non-subagent
+	// without a live prompt link is pointed at its space's Assistant object.
+	for (const agent of await queryAll({ type: "agent" })) {
+		if (str(agent.fields, "spawn_parent")) continue;
+		try {
+			const before = agent.fields["prompt"];
+			const after = await ensureAgentPrompt({ ...agent, blocks: [], deleted: false, mailbox: [] });
+			if (JSON.stringify(after.fields["prompt"]) !== JSON.stringify(before)) linked++;
+		} catch (err) {
+			console.error(`[migrate] prompt link failed for ${agent.id.slice(0, 8)}:`, err instanceof Error ? err.message : err);
+		}
+	}
+	// The Assistant text used to live in two places (seeded object + a
+	// hardcoded object-agent primer). An Assistant object nobody edited still
+	// holds the old seed verbatim: give it the unified text. Edited ones stay.
+	for (const prompt of await queryAll({ type: SYSTEM_PROMPT_TYPE })) {
+		if (str(prompt.fields, "name") !== DEFAULT_PROMPT.promptName) continue;
+		if (str(prompt.fields, "system") !== LEGACY_DEFAULT_SYSTEM) continue;
+		await setField(prompt.id, "system", sv(DEFAULT_SYSTEM));
+		upgraded++;
+	}
+	return { created, reused, linked, upgraded };
 }

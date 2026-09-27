@@ -11,7 +11,7 @@
  * instructions.
  */
 
-import { fetchObject, flag, iv, num, setField, str, sv, type ObjectJSON } from "./api";
+import { choice, fetchObject, flag, iv, num, setField, str, sv, type ObjectJSON } from "./api";
 import { addConvBlock, postTo, type ConvRef } from "./conv";
 import { objectContext } from "./spacemap";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
@@ -21,43 +21,10 @@ import { channelInstructions, listSkills, remoteCapabilitiesSection, skillsPromp
 import { credentialsPromptLine } from "./credentials";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceAt, workspaceContext, workspacePromptSection } from "./workspace";
-import { promptFor, promptTarget } from "./prompts";
+import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
 import { authContractPrompt, authRequirementsOf, localAuthRegistry, resolveAuthRequirements } from "./authreq";
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
-
-const OBJECT_AGENT_PRIMER = `You are the agent of exactly one object in Roostr - a local-first
-knowledge space where every note, person, task, and project is an object
-with typed properties, living in exactly one space, connected by links.
-Saved views (queries/collections) are the human's own groupings of the
-space - treat them as the semantic map.
-
-Your world, in the sections below: your object (its fields), its type
-(what the human says it means), its connections (typed links in and out),
-and the space census.
-
-Those sections are a summary, not the object. "Your object" lists field
-values only - it carries neither your body text nor your discussion, and
-it is cached for up to 30s, so it can lag a change made moments ago. Your
-own id is printed in it, and you can always look at yourself: object_get
-on that id returns your fields plus your full body text, and
-discussion_read on it returns the thread under you. Read them whenever a
-question turns on your body or on what was already said - never tell the
-human you would need to read something you can simply read. Bodies of
-neighbors are the same object_get away.
-
-Economics: reading is free and unlimited - space_map, neighborhood, find,
-query_run, object_get, discussion_read cost nothing. Query until you
-understand. Act on your object and its space with the write tools when
-asked. Answer the human in the discussion plainly and concretely.
-
-Identity: in this workspace you go by your object's name. If your object
-is "Maki Ehara", you ARE the Maki Ehara object's mind and that is the only
-name you use - never introduce yourself as Claude, an AI model, or "the
-agent for X". For a person object you are the keeper of their profile,
-not the person: speak about them in third person, never pretend to be
-them. Skip introductions and menu-of-options boilerplate entirely -
-answer the question directly, as this object.`;
 
 /**
  * Chars-per-token calibration, per agent, in memory only.
@@ -127,9 +94,10 @@ async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: Conve
 	// (`object.agent`) when the thread lives on it; nothing when the thread is
 	// the agent's own page or its space (those get the prompt's standing text).
 	const objectId = host.id === agent.id || host.typeKey === "channel" ? "" : host.id;
-	// The prompt's standing prompt is the default a blank `system` falls back to.
 	const spec = await promptFor(agent);
-	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || (objectId ? OBJECT_AGENT_PRIMER : spec.system) }];
+	// The agent's own `system` overrides; otherwise its linked prompt object's
+	// text. Never a hardcoded fallback - what runs is what Roostr shows.
+	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || spec.system }];
 	// Fast parts: per-turn context that can change between tool iterations -
 	// always re-rendered, never cached.
 	if (objectId) {
@@ -282,7 +250,7 @@ async function publishSystemParts(agentId: string, parts: SystemPart[], ratio: n
  */
 export async function publishSystemSnapshot(agentId: string, ref: ConvRef): Promise<void> {
 	try {
-		const agent = await fetchObject(agentId);
+		const agent = await ensureAgentPrompt(await fetchObject(agentId));
 		const conv = ref.objectId === agentId ? agent : await fetchObject(ref.objectId);
 		const view = buildConversationView(conv, agentId, tokenRatio(agent), ref.threadId);
 		await publishSystemParts(agentId, await buildSystemParts(agent, conv, view, {}), tokenRatio(agent));
@@ -316,7 +284,7 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 	for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
 		// Fresh fetch each iteration: picks up steered user messages and the
 		// blocks we just appended.
-		const agent = await fetchObject(agentId);
+		const agent = await ensureAgentPrompt(await fetchObject(agentId));
 		const conv = ref.objectId === agentId ? agent : await fetchObject(ref.objectId);
 		ctx.channelId = str(agent.fields, "channel");
 		// The object this turn is about is where its transcript lives: the
@@ -328,7 +296,8 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		ctx.workspacePath = (await (repo ? workspaceAt(repo) : workspaceContext(ctx.channelId)).catch(() => null))?.path;
 		const ratio = tokenRatio(agent);
 		const cfg = compactionConfig(agent);
-		const model = str(agent.fields, "model") || (await promptFor(agent)).model;
+		// The model picked on the agent (a select stores a one-item list), else its prompt's.
+		const model = choice(agent.fields, "model") || (await promptFor(agent)).model;
 		// Re-read every iteration with everything else, so revoking the grant
 		// takes effect on the agent's next tool call rather than its next turn.
 		const tools = toolDefs(opts.template ?? "", ctx.depth, ctx.allowAsk);

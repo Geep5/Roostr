@@ -189,6 +189,11 @@ export const flag = (fields: Record<string, ValueJSON>, key: string): boolean =>
 export const list = (fields: Record<string, ValueJSON>, key: string): string[] =>
 	(fields[key]?.valuesValue?.items ?? []).map((i) => i.stringValue ?? "").filter(Boolean);
 
+/** A single-choice property: plain text, or the one-item list a select
+ *  (status) picker stores. `model` is written both ways. */
+export const choice = (fields: Record<string, ValueJSON>, key: string): string =>
+	str(fields, key) || list(fields, key)[0] || "";
+
 /**
  * The object's guest list: agent ids its `agent` property names. Reads the
  * link list, and the single string the field held before it became one.
