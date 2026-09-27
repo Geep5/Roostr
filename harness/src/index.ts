@@ -477,6 +477,10 @@ async function serve(): Promise<void> {
 			}
 		} catch (error) {
 			console.error(`[harness] mailbox ${objectId}:`, error);
+		} finally {
+			// Always release: an early return (no mailbox, not waiting, served
+			// elsewhere) used to leave the id set, so no event or rescan ever
+			// pumped this object again - a fresh envelope stalled until restart.
 			mailboxInFlight.delete(objectId);
 		}
 	}
@@ -486,7 +490,14 @@ async function serve(): Promise<void> {
 		mailboxScan = (async () => {
 			const objects = await queryAll({});
 			for (let offset = 0; offset < objects.length; offset += 8) {
-				await Promise.all(objects.slice(offset, offset + 8).map((object) => pumpMailbox(object.id)));
+				// One hung or failing pump must not stall the scan (or, via the
+				// mailboxScan guard, every later scan). Bound each and keep going.
+				await Promise.all(objects.slice(offset, offset + 8).map((object) =>
+					Promise.race([
+						pumpMailbox(object.id),
+						new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+					]).catch((error) => console.error(`[harness] mailbox ${object.id.slice(0, 8)}:`, error)),
+				));
 			}
 		})().finally(() => { mailboxScan = undefined; });
 		return mailboxScan;
