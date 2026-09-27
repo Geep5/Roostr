@@ -1567,6 +1567,83 @@
    }
   },
   {
+   "name": "an unpinned agent is unserved even when a machine has what it requires",
+   "object": {
+    "id": "agent-x",
+    "typeKey": "agent",
+    "fields": {
+     "requires": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "c1",
+          "relationKey": "requires"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c1",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "served_by": {
+       "stringValue": "studio"
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i1",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i1",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "status": {
+       "stringValue": "active"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "",
+    "reason": "unserved",
+    "requires": [
+     "c1"
+    ],
+    "candidates": [
+     "studio"
+    ]
+   }
+  },
+  {
    "name": "no object at all: unserved",
    "machines": [],
    "expected": {

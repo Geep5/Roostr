@@ -9,7 +9,7 @@ import { SimplePool, finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 
 import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
 import { agentTurnStatus } from "./index";
-import { readRoster, setEnabled } from "./roster";
+import { readRoster } from "./roster";
 import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, finishCapabilityLogin, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
 import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
@@ -97,11 +97,8 @@ async function writeProfile(patch: NostrProfile): Promise<NostrProfile> {
 export const AUTH_PORT = Number(process.env.GLON_AUTH_PORT ?? 7334);
 
 
-/**
- * @param served live set of currently-served agent ids (reported by /agents)
- * @param onRosterChange invoked with the new roster after a toggle
- */
-export function startAuthServer(served: Set<string>, onRosterChange: (next: string[]) => void): void {
+/** @param served live set of currently-served agent ids (reported by /agents) */
+export function startAuthServer(served: Set<string>): void {
 	Bun.serve({
 		port: AUTH_PORT,
 		hostname: "127.0.0.1",
@@ -179,13 +176,6 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 				}
 				if (req.method === "GET" && url.pathname === "/agents") {
 					return json({ roster: await readRoster(), serving: [...served] });
-				}
-				if (req.method === "POST" && url.pathname === "/agents/toggle") {
-					const body = (await req.json()) as { id?: string; enabled?: boolean };
-					if (!body.id) return json({ error: "id required" }, 400);
-					const next = await setEnabled(body.id, body.enabled === true);
-					onRosterChange(next);
-					return json({ ok: true, roster: next });
 				}
 				if (req.method === "GET" && url.pathname === "/machine") {
 					const { machineId } = await import("./roster");

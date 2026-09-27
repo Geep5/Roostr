@@ -138,13 +138,10 @@ properties you'd click in the UI. There is no setup wizard and no `kind` field.
 - **`requires`** (links → `capability` objects): what the machine must provide.
 - **`install`** (links → `install` objects): credentials it authenticates with.
 
-To make a working agent: create the object, set `served_by` to a machine, set
-`prompt` to a `system_prompt` object, then enable it on that machine's roster:
-
-```bash
-curl -X POST http://127.0.0.1:7334/agents/toggle -H "Authorization: Bearer $TOK" \
-  -H "Content-Type: application/json" -d '{"id":"<agentId>","enabled":true}'
-```
+To make a working agent: create the object, set `served_by` to a machine and
+`prompt` to a `system_prompt` object. The machine it names adopts it on sight.
+An agent with no `served_by` runs nowhere; the engine writes `no machine serves
+this agent: …` on its `error` property until one is set.
 
 To address an agent: `POST /api/mutate` `chat_post` with `@<AgentName>` in the
 text on the object's `__discussion__` thread. A mention is the wake signal;

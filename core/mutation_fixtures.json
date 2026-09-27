@@ -13965,5 +13965,358 @@
       "key_id": 0
     },
     "error": true
+  },
+  {
+    "name": "agent created without served_by carries the unserved error",
+    "payload": {
+      "action": "create",
+      "params": {
+        "type_key": "agent",
+        "name": "Remy"
+      },
+      "objects": [],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "id": "",
+        "objectId": "new-id",
+        "parentIds": [],
+        "timestamp": 1234,
+        "author": "alice",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "agent"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Remy"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "error",
+              "value": {
+                "stringValue": "no machine serves this agent: pick a computer in its Served by property"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expected_result": {
+      "id": "new-id"
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "agent created with served_by has no error",
+    "payload": {
+      "action": "create",
+      "params": {
+        "type_key": "agent",
+        "name": "Remy",
+        "fields": [
+          [
+            "served_by",
+            {
+              "stringValue": "studio"
+            }
+          ]
+        ]
+      },
+      "objects": [],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "id": "",
+        "objectId": "new-id",
+        "parentIds": [],
+        "timestamp": 1234,
+        "author": "alice",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "agent"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Remy"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "served_by",
+              "value": {
+                "stringValue": "studio"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expected_result": {
+      "id": "new-id"
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "subagent needs no computer of its own",
+    "payload": {
+      "action": "create",
+      "params": {
+        "type_key": "agent",
+        "name": "Sub",
+        "fields": [
+          [
+            "spawn_parent",
+            {
+              "stringValue": "p"
+            }
+          ]
+        ]
+      },
+      "objects": [],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "id": "",
+        "objectId": "new-id",
+        "parentIds": [],
+        "timestamp": 1234,
+        "author": "alice",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "agent"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Sub"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "spawn_parent",
+              "value": {
+                "stringValue": "p"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expected_result": {
+      "id": "new-id"
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "setting served_by clears the unserved error",
+    "payload": {
+      "action": "set_field",
+      "params": {
+        "object_id": "a",
+        "key": "served_by",
+        "value": {
+          "stringValue": "studio"
+        }
+      },
+      "objects": [
+        {
+          "id": "a",
+          "typeKey": "agent",
+          "fields": [
+            [
+              "error",
+              {
+                "stringValue": "no machine serves this agent: pick a computer in its Served by property"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "id": "",
+        "objectId": "a",
+        "parentIds": [],
+        "timestamp": 1234,
+        "author": "alice",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "served_by",
+              "value": {
+                "stringValue": "studio"
+              }
+            }
+          },
+          {
+            "fieldDelete": {
+              "key": "error"
+            }
+          }
+        ]
+      }
+    ],
+    "expected_result": {},
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "deleting served_by sets the unserved error",
+    "payload": {
+      "action": "delete_field",
+      "params": {
+        "object_id": "a",
+        "key": "served_by"
+      },
+      "objects": [
+        {
+          "id": "a",
+          "typeKey": "agent",
+          "fields": [
+            [
+              "served_by",
+              {
+                "stringValue": "studio"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "id": "",
+        "objectId": "a",
+        "parentIds": [],
+        "timestamp": 1234,
+        "author": "alice",
+        "ops": [
+          {
+            "fieldDelete": {
+              "key": "served_by"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "error",
+              "value": {
+                "stringValue": "no machine serves this agent: pick a computer in its Served by property"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expected_result": {},
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "setting served_by keeps an unrelated error",
+    "payload": {
+      "action": "set_field",
+      "params": {
+        "object_id": "a",
+        "key": "served_by",
+        "value": {
+          "stringValue": "studio"
+        }
+      },
+      "objects": [
+        {
+          "id": "a",
+          "typeKey": "agent",
+          "fields": [
+            [
+              "error",
+              {
+                "stringValue": "run failed: x"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "id": "",
+        "objectId": "a",
+        "parentIds": [],
+        "timestamp": 1234,
+        "author": "alice",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "served_by",
+              "value": {
+                "stringValue": "studio"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expected_result": {},
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
   }
 ]

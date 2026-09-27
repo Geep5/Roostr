@@ -41,22 +41,20 @@ function argValue(flagName: string): string {
 }
 
 /**
- * Agents THIS machine serves: local roster ∩ live agent objects, plus any
- * agent assigned here by `served_by` (setup from another client), which
- * joins the roster on sight so the agent page shows it enabled here.
+ * Agents THIS machine serves: every live top-level agent whose `served_by`
+ * names it. The local roster mirrors that set; it never adds an agent on
+ * its own - an agent with no Served by runs nowhere.
  */
 async function servedAgents(): Promise<Set<string>> {
 	const roster = new Set(await readRoster());
 	const me = await machineId();
-	const rows = await queryAll({ type: "agent" });
 	const out = new Set<string>();
-	for (const r of rows) {
-		if (str(r.fields, "spawn_parent")) continue;
-		const assigned = str(r.fields, "served_by") === me;
-		if (!roster.has(r.id) && !assigned) continue;
+	for (const r of await queryAll({ type: "agent" })) {
+		if (str(r.fields, "spawn_parent") || str(r.fields, "served_by") !== me) continue;
 		if (!roster.has(r.id)) await setEnabled(r.id, true);
 		out.add(r.id);
 	}
+	for (const id of roster) if (!out.has(id)) await setEnabled(id, false);
 	return out;
 }
 
@@ -289,13 +287,14 @@ async function serve(): Promise<void> {
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
 
-	const NO_SERVER_ERROR = "no machine serves this agent: pick a computer in its Served by property";
+	// `no machine serves this agent` is the engine's own error on an agent
+	// with no served_by (core/agent_serving.odin); markRunError leaves it be.
 	const RUN_FAILED = "run failed: ";
 
 	/**
 	 * A failed turn names its reason on the agent's Error property ("run
 	 * failed: <provider message>"); the next successful turn clears it. Only
-	 * this badge is ours: holdup and no-server badges are never touched, and
+	 * this badge is ours: holdup and unserved errors are never touched, and
 	 * the badge write can never fail the turn it reports on.
 	 */
 	async function markRunError(agentId: string, failure: string): Promise<void> {
@@ -312,27 +311,6 @@ async function serve(): Promise<void> {
 			console.error(`[harness] run error badge failed for ${agentId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
 		}
 	}
-
-
-	/**
-	 * The silence killer: an agent nothing serves gets the reason on its
-	 * `error` property (visible on its page, sortable), and loses it the
-	 * moment serving resolves again. Only this marker is touched - a "needs
-	 * x:" holdup badge belongs to requirementsHoldup.
-	 */
-	const convergeAgentError = async (agent: { id: string; fields: Record<string, ValueJSON> }): Promise<void> => {
-		if (str(agent.fields, "spawn_parent") || str(agent.fields, "external_responder")) return;
-		const marked = str(agent.fields, "error").startsWith("no machine serves this agent");
-		if ((await serverOf(agent.id)).machineId === "") {
-			if (!marked) await setField(agent.id, "error", sv(NO_SERVER_ERROR));
-		} else if (marked) {
-			await deleteField(agent.id, "error");
-		}
-	};
-	const convergeAgentErrors = async (): Promise<void> => {
-		for (const agent of await queryAll({ type: "agent" })) await convergeAgentError(agent);
-	};
-	await convergeAgentErrors();
 
 	// ── External responders ─────────────────────────────────────────
 	// Agents another bot answers for: the harness stays silent on every
@@ -389,8 +367,8 @@ async function serve(): Promise<void> {
 
 	/**
 	 * An agent's `served_by` edit moves every object that follows its pin:
-	 * refresh the resolver, re-arm the clock (occurrences follow the pin),
-	 * and re-badge the agent.
+	 * refresh the resolver and re-arm the clock (occurrences follow the pin).
+	 * The engine keeps the agent's unserved error in step with the pin.
 	 */
 	function notePin(agent: ObjectJSON): void {
 		const pin = str(agent.fields, "served_by");
@@ -398,7 +376,6 @@ async function serve(): Promise<void> {
 		agentPins.set(agent.id, pin);
 		invalidateServing();
 		void armScheduler();
-		convergeAgentError(agent).catch((err) => console.error(`[harness] serving badge failed for ${agent.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
 	}
 
 	/**
@@ -721,6 +698,14 @@ async function serve(): Promise<void> {
 			const agent = await fetchObject(objectId).catch(() => null);
 			if (agent) {
 				notePin(agent);
+				// Its Served by was cleared: no computer serves it, this one included.
+				if (!str(agent.fields, "spawn_parent") && !str(agent.fields, "served_by")) {
+					agents.delete(objectId);
+					served.delete(objectId);
+					await setEnabled(objectId, false);
+					console.log(`[harness] released ${str(agent.fields, "name") || objectId.slice(0, 8)} (${objectId.slice(0, 8)}) - its Served by is empty`);
+					return;
+				}
 				const s = served.get(objectId);
 				if (s) s.types = await responsibleTypes(agent);
 			}
@@ -810,29 +795,8 @@ async function serve(): Promise<void> {
 		}
 	}
 
-	startAuthServer(agents, (next) => {
-		agents.clear();
-		for (const id of next) agents.add(id);
-		void buildServed(agents).then((next) => {
-			served = next;
-			void convergeAgentErrors();
-			for (const s of served.values()) {
-				void publishSystemSnapshot(s.agentId, s.conv);
-				// Only if the chat is actually waiting on us. An unconditional
-				// turn here made enabling an agent start one, and a message
-				// arriving during that turn gets folded into it by drive's
-				// steer branch - which ingested it a second time and drew a
-				// second answer. Every other drive call site checks first.
-				void (async () => {
-					const chat = await fetchObject(s.conv.objectId).catch(() => null);
-					if (!chat) return;
-					if ((await pendingMessages(chat, humanRef(s.conv.objectId), s.agentId)).length > 0) void drive(s, humanRef(s.conv.objectId));
-					void pumpMailbox(chat.id, chat);
-				})();
-			}
-		});
-	});
-	console.log(`[harness] serving ${agents.size} agent(s): ${[...agents].map((a) => a.slice(0, 8)).join(", ") || "(none — enable one from an agent page)"}`);
+	startAuthServer(agents);
+	console.log(`[harness] serving ${agents.size} agent(s): ${[...agents].map((a) => a.slice(0, 8)).join(", ") || "(none — set an agent's Served by to this computer)"}`);
 
 	// Catch up on chat messages that arrived while the harness was down.
 	// (Origin surfaces catch up on their next event.)

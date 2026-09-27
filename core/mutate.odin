@@ -126,6 +126,11 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 			ch := oldest_channel_id(input.states)
 			if ch != "" do append(&ops, Operation{kind = .Field_Set, key = "channel", value = string_value(ch)})
 		}
+		if type_key == "agent" {
+			created := make([dynamic]Value_Entry, context.temp_allocator)
+			for op in ops do if op.kind == .Field_Set do append(&created, Value_Entry{key = op.key, value = op.value})
+			if op, needed := agent_error_op(created); needed do append(&ops, op)
+		}
 		mutation_add(&plan, input, id, ops[:])
 		extra := jobj()
 		extra["id"] = json.String(strings.clone(id, context.temp_allocator))
@@ -603,8 +608,12 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 				return plan, ""
 			}
 		}
-		op := Operation{kind = .Field_Set, key = key, value = value}
-		mutation_add(&plan, input, object_id, {op})
+		ops := make([dynamic]Operation, context.temp_allocator)
+		append(&ops, Operation{kind = .Field_Set, key = key, value = value})
+		if s, ok := input.states[object_id]; ok && !s.deleted && s.type_key == "agent" && agent_rule_key(key) {
+			if op, needed := agent_error_op(agent_fields_after(s.fields, key, value, false)); needed do append(&ops, op)
+		}
+		mutation_add(&plan, input, object_id, ops[:])
 		return plan, ""
 
 	// ── Recurring objects (repeat.odin) ──
@@ -688,8 +697,12 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		if object_id == "" || key == "" {
 			return plan, "object_id and key required"
 		}
-		op := Operation{kind = .Field_Delete, key = key}
-		mutation_add(&plan, input, object_id, {op})
+		ops := make([dynamic]Operation, context.temp_allocator)
+		append(&ops, Operation{kind = .Field_Delete, key = key})
+		if s, ok := input.states[object_id]; ok && !s.deleted && s.type_key == "agent" && agent_rule_key(key) {
+			if op, needed := agent_error_op(agent_fields_after(s.fields, key, {}, true)); needed do append(&ops, op)
+		}
+		mutation_add(&plan, input, object_id, ops[:])
 		return plan, ""
 
 	case "restore":
@@ -1328,6 +1341,14 @@ mutation_bootstrap_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_
 	for id in legacy {
 		ops := []Operation{{kind = .Object_Delete}}
 		mutation_add(plan, input, id, ops)
+	}
+	// Agents written before the served_by rule get its error (or lose a
+	// stale one) once; after that every write keeps it in line.
+	agents := make([dynamic]string, context.temp_allocator)
+	for id, s in input.states do if !s.deleted && s.type_key == "agent" do append(&agents, id)
+	slice.sort(agents[:])
+	for id in agents {
+		if op, needed := agent_error_op(input.states[id].fields); needed do mutation_add(plan, input, id, {op})
 	}
 
 }

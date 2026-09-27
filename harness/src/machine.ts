@@ -123,16 +123,17 @@ const OBJECT_PLACED: Record<Serving["reason"], boolean> = {
 };
 
 /**
- * The machine that runs an agent on an object ("" = none). Object pin >
- * agent pin > nothing:
+ * The machine that runs an agent on an object ("" = none). An agent with no
+ * pin of its own (`served_by`) runs nowhere, whatever the object says.
+ * Otherwise object pin > agent pin:
  *   - the object is placed on purpose (a machine or install, an explicit
  *     pin, a capability only another machine has) → the object's server,
  *     for every agent on it;
- *   - otherwise → the agent's own pin (`agentPin`, its `served_by`), even
- *     when another guest's pin serves the object; an unpinned agent runs
- *     nowhere.
+ *   - otherwise → the agent's own pin, even when another guest's pin
+ *     serves the object.
  */
 export function agentRunsOn(serving: Serving, agentPin: string): string {
+	if (!agentPin) return "";
 	return OBJECT_PLACED[serving.reason] ? serving.machineId : agentPin;
 }
 

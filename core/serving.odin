@@ -25,7 +25,8 @@ package core
 //
 // Machine choice lives on agents; the space plays no part. An agent object's
 // own served_by is its pin, so its transcript resolves `pinned`, and every
-// object naming it follows through the agent pin.
+// object naming it follows through the agent pin. An agent with no pin is
+// `unserved` whatever it requires - nothing picks a computer for it.
 
 import "core:encoding/json"
 import "core:fmt"
@@ -206,6 +207,10 @@ resolve_server :: proc(object: ^Object_State, states: map[string]^Object_State, 
 	switch {
 	case self != "":
 		out.machine_id, out.reason = self, "self"
+	case object != nil && object.type_key == "agent" && pin == "":
+		// An agent runs only where its own served_by says: no capability
+		// fallback, no borrowed pin. Its error says so (agent_serving.odin).
+		out.machine_id, out.reason = "", "unserved"
 	case pin != "" && (len(out.requires) == 0 || capable(&out, pin)):
 		out.machine_id, out.reason = pin, "pinned"
 	case pin != "":

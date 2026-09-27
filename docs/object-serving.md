@@ -110,6 +110,17 @@ first listed guest with a `served_by` lends it, and every guest runs where
 the object resolves. The harness adopts each guest into its roster when it
 serves the object (`adoptForObject`).
 
+### Every agent names its own computer
+
+An agent runs only where its own `served_by` says. An unpinned agent
+resolves `unserved` whatever it requires - no capability fallback, no pin
+borrowed from an object - and no machine runs it on any object either
+(`agentRunsOn`). The engine keeps the reason on the agent's `error`
+property (`core/agent_serving.odin`): `create`, `set_field`/`delete_field`
+of `served_by`, and the boot converger set it on a pinless agent and clear
+exactly that message once a pin lands. Subagents and external responders
+are exempt.
+
 ### Recurring objects
 
 `schedule.ts` `recurringMine()` filters by `resolve_server(obj) == me`
