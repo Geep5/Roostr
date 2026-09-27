@@ -15,11 +15,11 @@
  * the `kind` field is deleted once the link lands, and a re-run finds
  * no `kind`.
  */
-import { deleteField, queryAll, setField, str, sv } from "./api";
+import { deleteField, fetchObject, queryAll, setField, str } from "./api";
 import { linkValue } from "./capabilities";
-import { DEFAULT_PROMPT, DEFAULT_SYSTEM, LEGACY_DEFAULT_SYSTEM, PROMPT_SEEDS, SYSTEM_PROMPT_TYPE, ensureAgentPrompt, ensureSystemPrompt } from "./prompts";
+import { DEFAULT_PROMPT, DEFAULT_SYSTEM, LEGACY_DEFAULT_SYSTEM, PROMPT_SEEDS, SYSTEM_PROMPT_TYPE, ensureAgentPrompt, ensureSystemPrompt, pageText, writePageText } from "./prompts";
 
-export async function migratePrompts(): Promise<{ created: number; reused: number; linked: number; upgraded: number }> {
+export async function migratePrompts(): Promise<{ created: number; reused: number; linked: number; upgraded: number; moved: number }> {
 	let created = 0;
 	let reused = 0;
 	let linked = 0;
@@ -51,14 +51,27 @@ export async function migratePrompts(): Promise<{ created: number; reused: numbe
 			console.error(`[migrate] prompt link failed for ${agent.id.slice(0, 8)}:`, err instanceof Error ? err.message : err);
 		}
 	}
-	// The Assistant text used to live in two places (seeded object + a
-	// hardcoded object-agent primer). An Assistant object nobody edited still
-	// holds the old seed verbatim: give it the unified text. Edited ones stay.
-	for (const prompt of await queryAll({ type: SYSTEM_PROMPT_TYPE })) {
-		if (str(prompt.fields, "name") !== DEFAULT_PROMPT.promptName) continue;
-		if (str(prompt.fields, "system") !== LEGACY_DEFAULT_SYSTEM) continue;
-		await setField(prompt.id, "system", sv(DEFAULT_SYSTEM));
-		upgraded++;
+	// A prompt's text lived in a hidden `system` field; it now IS the page.
+	// An Assistant object nobody edited still holds the pre-unification seed
+	// verbatim and gets the unified text; everything else moves as written.
+	// Only a page with no text of its own takes the field, so a human's page
+	// edits are never overwritten; the field is then removed either way.
+	let moved = 0;
+	for (const row of await queryAll({ type: SYSTEM_PROMPT_TYPE })) {
+		const legacy = str(row.fields, "system");
+		if (!legacy) continue;
+		const text = str(row.fields, "name") === DEFAULT_PROMPT.promptName && legacy === LEGACY_DEFAULT_SYSTEM ? DEFAULT_SYSTEM : legacy;
+		if (text !== legacy) upgraded++;
+		try {
+			const prompt = await fetchObject(row.id);
+			if (!pageText(prompt)) {
+				await writePageText(row.id, text);
+				moved++;
+			}
+			await deleteField(row.id, "system");
+		} catch (err) {
+			console.error(`[migrate] prompt text move failed for ${row.id.slice(0, 8)}:`, err instanceof Error ? err.message : err);
+		}
 	}
-	return { created, reused, linked, upgraded };
+	return { created, reused, linked, upgraded, moved };
 }

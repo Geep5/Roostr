@@ -19,7 +19,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { choice, createObject, fetchObject, list, lv, queryAll, setField, str, sv, type ObjectJSON, type ValueJSON } from "./api";
+import { addBlock, choice, createObject, fetchObject, list, lv, queryAll, setField, str, sv, type ObjectJSON, type ValueJSON } from "./api";
 
 export const SYSTEM_PROMPT_TYPE = "system_prompt";
 
@@ -189,7 +189,9 @@ export async function promptFor(agent: ObjectJSON): Promise<AgentKindEntry> {
 		name: name || DEFAULT_PROMPT.name,
 		promptName: name || DEFAULT_PROMPT.promptName,
 		description: str(prompt.fields, "description"),
-		system: str(prompt.fields, "system"),
+		// The page body is the prompt. The legacy `system` field is read only
+		// until this machine's boot migration moves it onto the page.
+		system: pageText(prompt) || str(prompt.fields, "system"),
 		model: choice(prompt.fields, "model") || DEFAULT_MODEL,
 		requires: await requiredKeys(prompt.fields),
 		skills: await promptSkillNames(prompt.fields),
@@ -236,7 +238,6 @@ export async function ensureSystemPrompt(seed: AgentKindEntry, channelId: string
 	// Dynamic: the module cycle noted in promptFor.
 	const { requiresValueForKeys } = await import("./capabilities");
 	const fields: Record<string, ValueJSON> = {
-		system: sv(seed.system),
 		model: sv(seed.model),
 		description: sv(seed.description),
 	};
@@ -244,5 +245,35 @@ export async function ensureSystemPrompt(seed: AgentKindEntry, channelId: string
 	if (seed.requires.length > 0) fields.requires = await requiresValueForKeys(seed.requires);
 	if (seed.responsibleTypes.length > 0) fields.responsible_types = lv(seed.responsibleTypes);
 	const { id } = await createObject(seed.promptName, SYSTEM_PROMPT_TYPE, fields);
+	// The standing prompt IS the page: what you open is what the agent runs on.
+	await writePageText(id, seed.system);
 	return { id, created: true };
+}
+
+/**
+ * A page's own text: its text blocks in tree order, one line each. Chat,
+ * conversation roots, mailbox receipts and tool blocks are not page text and
+ * never leak into a prompt.
+ */
+export function pageText(obj: ObjectJSON): string {
+	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
+	const referenced = new Set<string>();
+	for (const b of obj.blocks) for (const c of b.childrenIds) referenced.add(c);
+	const out: string[] = [];
+	const walk = (id: string) => {
+		const b = byId.get(id);
+		if (!b || !b.content.text) return;
+		if (b.content.text.text) out.push(b.content.text.text);
+		for (const c of b.childrenIds) walk(c);
+	};
+	for (const b of obj.blocks) if (!referenced.has(b.id)) walk(b.id);
+	return out.join("\n");
+}
+
+/** Append `text` to a page, one text block per non-empty line, in order. */
+export async function writePageText(objectId: string, text: string): Promise<void> {
+	for (const line of text.split("\n")) {
+		if (!line.trim()) continue;
+		await addBlock(objectId, { id: crypto.randomUUID(), childrenIds: [], content: { text: { text: line, style: 0 } } });
+	}
 }
