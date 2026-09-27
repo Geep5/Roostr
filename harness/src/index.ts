@@ -804,9 +804,13 @@ async function serve(): Promise<void> {
 	subscribe((objectId) => void route(objectId), () => {
 		void scanMailboxes().catch((error) => console.error("[harness] mailbox catch-up:", error));
 	});
+	// Live work, not only what the index already holds: a full rescan on a
+	// slow timer, so an envelope lands a turn even when its SSE event was
+	// missed (a quiet feed, a reconnect gap). scanMailboxes is cheap - it
+	// skips anything with nothing waiting.
 	setInterval(() => {
-		for (const id of mailboxObjects) void pumpMailbox(id);
-	}, 5_000);
+		void scanMailboxes().catch((error) => console.error("[harness] mailbox rescan:", error));
+	}, 15_000);
 	await scanMailboxes();
 	console.log("[harness] SSE connected; serving.");
 
