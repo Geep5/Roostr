@@ -1153,11 +1153,11 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// An agent's configuration is a system_prompt object: standing prompt,
 	// model, requires, skills. `prompt` links one; the harness reads it
 	// through the link, not a hardcoded kind.
-	{"prompt", "object", "System prompt", "🧠", true, false, 1, {}},
+	{"prompt", "object", "System prompt", "📜", true, false, 1, {}},
 	// Per-agent overrides, set like any property (blank = follow the prompt).
 	// One model per agent: a single-select status; the harness reads the
 	// chosen string, so a status option stays compatible with a plain value.
-	{"model", "status", "Model", "🧠", false, false, 1, {"kimi-k3", "claude-sonnet-4-5"}},
+	{"model", "status", "Model", "🧬", false, false, 1, {"kimi-k3", "claude-sonnet-4-5"}},
 	{"responsible_types", "tag", "Responsible types", "🧩", true, false, 0, {}},
 	// A "current problem" badge: the scheduler, a holdup, an agent, or a
 	// human sets it; visible and editable like any property so views can
@@ -1384,7 +1384,7 @@ BUNDLED_TYPES :: []Bundled_Type{
 	{"capability", "Capability", "🧩", "page"},
 	// An agent's configuration: standing prompt, model, requires, skills.
 	// An agent links one with `prompt`; there is no hardcoded kind.
-	{"system_prompt", "System prompt", "🧠", "page"},
+	{"system_prompt", "System prompt", "📜", "page"},
 	// Minds are objects like everything else: a type row so they list in
 	// the sidebar and a bare "+ New" is a real agent the harness can adopt.
 	{"agent", "Agent", "🤖", "page"},
