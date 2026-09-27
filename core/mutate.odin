@@ -1214,7 +1214,7 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			// Agent, served_by and install pickers are restricted to one bundled
 			// type; older rows predate the restriction and get it here.
 			if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" || r.key == "prompt" {
-				target := r.key == "served_by" ? "machine" : r.key
+				target := r.key == "served_by" ? "machine" : r.key == "prompt" ? "system_prompt" : r.key
 				types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
 				mutation_add(plan, input, e.id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
 			}
@@ -1239,7 +1239,7 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 		mutation_add(plan, input, id, ops)
 		if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" || r.key == "prompt" {
 			// Picker restriction: the space's own bundled type (deterministic id).
-			target := r.key == "served_by" ? "machine" : r.key
+			target := r.key == "served_by" ? "machine" : r.key == "prompt" ? "system_prompt" : r.key
 			types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
 			mutation_add(plan, input, id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
 		}

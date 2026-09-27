@@ -4225,7 +4225,7 @@
         "valuesValue": {
          "items": [
           {
-           "stringValue": "bundled-type-prompt-new-id"
+           "stringValue": "bundled-type-system_prompt-new-id"
           }
          ]
         }
@@ -7849,7 +7849,7 @@
         "valuesValue": {
          "items": [
           {
-           "stringValue": "bundled-type-prompt-s"
+           "stringValue": "bundled-type-system_prompt-s"
           }
          ]
         }
@@ -10540,7 +10540,7 @@
         "valuesValue": {
          "items": [
           {
-           "stringValue": "bundled-type-prompt-s"
+           "stringValue": "bundled-type-system_prompt-s"
           }
          ]
         }
