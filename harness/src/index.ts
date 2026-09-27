@@ -291,6 +291,29 @@ async function serve(): Promise<void> {
 	let served = await buildServed(agents);
 
 	const NO_SERVER_ERROR = "no machine serves this agent: no server pin, no space default, and no machine's capabilities cover its requirements";
+	const RUN_FAILED = "run failed: ";
+
+	/**
+	 * A failed turn names its reason on the agent's Error property ("run
+	 * failed: <provider message>"); the next successful turn clears it. Only
+	 * this badge is ours: holdup and no-server badges are never touched, and
+	 * the badge write can never fail the turn it reports on.
+	 */
+	async function markRunError(agentId: string, failure: string): Promise<void> {
+		try {
+			const current = str((await fetchObject(agentId)).fields, "error");
+			const ours = current.startsWith(RUN_FAILED);
+			if (failure) {
+				const next = (RUN_FAILED + failure).slice(0, 300);
+				if ((!current || ours) && current !== next) await setField(agentId, "error", sv(next));
+			} else if (ours) {
+				await deleteField(agentId, "error");
+			}
+		} catch (err) {
+			console.error(`[harness] run error badge failed for ${agentId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
+		}
+	}
+
 
 	/**
 	 * The silence killer: an agent nothing serves gets the reason on its
@@ -575,6 +598,7 @@ async function serve(): Promise<void> {
 		try {
 			await body();
 			report("idle");
+			await markRunError(s.agentId, "");
 		} catch (err) {
 			console.error(`[harness] turn failed for ${s.agentId.slice(0, 8)}:`, err);
 			let msg = (err instanceof Error ? err.message : String(err)).split("\n")[0];
@@ -590,6 +614,7 @@ async function serve(): Promise<void> {
 			}
 			failure = msg.slice(0, 200);
 			report("error", failure);
+			await markRunError(s.agentId, failure);
 		} finally {
 			busy.delete(s.agentId);
 			active.delete(s.agentId);
