@@ -21,7 +21,7 @@ import { channelInstructions, listSkills, remoteCapabilitiesSection, skillsPromp
 import { credentialsPromptLine } from "./credentials";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceAt, workspaceContext, workspacePromptSection } from "./workspace";
-import { promptFor } from "./prompts";
+import { promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
 import { authContractPrompt, authRequirementsOf, localAuthRegistry, resolveAuthRequirements } from "./authreq";
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
@@ -130,6 +130,8 @@ async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: Conve
 	// The prompt's standing prompt is the default a blank `system` falls back to.
 	const spec = await promptFor(agent);
 	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || (objectId ? OBJECT_AGENT_PRIMER : spec.system) }];
+	// Fast parts: per-turn context that can change between tool iterations -
+	// always re-rendered, never cached.
 	if (objectId) {
 		try {
 			const bc = await objectContext(objectId, str(agent.fields, "channel"));
@@ -143,11 +145,74 @@ async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: Conve
 	}
 	if (opts.systemSuffix) parts.push({ label: "Subagent template", text: opts.systemSuffix });
 	if (view.systemExtension) parts.push({ label: "Conversation summary", text: view.systemExtension });
+	// Slow parts: agent-scoped, expensive to assemble, change only when an
+	// input the fingerprint covers changes.
+	parts.push(...(await slowSystemParts(agent, spec, opts, objectId)));
+	return parts;
+}
+
+/**
+ * The slow prompt parts, cached per agent. These are the multi-fetch,
+ * machine-heavy sections (memory, skills, auth, capabilities, workspace)
+ * that stay identical across a turn and across turns until one of their
+ * inputs changes. `buildSystemParts` re-renders only the per-turn object
+ * and conversation context around them.
+ *
+ * The fingerprint covers every input, so a hit is never stale:
+ *   agent.updatedAt           - system/model/memory_digest_enabled/repo_path/prompt link
+ *   prompt object updatedAt   - the linked system_prompt's own fields
+ *   memory count+maxUpdated   - new/edited facts and milestones (separate objects)
+ *   skills/credentials/auth/capabilities/instructions/workspace signature
+ * A mismatch rebuilds just these parts and re-caches them.
+ */
+interface SlowParts {
+	fingerprint: string;
+	parts: SystemPart[];
+}
+const slowCache = new Map<string, SlowParts>();
+
+/** Max of a set of updatedAt stamps; 0 when the set is empty. */
+const maxUpdated = (rows: Array<{ updatedAt: number }>): number => rows.reduce((m, r) => Math.max(m, r.updatedAt ?? 0), 0);
+
+export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnType<typeof promptFor>>, opts: RunOptions, objectId: string): Promise<SystemPart[]> {
+	const agentId = agent.id;
+	const channelId = str(agent.fields, "channel");
+
+	// ── Fingerprint inputs (cheap reads; the expensive assembly only runs on a miss) ──
+	const promptId = promptTarget(agent.fields);
+	const promptObj = promptId ? await fetchObject(promptId).catch(() => null) : null;
+	const { listFacts, listMilestones } = await import("./memory");
+	const [facts, milestones, skills] = await Promise.all([
+		flag(agent.fields, "memory_digest_enabled") ? listFacts(agentId) : Promise.resolve([]),
+		flag(agent.fields, "memory_digest_enabled") ? listMilestones(agentId) : Promise.resolve([]),
+		listSkills(agentId),
+	]);
+	const repo = str(agent.fields, "repo_path");
+	const ws = await (repo ? workspaceAt(repo) : workspaceContext(channelId)).catch(() => null);
+	const fingerprint = [
+		agent.updatedAt ?? 0,
+		promptObj?.updatedAt ?? 0,
+		facts.length,
+		maxUpdated(facts),
+		milestones.length,
+		maxUpdated(milestones),
+		skills.map((s) => s.id).sort().join(","),
+		credentialsPromptLine(),
+		channelId,
+		repo,
+		ws?.path ?? "",
+		opts.requirementsObjectId ?? objectId,
+	].join("|");
+
+	const hit = slowCache.get(agentId);
+	if (hit && hit.fingerprint === fingerprint) return hit.parts;
+
+	// ── Miss: assemble the slow parts ──
+	const parts: SystemPart[] = [];
 	if (flag(agent.fields, "memory_digest_enabled")) {
-		const d = await digest(agent.id);
+		const d = await digest(agentId);
 		if (d) parts.push({ label: "Memory digest", text: d });
 	}
-	const skills = await listSkills(agent.id);
 	const skillsSection = skillsPromptSection(skills);
 	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
 	const credsLine = credentialsPromptLine();
@@ -165,20 +230,24 @@ async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: Conve
 	} catch (err) {
 		console.error("[harness] remote capabilities failed:", err instanceof Error ? err.message : err);
 	}
-	const instructions = await channelInstructions(str(agent.fields, "channel"));
+	const instructions = await channelInstructions(channelId);
 	if (instructions) parts.push({ label: "Space instructions", text: instructions });
 	// Machine-local by design: this section exists only on the machine
 	// holding the checkout - which the serving gate guarantees is the one
 	// running this turn. An agent's own `repo_path` (an agent field) beats
 	// the space's binding.
-	try {
-		const repo = str(agent.fields, "repo_path");
-		const ws = repo ? await workspaceAt(repo) : await workspaceContext(str(agent.fields, "channel"));
-		if (ws) parts.push({ label: "Workspace", text: workspacePromptSection(ws) });
-	} catch (err) {
-		console.error("[harness] workspace context failed:", err instanceof Error ? err.message : err);
-	}
+	if (ws) parts.push({ label: "Workspace", text: workspacePromptSection(ws) });
+
+	slowCache.set(agentId, { fingerprint, parts });
+	slowStats.builds++;
 	return parts;
+}
+
+/** Test seam: how many times the slow parts were (re)assembled. Reset per test. */
+export const slowStats = { builds: 0 };
+export function resetSlowCache(): void {
+	slowCache.clear();
+	slowStats.builds = 0;
 }
 
 /**
