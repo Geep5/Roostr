@@ -121,7 +121,6 @@ descriptor_to_json :: proc(d: Descriptor) -> json.Value {
 		agent["model"] = json.String(d.agent.model)
 		agent["requires"] = string_list_json(d.agent.requires)
 		agent["skills"] = string_list_json(d.agent.skills)
-		agent["responsibleTypes"] = string_list_json(d.agent.responsible_types)
 		put_unknown(&agent, d.agent.unknown)
 		out["agent"] = json.Object(agent)
 	}
@@ -226,7 +225,6 @@ descriptor_from_json :: proc(v: json.Value) -> Descriptor {
 		out.agent.model = json_str(agent, "model")
 		out.agent.requires = read_string_list(agent, "requires")
 		out.agent.skills = read_string_list(agent, "skills")
-		out.agent.responsible_types = read_string_list(agent, "responsibleTypes")
 		out.agent.unknown = read_unknown(agent)
 	}
 	out.unknown = read_unknown(v)

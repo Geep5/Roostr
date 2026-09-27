@@ -4492,102 +4492,6 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "bundled-rel-responsible_types-new-id",
-        "ops": [
-          {
-            "objectCreate": {
-              "typeKey": "relation"
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "channel",
-              "value": {
-                "stringValue": "new-id"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "key",
-              "value": {
-                "stringValue": "responsible_types"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "format",
-              "value": {
-                "stringValue": "tag"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "name",
-              "value": {
-                "stringValue": "Responsible types"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "iconEmoji",
-              "value": {
-                "stringValue": "🧩"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "hidden",
-              "value": {
-                "boolValue": true
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "readOnly",
-              "value": {
-                "boolValue": false
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "maxCount",
-              "value": {
-                "intValue": 0
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "bundled",
-              "value": {
-                "boolValue": true
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "options",
-              "value": {
-                "valuesValue": {
-                  "items": []
-                }
-              }
-            }
-          }
-        ],
-        "parentIds": [],
-        "timestamp": 1234
-      },
-      {
-        "author": "alice",
-        "id": "",
         "objectId": "bundled-rel-error-new-id",
         "ops": [
           {
@@ -8273,102 +8177,6 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "bundled-rel-responsible_types-s",
-        "ops": [
-          {
-            "objectCreate": {
-              "typeKey": "relation"
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "channel",
-              "value": {
-                "stringValue": "s"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "key",
-              "value": {
-                "stringValue": "responsible_types"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "format",
-              "value": {
-                "stringValue": "tag"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "name",
-              "value": {
-                "stringValue": "Responsible types"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "iconEmoji",
-              "value": {
-                "stringValue": "🧩"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "hidden",
-              "value": {
-                "boolValue": true
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "readOnly",
-              "value": {
-                "boolValue": false
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "maxCount",
-              "value": {
-                "intValue": 0
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "bundled",
-              "value": {
-                "boolValue": true
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "options",
-              "value": {
-                "valuesValue": {
-                  "items": []
-                }
-              }
-            }
-          }
-        ],
-        "parentIds": [],
-        "timestamp": 1234
-      },
-      {
-        "author": "alice",
-        "id": "",
         "objectId": "bundled-rel-error-s",
         "ops": [
           {
@@ -11110,102 +10918,6 @@
                       }
                     }
                   ]
-                }
-              }
-            }
-          }
-        ],
-        "parentIds": [],
-        "timestamp": 1234
-      },
-      {
-        "author": "alice",
-        "id": "",
-        "objectId": "bundled-rel-responsible_types-s",
-        "ops": [
-          {
-            "objectCreate": {
-              "typeKey": "relation"
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "channel",
-              "value": {
-                "stringValue": "s"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "key",
-              "value": {
-                "stringValue": "responsible_types"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "format",
-              "value": {
-                "stringValue": "tag"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "name",
-              "value": {
-                "stringValue": "Responsible types"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "iconEmoji",
-              "value": {
-                "stringValue": "🧩"
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "hidden",
-              "value": {
-                "boolValue": true
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "readOnly",
-              "value": {
-                "boolValue": false
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "maxCount",
-              "value": {
-                "intValue": 0
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "bundled",
-              "value": {
-                "boolValue": true
-              }
-            }
-          },
-          {
-            "fieldSet": {
-              "key": "options",
-              "value": {
-                "valuesValue": {
-                  "items": []
                 }
               }
             }
@@ -14311,6 +14023,149 @@
                 "stringValue": "studio"
               }
             }
+          }
+        ]
+      }
+    ],
+    "expected_result": {},
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "bootstrap retires a bundled property the engine no longer ships, with its values",
+    "payload": {
+      "action": "bootstrap_space_defaults",
+      "params": {},
+      "objects": [
+        {
+          "id": "bundled-rel-responsible_types-s",
+          "typeKey": "relation",
+          "fields": [
+            [
+              "channel",
+              {
+                "stringValue": "s"
+              }
+            ],
+            [
+              "key",
+              {
+                "stringValue": "responsible_types"
+              }
+            ],
+            [
+              "bundled",
+              {
+                "boolValue": true
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "a",
+          "typeKey": "agent",
+          "fields": [
+            [
+              "channel",
+              {
+                "stringValue": "s"
+              }
+            ],
+            [
+              "served_by",
+              {
+                "stringValue": "m"
+              }
+            ],
+            [
+              "responsible_types",
+              {
+                "valuesValue": {
+                  "items": [
+                    {
+                      "stringValue": "task"
+                    }
+                  ]
+                }
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "elsewhere",
+          "typeKey": "agent",
+          "fields": [
+            [
+              "channel",
+              {
+                "stringValue": "other"
+              }
+            ],
+            [
+              "served_by",
+              {
+                "stringValue": "m"
+              }
+            ],
+            [
+              "responsible_types",
+              {
+                "valuesValue": {
+                  "items": [
+                    {
+                      "stringValue": "task"
+                    }
+                  ]
+                }
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "id": "",
+        "objectId": "a",
+        "parentIds": [],
+        "timestamp": 1234,
+        "author": "alice",
+        "ops": [
+          {
+            "fieldDelete": {
+              "key": "responsible_types"
+            }
+          }
+        ]
+      },
+      {
+        "id": "",
+        "objectId": "bundled-rel-responsible_types-s",
+        "parentIds": [],
+        "timestamp": 1234,
+        "author": "alice",
+        "ops": [
+          {
+            "objectDelete": {}
           }
         ]
       }

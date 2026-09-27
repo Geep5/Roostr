@@ -141,9 +141,6 @@ descriptor_agent_round_trips :: proc(t: ^testing.T) {
 	append(&d.agent.requires, "discord-bot")
 	d.agent.skills = make([dynamic]string)
 	append(&d.agent.skills, "matcherino-dev")
-	d.agent.responsible_types = make([dynamic]string)
-	append(&d.agent.responsible_types, "task")
-	append(&d.agent.responsible_types, "bug")
 
 	wire := encode_descriptor(d)
 	back, ok := decode_descriptor(wire)
@@ -157,8 +154,6 @@ descriptor_agent_round_trips :: proc(t: ^testing.T) {
 	testing.expect_value(t, back.agent.requires[1], "discord-bot")
 	testing.expect_value(t, len(back.agent.skills), 1)
 	testing.expect_value(t, back.agent.skills[0], "matcherino-dev")
-	testing.expect_value(t, len(back.agent.responsible_types), 2)
-	testing.expect_value(t, back.agent.responsible_types[1], "bug")
 	testing.expect(t, !back.has_install, "an agent card has no install spec")
 	testing.expect(t, slice.equal(wire, encode_descriptor(back)), "re-encode is byte-identical")
 
@@ -176,9 +171,6 @@ descriptor_agent_round_trips :: proc(t: ^testing.T) {
 	testing.expect_value(t, json_str(agent, "model"), "kimi-k2-0905-preview")
 	testing.expect_value(t, len(json_array(agent, "requires")), 2)
 	testing.expect_value(t, len(json_array(agent, "skills")), 1)
-	responsible := json_array(agent, "responsibleTypes")
-	testing.expect_value(t, len(responsible), 2)
-	testing.expect_value(t, string(responsible[0].(json.String)), "task")
 
 	encode_request := jobj()
 	encode_request["action"] = json.String("encode")

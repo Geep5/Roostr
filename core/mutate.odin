@@ -1158,7 +1158,6 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// One model per agent: a single-select status; the harness reads the
 	// chosen string, so a status option stays compatible with a plain value.
 	{"model", "status", "Model", "🧬", false, false, 1, {"kimi-k3", "claude-sonnet-4-5"}},
-	{"responsible_types", "tag", "Responsible types", "🧩", true, false, 0, {}},
 	// A "current problem" badge: the scheduler, a holdup, an agent, or a
 	// human sets it; visible and editable like any property so views can
 	// filter and sort by it. Automation prefixes its messages ("run failed:",
@@ -1342,6 +1341,21 @@ mutation_bootstrap_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_
 		ops := []Operation{{kind = .Object_Delete}}
 		mutation_add(plan, input, id, ops)
 	}
+	// A property the engine no longer ships (its key left BUNDLED_RELATIONS)
+	// retires from every space, taking its values with it, so nothing keeps
+	// offering or reading a paradigm that is gone.
+	retired := make([dynamic]string, context.temp_allocator)
+	for id, s in input.states {
+		if s.deleted || s.type_key != "relation" || field_string(s.fields, "channel") == "" do continue
+		if bundled, ok := fields_get(s.fields, "bundled"); !ok || bundled.kind != .Bool || !bundled.b do continue
+		if !bundled_relation_shipped(field_string(s.fields, "key")) do append(&retired, id)
+	}
+	slice.sort(retired[:])
+	for id in retired {
+		rel_ids, rel_key := relation_value_cascade(input.states, id)
+		for oid in rel_ids do mutation_add(plan, input, oid, {Operation{kind = .Field_Delete, key = rel_key}})
+		mutation_add(plan, input, id, {Operation{kind = .Object_Delete}})
+	}
 	// Agents written before the served_by rule get its error (or lose a
 	// stale one) once; after that every write keeps it in line.
 	agents := make([dynamic]string, context.temp_allocator)
@@ -1351,6 +1365,11 @@ mutation_bootstrap_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_
 		if op, needed := agent_error_op(input.states[id].fields); needed do mutation_add(plan, input, id, {op})
 	}
 
+}
+
+bundled_relation_shipped :: proc(key: string) -> bool {
+	for r in BUNDLED_RELATIONS do if r.key == key do return true
+	return false
 }
 Bundled_Type :: struct {
 	key:    string,

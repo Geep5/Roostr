@@ -194,8 +194,7 @@ export async function buildSpaceMap(spaceId: string): Promise<string> {
 		if (named?.length) {
 			agentLines.push(`${str(a.fields, "name")} — agent of ${named.map((n) => `"${n}"`).join(", ")}`);
 		} else {
-			const types_ = strItems(a.fields["responsible_types"]);
-			agentLines.push(`${str(a.fields, "name")} — space agent${types_.length ? ` for ${types_.join(", ")}` : ""}`);
+			agentLines.push(`${str(a.fields, "name")} — not a guest on any object yet`);
 		}
 	}
 	if (agentLines.length) lines.push(`Agents alive in this space:\n  ${agentLines.join("\n  ")}`);

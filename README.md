@@ -134,7 +134,7 @@ properties you'd click in the UI. There is no setup wizard and no `kind` field.
 - **`served_by`** (link → `machine` object): the computer it runs on.
 - **`prompt`** (link → `system_prompt` object): its configuration (standing
   prompt, model, requires, skills). Edit or point at a different prompt object.
-- **`model`**, **`responsible_types`** (text/tag): per-agent overrides.
+- **`model`** (select): per-agent override of the prompt's model.
 - **`requires`** (links → `capability` objects): what the machine must provide.
 - **`install`** (links → `install` objects): credentials it authenticates with.
 
@@ -142,6 +142,10 @@ To make a working agent: create the object, set `served_by` to a machine and
 `prompt` to a `system_prompt` object. The machine it names adopts it on sight.
 An agent with no `served_by` runs nowhere; the engine writes `no machine serves
 this agent: …` on its `error` property until one is set.
+
+Which objects an agent works on is its **guest list** placement, not a setting
+on the agent: put it in an object's `agent` property, or in a type's template's
+`agent` property so every object created from that template starts with it.
 
 To address an agent: `POST /api/mutate` `chat_post` with `@<AgentName>` in the
 text on the object's `__discussion__` thread. A mention is the wake signal;

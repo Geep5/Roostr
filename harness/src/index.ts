@@ -10,7 +10,7 @@
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
-import { API, apiFetch, chatPost, deleteField, fetchObject, guestAgents, list, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
+import { API, apiFetch, chatPost, deleteField, fetchObject, guestAgents, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
 import { PROMPT_SEEDS, ensureSystemPrompt, promptFor } from "./prompts";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
@@ -101,8 +101,6 @@ interface Served {
 	/** The agent's home transcript on its own object. Turns on objects that name it run on those objects. */
 	conv: ConvRef;
 	channelId: string;
-	/** Type keys this agent is responsible for; "*" = everything else. Its prompt's list when the object has none. */
-	types: string[];
 	name: string;
 	icon: string;
 }
@@ -158,7 +156,6 @@ async function buildServedOne(agentId: string, defaultChannel: string, forObject
 		agentId,
 		conv,
 		channelId,
-		types: await responsibleTypes(agent),
 		name: str(agent.fields, "name") || agentId.slice(0, 8),
 		icon: str(agent.fields, "iconEmoji"),
 	};
@@ -172,11 +169,6 @@ async function buildServedOne(agentId: string, defaultChannel: string, forObject
 async function transcriptFor(s: Served, surface: ObjectJSON): Promise<ConvRef> {
 	if (!guestAgents(surface.fields).includes(s.agentId)) return s.conv;
 	return agentThreadOn(await fetchObject(s.agentId), surface.id);
-}
-
-/** The object's own list when set (even empty), else its prompt's. */
-async function responsibleTypes(agent: ObjectJSON): Promise<string[]> {
-	return agent.fields["responsible_types"] ? list(agent.fields, "responsible_types") : (await promptFor(agent)).responsibleTypes;
 }
 
 /** agentId → Served; rebuilt on roster change. */
@@ -668,16 +660,6 @@ async function serve(): Promise<void> {
 		return withTurn(s, s.conv, () => runTurn(s.agentId, s.conv, { spawn: spawnSubagent, systemSuffix, requirementsObjectId, a2aTurn: true }));
 	}
 
-	/**
-	 * The channel agent responsible for a type: explicit claim wins, else the
-	 * "*" (everything-else) agent. Undefined when no agent in the channel
-	 * claims the type - a space no longer implies a mind.
-	 */
-	function responsibleFor(channelId: string, typeKey: string): Served | undefined {
-		const inChannel = [...served.values()].filter((s) => s.channelId === channelId);
-		return inChannel.find((s) => s.types.includes(typeKey)) ?? inChannel.find((s) => s.types.includes("*"));
-	}
-
 	/** Route an SSE object event to the agent whose surface it is. */
 	async function route(objectId: string): Promise<void> {
 		await pumpMailbox(objectId);
@@ -692,9 +674,8 @@ async function serve(): Promise<void> {
 			}
 		}
 		if (agents.has(objectId)) {
-			// Responsibility and pin edits sync through the agent object — keep
-			// the served entry and the resolver current without a roster
-			// round-trip.
+			// Pin edits sync through the agent object: keep the resolver
+			// current without a roster round-trip.
 			const agent = await fetchObject(objectId).catch(() => null);
 			if (agent) {
 				notePin(agent);
@@ -706,8 +687,6 @@ async function serve(): Promise<void> {
 					console.log(`[harness] released ${str(agent.fields, "name") || objectId.slice(0, 8)} (${objectId.slice(0, 8)}) - its Served by is empty`);
 					return;
 				}
-				const s = served.get(objectId);
-				if (s) s.types = await responsibleTypes(agent);
 			}
 			return; // agent objects are not surfaces
 		}

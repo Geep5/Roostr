@@ -523,7 +523,10 @@ message AgentSpec {
   string model = 2;                  // default model id
   repeated string requires = 3;      // descriptor keys the serving machine must have active
   repeated string skills = 4;        // skill keys surfaced to this kind (empty = all)
-  repeated string responsible_types = 5;
+  // 5 was responsible_types: agents are placed by templates now. Old cards
+  // still decode; the bytes ride along as unknown fields.
+  reserved 5;
+  reserved "responsible_types";
 }
 
 message Descriptor {

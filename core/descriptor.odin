@@ -79,7 +79,6 @@ Agent_Spec :: struct {
 	model:             string,
 	requires:          [dynamic]string,
 	skills:            [dynamic]string,
-	responsible_types: [dynamic]string,
 	unknown:           [dynamic]byte,
 }
 
@@ -241,7 +240,6 @@ decode_agent_spec :: proc(data: []byte, allocator := context.allocator) -> Agent
 	out: Agent_Spec
 	out.requires = make([dynamic]string, allocator)
 	out.skills = make([dynamic]string, allocator)
-	out.responsible_types = make([dynamic]string, allocator)
 	out.unknown = make([dynamic]byte, allocator)
 	r := Reader{data = data}
 	for r.pos < len(r.data) && !r.err {
@@ -253,7 +251,6 @@ decode_agent_spec :: proc(data: []byte, allocator := context.allocator) -> Agent
 		case 2: out.model = read_string(&r)
 		case 3: append(&out.requires, read_string(&r))
 		case 4: append(&out.skills, read_string(&r))
-		case 5: append(&out.responsible_types, read_string(&r))
 		case:
 			skip_field(&r, wire)
 			keep_unknown(&out.unknown, &r, start)
@@ -379,7 +376,6 @@ encode_agent_spec :: proc(s: Agent_Spec, w: ^Writer) {
 	// proto3 default-omission is for singular fields only.
 	for item in s.requires do write_len_prefixed(w, 3, transmute([]byte)item)
 	for item in s.skills do write_len_prefixed(w, 4, transmute([]byte)item)
-	for item in s.responsible_types do write_len_prefixed(w, 5, transmute([]byte)item)
 	write_unknown(w, s.unknown)
 }
 

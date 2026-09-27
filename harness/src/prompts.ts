@@ -2,15 +2,15 @@
  * System prompts - what an agent IS before its object says otherwise.
  *
  * An agent's configuration (standing prompt, model, the machine
- * capabilities it `requires`, the skills it sees, the types it answers
- * for) is a `system_prompt` object the agent links with its `prompt`
- * property; the object is edited, shared, and space-scoped like any
- * other. An agent with no `prompt` link is linked to its space's
- * "Assistant" prompt object before it runs (`ensureAgentPrompt`) - there
- * is no hidden prompt behind the UI. Per-agent fields (`model`,
- * `responsible_types`) override the prompt, never the other way round;
- * the call sites apply them. The base prompt text is the prompt object's
- * alone.
+ * capabilities it `requires`, the skills it sees) is a `system_prompt`
+ * object the agent links with its `prompt` property; the object is edited,
+ * shared, and space-scoped like any other. An agent with no `prompt` link
+ * is linked to its space's "Assistant" prompt object before it runs
+ * (`ensureAgentPrompt`) - there is no hidden prompt behind the UI. The
+ * agent's own `model` overrides the prompt's, never the other way round;
+ * the call sites apply it. The base prompt text is the prompt object's
+ * alone. Which objects an agent works on is not configured here: an agent
+ * is put on an object's guest list, typically by that object's template.
  *
  * PROMPT_SEEDS is not a runtime lookup: it seeds the descriptor cards a
  * setup form renders from and the prompt objects the boot migration and
@@ -20,7 +20,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { addBlock, choice, createObject, fetchObject, list, lv, queryAll, setField, str, sv, type ObjectJSON, type ValueJSON } from "./api";
+import { addBlock, choice, createObject, fetchObject, queryAll, setField, str, sv, type ObjectJSON, type ValueJSON } from "./api";
 
 export const SYSTEM_PROMPT_TYPE = "system_prompt";
 
@@ -36,7 +36,6 @@ export interface AgentKindEntry {
 	requires: string[];
 	/** Skill keys surfaced to this prompt, by skill name; empty = all. */
 	skills: string[];
-	responsibleTypes: string[];
 	fields: Array<{ key: string; label: string; secret: boolean; format: "text" | "password" | "url" | "email"; note: string }>;
 	/** Values written for fields the setup left blank (harness-side; the card's `note` tells the human). */
 	defaults: Record<string, string>;
@@ -101,7 +100,7 @@ const MARCO_SYSTEM = readFileSync(`${import.meta.dir}/../kinds/marco.md`, "utf8"
 /** Default checkout for the Matcherino dev bot; also the `matcherino-dev` skill's check path. */
 export const MATCHERINO_REPO = "/home/geep/Matcherino";
 
-/** The prompt-less default: a generic standing prompt, the default model, no requires/skills/responsibleTypes. */
+/** The prompt-less default: a generic standing prompt, the default model, no requires/skills. */
 export const DEFAULT_PROMPT: AgentKindEntry = {
 	key: "assistant",
 	name: "Assistant",
@@ -111,7 +110,6 @@ export const DEFAULT_PROMPT: AgentKindEntry = {
 	model: DEFAULT_MODEL,
 	requires: [],
 	skills: [],
-	responsibleTypes: [],
 	fields: [],
 	defaults: {},
 };
@@ -129,7 +127,6 @@ export const PROMPT_SEEDS: AgentKindEntry[] = [
 		model: "kimi-k3",
 		requires: ["matcherino-dev", "discord-bot"],
 		skills: [],
-		responsibleTypes: [],
 		fields: [
 			{ key: "discord_channel_id", label: "Discord channel id", secret: false, format: "text", note: "Admin channel the bot answers in. Required." },
 			{ key: "discord_extra_channel_ids", label: "Extra channel ids", secret: false, format: "text", note: "Comma-separated additional guild channels to answer in." },
@@ -196,7 +193,6 @@ export async function promptFor(agent: ObjectJSON): Promise<AgentKindEntry> {
 		model: choice(prompt.fields, "model") || DEFAULT_MODEL,
 		requires: await requiredKeys(prompt.fields),
 		skills: await promptSkillNames(prompt.fields),
-		responsibleTypes: list(prompt.fields, "responsible_types"),
 		fields: [],
 		defaults: {},
 	};
@@ -244,7 +240,6 @@ export async function ensureSystemPrompt(seed: AgentKindEntry, channelId: string
 	};
 	if (channel) fields.channel = sv(channel);
 	if (seed.requires.length > 0) fields.requires = await requiresValueForKeys(seed.requires);
-	if (seed.responsibleTypes.length > 0) fields.responsible_types = lv(seed.responsibleTypes);
 	const { id } = await createObject(seed.promptName, SYSTEM_PROMPT_TYPE, fields);
 	// The standing prompt IS the page: what you open is what the agent runs on.
 	await writePageText(id, seed.system);
