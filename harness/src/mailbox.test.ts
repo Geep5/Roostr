@@ -59,7 +59,7 @@ function mailboxServer() {
 		if (path === "/api/serving") {
 			const body = JSON.parse(String(init?.body));
 			const out: Record<string, { machineId: string; reason: string; requires: string[]; candidates: string[] }> = {};
-			for (const id of body.objectIds ?? []) out[id] = { machineId: unserved.has(id) ? "" : "machine-1", reason: "space", requires: [], candidates: [] };
+			for (const id of body.objectIds ?? []) out[id] = unserved.has(id) ? { machineId: "", reason: "unserved", requires: [], candidates: [] } : { machineId: "machine-1", reason: "agent", requires: [], candidates: [] };
 			return Response.json(out);
 		}
 

@@ -89,8 +89,8 @@ test("an agent field edit rebuilds even with unchanged memory", async () => {
 	await slowSystemParts(agent, DEFAULT_PROMPT, {}, "");
 	expect(slowStats.builds).toBe(1);
 
-	// The agent object was edited (system prompt, etc.): updatedAt bumps.
-	const edited = object("ag", "agent", { ...AGENT_FIELDS, system: { stringValue: "new" } }, 8);
+	// The agent object was edited (model, prompt link, etc.): updatedAt bumps.
+	const edited = object("ag", "agent", { ...AGENT_FIELDS, model: { stringValue: "new" } }, 8);
 	server(edited, memoryRows(1, 3, 0, 0));
 	await slowSystemParts(edited, DEFAULT_PROMPT, {}, "");
 	expect(slowStats.builds).toBe(2);

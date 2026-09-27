@@ -3,12 +3,13 @@
  * `docs/object-serving.md`.
  *
  * Responsibility is a function of DAG state that every machine evaluates
- * identically: an object is served by its `served_by` pin, else by the
- * space's default (`served_by` on the channel), unless its `requires`
- * list names capabilities the default lacks - then the lowest machine id
- * that has them. The engine owns the rule (`core/serving.odin`); the
- * daemon evaluates it over the local replica (`POST /api/serving`) and
- * this module only caches the answers and asks "is it me?".
+ * identically: an object is served by its `served_by` pin, else by the pin
+ * of the first agent on its guest list (`agent`) that has one, unless its
+ * `requires` list names capabilities that machine lacks - then the lowest
+ * machine id that has them. Nothing pinned and nothing required: nobody.
+ * The engine owns the rule (`core/serving.odin`); the daemon evaluates it
+ * over the local replica (`POST /api/serving`) and this module only caches
+ * the answers and asks "is it me?".
  *
  * A machine always serves its own `machine` object, so a human can address
  * any machine through that object's discussion.
@@ -88,47 +89,57 @@ export async function primeServing(objectIds: string[]): Promise<void> {
 /** The engine's resolution for one object. */
 export async function serverOf(objectId: string): Promise<Serving> {
 	await primeServing([objectId]);
-	return servingCache.get(objectId)?.serving ?? { machineId: "", reason: "space", requires: [], candidates: [] };
+	return servingCache.get(objectId)?.serving ?? { machineId: "", reason: "unserved", requires: [], candidates: [] };
 }
 
 /**
  * Does this machine act for the object? Its own machine object: always;
- * another machine's: never. Otherwise the resolver decides, and an object
- * with no server at all (a brand-new space before its stamp) reads as
- * mine so it answers immediately - `convergeSpaceServing` follows.
+ * another machine's: never. Otherwise the resolver decides; an unserved
+ * object is nobody's.
  */
 export async function servesHere(objectId: string): Promise<boolean> {
 	if (!objectId) return true;
 	const me = await machineId();
 	const own = (await machines()).find((m) => m.objectId === objectId);
 	if (own) return own.machineId === me;
-	const s = await serverOf(objectId);
-	return s.machineId === me || (s.machineId === "" && s.reason === "space");
+	return (await serverOf(objectId)).machineId === me;
 }
 
-/** An agent is served where its home is: its space, else its own row. */
+/** An agent's own page is served where the agent is pinned (`served_by`). */
 export function agentServedHere(agent: { id: string; fields: Record<string, ValueJSON> }): Promise<boolean> {
 	return servesHere(agentSubject(agent));
 }
 
-/** Stamp-if-absent: the first machine to see an unclaimed space becomes its
- * default. Two machines racing converge via replay (deterministic winner)
- * and the gate follows the converged value on its next refresh. */
-export async function convergeSpaceServing(): Promise<void> {
-	const id = await machineId();
-	const channels = await queryAll({ type: "channel" });
-	for (const c of channels) {
-		if (!str(c.fields, "served_by")) {
-			await setField(c.id, "served_by", sv(id));
-			console.log(`[harness] space "${str(c.fields, "name") || c.id.slice(0, 8)}" now served by this machine`);
-		}
-	}
-	invalidateServing();
+/** Whether the object's own placement decides, whoever the agent is. */
+const OBJECT_PLACED: Record<Serving["reason"], boolean> = {
+	self: true,
+	pinned: true,
+	"pinned-uncapable": true,
+	capability: true,
+	agent: false,
+	"agent-capable": false,
+	unsatisfied: false,
+	unserved: false,
+};
+
+/**
+ * The machine that runs an agent on an object ("" = none). Object pin >
+ * agent pin > nothing:
+ *   - the object is placed on purpose (a machine or install, an explicit
+ *     pin, a capability only another machine has) → the object's server,
+ *     for every agent on it;
+ *   - otherwise → the agent's own pin (`agentPin`, its `served_by`), even
+ *     when another guest's pin serves the object; an unpinned agent runs
+ *     nowhere.
+ */
+export function agentRunsOn(serving: Serving, agentPin: string): string {
+	return OBJECT_PLACED[serving.reason] ? serving.machineId : agentPin;
 }
 
 /**
  * Register this machine: create its object on first call, keep `name` at
  * the hostname. Capabilities no longer ride on the machine object - the
+ * capability objects that name it as `served_by` carry them.
  */
 export async function publishMachine(): Promise<void> {
 	const id = await machineId();

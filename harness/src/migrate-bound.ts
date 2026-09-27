@@ -16,7 +16,9 @@
  * resolve legacy a2a participant endpoints. Idempotent: a field is deleted
  * only after its pointer landed, and re-running finds no `bound_object`.
  */
-import { deleteField, fetchObject, guestAgents, lv, queryAll, setField, str, sv } from "./api";
+import { deleteField, fetchObject, guestAgents, lv, queryAll, setField, str, sv, type QueryRow } from "./api";
+import { MACHINE_TYPE } from "./machine";
+import { defaultSpaceId } from "./spacemap";
 
 /**
  * `agent` became a link list (the object's guest list). An object still
@@ -68,6 +70,61 @@ export async function migrateSpaceDefaults(): Promise<{ moved: number }> {
 		}
 	}
 	return { moved };
+}
+
+/**
+ * A space's default computer (`served_by` on the channel) is retired:
+ * machines are chosen per agent. Every top-level agent with no pin of its
+ * own takes its space's computer (an agent with no `channel` lives in the
+ * default space), then the space field goes - with the space-scoped
+ * checkout bindings (channel `repo_url`, machine `paths`/`paths_status`),
+ * which the agent's own `repo_path` replaced. Spaces keep their computers
+ * until every pin has landed, so a failed or interrupted run re-pins on
+ * the next boot. Idempotent: a re-run finds nothing to pin and nothing to
+ * delete.
+ */
+export async function migrateSpaceComputers(): Promise<{ pinned: number; spacesCleared: number; machinesCleared: number }> {
+	const channels = await queryAll({ type: "channel" });
+	const computerOf = new Map(channels.map((c) => [c.id, str(c.fields, "served_by")]));
+	const fallbackSpace = await defaultSpaceId();
+	let pinned = 0;
+	let pinFailed = false;
+	for (const agent of await queryAll({ type: "agent" })) {
+		if (str(agent.fields, "spawn_parent") || str(agent.fields, "served_by")) continue;
+		const computer = computerOf.get(str(agent.fields, "channel") || fallbackSpace);
+		if (!computer) continue;
+		const name = str(agent.fields, "name") || agent.id.slice(0, 8);
+		try {
+			await setField(agent.id, "served_by", sv(computer));
+			pinned++;
+			console.log(`[migrate] "${name}" -> served by ${computer.slice(0, 8)} (its space's computer)`);
+		} catch (err) {
+			pinFailed = true;
+			console.error(`[migrate] space computer pin failed for "${name}":`, err instanceof Error ? err.message : err);
+		}
+	}
+	const drop = async (row: QueryRow, keys: string[]): Promise<boolean> => {
+		const present = keys.filter((k) => row.fields[k] !== undefined);
+		for (const key of present) await deleteField(row.id, key);
+		return present.length > 0;
+	};
+	let spacesCleared = 0;
+	for (const channel of channels) {
+		try {
+			if (await drop(channel, pinFailed ? ["repo_url"] : ["served_by", "repo_url"])) spacesCleared++;
+		} catch (err) {
+			console.error(`[migrate] space computer cleanup failed for space ${channel.id.slice(0, 8)}:`, err instanceof Error ? err.message : err);
+		}
+	}
+	let machinesCleared = 0;
+	for (const machine of await queryAll({ type: MACHINE_TYPE })) {
+		try {
+			if (await drop(machine, ["paths", "paths_status"])) machinesCleared++;
+		} catch (err) {
+			console.error(`[migrate] checkout binding cleanup failed for machine ${machine.id.slice(0, 8)}:`, err instanceof Error ? err.message : err);
+		}
+	}
+	return { pinned, spacesCleared, machinesCleared };
 }
 
 export async function migrateBoundAgents(): Promise<{ moved: number; conflicts: number }> {

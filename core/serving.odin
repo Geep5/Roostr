@@ -8,23 +8,27 @@ package core
 // It never writes: work moves by editing its inputs, each an ordinary commit.
 //
 //   object.served_by      pin: this machine, whatever it can do
+//   object.agent          guest list: the first listed agent with a served_by
+//                         lends its pin (the agent pin)
 //   object.requires       capability keys the work needs (catalog keys)
-//   space.served_by       default server for the space (first-seen machine)
 //   machine.capabilities  catalog keys installed AND enabled on that machine
 //
 // Resolution, in order:
+//   self                the object is a machine (or an install): its own machine_id
 //   pinned              served_by set and capable (or nothing required)
 //   pinned-uncapable    served_by set but lacks a requirement - the host files a holdup
-//   space               nothing required → the space default
-//   space-capable       the default has every requirement (stickiness: no churn)
+//   agent               nothing required → the agent pin
+//   agent-capable       the agent pin has every requirement
 //   capability          smallest machine_id among capable machines
-//   unsatisfied         nothing capable → the space default, and a holdup
+//   unsatisfied         nothing capable → the agent pin (else nobody), and a holdup
+//   unserved            no pin, no agent pin, nothing required → nobody
 //
-// An agent has no server of its own: the object that names it (`object.agent`)
-// resolves through this same function, and the agent object itself for its
-// own transcript.
+// Machine choice lives on agents; the space plays no part. An agent object's
+// own served_by is its pin, so its transcript resolves `pinned`, and every
+// object naming it follows through the agent pin.
 
 import "core:encoding/json"
+import "core:fmt"
 import "core:strings"
 
 SERVED_BY_KEY :: "served_by"
@@ -115,15 +119,40 @@ capability_servers :: proc(states: map[string]^Object_State, capability_id: stri
 	return out
 }
 
-resolve_server :: proc(object: ^Object_State, space: ^Object_State, states: map[string]^Object_State, allocator := context.temp_allocator) -> Serving {
+// `served_by` as a string machine_id, or the machine it links since it became
+// an object relation.
+@(private = "file")
+served_by :: proc(s: ^Object_State) -> string {
+	pin := field_string(s.fields, SERVED_BY_KEY)
+	if pin == "" {
+		if v, ok := fields_get(s.fields, SERVED_BY_KEY); ok && v.kind == .Link do pin = v.link_target
+	}
+	return pin
+}
+
+// The first agent on the object's guest list, in list order, that has a
+// served_by. Agents missing from `states`, binned, or unpinned are skipped.
+@(private = "file")
+agent_pin :: proc(object: ^Object_State, states: map[string]^Object_State) -> string {
+	for id in object_agents(object.fields) {
+		agent := states[id]
+		if agent == nil || agent.deleted || agent.type_key != "agent" do continue
+		if pin := served_by(agent); pin != "" do return pin
+	}
+	return ""
+}
+
+// `states` carries the candidate machines, the capability objects and their
+// installs, and the agents the object's guest list names.
+resolve_server :: proc(object: ^Object_State, states: map[string]^Object_State, allocator := context.temp_allocator) -> Serving {
 	out: Serving
 	out.candidates = make([dynamic]string, allocator)
 	if object != nil do out.requires = field_strings(object.fields, REQUIRES_KEY, allocator)
 	else do out.requires = make([dynamic]string, allocator)
-	// Installations are machine-owned services. Neither a space default nor
-	// an object pin may approve credentials or install software elsewhere.
-	// An installation missing its owner stays unserved, rather than falling
-	// back to whichever machine happens to serve the space.
+	// Installations are machine-owned services. Neither an agent pin nor an
+	// object pin may approve credentials or install software elsewhere. An
+	// installation missing its owner stays unserved, rather than falling back
+	// to whichever machine happens to serve its agent.
 	if object != nil && object.type_key == "install" {
 		out.machine_id = field_string(object.fields, MACHINE_ID_KEY)
 		out.reason = "self"
@@ -131,8 +160,8 @@ resolve_server :: proc(object: ^Object_State, space: ^Object_State, states: map[
 	}
 
 	// A machine is a candidate iff it serves every required capability. With
-	// no requirements every live machine is a candidate (the space default or
-	// a pin decides between them).
+	// no requirements every live machine is a candidate (a pin decides
+	// between them).
 	if len(out.requires) == 0 {
 		for _, m in states {
 			if m.deleted || m.type_key != "machine" do continue
@@ -161,16 +190,11 @@ resolve_server :: proc(object: ^Object_State, space: ^Object_State, states: map[
 		return false
 	}
 
-	pin := ""
+	pin, lent := "", ""
 	if object != nil {
-		pin = field_string(object.fields, SERVED_BY_KEY)
-		if pin == "" {
-			// served_by became an object relation: the machine object id rides as a link.
-			if v, ok := fields_get(object.fields, SERVED_BY_KEY); ok && v.kind == .Link do pin = v.link_target
-		}
+		pin = served_by(object)
+		if pin == "" do lent = agent_pin(object, states)
 	}
-	dflt := pin
-	if dflt == "" && space != nil do dflt = field_string(space.fields, SERVED_BY_KEY)
 
 	// A machine object answers for itself, ahead of any pin. Nobody else can
 	// install software on that box, read its holdups, or report its
@@ -186,74 +210,61 @@ resolve_server :: proc(object: ^Object_State, space: ^Object_State, states: map[
 		out.machine_id, out.reason = pin, "pinned"
 	case pin != "":
 		out.machine_id, out.reason = pin, "pinned-uncapable"
+	case lent != "" && len(out.requires) == 0:
+		out.machine_id, out.reason = lent, "agent"
+	case lent != "" && capable(&out, lent):
+		out.machine_id, out.reason = lent, "agent-capable"
 	case len(out.requires) == 0:
-		out.machine_id, out.reason = dflt, "space"
-	case dflt != "" && capable(&out, dflt):
-		out.machine_id, out.reason = dflt, "space-capable"
+		out.machine_id, out.reason = "", "unserved"
 	case len(out.candidates) > 0:
 		out.machine_id, out.reason = out.candidates[0], "capability"
 	case:
-		out.machine_id, out.reason = dflt, "unsatisfied"
+		out.machine_id, out.reason = lent, "unsatisfied"
 	}
 	return out
 }
 
-// {action: "resolve", object?: ObjectJSON, space?: ObjectJSON, machines: [ObjectJSON]}
+// Object states riding a payload array, entered into `states` by id.
+@(private = "file")
+payload_states :: proc(payload: json.Value, key, noun: string, states: ^map[string]^Object_State) -> string {
+	list, present := json_field(payload, key)
+	if !present do return ""
+	arr, ok := list.(json.Array)
+	if !ok do return fmt.tprintf("%s must be an array", key)
+	for item in arr {
+		state, sok := object_from_json(item, context.temp_allocator, clone_json = false)
+		if !sok do return fmt.tprintf("invalid %s state", noun)
+		states^[strings.clone(state.id, context.temp_allocator)] = new_clone(state, context.temp_allocator)
+	}
+	return ""
+}
+
+// {action: "resolve", object?: ObjectJSON, agents?: [ObjectJSON],
+//  machines?: [ObjectJSON], capabilities?: [ObjectJSON]}
 // → {machineId, reason, requires: [key], candidates: [machineId]}
+// `agents` are the agent objects the object's guest list names, in any order:
+// the object's own list order decides. Capability objects ride with their
+// installs: the resolver needs both alongside the machines.
 serving_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	switch json_str(payload, "action") {
 	case "resolve":
 		object, ook := optional_state(payload, "object")
 		if !ook do return nil, "invalid object state"
-		space, sok := optional_state(payload, "space")
-		if !sok do return nil, "invalid space state"
-		machines := make([dynamic]Object_State, context.temp_allocator)
-		if list, present := json_field(payload, "machines"); present {
-			arr, aok := list.(json.Array)
-			if !aok do return nil, "machines must be an array"
-			for item in arr {
-				state, mok := object_from_json(item, context.temp_allocator, clone_json = false)
-				if !mok do return nil, "invalid machine state"
-				append(&machines, state)
-			}
-		}
 		states := make(map[string]^Object_State, context.temp_allocator)
 		if object != nil do states[object.id] = object
-		if space != nil do states[space.id] = space
-		for &m in machines {
-			states[strings.clone(m.id, context.temp_allocator)] = &m
-		}
-		// Capability objects ride a separate `capabilities` array: the resolver
-		// needs them (and their installs) alongside the machines.
-		caps := make([dynamic]Object_State, context.temp_allocator)
-		if list, present := json_field(payload, "capabilities"); present {
-			arr, aok := list.(json.Array)
-			if !aok do return nil, "capabilities must be an array"
-			for item in arr {
-				state, mok := object_from_json(item, context.temp_allocator, clone_json = false)
-				if !mok do return nil, "invalid capability state"
-				append(&caps, state)
-			}
-		}
-		for &c in caps {
-			states[strings.clone(c.id, context.temp_allocator)] = &c
-		}
-		return serving_to_json(resolve_server(object, space, states)), ""
+		if err := payload_states(payload, "agents", "agent", &states); err != "" do return nil, err
+		if err := payload_states(payload, "machines", "machine", &states); err != "" do return nil, err
+		if err := payload_states(payload, "capabilities", "capability", &states); err != "" do return nil, err
+		return serving_to_json(resolve_server(object, states)), ""
 	}
 	return nil, "unknown serving action"
 }
 
-// Resolve by id over a full state map: the object's `channel` (else the
-// oldest live channel) is its space; every live `machine` object is a
-// candidate. `object_id` may name an object that does not exist yet (a
-// brand-new space's first message) - it then resolves as the space default.
+// Resolve by id over a full state map: every live `machine` object is a
+// candidate and the object's agents are found among the states. `object_id`
+// may name an object that does not exist yet - it then resolves `unserved`.
 resolve_server_in :: proc(states: map[string]^Object_State, object_id: string, allocator := context.temp_allocator) -> Serving {
-	object := states[object_id]
-	space_id := ""
-	if object != nil do space_id = field_string(object.fields, "channel")
-	if space_id == "" do space_id = oldest_channel_id(states)
-	space := states[space_id]
-	return resolve_server(object, space, states, allocator)
+	return resolve_server(states[object_id], states, allocator)
 }
 
 serving_to_json :: proc(s: Serving, allocator := context.temp_allocator) -> json.Value {

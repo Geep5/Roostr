@@ -20,18 +20,17 @@ import { fileCapabilityHoldup } from "./tools";
 import { startAuthServer } from "./authserver";
 import { machineId, readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
-import { MACHINE_TYPE, agentServedHere, convergeSpaceServing, invalidateServing, publishMachine, serverOf, servesHere } from "./machine";
+import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishMachine, serverOf, servesHere } from "./machine";
 import { publishDescriptors, INSTALL_TYPE } from "./descriptors";
 import { CAPABILITY_TYPE, linkValue, requiredKeys } from "./capabilities";
 import { migrateCapabilities } from "./migrate-capabilities";
 import { migratePrompts } from "./migrate-prompts";
-import { validateBindings } from "./workspace";
 import { startDiscordManager } from "./discord";
 import { chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, pendingMessages, setMark } from "./surfaces";
 import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { migrateExchanges } from "./migrate-exchanges";
-import { migrateAgentLists, migrateBoundAgents, migrateSpaceDefaults } from "./migrate-bound";
+import { migrateAgentLists, migrateBoundAgents, migrateSpaceComputers, migrateSpaceDefaults } from "./migrate-bound";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
 import { arm as armScheduler, startScheduler } from "./schedule";
@@ -271,7 +270,6 @@ async function serve(): Promise<void> {
 	// every link lands. Invisible to agents and the resolver until active.
 	await publishCapabilityObjects();
 	await convergeCatalogScope();
-	await convergeSpaceServing();
 	const migration = await migrateExchanges({ apply: true });
 	console.log("[harness] exchange migration:", JSON.stringify(migration));
 	// bound_object -> object.agent, after the exchange migration has read
@@ -280,17 +278,18 @@ async function serve(): Promise<void> {
 	console.log("[harness] agent-list migration:", JSON.stringify(await migrateAgentLists()));
 	// space_default -> the space's own guest list; spaces no longer imply a mind.
 	console.log("[harness] space-default migration:", JSON.stringify(await migrateSpaceDefaults()));
+	// channel served_by -> each agent's own pin; spaces no longer serve, and
+	// their checkout bindings give way to the agent's Project folder.
+	console.log("[harness] space-computer migration:", JSON.stringify(await migrateSpaceComputers()));
 	// machine.capabilities -> capability objects; requires keys -> capability links.
 	console.log("[harness] capability migration:", JSON.stringify(await migrateCapabilities()));
 	// agent.kind -> a linked system_prompt object; after capabilities exist so
 	// the prompt's requires links land on capability objects.
 	console.log("[harness] prompt migration:", JSON.stringify(await migratePrompts()));
-	// Checkout bindings: statuses refresh at boot and on every UI write.
-	validateBindings().catch((err) => console.error("[harness] binding validation failed:", err?.message ?? err));
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
 
-	const NO_SERVER_ERROR = "no machine serves this agent: no server pin, no space default, and no machine's capabilities cover its requirements";
+	const NO_SERVER_ERROR = "no machine serves this agent: pick a computer in its Served by property";
 	const RUN_FAILED = "run failed: ";
 
 	/**
@@ -321,17 +320,17 @@ async function serve(): Promise<void> {
 	 * moment serving resolves again. Only this marker is touched - a "needs
 	 * x:" holdup badge belongs to requirementsHoldup.
 	 */
-	const convergeAgentErrors = async (): Promise<void> => {
-		for (const agent of await queryAll({ type: "agent" })) {
-			if (str(agent.fields, "spawn_parent") || str(agent.fields, "external_responder")) continue;
-			const error = str(agent.fields, "error");
-			const marked = error.startsWith("no machine serves this agent");
-			if ((await serverOf(agent.id)).machineId === "") {
-				if (!marked) await setField(agent.id, "error", sv(NO_SERVER_ERROR));
-			} else if (marked) {
-				await deleteField(agent.id, "error");
-			}
+	const convergeAgentError = async (agent: { id: string; fields: Record<string, ValueJSON> }): Promise<void> => {
+		if (str(agent.fields, "spawn_parent") || str(agent.fields, "external_responder")) return;
+		const marked = str(agent.fields, "error").startsWith("no machine serves this agent");
+		if ((await serverOf(agent.id)).machineId === "") {
+			if (!marked) await setField(agent.id, "error", sv(NO_SERVER_ERROR));
+		} else if (marked) {
+			await deleteField(agent.id, "error");
 		}
+	};
+	const convergeAgentErrors = async (): Promise<void> => {
+		for (const agent of await queryAll({ type: "agent" })) await convergeAgentError(agent);
 	};
 	await convergeAgentErrors();
 
@@ -341,8 +340,12 @@ async function serve(): Promise<void> {
 	// the external bot is the only voice. The field travels with the vault,
 	// so every machine honors it. Kept current from agent object events.
 	const externalAgents = new Set<string>();
+	// agentId → its `served_by` as last seen: an agent's pin serves every
+	// object naming it, so a pin edit is a serving change (`notePin`).
+	const agentPins = new Map<string, string>();
 	for (const a of await queryAll({ type: "agent" })) {
 		if (str(a.fields, "external_responder")) externalAgents.add(a.id);
+		agentPins.set(a.id, str(a.fields, "served_by"));
 	}
 	const externallyAnswered = (obj: ObjectJSON): boolean => guestAgents(obj.fields).some((id) => externalAgents.has(id));
 	console.log(`[harness] ${externalAgents.size} externally answered agent(s) known`);
@@ -372,31 +375,37 @@ async function serve(): Promise<void> {
 
 	/**
 	 * Does THIS machine run `agent` on `object`? Exactly one machine answers:
-	 *   - the object is placed on purpose (an explicit pin, a capability
-	 *     need, a machine object) → the object's server;
-	 *   - otherwise, when the agent is pinned (`served_by`) → that machine,
-	 *     and ONLY that machine - the object's inherited space default
-	 *     stands down for it;
-	 *   - otherwise → the object's server (the space default).
-	 * object pin > agent pin > space default. Every machine evaluates the same
-	 * DAG state, so two harnesses never both answer one message. Pin swaps take
-	 * effect on the next event: served_by/agent commits invalidate the cache.
+	 * object pin > agent pin > nothing (`agentRunsOn`). An object placed on
+	 * purpose (an explicit pin, a capability need, a machine) runs every
+	 * guest on its server; otherwise each agent runs on its own `served_by`,
+	 * and an unpinned agent runs nowhere. Every machine evaluates the same
+	 * DAG state, so two harnesses never both answer one message. Pin swaps
+	 * take effect on the next event: served_by commits invalidate the cache.
 	 */
 	async function runsAgentHere(objectId: string, agentId: string): Promise<boolean> {
-		const agent = await fetchObject(agentId).catch(() => null);
-		const pin = agent ? str(agent.fields, "served_by") : "";
-		if (pin && agentId !== objectId) {
-			const s = await serverOf(objectId);
-			if (s.reason === "space") return pin === me;
-		}
-		return servesHere(objectId);
+		const [serving, agent] = await Promise.all([serverOf(objectId), fetchObject(agentId).catch(() => null)]);
+		return agentRunsOn(serving, agent ? str(agent.fields, "served_by") : "") === me;
+	}
+
+	/**
+	 * An agent's `served_by` edit moves every object that follows its pin:
+	 * refresh the resolver, re-arm the clock (occurrences follow the pin),
+	 * and re-badge the agent.
+	 */
+	function notePin(agent: ObjectJSON): void {
+		const pin = str(agent.fields, "served_by");
+		if (agentPins.get(agent.id) === pin) return;
+		agentPins.set(agent.id, pin);
+		invalidateServing();
+		void armScheduler();
+		convergeAgentError(agent).catch((err) => console.error(`[harness] serving badge failed for ${agent.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
 	}
 
 	/**
 	 * One agent on an object's guest list (`object.agent`), served here
-	 * because this machine serves the object - adopted into the local roster
-	 * on first contact, so a space takeover needs no per-agent toggling. Null
-	 * when the pointer is dangling or another bot answers for the agent.
+	 * because this machine runs it on the object - adopted into the local
+	 * roster on first contact, so it needs no per-agent toggling. Null when
+	 * the pointer is dangling or another bot answers for the agent.
 	 */
 	async function adoptForObject(obj: ObjectJSON, aid: string): Promise<Served | null> {
 		if (!aid || !guestAgents(obj.fields).includes(aid) || externalAgents.has(aid)) return null;
@@ -468,9 +477,9 @@ async function serve(): Promise<void> {
 				object = await fetchObject(objectId);
 			}
 			// Gate per recipient, not per object: an agent pinned to this
-			// machine answers even on an object served elsewhere (space
-			// default), while every other recipient still needs the object's
-			// server. Recover only when this machine serves the object itself.
+			// machine answers even on an object that follows another guest's
+			// pin, while an object placed on purpose runs every recipient on
+			// its server. Recover only when this machine serves the object itself.
 			const objectServedHere = await servesHere(objectId);
 			if (objectServedHere) {
 				// An external responder owns this object's inbox as well: it claims,
@@ -706,12 +715,14 @@ async function serve(): Promise<void> {
 			}
 		}
 		if (agents.has(objectId)) {
-			// Responsibility edits sync through the agent object — keep the
-			// served entry current without a roster round-trip.
-			const s = served.get(objectId);
-			if (s) {
-				const agent = await fetchObject(objectId).catch(() => null);
-				if (agent) s.types = await responsibleTypes(agent);
+			// Responsibility and pin edits sync through the agent object — keep
+			// the served entry and the resolver current without a roster
+			// round-trip.
+			const agent = await fetchObject(objectId).catch(() => null);
+			if (agent) {
+				notePin(agent);
+				const s = served.get(objectId);
+				if (s) s.types = await responsibleTypes(agent);
 			}
 			return; // agent objects are not surfaces
 		}
@@ -721,6 +732,7 @@ async function serve(): Promise<void> {
 		if (!agents.has(objectId)) {
 			const maybe = await fetchObject(objectId).catch(() => null);
 			if (maybe?.typeKey === "agent") {
+				notePin(maybe);
 				if (str(maybe.fields, "external_responder")) externalAgents.add(objectId);
 				else externalAgents.delete(objectId);
 				if (!str(maybe.fields, "spawn_parent") && str(maybe.fields, "served_by") === me) {
@@ -748,19 +760,6 @@ async function serve(): Promise<void> {
 		} catch {
 			return;
 		}
-		if (obj.typeKey === "channel") {
-			// served_by edits (takeovers) and brand-new spaces sync as channel
-			// commits: refresh the gate now, stamp unclaimed spaces.
-			invalidateServing();
-			// A daemon blip (ECONNRESET mid-restart) must not kill the harness -
-			// the next channel event or boot reconcile converges again.
-			// The scheduler follows the gate: a space handed over moves its
-			// occurrences to the new server.
-			convergeSpaceServing()
-				.catch((err) => console.error("[harness] converge failed:", err?.message ?? err))
-				.then(armScheduler);
-			return;
-		}
 		// A rule edit (repeat_set/clear, an occurrence completed or fired)
 		// may move the earliest occurrence.
 		if (obj.fields["repeat"]) void armScheduler();
@@ -780,7 +779,7 @@ async function serve(): Promise<void> {
 		if (guestAgents(obj.fields).length === 0 || externallyAnswered(obj)) return;
 		// Per guest, not per object: a guest pinned to another machine is that
 		// machine's to run even here; a guest pinned HERE runs even when the
-		// object's space default is another machine.
+		// object follows another guest's pin.
 		const mine: string[] = [];
 		for (const aid of guestAgents(obj.fields)) if (await runsAgentHere(objectId, aid)) mine.push(aid);
 		void pumpMailbox(objectId, obj);
@@ -857,7 +856,7 @@ async function serve(): Promise<void> {
 	console.log("[harness] SSE connected; serving.");
 
 	// The clock: fires occurrences due now (missed while down) and arms for
-	// the next. Only for spaces this machine serves - the gate is inside.
+	// the next. Only for objects this machine serves - the gate is inside.
 	await startScheduler({
 		async served(agentId) {
 			const known = served.get(agentId);

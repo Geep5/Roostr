@@ -1124,6 +1124,9 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// count for the resolver and is not offered to an agent.
 	{"served_by", "object", "Served by", "🖥️", true, false, 1, {}},
 	{"requires", "object", "Requires", "🧩", true, false, 0, {}},
+	// An agent's checkout on the machine that serves it: the harness works
+	// in this folder.
+	{"repo_path", "shorttext", "Project folder", "📁", false, false, 1, {}},
 	// The object's guest list: agents a human (or one of those agents) may
 	// address here with @. Rendered as a link badge; its picker is limited to
 	// the space's agent type. Nothing answers an object without being on it.

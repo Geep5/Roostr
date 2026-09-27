@@ -20,7 +20,7 @@ import { callLLM, isContextOverflowError } from "./llm";
 import { channelInstructions, listSkills, remoteCapabilitiesSection, skillsPromptSection } from "./skills";
 import { credentialsPromptLine } from "./credentials";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
-import { workspaceAt, workspaceContext, workspacePromptSection } from "./workspace";
+import { workspaceAt, workspacePromptSection } from "./workspace";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
 import { authContractPrompt, authRequirementsOf, localAuthRegistry, resolveAuthRequirements } from "./authreq";
@@ -95,9 +95,9 @@ async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: Conve
 	// the agent's own page or its space (those get the prompt's standing text).
 	const objectId = host.id === agent.id || host.typeKey === "channel" ? "" : host.id;
 	const spec = await promptFor(agent);
-	// The agent's own `system` overrides; otherwise its linked prompt object's
-	// text. Never a hardcoded fallback - what runs is what Roostr shows.
-	const parts: SystemPart[] = [{ label: "Base prompt", text: str(agent.fields, "system") || spec.system }];
+	// The linked prompt object's text. Never a hardcoded fallback - what runs
+	// is what Roostr shows.
+	const parts: SystemPart[] = [{ label: "Base prompt", text: spec.system }];
 	// Fast parts: per-turn context that can change between tool iterations -
 	// always re-rendered, never cached.
 	if (objectId) {
@@ -127,7 +127,7 @@ async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: Conve
  * and conversation context around them.
  *
  * The fingerprint covers every input, so a hit is never stale:
- *   agent.updatedAt           - system/model/memory_digest_enabled/repo_path/prompt link
+ *   agent.updatedAt           - model/memory_digest_enabled/repo_path/prompt link
  *   prompt object updatedAt   - the linked system_prompt's own fields
  *   memory count+maxUpdated   - new/edited facts and milestones (separate objects)
  *   skills/credentials/auth/capabilities/instructions/workspace signature
@@ -156,7 +156,7 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 		listSkills(agentId),
 	]);
 	const repo = str(agent.fields, "repo_path");
-	const ws = await (repo ? workspaceAt(repo) : workspaceContext(channelId)).catch(() => null);
+	const ws = repo ? await workspaceAt(repo).catch(() => null) : null;
 	const fingerprint = [
 		agent.updatedAt ?? 0,
 		promptObj?.updatedAt ?? 0,
@@ -200,10 +200,9 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	}
 	const instructions = await channelInstructions(channelId);
 	if (instructions) parts.push({ label: "Space instructions", text: instructions });
-	// Machine-local by design: this section exists only on the machine
-	// holding the checkout - which the serving gate guarantees is the one
-	// running this turn. An agent's own `repo_path` (an agent field) beats
-	// the space's binding.
+	// Machine-local by design: the agent's Project folder (`repo_path`) exists
+	// only on the machine holding the checkout - which the serving gate
+	// guarantees is the one running this turn.
 	if (ws) parts.push({ label: "Workspace", text: workspacePromptSection(ws) });
 
 	slowCache.set(agentId, { fingerprint, parts });
@@ -293,7 +292,7 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		// Same checkout the Workspace prompt section describes; a missing
 		// directory means home, never a spawn failure.
 		const repo = str(agent.fields, "repo_path");
-		ctx.workspacePath = (await (repo ? workspaceAt(repo) : workspaceContext(ctx.channelId)).catch(() => null))?.path;
+		ctx.workspacePath = repo ? (await workspaceAt(repo).catch(() => null))?.path : undefined;
 		const ratio = tokenRatio(agent);
 		const cfg = compactionConfig(agent);
 		// The model picked on the agent (a select stores a one-item list), else its prompt's.

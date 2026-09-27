@@ -6,16 +6,16 @@
  *     id, `install` links the install row for that key on that machine when
  *     one exists. The machine's `capabilities` field is then deleted.
  *  2. Every object's `requires` string items become links to the matching
- *     capability object: key + the machine that would serve the object (its
- *     `served_by` pin, else its space's), else by key alone. Keys no
- *     machine offers stay strings and convert on a later boot.
+ *     capability object: key + the machine the object is pinned to (its
+ *     `served_by`), else by key alone. Keys no machine offers stay strings
+ *     and convert on a later boot.
  *
  * Runs with the other boot migrations, after publishCapabilityObjects, so
  * this machine's own capabilities already exist and only legacy rows from
  * other machines (and legacy requires) are converted here. Idempotent: a
  * re-run finds no `capabilities` field and no string requires.
  */
-import { createObject, deleteField, fetchObject, list, queryAll, setField, str, sv, type ValueJSON } from "./api";
+import { createObject, deleteField, list, queryAll, setField, str, sv, type ValueJSON } from "./api";
 import { CAPABILITY_TYPE, chooseCapability, fetchCapabilities, linkTarget, linkValue, requiresItems, type CapabilityRow } from "./capabilities";
 import { CREDENTIALS } from "./credentials";
 import { fetchInstallations } from "./descriptors";
@@ -68,13 +68,8 @@ export async function migrateCapabilities(): Promise<{ created: number; machines
 	for (const row of await queryAll({ filters: [{ key: "requires", condition: "notEmpty" }] })) {
 		const items = requiresItems(row.fields);
 		if (!items.some((i) => i.stringValue)) continue;
-		// The machine that would serve the object: its own pin, else its space's.
-		let server = linkTarget(row.fields, "served_by");
-		const channel = str(row.fields, "channel");
-		if (!server && channel) {
-			const space = await fetchObject(channel).catch(() => null);
-			if (space) server = linkTarget(space.fields, "served_by");
-		}
+		// The machine the object is pinned to, if any.
+		const server = linkTarget(row.fields, "served_by");
 		let changed = false;
 		const next = items.map((item) => {
 			const key = item.stringValue;

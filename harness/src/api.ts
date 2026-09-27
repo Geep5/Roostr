@@ -111,16 +111,16 @@ export async function query(body: Record<string, unknown>): Promise<QueryRow[]> 
 
 /** Which machine serves an object; `core/serving.odin` is the rule, `docs/object-serving.md` the spec. */
 export interface Serving {
-	/** "" when the space has no default and no machine qualifies. */
+	/** "" when nothing pins the object, no agent it names is pinned, and no machine qualifies. */
 	machineId: string;
-	reason: "self" | "pinned" | "pinned-uncapable" | "space" | "space-capable" | "capability" | "unsatisfied";
+	reason: "self" | "pinned" | "pinned-uncapable" | "agent" | "agent-capable" | "capability" | "unsatisfied" | "unserved";
 	/** The object's `requires`, verbatim: capability object ids where links were written, legacy catalog keys where strings remain. */
 	requires: string[];
 	/** Machine ids serving every required capability (capability object + active install), sorted. */
 	candidates: string[];
 }
 
-/** Resolve serving for many objects in one round trip; unknown ids resolve to the space default. */
+/** Resolve serving for many objects in one round trip; an id with no object resolves `unserved`. */
 export async function servingFor(objectIds: string[]): Promise<Record<string, Serving>> {
 	if (objectIds.length === 0) return {};
 	const res = await apiFetch(`${API}/api/serving`, { method: "POST", body: JSON.stringify({ objectIds }) });

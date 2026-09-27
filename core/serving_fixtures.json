@@ -1,15 +1,383 @@
 {
  "resolve": [
   {
-   "name": "no requirements: space default",
+   "name": "no requirements: the agent pin",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "agents": [
+    {
+     "id": "a",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "laptop"
+      }
+     }
+    }
+   ],
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "agent",
+    "requires": [],
+    "candidates": [
+     "laptop",
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "no pin, no agent, no requirements: unserved",
    "object": {
     "id": "o",
     "typeKey": "task",
     "fields": {}
    },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "",
+    "reason": "unserved",
+    "requires": [],
+    "candidates": [
+     "laptop",
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "the first listed pinned agent wins",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a1",
+          "relationKey": "agent"
+         }
+        },
+        {
+         "linkValue": {
+          "targetId": "a2",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "agents": [
+    {
+     "id": "a2",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "a1",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "studio",
+    "reason": "agent",
+    "requires": [],
+    "candidates": [
+     "laptop",
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "an unpinned first agent is skipped for a pinned second",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a1",
+          "relationKey": "agent"
+         }
+        },
+        {
+         "linkValue": {
+          "targetId": "a2",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "agents": [
+    {
+     "id": "a1",
+     "typeKey": "agent",
+     "fields": {}
+    },
+    {
+     "id": "a2",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "laptop"
+      }
+     }
+    }
+   ],
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "agent",
+    "requires": [],
+    "candidates": [
+     "laptop",
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "a binned agent lends no pin",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a1",
+          "relationKey": "agent"
+         }
+        },
+        {
+         "linkValue": {
+          "targetId": "a2",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "agents": [
+    {
+     "id": "a1",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "studio"
+      }
+     },
+     "deleted": true
+    },
+    {
+     "id": "a2",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "laptop"
+      }
+     }
+    }
+   ],
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "agent",
+    "requires": [],
+    "candidates": [
+     "laptop",
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "an agent named on the guest list but not supplied lends no pin",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "",
+    "reason": "unserved",
+    "requires": [],
+    "candidates": [
+     "laptop",
+     "studio"
+    ]
+   }
+  },
+  {
+   "name": "an agent object resolves through its own pin",
+   "object": {
+    "id": "a",
+    "typeKey": "agent",
     "fields": {
      "served_by": {
       "stringValue": "laptop"
@@ -38,7 +406,7 @@
    ],
    "expected": {
     "machineId": "laptop",
-    "reason": "space",
+    "reason": "pinned",
     "requires": [],
     "candidates": [
      "laptop",
@@ -47,22 +415,7 @@
    }
   },
   {
-   "name": "no space claim and no requirements: nobody",
-   "object": {
-    "id": "o",
-    "typeKey": "task",
-    "fields": {}
-   },
-   "machines": [],
-   "expected": {
-    "machineId": "",
-    "reason": "space",
-    "requires": [],
-    "candidates": []
-   }
-  },
-  {
-   "name": "requirement moves work to the capable machine",
+   "name": "requirement moves work off the agent pin to the capable machine",
    "object": {
     "id": "o",
     "typeKey": "task",
@@ -78,18 +431,32 @@
         }
        ]
       }
+     },
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
      }
     }
    },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "laptop"
+   "agents": [
+    {
+     "id": "a",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "laptop"
+      }
      }
     }
-   },
+   ],
    "machines": [
     {
      "id": "m1",
@@ -167,7 +534,7 @@
    }
   },
   {
-   "name": "stickiness: the default keeps work it can do",
+   "name": "the agent pin keeps work it can do",
    "object": {
     "id": "o",
     "typeKey": "task",
@@ -183,18 +550,35 @@
         }
        ]
       }
+     },
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
      }
     }
    },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "studio"
+   "agents": [
+    {
+     "id": "a",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "linkValue": {
+        "targetId": "studio",
+        "relationKey": "served_by"
+       }
+      }
      }
     }
-   },
+   ],
    "machines": [
     {
      "id": "m1",
@@ -255,7 +639,7 @@
    ],
    "expected": {
     "machineId": "studio",
-    "reason": "space-capable",
+    "reason": "agent-capable",
     "requires": [
      "c1"
     ],
@@ -281,15 +665,6 @@
         }
        ]
       }
-     }
-    }
-   },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "laptop"
      }
     }
    },
@@ -405,7 +780,7 @@
    }
   },
   {
-   "name": "all requirements must be present",
+   "name": "all requirements must be present: the agent pin, unsatisfied",
    "object": {
     "id": "o",
     "typeKey": "task",
@@ -427,18 +802,32 @@
         }
        ]
       }
+     },
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
      }
     }
    },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "laptop"
+   "agents": [
+    {
+     "id": "a",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "laptop"
+      }
      }
     }
-   },
+   ],
    "machines": [
     {
      "id": "m1",
@@ -563,15 +952,6 @@
      }
     }
    },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "laptop"
-     }
-    }
-   },
    "machines": [
     {
      "id": "m1",
@@ -625,7 +1005,7 @@
     }
    ],
    "expected": {
-    "machineId": "laptop",
+    "machineId": "",
     "reason": "unsatisfied",
     "requires": [
      "c1"
@@ -650,18 +1030,32 @@
         }
        ]
       }
+     },
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
      }
     }
    },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "laptop"
+   "agents": [
+    {
+     "id": "a",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "laptop"
+      }
      }
     }
-   },
+   ],
    "machines": [
     {
      "id": "m1",
@@ -727,7 +1121,7 @@
    }
   },
   {
-   "name": "pin wins when capable",
+   "name": "pin wins over the agent pin when capable",
    "object": {
     "id": "o",
     "typeKey": "task",
@@ -746,18 +1140,32 @@
         }
        ]
       }
+     },
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
      }
     }
    },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "laptop"
+   "agents": [
+    {
+     "id": "a",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "alpha"
+      }
      }
     }
-   },
+   ],
    "machines": [
     {
      "id": "m1",
@@ -835,18 +1243,32 @@
     "fields": {
      "served_by": {
       "stringValue": "laptop"
+     },
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
      }
     }
    },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "studio"
+   "agents": [
+    {
+     "id": "a",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "studio"
+      }
      }
     }
-   },
+   ],
    "machines": [],
    "expected": {
     "machineId": "laptop",
@@ -875,15 +1297,6 @@
         }
        ]
       }
-     }
-    }
-   },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "laptop"
      }
     }
    },
@@ -979,15 +1392,6 @@
      }
     }
    },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "laptop"
-     }
-    }
-   },
    "machines": [
     {
      "id": "m0",
@@ -1078,18 +1482,32 @@
         }
        ]
       }
+     },
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
      }
     }
    },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "other"
+   "agents": [
+    {
+     "id": "a",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "other"
+      }
      }
     }
-   },
+   ],
    "machines": [
     {
      "id": "m1",
@@ -1149,20 +1567,11 @@
    }
   },
   {
-   "name": "no object at all: the space default",
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "laptop"
-     }
-    }
-   },
+   "name": "no object at all: unserved",
    "machines": [],
    "expected": {
-    "machineId": "laptop",
-    "reason": "space",
+    "machineId": "",
+    "reason": "unserved",
     "requires": [],
     "candidates": []
    }
@@ -1192,6 +1601,18 @@
    "error": "invalid capability state"
   },
   {
+   "name": "malformed agent entry is an error",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {}
+   },
+   "agents": [
+    42
+   ],
+   "error": "invalid agent state"
+  },
+  {
    "name": "a machine object answers for itself",
    "object": {
     "id": "m2",
@@ -1199,15 +1620,6 @@
     "fields": {
      "machine_id": {
       "stringValue": "studio"
-     }
-    }
-   },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
-     "served_by": {
-      "stringValue": "alpha"
      }
     }
    },
@@ -1257,15 +1669,6 @@
      "machine_id": {
       "stringValue": "studio"
      },
-     "served_by": {
-      "stringValue": "alpha"
-     }
-    }
-   },
-   "space": {
-    "id": "s",
-    "typeKey": "channel",
-    "fields": {
      "served_by": {
       "stringValue": "alpha"
      }

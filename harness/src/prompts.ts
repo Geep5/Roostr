@@ -7,9 +7,10 @@
  * property; the object is edited, shared, and space-scoped like any
  * other. An agent with no `prompt` link is linked to its space's
  * "Assistant" prompt object before it runs (`ensureAgentPrompt`) - there
- * is no hidden prompt behind the UI. Per-agent fields (`system`, `model`,
+ * is no hidden prompt behind the UI. Per-agent fields (`model`,
  * `responsible_types`) override the prompt, never the other way round;
- * the call sites apply them.
+ * the call sites apply them. The base prompt text is the prompt object's
+ * alone.
  *
  * PROMPT_SEEDS is not a runtime lookup: it seeds the descriptor cards a
  * setup form renders from and the prompt objects the boot migration and

@@ -1,87 +1,12 @@
 /**
- * Space ↔ local checkout binding.
- *
- * A space that manages a project has two facts with different scopes:
- *
- *   - Project identity (`repo_url` on the channel object) - synced truth,
- *     meaningful on every device; a new machine uses it to clone.
- *   - The local checkout path - a machine-local fact, stored on THIS
- *     machine's object as a JSON map (`paths`: spaceId -> absolute path)
- *     with a sibling status map (`paths_status`). It syncs like everything
- *     else so any device can SEE where checkouts live, but only the machine
- *     that serves the space object (`docs/object-serving.md`: a channel
- *     resolves to its own `served_by`) ever writes its own entry (enforced
- *     by the harness endpoint being the sole writer - the UI has no direct
- *     path).
- *
- * The binding is what makes serving sticky in practice: the machine with
- * the working copy is the only one that can execute in it.
+ * The agent's project checkout: its `repo_path` property ("Project folder"),
+ * an absolute path on the machine that serves the agent. Machine-local by
+ * nature - the serving gate guarantees the machine running the turn is the
+ * one the agent is pinned to.
  */
-
-import { fetchObject, queryAll, setField, str, sv, type QueryRow } from "./api";
-import { machineId } from "./roster";
-import { MACHINE_TYPE, servesHere } from "./machine";
-import { realpath, stat } from "node:fs/promises";
-import { isAbsolute } from "node:path";
 
 const AGENTS_MD_CAP = 4000;
 const GIT_TIMEOUT_MS = 10_000;
-
-// ── My machine row ────────────────────────────────────────────────
-
-const ROW_TTL_MS = 20_000;
-let rowCache: { at: number; row: QueryRow | null } | null = null;
-
-export function invalidateWorkspaces(): void {
-	rowCache = null;
-}
-
-async function myMachineRow(): Promise<QueryRow | null> {
-	if (rowCache && Date.now() - rowCache.at < ROW_TTL_MS) return rowCache.row;
-	const id = await machineId();
-	const row = (await queryAll({ type: MACHINE_TYPE })).find((m) => str(m.fields, "machine_id") === id) ?? null;
-	rowCache = { at: Date.now(), row };
-	return row;
-}
-
-function parseMap(row: QueryRow | null, key: string): Record<string, string> {
-	try {
-		const raw = row ? str(row.fields, key) : "";
-		return raw ? (JSON.parse(raw) as Record<string, string>) : {};
-	} catch {
-		return {};
-	}
-}
-
-/** This machine's spaceId -> path map. */
-export async function readBindings(): Promise<Record<string, string>> {
-	return parseMap(await myMachineRow(), "paths");
-}
-
-export class WorkspaceAccessError extends Error {}
-
-async function servingSpace(spaceId: string) {
-	if (!spaceId) throw new WorkspaceAccessError("space required");
-	const space = await fetchObject(spaceId);
-	if (!(await servesHere(spaceId))) throw new WorkspaceAccessError("this machine does not serve this space");
-	return space;
-}
-
-async function directoryPath(path: string): Promise<string> {
-	if (!isAbsolute(path)) throw new WorkspaceAccessError("workspace path must be absolute");
-	const canonical = await realpath(path);
-	if (!(await stat(canonical)).isDirectory()) throw new WorkspaceAccessError("workspace must be a directory");
-	return canonical;
-}
-
-/** Local path disclosure is restricted to spaces actually served by this machine. */
-export async function readBinding(spaceId: string): Promise<string> {
-	await servingSpace(spaceId);
-	const path = (await readBindings())[spaceId];
-	return path ? directoryPath(path) : "";
-}
-
-// ── Validation ────────────────────────────────────────────────────
 
 async function git(path: string, ...args: string[]): Promise<{ code: number; out: string }> {
 	const proc = Bun.spawn(["git", "-C", path, ...args], { stdout: "pipe", stderr: "pipe" });
@@ -92,86 +17,6 @@ async function git(path: string, ...args: string[]): Promise<{ code: number; out
 	return { code, out: out.trim() };
 }
 
-/** Normalize a git remote for comparison: strip protocol/user/.git suffix. */
-function remoteKey(url: string): string {
-	return url
-		.trim()
-		.replace(/^git@([^:]+):/, "$1/")
-		.replace(/^[a-z+]+:\/\//, "")
-		.replace(/^[^@]+@/, "")
-		.replace(/\.git$/, "")
-		.replace(/\/+$/, "")
-		.toLowerCase();
-}
-
-/**
- * Status of one binding: "ok" | "missing" | "not-git" |
- * "remote-mismatch:<actual>". `repoUrl` empty = any remote is fine.
- */
-export async function bindingStatus(path: string, repoUrl: string): Promise<string> {
-	const exists = await Bun.file(`${path}/.`)
-		.stat()
-		.then((s) => s.isDirectory())
-		.catch(() => false);
-	if (!exists) return "missing";
-	const remote = await git(path, "remote", "get-url", "origin");
-	if (remote.code !== 0) return "not-git";
-	if (repoUrl && remoteKey(remote.out) !== remoteKey(repoUrl)) return `remote-mismatch:${remote.out}`;
-	return "ok";
-}
-
-async function writeStatusMap(row: QueryRow, statuses: Record<string, string>): Promise<void> {
-	const prev = parseMap(row, "paths_status");
-	if (JSON.stringify(prev) === JSON.stringify(statuses)) return;
-	await setField(row.id, "paths_status", sv(JSON.stringify(statuses)));
-}
-
-/** Re-validate every binding this machine holds; write statuses if changed. */
-export async function validateBindings(): Promise<void> {
-	const row = await myMachineRow();
-	if (!row) return;
-	const paths = parseMap(row, "paths");
-	const statuses: Record<string, string> = {};
-	for (const [spaceId, path] of Object.entries(paths)) {
-		const repoUrl = await fetchObject(spaceId)
-			.then((o) => str(o.fields, "repo_url"))
-			.catch(() => "");
-		statuses[spaceId] = await bindingStatus(path, repoUrl);
-	}
-	await writeStatusMap(row, statuses);
-	invalidateWorkspaces();
-}
-
-// ── Binding writes (authserver is the only caller - UI never writes) ──
-
-/** Bind (or with empty path, unbind) this machine's checkout for a space. */
-export async function setBinding(spaceId: string, path: string): Promise<{ status: string }> {
-	const space = await servingSpace(spaceId);
-	const row = await myMachineRow();
-	if (!row) throw new Error("this machine has no machine object yet - serve something first");
-	const paths = parseMap(row, "paths");
-	const statuses = parseMap(row, "paths_status");
-	if (!path) {
-		delete paths[spaceId];
-		delete statuses[spaceId];
-		await setField(row.id, "paths", sv(JSON.stringify(paths)));
-		await writeStatusMap(row, statuses);
-		invalidateWorkspaces();
-		return { status: "unbound" };
-	}
-	const canonical = await directoryPath(path);
-	const status = await bindingStatus(canonical, str(space.fields, "repo_url"));
-	if (status !== "ok") throw new WorkspaceAccessError(`invalid workspace binding: ${status}`);
-	paths[spaceId] = canonical;
-	statuses[spaceId] = status;
-	await setField(row.id, "paths", sv(JSON.stringify(paths)));
-	await writeStatusMap(row, statuses);
-	invalidateWorkspaces();
-	return { status };
-}
-
-// ── Agent-facing context ──────────────────────────────────────────
-
 export interface Workspace {
 	path: string;
 	remote: string;
@@ -181,19 +26,9 @@ export interface Workspace {
 }
 
 /**
- * The workspace an agent in `channelId` works in on THIS machine, or null
- * when the space has no binding here.
- */
-export async function workspaceContext(channelId: string): Promise<Workspace | null> {
-	if (!channelId) return null;
-	const path = (await readBindings())[channelId];
-	return path ? workspaceAt(path) : null;
-}
-
-/**
- * A checkout by path (a space binding, or an agent's own `repo_path`), or
- * null when the directory is missing. Reads AGENTS.md/CLAUDE.md from it so
- * repo knowledge rides with the repo, not the DAG.
+ * A checkout by path, or null when the directory is missing. Reads
+ * AGENTS.md/CLAUDE.md from it so repo knowledge rides with the repo, not
+ * the DAG.
  */
 export async function workspaceAt(path: string): Promise<Workspace | null> {
 	const exists = await Bun.file(`${path}/.`)
@@ -228,7 +63,7 @@ export async function workspaceAt(path: string): Promise<Workspace | null> {
 /** The Workspace system-prompt section. */
 export function workspacePromptSection(ws: Workspace): string {
 	const lines = [
-		`This space manages a local project checked out on this machine.`,
+		`You work in a local project checked out on this machine.`,
 		`Path: ${ws.path}`,
 		ws.remote ? `Remote: ${ws.remote}` : "",
 		ws.branch ? `Branch: ${ws.branch}${ws.dirty ? ` (${ws.dirty} uncommitted change${ws.dirty === 1 ? "" : "s"})` : " (clean)"}` : "",

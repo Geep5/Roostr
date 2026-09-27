@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { API, apiFetch, authorizeLocalRequest, localPreflight, serviceToken, validLocalHost } from "./local-api-auth";
-import { invalidateWorkspaces, readBinding, setBinding, WorkspaceAccessError } from "./workspace";
-import { invalidateServing } from "./machine";
 
 const token = "a".repeat(64);
 const uiToken = "b".repeat(64);
@@ -18,16 +16,11 @@ beforeEach(async () => {
 	root = await mkdtemp(join(tmpdir(), "glon-auth-test-"));
 	process.env.GLON_DATA = root;
 	await writeFile(join(root, "api-token"), token, { mode: 0o600 });
-	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "this-machine" }));
-	invalidateWorkspaces();
-	invalidateServing();
 });
 afterEach(async () => {
 	globalThis.fetch = previousFetch;
 	if (previousRoot === undefined) delete process.env.GLON_DATA;
 	else process.env.GLON_DATA = previousRoot;
-	invalidateWorkspaces();
-	invalidateServing();
 	await rm(root, { recursive: true, force: true });
 });
 
@@ -89,48 +82,4 @@ test("preflight only echoes an origin authorized by native paired sessions", asy
 	const denied = await localPreflight(request("https://evil.example"), 7334);
 	expect(denied.status).toBe(403);
 	expect(denied.headers.has("Access-Control-Allow-Origin")).toBe(false);
-});
-
-test("non-serving machines cannot disclose, bind or unbind workspace paths", async () => {
-	globalThis.fetch = (async (input) => {
-		const url = String(input);
-		if (url.endsWith("/api/objects/space")) return Response.json({ id: "space", fields: { served_by: { stringValue: "other-machine" } } });
-		if (url.endsWith("/api/query")) return Response.json({ total: 0, records: [] });
-		if (url.endsWith("/api/serving")) return Response.json({ space: { machineId: "other-machine", reason: "space", requires: [], candidates: [] } });
-		throw new Error(`unexpected request: ${url}`);
-	}) as typeof fetch;
-	await expect(readBinding("space")).rejects.toBeInstanceOf(WorkspaceAccessError);
-	await expect(setBinding("space", root)).rejects.toBeInstanceOf(WorkspaceAccessError);
-	await expect(setBinding("space", "")).rejects.toBeInstanceOf(WorkspaceAccessError);
-});
-
-test("failed realpath binding does not persist a path or fall back to home", async () => {
-	const writes: string[] = [];
-	globalThis.fetch = (async (input, init) => {
-		const url = String(input);
-		if (url.endsWith("/api/objects/space")) return Response.json({ id: "space", fields: { served_by: { stringValue: "this-machine" } } });
-		if (url.endsWith("/api/query")) return Response.json({ total: 1, records: [{ id: "machine", fields: { machine_id: { stringValue: "this-machine" } } }] });
-		if (url.endsWith("/api/serving")) return Response.json({ space: { machineId: "this-machine", reason: "space", requires: [], candidates: [] } });
-		if (!url.endsWith("/api/mutate")) throw new Error(`unexpected request: ${url}`);
-		writes.push(String(init?.body));
-		return Response.json({ ok: true });
-	}) as typeof fetch;
-	await expect(setBinding("space", join(root, "missing"))).rejects.toThrow();
-	await expect(setBinding("space", "relative/path")).rejects.toBeInstanceOf(WorkspaceAccessError);
-	expect(writes).toEqual([]);
-});
-
-test("serving workspace reads resolve a real directory instead of returning an unchecked path", async () => {
-	const directory = join(root, "checkout");
-	const alias = join(root, "alias");
-	await mkdir(directory);
-	await symlink(directory, alias);
-	globalThis.fetch = (async (input) => {
-		const url = String(input);
-		if (url.endsWith("/api/objects/space")) return Response.json({ id: "space", fields: { served_by: { stringValue: "this-machine" } } });
-		if (url.endsWith("/api/query")) return Response.json({ total: 1, records: [{ id: "machine", fields: { machine_id: { stringValue: "this-machine" }, paths: { stringValue: JSON.stringify({ space: alias }) } } }] });
-		if (url.endsWith("/api/serving")) return Response.json({ space: { machineId: "this-machine", reason: "space", requires: [], candidates: [] } });
-		throw new Error(`unexpected request: ${url}`);
-	}) as typeof fetch;
-	expect(await readBinding("space")).toBe(await realpath(directory));
 });

@@ -54,7 +54,7 @@ test("a scheduled object fires to the served agent on its guest list", async () 
 		}
 		if (url.pathname === "/api/serving") {
 			const ids = (body.objectIds as string[]) ?? [];
-			return respond(Object.fromEntries(ids.map((id) => [id, { machineId: machine, reason: "space", requires: [], candidates: [machine] }])));
+			return respond(Object.fromEntries(ids.map((id) => [id, { machineId: machine, reason: "agent", requires: [], candidates: [machine] }])));
 		}
 		if (url.pathname === `/api/objects/${objectId}`) {
 			return respond({
@@ -129,7 +129,7 @@ test("a scheduled object with no agent gets an error badge and no turn", async (
 		}
 		if (url.pathname === "/api/serving") {
 			const ids = (body.objectIds as string[]) ?? [];
-			return respond(Object.fromEntries(ids.map((id) => [id, { machineId: machine, reason: "space", requires: [], candidates: [machine] }])));
+			return respond(Object.fromEntries(ids.map((id) => [id, { machineId: machine, reason: "pinned", requires: [], candidates: [machine] }])));
 		}
 		if (url.pathname === `/api/objects/${objectId}`) {
 			return respond({

@@ -13,7 +13,6 @@ import { readRoster, setEnabled } from "./roster";
 import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, finishCapabilityLogin, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
 import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
-import { WorkspaceAccessError } from "./workspace";
 import type { SpaceJoinLink } from "./nostrsync";
 
 /** Public identity (npub + hex pubkey) derived from the local nostr key. */
@@ -188,17 +187,6 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 					onRosterChange(next);
 					return json({ ok: true, roster: next });
 				}
-				if (req.method === "GET" && url.pathname === "/workspace") {
-					const { readBinding } = await import("./workspace");
-					const space = url.searchParams.get("space") ?? "";
-					return json({ path: await readBinding(space) });
-				}
-				if (req.method === "POST" && url.pathname === "/workspace") {
-					const body = (await req.json()) as { space?: string; path?: string };
-					if (!body.space) return json({ error: "space required" }, 400);
-					const { setBinding } = await import("./workspace");
-					return json(await setBinding(body.space, (body.path ?? "").trim()));
-				}
 				if (req.method === "GET" && url.pathname === "/machine") {
 					const { machineId } = await import("./roster");
 					const { hostname } = await import("node:os");
@@ -234,7 +222,7 @@ export function startAuthServer(served: Set<string>, onRosterChange: (next: stri
 				}
 				return json({ error: "not found" }, 404);
 			} catch (err) {
-				return json({ error: err instanceof Error ? err.message : String(err) }, err instanceof WorkspaceAccessError ? 403 : 500);
+				return json({ error: err instanceof Error ? err.message : String(err) }, 500);
 			}
 		},
 	});

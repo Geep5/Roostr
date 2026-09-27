@@ -32,8 +32,10 @@ identically. No heartbeats, no leases, no coordinator.
 | machine  | `capabilities` | string list | that machine               | catalog keys installed **and** enabled here            |
 | machine  | `name`         | string      | that machine / human       | hostname by default                                    |
 | install  | `machine_id`   | string      | owning machine            | fixed owner for local capability/authentication work  |
-| channel  | `served_by`    | string      | human, first-seen machine  | default server for objects in the space (unchanged)    |
+| agent    | `served_by`    | string      | human, harness migration   | the agent's machine: lends its pin to objects naming it |
+| agent    | `repo_path`    | string      | human                      | "Project folder": the agent's checkout on that machine |
 | any      | `served_by`    | string      | human, agent tool          | pin: this machine serves this object                   |
+| any      | `agent`        | link list   | human, agent tool          | guest list; the first pinned guest lends its pin       |
 | any      | `requires`     | string list | human, agent tool          | capabilities the work needs                            |
 
 `served_by` is already a protected field (`core/authority.odin`
@@ -45,27 +47,33 @@ it duplicated what the resolver derives.
 ### Resolver (engine, one implementation)
 
 ```
-resolve_server(object, space, machines) -> { machine_id, reason }
+resolve_server(object, states) -> { machine_id, reason }
 ```
 
 Pure function in `core/serving.odin`, exposed through the ABI as method
 `serving` (`resolve`), with fixtures in `core/serving_fixtures.json`. Every
-host — harness, website, iOS — calls it; none re-implements it.
+host — harness, website, iOS — calls it; none re-implements it. The ABI
+payload is `{object, agents, machines, capabilities}`: `agents` are the agent
+objects the object's guest list names (any order; the list's order decides).
+The space plays no part: machine choice lives on agents.
 
 ```
 if object is an installation:
     return (object.machine_id, "self")                   # missing owner means unserved
+if object is a machine:
+    return (object.machine_id, "self")
 
 candidates = machines whose capabilities ⊇ object.requires
-default    = object.served_by ?? space.served_by
+agent_pin  = served_by of the first agent in object.agent (list order) that has one
 
-if object.served_by set:
+if object.served_by set:                                 # an agent object's own pin lands here
     if object.served_by ∈ candidates or requires empty → (served_by, "pinned")
     else                                                → (served_by, "pinned-uncapable")   # host files a holdup
-if requires empty                                       → (default, "space")
-if default ∈ candidates                                 → (default, "space-capable")       # stickiness: no churn
+if agent_pin set and requires empty                     → (agent_pin, "agent")
+if agent_pin ∈ candidates                               → (agent_pin, "agent-capable")
+if requires empty                                       → ("", "unserved")
 if candidates non-empty                                 → (min(candidates by machine_id), "capability")
-else                                                    → (default, "unsatisfied")         # host files a holdup
+else                                                    → (agent_pin ?? "", "unsatisfied")  # host files a holdup
 ```
 
 Properties: deterministic across machines (same DAG → same answer);
@@ -97,9 +105,10 @@ and an agent answering another agent may ask on, bounded to `A2A_MAX_HOPS`
 (3) agent-authored messages per exchange. Co-guests on one object address
 each other directly; the object's DAG holds both copies.
 
-Serving is unchanged: the object resolves on its own row and every guest
-runs where the object resolves. The harness adopts each guest into its
-roster when it serves the object (`adoptForObject`).
+The object resolves through its guest list: without a pin of its own, the
+first listed guest with a `served_by` lends it, and every guest runs where
+the object resolves. The harness adopts each guest into its roster when it
+serves the object (`adoptForObject`).
 
 ### Recurring objects
 
@@ -182,9 +191,9 @@ second — unchanged).
 ## Implementation plan
 
 1. **Engine** (`glonOdin/core`): `serving.odin` resolver + ABI method +
-   fixtures (pinned, pinned-uncapable, space default, capability move,
-   stickiness, tie-break, unsatisfied, agent-follows-bound-object). Bundle
-   `requires` relation. Rebuild `engine.wasm`, xcframework.
+   fixtures (pinned, pinned-uncapable, agent pin, agent-capable, guest-list
+   order, capability move, tie-break, unsatisfied, unserved). Bundle
+   `requires` and `repo_path` relations. Rebuild `engine.wasm`, xcframework.
 2. **Harness**: `capabilities` publish in `skillmgr`; `machine.ts` loses
    `spaceMine`/`claims`, gains `serverOf(objectId)` over cached machines +
    channels (20 s TTL as today, invalidated on relevant commits);
@@ -194,7 +203,7 @@ second — unchanged).
 3. **Website**: header chip + picker, Repeat cell, Machine panel "serves"
    list. iOS follows through the bundle.
 4. **Cleanup**: README "Sync (nostr)" paragraph, `claims` field removal,
-   `convergeSpaceServing` stays (space default is still the base case).
+   channel `served_by` removal (agents carry the machine choice).
 
 ## Verification
 
