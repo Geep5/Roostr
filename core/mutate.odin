@@ -1101,54 +1101,58 @@ Bundled_Relation :: struct {
 	hidden:    bool,
 	read_only: bool,
 	max_count: i64,
+	// Single-select (status) choices, seeded as {id,text,color,orderId} maps.
+	options:   []string,
 }
 
 BUNDLED_RELATIONS :: []Bundled_Relation{
-	{"name", "shorttext", "Name", "✏️", false, false, 0},
-	{"description", "longtext", "Description", "📝", false, false, 0},
-	{"iconEmoji", "emoji", "Icon", "🖼️", true, false, 0},
-	{"createdDate", "date", "Created date", "📅", false, true, 0},
-	{"modifiedDate", "date", "Modified date", "🗓️", false, true, 0},
-	{"dueDate", "date", "Due date", "⏰", false, false, 0},
-	{"tag", "tag", "Tag", "🏷️", false, false, 0},
-	{"status", "status", "Status", "🚦", false, false, 1},
-	{"done", "checkbox", "Done", "✅", false, false, 0},
+	{"name", "shorttext", "Name", "✏️", false, false, 0, {}},
+	{"description", "longtext", "Description", "📝", false, false, 0, {}},
+	{"iconEmoji", "emoji", "Icon", "🖼️", true, false, 0, {}},
+	{"createdDate", "date", "Created date", "📅", false, true, 0, {}},
+	{"modifiedDate", "date", "Modified date", "🗓️", false, true, 0, {}},
+	{"dueDate", "date", "Due date", "⏰", false, false, 0, {}},
+	{"tag", "tag", "Tag", "🏷️", false, false, 0, {}},
+	{"status", "status", "Status", "🚦", false, false, 1, {}},
+	{"done", "checkbox", "Done", "✅", false, false, 0, {}},
 	// Rendered by the Repeat cell, not the generic property editor.
-	{"repeat", "repeat", "Repeat", "↻", true, false, 0},
+	{"repeat", "repeat", "Repeat", "↻", true, false, 0, {}},
 	// Per-object serving: who runs this object, and the capabilities it needs.
 	// `served_by` links the machine object; `requires` links capability
 	// objects (type `capability`). A capability is only usable once it is
 	// served by a machine with an active install - before that it does not
 	// count for the resolver and is not offered to an agent.
-	{"served_by", "object", "Served by", "🖥️", true, false, 1},
-	{"requires", "object", "Requires", "🧩", true, false, 0},
+	{"served_by", "object", "Served by", "🖥️", true, false, 1, {}},
+	{"requires", "object", "Requires", "🧩", true, false, 0, {}},
 	// The object's guest list: agents a human (or one of those agents) may
 	// address here with @. Rendered as a link badge; its picker is limited to
 	// the space's agent type. Nothing answers an object without being on it.
 	// Agent-related properties are hidden from query/collection views by
 	// default (FeaturedProps shows them on the object page regardless).
-	{"agent", "object", "Agent", "🤖", true, false, 0},
+	{"agent", "object", "Agent", "🤖", true, false, 0, {}},
 	// Which installations (a machine's credentials/logins) this object uses.
 	// Rendered as credential badges that read status from the resolved
 	// machine's install rows; secrets never enter the object.
-	{"install", "object", "Credentials", "🔌", true, false, 0},
+	{"install", "object", "Credentials", "🔌", true, false, 0, {}},
 	// An agent's configuration is a system_prompt object: standing prompt,
 	// model, requires, skills. `prompt` links one; the harness reads it
 	// through the link, not a hardcoded kind.
-	{"prompt", "object", "System prompt", "🧠", true, false, 1},
+	{"prompt", "object", "System prompt", "🧠", true, false, 1, {}},
 	// Per-agent overrides, set like any property (blank = follow the prompt).
-	{"model", "shorttext", "Model", "🧠", true, false, 0},
-	{"responsible_types", "tag", "Responsible types", "🧩", true, false, 0},
+	// One model per agent: a single-select status; the harness reads the
+	// chosen string, so a status option stays compatible with a plain value.
+	{"model", "status", "Model", "🧠", false, false, 1, {"kimi-k3", "claude-sonnet-4-5"}},
+	{"responsible_types", "tag", "Responsible types", "🧩", true, false, 0, {}},
 	// A "current problem" badge: the scheduler, a holdup, an agent, or a
 	// human sets it; visible and editable like any property so views can
 	// filter and sort by it. Automation prefixes its messages ("run failed:",
 	// "needs <capability>:") and only ever clears what it wrote.
-	{"error", "shorttext", "Error", "⚠️", false, false, 0},
-	{"url", "url", "URL", "🔗", false, false, 0},
-	{"email", "email", "Email", "✉️", false, false, 0},
-	{"phone", "phone", "Phone", "📞", false, false, 0},
-	{"featuredRelations", "relations", "Featured relations", "⭐", true, false, 0},
-	{"setOf", "object", "Set of", "🗂️", true, false, 0},
+	{"error", "shorttext", "Error", "⚠️", false, false, 0, {}},
+	{"url", "url", "URL", "🔗", false, false, 0, {}},
+	{"email", "email", "Email", "✉️", false, false, 0, {}},
+	{"phone", "phone", "Phone", "📞", false, false, 0, {}},
+	{"featuredRelations", "relations", "Featured relations", "⭐", true, false, 0, {}},
+	{"setOf", "object", "Set of", "🗂️", true, false, 0, {}},
 }
 
 /**
@@ -1159,10 +1163,12 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
  */
 mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input, channel_id: string) {
 	Present :: struct {
-		id:     string,
-		name:   string,
-		emoji:  string,
-		format: string,
+		id:        string,
+		name:      string,
+		emoji:     string,
+		format:    string,
+		hidden:    bool,
+		max_count: i64,
 	}
 	rels := make(map[string]Present)
 	defer delete(rels)
@@ -1192,6 +1198,8 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do e.name = strings.clone(v.str, context.temp_allocator)
 			if v, ok := fields_get(s.fields, "iconEmoji"); ok && v.kind == .String do e.emoji = strings.clone(v.str, context.temp_allocator)
 			if v, ok := fields_get(s.fields, "format"); ok && v.kind == .String do e.format = strings.clone(v.str, context.temp_allocator)
+			if v, ok := fields_get(s.fields, "hidden"); ok && v.kind == .Bool do e.hidden = v.b
+			if v, ok := fields_get(s.fields, "maxCount"); ok && v.kind == .Int do e.max_count = v.i
 			if s.type_key == "relation" {
 				if prior, exists := c.rels^[key.str]; !exists || e.id < prior.id do c.rels^[strings.clone(key.str, context.temp_allocator)] = e
 			} else {
@@ -1207,10 +1215,26 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 
 
 	for r in BUNDLED_RELATIONS {
+		options_value := proc(texts: []string) -> Value {
+			items := make([dynamic]Value, context.temp_allocator)
+			for text, i in texts {
+				entry := Value{kind = .Map}
+				entry.entries = make([dynamic]Value_Entry, context.temp_allocator)
+				append(&entry.entries, Value_Entry{key = "id", value = string_value(fmt.tprintf("opt-%d", i))})
+				append(&entry.entries, Value_Entry{key = "text", value = string_value(text)})
+				append(&entry.entries, Value_Entry{key = "color", value = string_value("")})
+				append(&entry.entries, Value_Entry{key = "orderId", value = string_value(fmt.tprintf("%04d", i))})
+				append(&items, entry)
+			}
+			return list_value(items[:])
+		}
 		if e, ok := rels[r.key]; ok {
 			ops := make([dynamic]Operation, context.temp_allocator)
 			if e.emoji != r.emoji do append(&ops, Operation{kind = .Field_Set, key = "iconEmoji", value = string_value(r.emoji)})
 			if e.format != "" && e.format != r.format do append(&ops, Operation{kind = .Field_Set, key = "format", value = string_value(r.format)})
+			if e.hidden != r.hidden do append(&ops, Operation{kind = .Field_Set, key = "hidden", value = bool_value(r.hidden)})
+			if e.max_count != r.max_count do append(&ops, Operation{kind = .Field_Set, key = "maxCount", value = int_value(r.max_count)})
+			if len(r.options) > 0 do append(&ops, Operation{kind = .Field_Set, key = "options", value = options_value(r.options)})
 			// Agent, served_by and install pickers are restricted to one bundled
 			// type; older rows predate the restriction and get it here.
 			if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" || r.key == "prompt" {
@@ -1222,7 +1246,6 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			continue
 		}
 		id := fmt.tprintf("bundled-rel-%s-%s", r.key, prefix)
-		empty: []Value
 		ops := []Operation{
 			{kind = .Object_Create, type_key = "relation"},
 			{kind = .Field_Set, key = "channel", value = string_value(channel_id)},
@@ -1234,7 +1257,7 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "readOnly", value = bool_value(r.read_only)},
 			{kind = .Field_Set, key = "maxCount", value = int_value(r.max_count)},
 			{kind = .Field_Set, key = "bundled", value = bool_value(true)},
-			{kind = .Field_Set, key = "options", value = list_value(empty)},
+			{kind = .Field_Set, key = "options", value = options_value(r.options)},
 		}
 		mutation_add(plan, input, id, ops)
 		if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" || r.key == "prompt" {
