@@ -348,25 +348,25 @@ async function serve(): Promise<void> {
 	}
 
 	/**
-	 * May this machine run `agent` on `object`'s inbox? Two ways in:
-	 *   - this machine serves the object (`servesHere`), or
-	 *   - the agent is pinned to this machine (`served_by`) AND the object is
-	 *     not itself pinned to a DIFFERENT machine.
-	 * The second is the human's explicit "run this agent on my laptop": it
-	 * overrides the inherited space default (Sharky) but never an explicit
-	 * object pin - object pin > agent pin > space default. Swapping the pin
-	 * on a live object is picked up because every served_by/agent commit
-	 * invalidates the serving cache (`route`), so the next event re-resolves.
+	 * Does THIS machine run `agent` on `object`? Exactly one machine answers:
+	 *   - the object is placed on purpose (an explicit pin, a capability
+	 *     need, a machine object) → the object's server;
+	 *   - otherwise, when the agent is pinned (`served_by`) → that machine,
+	 *     and ONLY that machine - the object's inherited space default
+	 *     stands down for it;
+	 *   - otherwise → the object's server (the space default).
+	 * object pin > agent pin > space default. Every machine evaluates the same
+	 * DAG state, so two harnesses never both answer one message. Pin swaps take
+	 * effect on the next event: served_by/agent commits invalidate the cache.
 	 */
-	async function servesHereForAgent(objectId: string, agentId: string): Promise<boolean> {
-		if (await servesHere(objectId)) return true;
+	async function runsAgentHere(objectId: string, agentId: string): Promise<boolean> {
 		const agent = await fetchObject(agentId).catch(() => null);
-		if (!agent || str(agent.fields, "served_by") !== me) return false;
-		const s = await serverOf(objectId);
-		// Blocked only by an explicit pin to another machine; the inherited
-		// space default yields to the agent pin.
-		const objectPinnedElsewhere = (s.reason === "pinned" || s.reason === "pinned-uncapable") && s.machineId !== "" && s.machineId !== me;
-		return !objectPinnedElsewhere;
+		const pin = agent ? str(agent.fields, "served_by") : "";
+		if (pin && agentId !== objectId) {
+			const s = await serverOf(objectId);
+			if (s.reason === "space") return pin === me;
+		}
+		return servesHere(objectId);
 	}
 
 	/**
@@ -415,7 +415,7 @@ async function serve(): Promise<void> {
 	}
 
 	async function driveInbox(s: Served, object: ObjectJSON): Promise<void> {
-		if (busy.has(s.agentId) || !(await servesHereForAgent(object.id, s.agentId))) return;
+		if (busy.has(s.agentId) || !(await runsAgentHere(object.id, s.agentId))) return;
 		// Another turn may have acquired the slot while serving was checked.
 		if (busy.has(s.agentId)) return;
 		const entry = pendingInbox(object, s.agentId)[0];
@@ -616,7 +616,7 @@ async function serve(): Promise<void> {
 	}
 
 	async function drive(s: Served, surface: ConvRef): Promise<void> {
-		if (!(await servesHere(surface.objectId))) return;
+		if (!(await runsAgentHere(surface.objectId, s.agentId))) return;
 		const key = convKey(surface);
 		if (busy.has(s.agentId)) {
 			if (key === active.get(s.agentId)) {
@@ -753,9 +753,14 @@ async function serve(): Promise<void> {
 		// guest. A post with no tag wakes nobody; the reply lands in the same
 		// thread. Exchanges are only for explicit group/agent-to-agent asks. ──
 		if (guestAgents(obj.fields).length === 0 || externallyAnswered(obj)) return;
-		if (!(await servesHere(objectId))) return;
-		for (const aid of guestAgents(obj.fields)) void adoptForObject(obj, aid);
+		// Per guest, not per object: a guest pinned to another machine is that
+		// machine's to run even here; a guest pinned HERE runs even when the
+		// object's space default is another machine.
+		const mine: string[] = [];
+		for (const aid of guestAgents(obj.fields)) if (await runsAgentHere(objectId, aid)) mine.push(aid);
 		void pumpMailbox(objectId, obj);
+		if (mine.length === 0) return;
+		for (const aid of mine) void adoptForObject(obj, aid);
 
 		// ── @-mentions in the human thread: wake each tagged guest. ──
 		await wakeMentionedGuests(obj);
@@ -770,6 +775,7 @@ async function serve(): Promise<void> {
 		const newest = msgs[msgs.length - 1].block.content.custom?.meta?.["text"] ?? "";
 		if (!newest.includes("@")) return;
 		for (const aid of guestAgents(obj.fields)) {
+			if (!(await runsAgentHere(obj.id, aid))) continue;
 			const agent = await fetchObject(aid).catch(() => null);
 			if (!agent) continue;
 			const name = str(agent.fields, "name");
