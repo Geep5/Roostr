@@ -348,6 +348,28 @@ async function serve(): Promise<void> {
 	}
 
 	/**
+	 * May this machine run `agent` on `object`'s inbox? Two ways in:
+	 *   - this machine serves the object (`servesHere`), or
+	 *   - the agent is pinned to this machine (`served_by`) AND the object is
+	 *     not itself pinned to a DIFFERENT machine.
+	 * The second is the human's explicit "run this agent on my laptop": it
+	 * overrides the inherited space default (Sharky) but never an explicit
+	 * object pin - object pin > agent pin > space default. Swapping the pin
+	 * on a live object is picked up because every served_by/agent commit
+	 * invalidates the serving cache (`route`), so the next event re-resolves.
+	 */
+	async function servesHereForAgent(objectId: string, agentId: string): Promise<boolean> {
+		if (await servesHere(objectId)) return true;
+		const agent = await fetchObject(agentId).catch(() => null);
+		if (!agent || str(agent.fields, "served_by") !== me) return false;
+		const s = await serverOf(objectId);
+		// Blocked only by an explicit pin to another machine; the inherited
+		// space default yields to the agent pin.
+		const objectPinnedElsewhere = (s.reason === "pinned" || s.reason === "pinned-uncapable") && s.machineId !== "" && s.machineId !== me;
+		return !objectPinnedElsewhere;
+	}
+
+	/**
 	 * One agent on an object's guest list (`object.agent`), served here
 	 * because this machine serves the object - adopted into the local roster
 	 * on first contact, so a space takeover needs no per-agent toggling. Null
@@ -393,7 +415,7 @@ async function serve(): Promise<void> {
 	}
 
 	async function driveInbox(s: Served, object: ObjectJSON): Promise<void> {
-		if (busy.has(s.agentId) || !(await servesHere(object.id))) return;
+		if (busy.has(s.agentId) || !(await servesHereForAgent(object.id, s.agentId))) return;
 		// Another turn may have acquired the slot while serving was checked.
 		if (busy.has(s.agentId)) return;
 		const entry = pendingInbox(object, s.agentId)[0];
@@ -422,19 +444,25 @@ async function serve(): Promise<void> {
 				await deliverOutbox(object);
 				object = await fetchObject(objectId);
 			}
-			if (!(await servesHere(objectId))) return;
-			// An external responder owns this object's inbox as well: it claims,
-			// answers and delivers on its own. Outgoing copies were still pumped
-			// above, and a harness restart must not mark its claims interrupted.
-			if (externallyAnswered(object)) return;
-			if (object.typeKey === "install") {
-				await receiveCapabilityRequests(object, inboxOwner);
-				return;
-			}
-			if (!recoveredObjects.has(objectId)) {
-				await recoverInbox(object, inboxOwner);
-				recoveredObjects.add(objectId);
-				object = await fetchObject(objectId);
+			// Gate per recipient, not per object: an agent pinned to this
+			// machine answers even on an object served elsewhere (space
+			// default), while every other recipient still needs the object's
+			// server. Recover only when this machine serves the object itself.
+			const objectServedHere = await servesHere(objectId);
+			if (objectServedHere) {
+				// An external responder owns this object's inbox as well: it claims,
+				// answers and delivers on its own. Outgoing copies were still pumped
+				// above, and a harness restart must not mark its claims interrupted.
+				if (externallyAnswered(object)) return;
+				if (object.typeKey === "install") {
+					await receiveCapabilityRequests(object, inboxOwner);
+					return;
+				}
+				if (!recoveredObjects.has(objectId)) {
+					await recoverInbox(object, inboxOwner);
+					recoveredObjects.add(objectId);
+					object = await fetchObject(objectId);
+				}
 			}
 			const recipients = new Map<string, { objectId: string; agentId: string }>();
 			for (const entry of object.mailbox ?? []) {
