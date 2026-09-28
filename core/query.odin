@@ -508,47 +508,26 @@ sort_less :: proc(a, b: ^Object_State, user_data: rawptr) -> bool {
 	return strings.compare(a.id, b.id) < 0
 }
 
-// Anytype resolveSources: type keys become type-in, relation keys exists; OR.
-resolve_set_filter :: proc(states: map[string]^Object_State, set_obj: ^Object_State) -> json.Value {
-	sources := make([dynamic]string, context.temp_allocator)
-	if v, ok := fields_get(set_obj.fields, "setOf"); ok && v.kind == .List {
-		for item in v.items do if item.kind == .String do append(&sources, item.str)
-	}
-	if len(sources) == 0 do return nil
-	relation_keys := make(map[string]bool, allocator = context.temp_allocator)
-	for _, s in states {
-		if s.type_key != "relation" do continue
-		if v, ok := fields_get(s.fields, "key"); ok && v.kind == .String do relation_keys[v.str] = true
-	}
-	parts := make([dynamic]json.Value, context.temp_allocator)
+// A query's sources (`setOf`) are object types, OR'd: it selects objects of
+// those types, and its view filters narrow them by property. A source is
+// never a property - `agent` is both a type and the guest-list property,
+// and a query of Agents must return agents.
+resolve_set_filter :: proc(set_obj: ^Object_State) -> json.Value {
 	type_values := make([dynamic]json.Value, context.temp_allocator)
-	for src in sources {
-		if relation_keys[src] {
-			f := jobj()
-			f["key"] = json.String(src)
-			f["condition"] = json.String("exists")
-			append(&parts, json.Object(f))
-		} else {
-			append(&type_values, json.String(src))
-		}
+	if v, ok := fields_get(set_obj.fields, "setOf"); ok && v.kind == .List {
+		for item in v.items do if item.kind == .String do append(&type_values, json.String(item.str))
 	}
-	if len(type_values) > 0 {
-		f := jobj()
-		f["key"] = json.String("type")
-		f["condition"] = json.String("in")
-		f["value"] = json.Array(type_values)
-		append(&parts, json.Object(f))
-	}
-	if len(parts) == 1 do return parts[0]
-	group := jobj()
-	group["operator"] = json.String("or")
-	group["nested"] = json.Array(parts)
-	return json.Object(group)
+	if len(type_values) == 0 do return nil
+	f := jobj()
+	f["key"] = json.String("type")
+	f["condition"] = json.String("in")
+	f["value"] = json.Array(type_values)
+	return json.Object(f)
 }
 
 query_result :: proc(states: map[string]^Object_State, body: json.Value, now_ms: f64) -> json.Value {
 	extra: json.Value
-	if set_obj, ok := states[json_str(body, "setId")]; ok do extra = resolve_set_filter(states, set_obj)
+	if set_obj, ok := states[json_str(body, "setId")]; ok do extra = resolve_set_filter(set_obj)
 	total := 0
 	matched := run_query(states, body, now_ms, extra, context.temp_allocator, &total)
 	text := json_str(body, "textQuery")
