@@ -22,6 +22,7 @@ import {
 	type ObjectJSON,
 	type QueryRow,
 	type ValueJSON,
+	type BlockJSON,
 	API,
 	apiFetch,
 	guestAgents,
@@ -32,8 +33,8 @@ import { CATALOG, fileHoldup, skillReady } from "./skillmgr";
 import { myInstallations, type InstallationRow } from "./descriptors";
 import { browserProfileDir, credentialStatus } from "./credentials";
 import { credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
-import { isAgentAuthor } from "./surfaces";
-import { objectText, readSkill } from "./skills";
+import { blockLine, isAgentAuthor } from "./surfaces";
+import { readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor } from "./spacemap";
 import * as memory from "./memory";
 import { TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
@@ -144,12 +145,77 @@ const S = (v: unknown): string => (typeof v === "string" ? v : "");
 const N = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
 const A = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
-function summarizeObject(obj: ObjectJSON): string {
+/**
+ * The body as addressable lines, in reading order: each block's id, its
+ * nesting depth and the line a human reads. Conversation subtrees are not
+ * body and never appear; editing tools accept only these ids.
+ */
+function bodyBlocks(obj: ObjectJSON): Array<{ id: string; depth: number; line: string; block: BlockJSON }> {
+	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
+	const referenced = new Set<string>();
+	for (const b of obj.blocks) for (const c of b.childrenIds) referenced.add(c);
+	const out: Array<{ id: string; depth: number; line: string; block: BlockJSON }> = [];
+	const walk = (id: string, depth: number) => {
+		const b = byId.get(id);
+		if (!b) return;
+		const kind = b.content.custom?.contentType;
+		if (kind === "chat" || kind === "discussion" || kind === "agent_message") return;
+		out.push({ id, depth, line: blockLine(b), block: b });
+		for (const c of b.childrenIds) walk(c, depth + 1);
+	};
+	for (const b of obj.blocks) if (!referenced.has(b.id) && b.id !== "__discussion__") walk(b.id, 0);
+	return out;
+}
+
+async function summarizeObject(obj: ObjectJSON): Promise<string> {
 	const fields: Record<string, unknown> = {};
 	for (const [k, v] of Object.entries(obj.fields)) {
 		fields[k] = v.stringValue ?? v.intValue ?? v.floatValue ?? v.boolValue ?? (v.valuesValue ? v.valuesValue.items.map((i) => i.stringValue) : undefined);
 	}
-	return JSON.stringify({ id: obj.id, typeKey: obj.typeKey, fields, text: objectText(obj).slice(0, 4000) }, null, 1);
+	const blocks = bodyBlocks(obj).slice(0, 400);
+	// A link card reads as the linked object's name on the page, so the agent sees that too (plus the id to open it).
+	const lines = await Promise.all(
+		blocks.map(async (b) => {
+			const target = b.block.content.custom?.contentType === "link" ? (b.block.content.custom.meta?.["target"] ?? "") : "";
+			if (!target) return b.line;
+			const o = await fetchObject(target).catch(() => null);
+			return o && !o.deleted ? `[link] "${str(o.fields, "name") || "Untitled"}" (${o.typeKey}, object ${target})` : `[link to a deleted object ${target}]`;
+		}),
+	);
+	const total = bodyBlocks(obj).length;
+	return JSON.stringify(
+		{
+			id: obj.id,
+			typeKey: obj.typeKey,
+			fields,
+			// Body, one entry per block: pass `block` to the object_*_block tools to change it.
+			body: blocks.map((b, i) => ({ block: b.id, depth: b.depth, line: lines[i].slice(0, 300) })),
+			...(total > 400 ? { bodyTruncated: total - 400 } : {}),
+		},
+		null,
+		1,
+	);
+}
+
+/**
+ * The object and body line a block tool acts on (`id`, else this turn's
+ * object; `block` must be a line of that body - never conversation), or
+ * the refusal to return instead.
+ */
+async function bodyTarget(input: Record<string, unknown>, ctx: ToolContext): Promise<{ obj: ObjectJSON; entry: ReturnType<typeof bodyBlocks>[number] } | string> {
+	const id = S(input.id) || ctx.boundObject || "";
+	if (!id) return "error: nothing written. No object id and this turn is not running on an object.";
+	const obj = await assertInSpace(await fetchObject(id), ctx);
+	ctx.touched.add(obj.id);
+	const entry = bodyBlocks(obj).find((e) => e.id === S(input.block));
+	if (!entry) return `error: nothing written. "${S(input.block)}" is not a line of this object's body. Read object_get's body for the ids.`;
+	return { obj, entry };
+}
+
+/** One body line as the human now reads it, after a write. */
+async function lineNow(objectId: string, blockId: string): Promise<string> {
+	const entry = bodyBlocks(await fetchObject(objectId)).find((e) => e.id === blockId);
+	return entry ? `Line is now: ${entry.line}` : "The line is no longer in the body.";
 }
 
 // ── Space containment ────────────────────────────────────────────
@@ -652,7 +718,7 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
-			return summarizeObject(await assertInSpace(await fetchObject(S(input.id)), ctx));
+			return await summarizeObject(await assertInSpace(await fetchObject(S(input.id)), ctx));
 		},
 	},
 	{
@@ -901,7 +967,7 @@ const TOOLS: RegisteredTool[] = [
 		def: {
 			name: "object_add_text",
 			description:
-				"Append text to an object's body. Markdown lines become real blocks: '- [ ] x' checkboxes, '- x' bullets, '1. x' numbered, '# x' headings, '> x' quotes; plain lines become paragraphs. When the object already has a matching list or section, pass 'under' with that block's text (e.g. under: \"Walmart\") so new items join it as children instead of landing at the page root.",
+				"Append NEW text to an object's body. Markdown lines become real blocks: '- [ ] x' checkboxes, '- x' bullets, '1. x' numbered, '# x' headings, '> x' quotes; plain lines become paragraphs. When the object already has a matching list or section, pass 'under' with that block's text (e.g. under: \"Walmart\") so new items join it as children instead of landing at the page root. To change what is already there, use object_edit_block / object_check / object_set_block_style / object_move_block / object_remove_blocks; to link another object, object_add_link (never write '🔗 Name' text).",
 			input_schema: {
 				type: "object",
 				properties: {
@@ -916,6 +982,170 @@ const TOOLS: RegisteredTool[] = [
 			ctx.touched.add(S(input.id));
 			await assertInSpace(await fetchObject(S(input.id)), ctx);
 			return await appendBody(S(input.id), S(input.text), S(input.under));
+		},
+	},
+	{
+		def: {
+			name: "object_edit_block",
+			description:
+				"Replace the text of one line in an object's body, keeping its style (heading, bullet, checkbox...). `block` is the id from object_get's body. The reply is the line as the human now reads it.",
+			input_schema: {
+				type: "object",
+				properties: { id: { type: "string", description: "object id; omit for the object of this conversation" }, block: { type: "string" }, text: { type: "string" } },
+				required: ["block", "text"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const hit = await bodyTarget(input, ctx);
+			if (typeof hit === "string") return hit;
+			const t = hit.entry.block.content.text;
+			if (!t) return `error: nothing written. That line is a ${hit.entry.block.content.custom?.contentType ?? "non-text"} block, not text.`;
+			const cleared = (t.marks ?? []).length > 0;
+			await mutate("block_update", { object_id: hit.obj.id, block_id: hit.entry.id, content: { ...hit.entry.block.content, text: { ...t, text: S(input.text), marks: [] } } });
+			return `${await lineNow(hit.obj.id, hit.entry.id)}${cleared ? "\n(Its inline formatting - bold, links, mentions - was cleared with the old text.)" : ""}`;
+		},
+	},
+	{
+		def: {
+			name: "object_set_block_style",
+			description: "Change what one body line is: paragraph, h1, h2, h3, quote, bullet, numbered or checkbox. `block` is the id from object_get's body.",
+			input_schema: {
+				type: "object",
+				properties: {
+					id: { type: "string", description: "object id; omit for the object of this conversation" },
+					block: { type: "string" },
+					style: { type: "string", enum: Object.keys(STYLE) },
+				},
+				required: ["block", "style"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const hit = await bodyTarget(input, ctx);
+			if (typeof hit === "string") return hit;
+			const t = hit.entry.block.content.text;
+			if (!t) return `error: nothing written. That line is a ${hit.entry.block.content.custom?.contentType ?? "non-text"} block, not text.`;
+			const name = S(input.style) as keyof typeof STYLE;
+			if (!(name in STYLE)) return `error: nothing written. style must be one of ${Object.keys(STYLE).join(", ")}.`;
+			const style = STYLE[name];
+			await mutate("block_update", { object_id: hit.obj.id, block_id: hit.entry.id, content: { ...hit.entry.block.content, text: { ...t, style, checked: style === STYLE.checkbox ? t.checked === true : false } } });
+			return await lineNow(hit.obj.id, hit.entry.id);
+		},
+	},
+	{
+		def: {
+			name: "object_check",
+			description: "Tick or untick one checkbox line in an object's body. `block` is the id from object_get's body (a line starting '- [ ]' or '- [x]').",
+			input_schema: {
+				type: "object",
+				properties: { id: { type: "string", description: "object id; omit for the object of this conversation" }, block: { type: "string" }, checked: { type: "boolean" } },
+				required: ["block", "checked"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const hit = await bodyTarget(input, ctx);
+			if (typeof hit === "string") return hit;
+			const t = hit.entry.block.content.text;
+			if (!t || t.style !== STYLE.checkbox) return `error: nothing written. That line is not a checkbox (${hit.entry.line.slice(0, 80)}).`;
+			await mutate("block_update", { object_id: hit.obj.id, block_id: hit.entry.id, content: { ...hit.entry.block.content, text: { ...t, checked: input.checked === true } } });
+			return await lineNow(hit.obj.id, hit.entry.id);
+		},
+	},
+	{
+		def: {
+			name: "object_remove_blocks",
+			description: "Delete lines from an object's body - each block and everything nested under it. `blocks` are ids from object_get's body. The reply lists what was removed.",
+			input_schema: {
+				type: "object",
+				properties: { id: { type: "string", description: "object id; omit for the object of this conversation" }, blocks: { type: "array", items: { type: "string" } } },
+				required: ["blocks"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const ids = A(input.blocks);
+			if (ids.length === 0) return "error: nothing removed. Pass the block ids to remove.";
+			const id = S(input.id) || ctx.boundObject || "";
+			if (!id) return "error: nothing removed. No object id and this turn is not running on an object.";
+			const obj = await assertInSpace(await fetchObject(id), ctx);
+			ctx.touched.add(obj.id);
+			const body = bodyBlocks(obj);
+			const missing = ids.filter((b) => !body.some((e) => e.id === b));
+			if (missing.length) return `error: nothing removed. Not lines of this object's body: ${missing.join(", ")}. Read object_get's body for the ids.`;
+			const removed = body.filter((e) => ids.includes(e.id));
+			for (const e of removed) await mutate("block_remove", { object_id: obj.id, block_id: e.id });
+			const after = new Set(bodyBlocks(await fetchObject(obj.id)).map((e) => e.id));
+			const gone = body.filter((e) => !after.has(e.id));
+			return `Removed ${gone.length} line(s):\n${gone.map((e) => `${"  ".repeat(e.depth)}${e.line}`).join("\n")}`;
+		},
+	},
+	{
+		def: {
+			name: "object_move_block",
+			description: "Move one body line (with what's nested under it) before or after another line, or inside it as its last child. Ids come from object_get's body.",
+			input_schema: {
+				type: "object",
+				properties: {
+					id: { type: "string", description: "object id; omit for the object of this conversation" },
+					block: { type: "string" },
+					to: { type: "string", description: "the line to move next to" },
+					where: { type: "string", enum: ["before", "after", "inside"] },
+				},
+				required: ["block", "to", "where"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const hit = await bodyTarget(input, ctx);
+			if (typeof hit === "string") return hit;
+			const body = bodyBlocks(hit.obj);
+			const to = body.find((e) => e.id === S(input.to));
+			if (!to) return `error: nothing moved. "${S(input.to)}" is not a line of this object's body.`;
+			// The moved line's own subtree, in reading order right after it.
+			const at = body.findIndex((e) => e.id === hit.entry.id);
+			let end = at + 1;
+			while (end < body.length && body[end].depth > hit.entry.depth) end++;
+			if (body.slice(at, end).includes(to)) return "error: nothing moved. A line cannot move next to or into itself or its own nested lines.";
+			const where = S(input.where);
+			const position = where === "before" ? 1 : where === "after" ? 2 : where === "inside" ? 5 : 0;
+			if (!position) return "error: nothing moved. where must be before, after or inside.";
+			await mutate("block_move", { object_id: hit.obj.id, block_id: hit.entry.id, target_id: to.id, position });
+			const now = bodyBlocks(await fetchObject(hit.obj.id));
+			const i = now.findIndex((e) => e.id === hit.entry.id);
+			const prev = now.slice(0, i).reverse().find((e) => e.depth <= now[i].depth);
+			return `${now[i].line}\n${prev ? `now ${prev.depth < now[i].depth ? "inside" : "after"}: ${prev.line}` : "now first in the body"}`;
+		},
+	},
+	{
+		def: {
+			name: "object_add_link",
+			description:
+				"Add a link to another object in this object's body - a real, clickable link card, never text that merely looks like one. Place it at the end of the body, inside a line (`under`) or right after one (`after`); those ids come from object_get's body.",
+			input_schema: {
+				type: "object",
+				properties: {
+					id: { type: "string", description: "object id; omit for the object of this conversation" },
+					target: { type: "string", description: "id of the object to link to" },
+					under: { type: "string", description: "body line to nest the link inside" },
+					after: { type: "string", description: "body line to place the link after" },
+				},
+				required: ["target"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const id = S(input.id) || ctx.boundObject || "";
+			if (!id) return "error: nothing added. No object id and this turn is not running on an object.";
+			const obj = await assertInSpace(await fetchObject(id), ctx);
+			ctx.touched.add(obj.id);
+			const target = await fetchObject(S(input.target)).catch(() => null);
+			if (!target || target.deleted) return `error: nothing added. No object "${S(input.target)}" - find it with object_search first.`;
+			await assertInSpace(target, ctx);
+			const body = bodyBlocks(obj);
+			const anchor = S(input.under) || S(input.after);
+			if (anchor && !body.some((e) => e.id === anchor)) return `error: nothing added. "${anchor}" is not a line of this object's body.`;
+			await mutate("block_add", {
+				object_id: obj.id,
+				block: { id: crypto.randomUUID(), childrenIds: [], content: { custom: { contentType: "link", meta: { target: target.id, style: "text" } } } },
+				...(anchor ? { target_id: anchor, position: S(input.under) ? POSITION_INNER : 2 } : {}),
+			});
+			return `Linked to "${str(target.fields, "name") || "Untitled"}" (${target.typeKey}) - a clickable link in the body.`;
 		},
 	},
 	{

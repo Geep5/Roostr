@@ -299,3 +299,11 @@ Agent writes land where a human sees them: `object_set_field` accepts only a
 property that exists in the space, in that property's type, and replies with
 the value as the Properties pane shows it; anything else is refused with
 "nothing written", never reported as done.
+
+Agents edit an object's body the way a person does: `object_get` returns the
+body as addressable lines (block id, depth, the line as read, link cards by
+their target's name), and `object_edit_block`, `object_check`,
+`object_set_block_style`, `object_move_block`, `object_remove_blocks` and
+`object_add_link` change one line each through the engine's block actions,
+replying with the line as the human now reads it. They refuse conversation
+messages, non-checkbox ticks and moves into a line's own nested lines.

@@ -172,7 +172,7 @@ const STYLE_PREFIX: Record<number, string> = { 1: "# ", 2: "## ", 3: "### ", 4: 
  */
 export function blockLine(b: BlockJSON): string {
 	const t = b.content.text;
-	if (t?.text) return (STYLE_PREFIX[t.style ?? 0] ?? "") + t.text;
+	if (t?.text) return (t.style === 8 && t.checked ? "- [x] " : (STYLE_PREFIX[t.style ?? 0] ?? "")) + t.text;
 	const custom = b.content.custom;
 	if (!custom) return "";
 	const meta = custom.meta ?? {};

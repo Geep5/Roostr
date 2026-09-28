@@ -1,0 +1,117 @@
+/**
+ * Body editing tools act only on lines a human reads on the page, and
+ * refuse (writing nothing) when the request can't land as asked: a
+ * conversation message is not a body line, a paragraph is not a checkbox,
+ * and a line can't move into its own nested lines.
+ */
+
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { BlockJSON, ObjectJSON } from "./api";
+import { dispatchTool } from "./tools";
+
+const originalFetch = globalThis.fetch;
+let previousRoot: string | undefined;
+let root = "";
+
+beforeEach(async () => {
+	previousRoot = process.env.GLON_DATA;
+	root = await mkdtemp(join(tmpdir(), "roostr-body-"));
+	await writeFile(join(root, "api-token"), "a".repeat(64), { mode: 0o600 });
+	process.env.GLON_DATA = root;
+});
+
+afterEach(async () => {
+	globalThis.fetch = originalFetch;
+	if (previousRoot === undefined) delete process.env.GLON_DATA;
+	else process.env.GLON_DATA = previousRoot;
+	await rm(root, { recursive: true, force: true });
+});
+
+const text = (id: string, body: string, style = 0, children: string[] = []): BlockJSON => ({ id, childrenIds: children, content: { text: { text: body, style } } });
+
+/** "# Plan" holding a checkbox; a note; and a discussion with one message. */
+const page = (): ObjectJSON => ({
+	id: "page",
+	typeKey: "task",
+	fields: { channel: { stringValue: "space" } },
+	blocks: [
+		text("plan", "Plan", 1, ["todo"]),
+		text("todo", "Review with Brian", 8),
+		text("note", "Notes"),
+		{ id: "__discussion__", childrenIds: ["msg"], content: { custom: { contentType: "discussion" } } },
+		{ id: "msg", childrenIds: [], content: { custom: { contentType: "chat", meta: { text: "hello" } } } },
+	],
+	deleted: false,
+	createdAt: 0,
+	updatedAt: 0,
+	mailbox: [],
+});
+
+function daemon(obj: ObjectJSON) {
+	const mutations: Array<Record<string, unknown>> = [];
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		if (url.pathname === `/api/objects/${obj.id}`) return Response.json(obj);
+		if (url.pathname === "/api/channels") return Response.json([{ id: "space" }]);
+		if (url.pathname === "/api/mutate") {
+			mutations.push(JSON.parse(String(init?.body)));
+			return Response.json({ ok: true });
+		}
+		return Response.json({ error: "unexpected request" }, { status: 404 });
+	}) as typeof fetch;
+	return mutations;
+}
+
+const ctx = () => ({ agentId: "agent", channelId: "space", boundObject: "page", depth: 0, allowAsk: false, touched: new Set<string>() });
+
+test("object_get lists body lines with their ids and never the conversation", async () => {
+	daemon(page());
+	const got = JSON.parse((await dispatchTool("object_get", { id: "page" }, ctx())).content);
+	expect(got.body).toEqual([
+		{ block: "plan", depth: 0, line: "# Plan" },
+		{ block: "todo", depth: 1, line: "- [ ] Review with Brian" },
+		{ block: "note", depth: 0, line: "Notes" },
+	]);
+});
+
+test("a conversation message is not a body line: editing it is refused", async () => {
+	const mutations = daemon(page());
+	for (const [tool, input] of [
+		["object_edit_block", { block: "msg", text: "rewritten" }],
+		["object_remove_blocks", { blocks: ["msg"] }],
+		["object_move_block", { block: "msg", to: "note", where: "after" }],
+	] as const) {
+		expect((await dispatchTool(tool, input, ctx())).content).toStartWith("error: nothing");
+	}
+	expect(mutations).toEqual([]);
+});
+
+test("only a checkbox line can be ticked", async () => {
+	const mutations = daemon(page());
+	expect((await dispatchTool("object_check", { block: "note", checked: true }, ctx())).content).toStartWith("error: nothing written");
+	expect(mutations).toEqual([]);
+});
+
+test("a line cannot move into its own nested lines", async () => {
+	const mutations = daemon(page());
+	expect((await dispatchTool("object_move_block", { block: "plan", to: "todo", where: "after" }, ctx())).content).toStartWith("error: nothing moved");
+	expect(mutations).toEqual([]);
+});
+
+test("removing a mix of real and unknown ids removes nothing", async () => {
+	const mutations = daemon(page());
+	expect((await dispatchTool("object_remove_blocks", { blocks: ["note", "nope"] }, ctx())).content).toStartWith("error: nothing removed");
+	expect(mutations).toEqual([]);
+});
+
+test("editing a line keeps its style and says when inline formatting is cleared", async () => {
+	const obj = page();
+	(obj.blocks[1].content.text as NonNullable<BlockJSON["content"]["text"]>).marks = [{ from: 0, to: 6, type: 1 }];
+	const mutations = daemon(obj);
+	const reply = (await dispatchTool("object_edit_block", { block: "todo", text: "Review with Brian and Lou" }, ctx())).content;
+	expect(mutations[0]).toMatchObject({ action: "block_update", block_id: "todo", content: { text: { text: "Review with Brian and Lou", style: 8, marks: [] } } });
+	expect(reply).toContain("formatting");
+});
