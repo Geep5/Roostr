@@ -71,7 +71,7 @@ export async function relationDefs(spaceId: string): Promise<Map<string, RelDef>
 	return out;
 }
 
-interface TypeDef {
+export interface TypeDef {
 	id: string;
 	key: string;
 	name: string;
@@ -79,7 +79,7 @@ interface TypeDef {
 	definition: string;
 }
 
-async function typeDefs(spaceId: string): Promise<Map<string, TypeDef>> {
+export async function typeDefs(spaceId: string): Promise<Map<string, TypeDef>> {
 	const sf = await spaceFilterFor(spaceId);
 	const rows = await queryAll({ type: "type", filters: [sf] });
 	const out = new Map<string, TypeDef>();

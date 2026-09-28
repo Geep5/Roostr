@@ -43,6 +43,18 @@ const relation = (key: string, name: string, format: string, extra: Record<strin
 
 const RELATIONS = [relation("done", "Done", "checkbox"), relation("dueDate", "Due date", "date"), relation("createdDate", "Created date", "date", { readOnly: { boolValue: true } })];
 
+const typeRow = (key: string, name: string): ObjectJSON => ({
+	id: `type-${key}`,
+	typeKey: "type",
+	fields: { key: { stringValue: key }, name: { stringValue: name }, channel: { stringValue: "space" } },
+	blocks: [],
+	deleted: false,
+	createdAt: 0,
+	updatedAt: 0,
+	mailbox: [],
+});
+const TYPES = [typeRow("task", "Task"), typeRow("note", "Note"), typeRow("person", "Person"), typeRow("agent", "Agent")];
+
 /** A daemon with one task and the space's properties; mutations apply to the task. */
 function daemon(task: ObjectJSON) {
 	const mutations: Array<Record<string, unknown>> = [];
@@ -52,7 +64,7 @@ function daemon(task: ObjectJSON) {
 		if (url.pathname === "/api/channels") return Response.json([{ id: "space" }]);
 		if (url.pathname === "/api/query") {
 			const body = JSON.parse(String(init?.body));
-			const records = body.type === "relation" ? RELATIONS : [];
+			const records = body.type === "relation" ? RELATIONS : body.type === "type" ? TYPES : [];
 			return Response.json({ records, total: records.length });
 		}
 		if (url.pathname === "/api/mutate") {
@@ -73,6 +85,8 @@ function daemon(task: ObjectJSON) {
 				};
 			}
 			if (body.action === "repeat_clear") delete task.fields.repeat;
+			if (body.action === "delete_field") delete task.fields[String(body.key)];
+			if (body.action === "set_type") task.typeKey = String(body.type_key);
 			return Response.json({ ok: true });
 		}
 		return Response.json({ error: "unexpected request" }, { status: 404 });
@@ -159,4 +173,45 @@ test("object_clear_repeat turns repeating off, and refuses on an object that doe
 	await dispatchTool("object_set_repeat", { unit: "month" }, ctx());
 	expect((await dispatchTool("object_clear_repeat", {}, ctx())).content).toBe("This object no longer repeats.");
 	expect(t.fields.repeat).toBeUndefined();
+});
+
+test("object_add_property creates a visible property keyed like the app's, once", async () => {
+	const mutations = daemon(task());
+	const reply = (await dispatchTool("object_add_property", { name: "Mockup Status", format: "status" }, ctx())).content;
+	expect(reply).toContain("key mockup_status");
+	const create = mutations.find((m) => m.action === "create");
+	expect(create).toMatchObject({ type_key: "relation", fields: { key: { stringValue: "mockup_status" }, format: { stringValue: "status" }, channel: { stringValue: "space" }, hidden: { boolValue: false }, maxCount: { intValue: 1 } } });
+	// An existing key creates nothing.
+	const again = daemon(task());
+	expect((await dispatchTool("object_add_property", { name: "Due date", format: "text" }, ctx())).content).toStartWith("error: nothing created");
+	for (const name of ["Due date", "due_date", "dueDate", "DUE DATE"]) {
+		expect((await dispatchTool("object_add_property", { name, format: "date" }, ctx())).content).toContain("already has Due date (key dueDate");
+	}
+	expect((await dispatchTool("object_add_property", { name: "Recurrence", format: "shorttext" }, ctx())).content).toContain("object_set_repeat");
+	expect(again).toEqual([]);
+});
+
+test("object_clear_field empties a property and refuses the ones with their own rules", async () => {
+	const t = task({ dueDate: { intValue: 1 } });
+	const mutations = daemon(t);
+	for (const key of ["agent", "repeat", "createdDate", "priority"]) {
+		expect((await dispatchTool("object_clear_field", { key }, ctx())).content).toStartWith("error: nothing cleared");
+	}
+	expect(mutations).toEqual([]);
+	expect((await dispatchTool("object_clear_field", { key: "dueDate" }, ctx())).content).toBe("Due date is now empty.");
+	expect(t.fields.dueDate).toBeUndefined();
+});
+
+test("object_set_type retypes to a space type and never into or out of infrastructure", async () => {
+	const t = task();
+	const mutations = daemon(t);
+	expect((await dispatchTool("object_set_type", { type: "agent" }, ctx())).content).toStartWith("error: nothing changed");
+	expect((await dispatchTool("object_set_type", { type: "spaceship" }, ctx())).content).toContain("types here: task (Task), note (Note), person (Person)");
+	expect(mutations).toEqual([]);
+	expect((await dispatchTool("object_set_type", { type: "person" }, ctx())).content).toBe("It is now a Person.");
+	expect(t.typeKey).toBe("person");
+	const agentObj = task();
+	agentObj.typeKey = "agent";
+	daemon(agentObj);
+	expect((await dispatchTool("object_set_type", { type: "task" }, ctx())).content).toStartWith("error: nothing changed");
 });

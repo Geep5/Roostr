@@ -35,7 +35,7 @@ import { browserProfileDir, credentialStatus } from "./credentials";
 import { credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
 import { blockLine, isAgentAuthor } from "./surfaces";
 import { readSkill } from "./skills";
-import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor } from "./spacemap";
+import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor, typeDefs } from "./spacemap";
 import * as memory from "./memory";
 import { TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
 import { authRequirementsOf, localAuthRegistry, resolveAuthRequirements, validateAuthSelector } from "./authreq";
@@ -305,6 +305,15 @@ function renderValue(format: string, v: ValueJSON | undefined): string {
 
 /** Field keys agents reach for when they mean a schedule: only object_set_repeat makes an object recur. */
 const SCHEDULE_KEYS = new Set(["repeat", "repeats", "recurrence", "recurring", "recurs", "schedule", "frequency", "cadence"]);
+
+/** Formats a person can create in the app (the website's CREATABLE_FORMATS). */
+const PROPERTY_FORMATS = ["shorttext", "longtext", "number", "status", "tag", "date", "checkbox", "url", "email", "phone", "object"] as const;
+
+/** A property's key from its name, as the app derives it (relations.ts slugKey). */
+const propertyKey = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || `prop_${Date.now()}`;
+
+/** Infrastructure types: never retyped, and nothing is retyped into them. */
+const FIXED_TYPES = new Set(["agent", "machine", "install", "capability", "channel", "relation", "type", "template", "query", "collection", "set", "chat", "skill"]);
 
 const WEEKDAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
@@ -806,7 +815,7 @@ const TOOLS: RegisteredTool[] = [
 			const def = defs.get(key);
 			if (!def) {
 				const known = [...defs.values()].filter((d) => !d.readOnly).map((d) => `${d.key} (${d.name}, ${d.format})`).join(", ");
-				return `error: nothing written. This space has no "${key}" property, so a value there would be invisible to everyone. Properties here: ${known}. If none fits, tell the human which property is missing - never report it as done.`;
+				return `error: nothing written. This space has no "${key}" property, so a value there would be invisible to everyone. Properties here: ${known}. If none fits, create one with object_add_property (it shows in everyone's Properties list), then set it - never report it as done before that.`;
 			}
 			if (def.readOnly) return `error: nothing written. ${def.name} is computed by the store and cannot be set.`;
 			let value: ValueJSON;
@@ -901,6 +910,115 @@ const TOOLS: RegisteredTool[] = [
 			if (!obj.fields["repeat"]) return "error: nothing written. This object does not repeat.";
 			await mutate("repeat_clear", { object_id: obj.id });
 			return "This object no longer repeats.";
+		},
+	},
+	{
+		def: {
+			name: "object_add_property",
+			description:
+				"Create a new property in this space - on purpose, visible to everyone in the Properties list - when none of the existing ones fits (object_set_field lists them). Then set values with object_set_field. `object` properties may be limited to some types (type keys). Creating a key that already exists changes nothing and says so.",
+			input_schema: {
+				type: "object",
+				properties: {
+					name: { type: "string", description: "human name, e.g. 'Mockup status'" },
+					format: { type: "string", enum: [...PROPERTY_FORMATS] },
+					object_types: { type: "array", items: { type: "string" }, description: "object format only: type keys the value may link to" },
+				},
+				required: ["name", "format"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const name = S(input.name).trim();
+			if (!name) return "error: nothing created. A property needs a name.";
+			const format = S(input.format);
+			if (!(PROPERTY_FORMATS as readonly string[]).includes(format)) return `error: nothing created. format must be one of ${PROPERTY_FORMATS.join(", ")}.`;
+			const key = propertyKey(name);
+			if (SCHEDULE_KEYS.has(key)) return `error: nothing created. A "${name}" property would not make anything repeat - use object_set_repeat.`;
+			const space = await agentSpace(ctx);
+			// Same property whatever the spelling: "Due date", "due_date" and the bundled "dueDate" are one.
+			const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+			const existing = [...(await relationDefs(space)).values()].find((d) => norm(d.key) === norm(name) || norm(d.name) === norm(name));
+			if (existing) return `Nothing created: this space already has ${existing.name} (key ${existing.key}, ${existing.format}). Set it with object_set_field key=${existing.key}.`;
+			const types = await typeDefs(space);
+			const limits: string[] = [];
+			for (const k of format === "object" ? A(input.object_types) : []) {
+				const t = types.get(k);
+				if (!t) return `error: nothing created. No type "${k}" in this space; types here: ${[...types.keys()].join(", ")}.`;
+				limits.push(t.id);
+			}
+			await createObject(name, "relation", {
+				channel: sv(space),
+				key: sv(key),
+				name: sv(name),
+				format: sv(format),
+				hidden: bv(false),
+				readOnly: bv(false),
+				maxCount: iv(format === "status" ? 1 : 0),
+				options: lv([]),
+				bundled: bv(false),
+				...(limits.length ? { object_types: lv(limits) } : {}),
+			});
+			return `Created the property ${name} (key ${key}, ${format}) in this space; it now shows in the Properties list. Set it with object_set_field key=${key}.`;
+		},
+	},
+	{
+		def: {
+			name: "object_clear_field",
+			description: "Empty one of an object's properties (the Properties pane's Remove). The guest list (agent) and the repeat rule have their own tools; computed dates can't be cleared.",
+			input_schema: {
+				type: "object",
+				properties: { id: { type: "string", description: "object id; omit for the object of this conversation" }, key: { type: "string" } },
+				required: ["key"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const id = S(input.id) || ctx.boundObject || "";
+			if (!id) return "error: nothing cleared. No object id and this turn is not running on an object.";
+			const obj = await assertInSpace(await fetchObject(id), ctx);
+			ctx.touched.add(obj.id);
+			const key = S(input.key);
+			if (key === "repeat") return "error: nothing cleared. Stop a repeat with object_clear_repeat.";
+			if (key === "agent") return "error: nothing cleared. Agents are not removed from a guest list by agents - ask the human.";
+			const def = (await relationDefs(await agentSpace(ctx))).get(key);
+			if (!def) return `error: nothing cleared. This space has no "${key}" property.`;
+			if (def.readOnly) return `error: nothing cleared. ${def.name} is computed by the store.`;
+			if (!(key in obj.fields)) return `Nothing cleared: ${def.name} is already empty.`;
+			await mutate("delete_field", { object_id: obj.id, key });
+			const after = await fetchObject(obj.id);
+			// The engine may answer a cleared pin with its own error (an agent with no Served by): say so.
+			const error = str(after.fields, "error");
+			return `${def.name} is now empty.${error && error !== str(obj.fields, "error") ? ` The object now shows: ${error}` : ""}`;
+		},
+	},
+	{
+		def: {
+			name: "object_set_type",
+			description:
+				"Change an object's type (e.g. note -> task) to one of this space's types; its text, properties and history stay. Infrastructure (agents, computers, spaces, properties, types, templates, queries, collections) is never retyped.",
+			input_schema: {
+				type: "object",
+				properties: { id: { type: "string", description: "object id; omit for the object of this conversation" }, type: { type: "string", description: "type key, e.g. task" } },
+				required: ["type"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const id = S(input.id) || ctx.boundObject || "";
+			if (!id) return "error: nothing changed. No object id and this turn is not running on an object.";
+			const obj = await assertInSpace(await fetchObject(id), ctx);
+			ctx.touched.add(obj.id);
+			const key = S(input.type);
+			if (FIXED_TYPES.has(obj.typeKey)) return `error: nothing changed. A ${obj.typeKey} object keeps its type.`;
+			if (FIXED_TYPES.has(key)) return `error: nothing changed. Objects are not turned into ${key} objects this way.`;
+			const types = await typeDefs(await agentSpace(ctx));
+			const t = types.get(key);
+			if (!t) {
+				const offered = [...types.values()].filter((d) => !FIXED_TYPES.has(d.key)).map((d) => `${d.key} (${d.name})`).join(", ");
+				return `error: nothing changed. No type "${key}" in this space; types here: ${offered}.`;
+			}
+			if (obj.typeKey === key) return `Nothing changed: it is already a ${t.name}.`;
+			await mutate("set_type", { object_id: obj.id, type_key: key });
+			const after = await fetchObject(obj.id);
+			return `It is now a ${types.get(after.typeKey)?.name ?? after.typeKey}.`;
 		},
 	},
 	{

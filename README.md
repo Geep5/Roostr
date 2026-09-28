@@ -307,3 +307,11 @@ their target's name), and `object_edit_block`, `object_check`,
 `object_add_link` change one line each through the engine's block actions,
 replying with the line as the human now reads it. They refuse conversation
 messages, non-checkbox ticks and moves into a line's own nested lines.
+
+New properties are made on purpose, never by accident: `object_add_property`
+creates one visible in the space's Properties list (the app's key rule; an
+existing property, under any spelling of its name or key, is reused instead).
+`object_clear_field` empties a property (not the guest list, the repeat rule or
+computed dates), and `object_set_type` retypes an object to one of the space's
+types - never into or out of infrastructure (agents, computers, spaces,
+properties, types, templates, queries, collections).
