@@ -1520,10 +1520,9 @@
         "a",
         "b",
         "c",
-        "d",
-        "other"
+        "d"
       ],
-      "total": 5
+      "total": 4
     },
     {
       "name": "missing-set",

@@ -46,7 +46,7 @@ query_native_and_dispatch_fixtures :: proc(t: ^testing.T) {
 			testing.expect(t, core.json_str(records[0], "snippet") == snippet, name)
 		}
 		extra: json.Value
-		if set_obj, ok := states[core.json_str(body, "setId")]; ok do extra = core.resolve_set_filter(states, set_obj)
+		if set_obj, ok := states[core.json_str(body, "setId")]; ok do extra = core.resolve_set_filter(set_obj)
 		matched := 0
 		direct := core.run_query(states, body, f64(now), extra, context.temp_allocator, &matched)
 		testing.expect(t, matched == int(total) && len(direct) == len(records), name)

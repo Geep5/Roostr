@@ -616,7 +616,7 @@ handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
 		set_id := core.json_str(c.body, "setId")
 		if set_id != "" {
 			if set_obj, ok := states[set_id]; ok {
-				extra = core.resolve_set_filter(states, set_obj)
+				extra = core.resolve_set_filter(set_obj)
 			}
 		}
 

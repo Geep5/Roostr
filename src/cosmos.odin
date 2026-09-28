@@ -161,7 +161,7 @@ build_graph :: proc(allocator := context.allocator) -> Graph {
 			}
 			// queries → edges to current matches
 			if s.type_key == "query" || s.type_key == "set" {
-				filter := core.resolve_set_filter(states, s)
+				filter := core.resolve_set_filter(s)
 				if filter != nil {
 					matched := core.run_query(states, nil, f64(unix_ms()), filter)
 					count := 0
