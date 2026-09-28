@@ -1,25 +1,23 @@
 /**
- * Service credentials the agents on THIS machine may use.
+ * Credentials: the catalog of services a Credential object can be for,
+ * and reading the secret a Credential carries.
  *
- * Two kinds, matching how services actually admit automation:
+ * A Credential (typeKey `credential`, credential-objects.ts) is a synced
+ * object and carries its secret in properties, so an agent on ANY computer
+ * can use it:
  *
- * - "password": fields typed by the human (API keys, username/password),
- *   stored in `~/.glon/credentials.json` (mode 0600, like `api-token`).
- * - "browser": a persistent Chrome profile at
- *   `~/.glon/browser-profiles/<key>/`. Setup launches a HEADED Chrome on
- *   that profile at the service's login page; the human logs in (2FA and
- *   all) and clicks Done. Agents later drive Chrome with
- *   `--user-data-dir` pointing at the same profile and act logged in.
+ * - `secret`: the pasted keys (API keys, a bot token) as a JSON object.
+ * - `session`: a browser sign-in's cookies as a JSON array. The computer in
+ *   `served_by` opens the headed sign-in window and exports them; every
+ *   later action injects them into a throwaway headless Chrome (browser.ts).
  *
- * Secrets never leave the machine and never enter the DAG. What syncs is
- * only the FACT of capability: an active credential becomes a capability
- * object served_by this machine (skillmgr/capabilities), so an object that
- * requires it resolves to a machine that can actually auth.
+ * Everyone in the credential's space can read these properties.
  */
-import { copyFileSync, chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { Database } from "bun:sqlite";
+import { str, type ValueJSON } from "./api";
+import type { SessionCookie } from "./browser";
 
 export interface PasswordField {
 	key: string;
@@ -30,7 +28,7 @@ export interface PasswordField {
 export interface CredentialEntry {
 	key: string;
 	label: string;
-	/** Shown in the Machine panel so the human picks the right path. */
+	/** Shown on the Credential page so the person picks the right path. */
 	note: string;
 	/** Browser-login setup: the page the headed Chrome opens. */
 	loginUrl?: string;
@@ -81,184 +79,100 @@ export const CREDENTIALS: CredentialEntry[] = [
 	},
 ];
 
-const STORE_VERSION = 1;
-
-interface PasswordRecord {
-	kind: "password";
-	fields: Record<string, string>;
-	updatedAt: number;
+export function serviceEntry(service: string): CredentialEntry | undefined {
+	return CREDENTIALS.find((c) => c.key === service);
 }
 
-interface StoreFile {
-	version: number;
-	credentials: Record<string, PasswordRecord>;
+/** A credential's pasted keys, when every field its service asks for is filled. */
+export function credentialKeys(fields: Record<string, ValueJSON>): Record<string, string> | null {
+	const specs = serviceEntry(str(fields, "service"))?.passwordFields;
+	if (!specs) return null;
+	try {
+		const parsed = JSON.parse(str(fields, "secret") || "{}") as Record<string, unknown>;
+		const out: Record<string, string> = {};
+		for (const spec of specs) {
+			const v = parsed[spec.key];
+			if (typeof v !== "string" || !v.trim()) return null;
+			out[spec.key] = v.trim();
+		}
+		return out;
+	} catch {
+		return null;
+	}
 }
+
+/** A credential's browser session cookies, or [] when it has none. */
+export function credentialSession(fields: Record<string, ValueJSON>): SessionCookie[] {
+	try {
+		const parsed = JSON.parse(str(fields, "session") || "[]") as unknown;
+		return Array.isArray(parsed) ? (parsed as SessionCookie[]) : [];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Whether cookies hold a real, unexpired login for the service: guest
+ * cookies (x.com's gt, linkedin's li_rm) appear on first load, so only the
+ * service's session cookie counts.
+ */
+export function sessionSignedIn(cookies: SessionCookie[], service: string): boolean {
+	const want = serviceEntry(service)?.sessionCookie;
+	if (!want) return false;
+	const now = Date.now() / 1000;
+	return cookies.some((c) => c.name === want.name && c.domain.replace(/^\./, "").endsWith(want.host.replace(/^www\./, "")) && (c.expires <= 0 || c.expires > now));
+}
+
+/** The cookies worth keeping from a sign-in window: the service's own domain. */
+export function serviceCookies(cookies: SessionCookie[], service: string): SessionCookie[] {
+	const host = serviceEntry(service)?.sessionCookie?.host.replace(/^www\./, "");
+	return host ? cookies.filter((c) => c.domain.replace(/^\./, "").endsWith(host)) : [];
+}
+
+// Before Credential objects, each machine kept secrets locally, keyed by
+// service: ~/.glon/credentials.json and ~/.glon/browser-profiles/<service>.
+// Only the one-time migration (credential-objects.ts) reads them.
 
 function dataDir(): string {
 	return process.env.GLON_DATA ?? join(homedir(), ".glon");
 }
 
-function storePath(): string {
-	return join(dataDir(), "credentials.json");
+export function legacyProfileDir(service: string): string {
+	return join(dataDir(), "browser-profiles", service);
 }
 
-export function browserProfileDir(key: string): string {
-	return join(dataDir(), "browser-profiles", key);
+interface LegacyStore {
+	version: number;
+	credentials: Record<string, { fields: Record<string, string> }>;
 }
 
-function readStore(): StoreFile {
+function legacyStore(): LegacyStore | null {
 	try {
-		const parsed = JSON.parse(readFileSync(storePath(), "utf8")) as StoreFile;
-		if (parsed?.version === STORE_VERSION && parsed.credentials) return parsed;
+		const parsed = JSON.parse(readFileSync(join(dataDir(), "credentials.json"), "utf8")) as LegacyStore;
+		return parsed?.credentials ? parsed : null;
 	} catch {
-		/* missing or corrupt → empty */
-	}
-	return { version: STORE_VERSION, credentials: {} };
-}
-
-function writeStore(store: StoreFile): void {
-	const path = storePath();
-	writeFileSync(path, JSON.stringify(store, null, 2), "utf8");
-	chmodSync(path, 0o600);
-}
-
-/** A browser profile counts as logged in only when the service's session cookie is present. */
-function browserActive(key: string): boolean {
-	const entry = CREDENTIALS.find((c) => c.key === key);
-	if (!entry?.sessionCookie) return false;
-	const dir = browserProfileDir(key);
-	const db = [join(dir, "Default", "Network", "Cookies"), join(dir, "Default", "Cookies")].find((p) => existsSync(p));
-	if (!db) return false;
-	// Chrome holds the db; read a snapshot so a running login window never blocks us.
-	const snap = join(tmpdir(), `roostr-cookies-${key}-${process.pid}`);
-	try {
-		copyFileSync(db, snap);
-		const sqlite = new Database(snap, { readonly: true });
-		const row = sqlite.query("SELECT 1 FROM cookies WHERE name = ? AND host_key LIKE ? LIMIT 1").get(entry.sessionCookie.name, `%${entry.sessionCookie.host}`) as unknown;
-		sqlite.close();
-		return row !== null;
-	} catch {
-		return false;
-	} finally {
-		rmSync(snap, { force: true });
+		return null;
 	}
 }
 
-/** Active credential keys - the part that joins the machine's published capabilities. */
-export function activeCredentialKeys(): string[] {
-	const store = readStore();
-	return CREDENTIALS.filter((c) => store.credentials[c.key] !== undefined || browserActive(c.key)).map((c) => c.key);
+export function legacyKeys(service: string): Record<string, string> | null {
+	return legacyStore()?.credentials[service]?.fields ?? null;
 }
 
-export interface CredentialStatus {
-	key: string;
-	label: string;
-	note: string;
-	loginUrl?: string;
-	passwordFields?: PasswordField[];
-	active: { password: boolean; browser: boolean };
-	updatedAt?: number;
-}
-
-export function credentialStatus(): CredentialStatus[] {
-	const store = readStore();
-	return CREDENTIALS.map((c) => ({
-		key: c.key,
-		label: c.label,
-		note: c.note,
-		...(c.loginUrl ? { loginUrl: c.loginUrl } : {}),
-		...(c.passwordFields ? { passwordFields: c.passwordFields } : {}),
-		active: { password: store.credentials[c.key] !== undefined, browser: browserActive(c.key) },
-		...(store.credentials[c.key] ? { updatedAt: store.credentials[c.key].updatedAt } : {}),
-	}));
-}
-
-/** One line for the agent prompt: what is usable here and how to reach it. */
-export function credentialsPromptLine(): string {
-	const store = readStore();
-	const parts: string[] = [];
-	for (const c of CREDENTIALS) {
-		const ways: string[] = [];
-		if (browserActive(c.key)) ways.push(`logged-in Chrome profile ${browserProfileDir(c.key)}; call credential_fetch to read pages or the local x-retweet <status-url> command to retweet through the profile headlessly`);
-		if (store.credentials[c.key]) ways.push(`keys in ${storePath()} under "${c.key}"`);
-		if (ways.length > 0) parts.push(`${c.label}: ${ways.join("; ")}`);
+/** Delete a service's legacy local secrets once migrated (or never used). */
+export function dropLegacySecrets(service: string): void {
+	rmSync(legacyProfileDir(service), { recursive: true, force: true });
+	const store = legacyStore();
+	if (!store?.credentials[service]) return;
+	delete store.credentials[service];
+	const path = join(dataDir(), "credentials.json");
+	if (Object.keys(store.credentials).length === 0) rmSync(path, { force: true });
+	else {
+		writeFileSync(path, JSON.stringify(store, null, 2), "utf8");
+		chmodSync(path, 0o600);
 	}
-	return parts.length === 0 ? "" : `Credentials available on this machine. browserless/web_fetch is deliberately logged out; use credential_fetch for logged-in reads or x-retweet for X retweets:\n${parts.map((p) => `- ${p}`).join("\n")}`;
 }
 
-/** Save password-kind fields; every catalog field is required. */
-export function setPasswordCredential(key: string, fields: Record<string, string>): void {
-	const entry = CREDENTIALS.find((c) => c.key === key);
-	if (!entry) throw new Error(`unknown credential "${key}"`);
-	if (!entry.passwordFields) throw new Error(`"${key}" does not take password fields`);
-	const clean: Record<string, string> = {};
-	for (const f of entry.passwordFields) {
-		const v = (fields[f.key] ?? "").trim();
-		if (!v) throw new Error(`${f.label} is required`);
-		clean[f.key] = v;
-	}
-	const store = readStore();
-	store.credentials[key] = { kind: "password", fields: clean, updatedAt: Date.now() };
-	writeStore(store);
-}
-
-/** Password-kind fields of one credential, or null when it is not set up here. Machine-local: never put a value in the DAG. */
-export function passwordCredential(key: string): Record<string, string> | null {
-	return readStore().credentials[key]?.fields ?? null;
-}
-
-const CHROME_CANDIDATES = [
-	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-	"/Applications/Chromium.app/Contents/MacOS/Chromium",
-	"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-];
-
-const openSessions = new Map<string, { pid: number; startedAt: number }>();
-
-/**
- * Open a headed Chrome on the service's own profile at its login page.
- * The human logs in there; `finishBrowserLogin` confirms cookies landed.
- */
-export function startBrowserLogin(key: string): { pid: number } {
-	const entry = CREDENTIALS.find((c) => c.key === key);
-	if (!entry?.loginUrl) throw new Error(`"${key}" has no browser login`);
-	const running = openSessions.get(key);
-	if (running) {
-		try {
-			process.kill(running.pid, 0);
-			throw new Error("a login window for this service is already open");
-		} catch (err) {
-			if (err instanceof Error && err.message.includes("already open")) throw err;
-			openSessions.delete(key); // stale pid
-		}
-	}
-	const bin = CHROME_CANDIDATES.find((p) => existsSync(p));
-	if (!bin) throw new Error("no Chrome/Chromium/Brave binary found on this machine");
-	const dir = browserProfileDir(key);
-	mkdirSync(dir, { recursive: true });
-	const proc = Bun.spawn([bin, `--user-data-dir=${dir}`, "--no-first-run", "--no-default-browser-check", "--new-window", entry.loginUrl], {
-		// Setup is deliberately headed: the human may need 2FA and site
-		// challenge UI. Scheduled work must instead launch headlessly.
-		stdout: "ignore",
-		stderr: "ignore",
-		stdin: "ignore",
-	});
-	openSessions.set(key, { pid: proc.pid, startedAt: Date.now() });
-	proc.exited.then(() => openSessions.delete(key));
-	return { pid: proc.pid };
-}
-
-/** True when the login left cookies behind; also the post-state for the UI. */
-export function finishBrowserLogin(key: string): boolean {
-	return browserActive(key);
-}
-
-/** Remove both kinds and the browser profile directory. */
-export function removeCredential(key: string): void {
-	const store = readStore();
-	if (store.credentials[key]) {
-		delete store.credentials[key];
-		writeStore(store);
-	}
-	rmSync(browserProfileDir(key), { recursive: true, force: true });
+export function legacyProfileExists(service: string): boolean {
+	return existsSync(join(legacyProfileDir(service), "Default"));
 }

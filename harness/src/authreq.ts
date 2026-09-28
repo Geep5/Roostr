@@ -5,7 +5,8 @@
  * entries are `service` or `service:account`. The harness resolves those
  * selectors against machine-local auth state; secrets never enter the DAG.
  */
-import { credentialStatus } from "./credentials";
+import { CREDENTIALS } from "./credentials";
+import { localCredentials } from "./credential-objects";
 import { googleAccountStatus, listGoogleAccounts } from "./google";
 
 export interface AuthRequirement {
@@ -50,10 +51,9 @@ async function serviceActive(service: string): Promise<{ active: boolean; accoun
 		const ready = await skillReady("browserless");
 		return { active: ready.ok, reason: ready.ok ? "browserless ready" : ready.reason };
 	}
-	const credential = credentialStatus().find((c) => c.key === service);
-	if (credential) {
-		const active = credential.active.browser || credential.active.password;
-		return { active, account: active ? service : undefined, reason: active ? `${service} active` : `${service} is not set up on this machine` };
+	if (CREDENTIALS.some((c) => c.key === service)) {
+		const active = localCredentials().some((c) => c.service === service && c.status === "active");
+		return { active, account: active ? service : undefined, reason: active ? `${service} active` : `no connected ${service} Credential is looked after by this machine` };
 	}
 	return { active: false, reason: `unknown auth service "${service}"` };
 }
@@ -91,14 +91,14 @@ export interface AuthIdentity extends AuthRequirement {
  */
 export async function localAuthRegistry(): Promise<AuthIdentity[]> {
 	const rows: AuthIdentity[] = [];
-	for (const c of credentialStatus()) {
-		const active = c.active.browser || c.active.password;
+	for (const c of CREDENTIALS) {
+		const active = localCredentials().some((row) => row.service === c.key && row.status === "active");
 		rows.push({
 			selector: c.key,
 			service: c.key,
 			raw: c.key,
 			active,
-			reason: active ? `${c.key} active` : `${c.key} is not set up on this machine`,
+			reason: active ? `${c.key} active` : `no connected ${c.key} Credential is looked after by this machine`,
 		});
 	}
 	for (const g of await listGoogleAccounts()) {

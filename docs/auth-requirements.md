@@ -105,8 +105,8 @@ Before acting, an agent MUST:
 Service-specific prompts decide how to fulfill the requirement:
 
 - Google: `gws-as <account> ...`
-- X: saved X browser profile / `x-retweet <status-url>`
-- Matcherino: saved Matcherino browser profile
+- X: the agent's X Credential via `credential_fetch` / `credential_action`
+- Matcherino: the agent's Matcherino Credential via `credential_fetch`
 - browserless: headless rendering only; it is not an auth mechanism
 
 ## Local setup
@@ -120,4 +120,4 @@ gws-as support@matcherino.com auth status
 
 Each account has its own config dir under `~/.config/gws/accounts/<account>`. Authenticating one account does not overwrite another.
 
-Browser credentials are managed in **This machine → Integrations**. Active browser credentials join machine capabilities, but the object’s `requires_auth` selector is what tells an agent which one it must use.
+Service logins are Credential objects (see the README's Credentials section). An active Credential publishes a capability on the computer that looks after it, but the object’s `requires_auth` selector is what tells an agent which one it must use.

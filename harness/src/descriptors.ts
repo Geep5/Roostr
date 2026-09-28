@@ -18,9 +18,9 @@
  * kills the hand-copy the website admits to keeping in
  * `src/lib/serving.ts` ("Mirrors the harness catalogs …").
  *
- * No secret value can appear here. `FieldSpec.secret` says a value exists on
- * some machine; the value stays in `credentials.json`, a Chrome profile, or a
- * `gws` config dir.
+ * No secret value can appear here. `FieldSpec.secret` says a value exists;
+ * a login's value rides on its Credential object, a skill's in a `gws`
+ * config dir.
  */
 
 import { API, apiFetch, createObject, fetchObject, mutate, queryAll, str, sv, iv, type ValueJSON } from "./api";
@@ -394,18 +394,16 @@ async function sweepHoldupBadges(key: string): Promise<void> {
 }
 
 /**
- * Publish this machine's installation rows for every catalog entry, from the
+ * Publish this machine's installation rows for every catalog skill, from the
  * state that already decides `capabilities`. Called wherever capabilities are
- * published, so the detailed truth and the flat list never disagree.
+ * published, so the detailed truth and the flat list never disagree. Logins
+ * are Credential objects (credential-objects.ts), not installation rows.
  *
  * An existing `error` is preserved when the row is otherwise unchanged: a
  * status sweep must not erase a failure that a tool call recorded, or the
  * holdup becomes invisible again.
  */
-export async function publishInstallations(
-	skills: Record<string, { installed?: boolean; enabled?: boolean } | undefined>,
-	credentials: Array<{ key: string; active: { password: boolean; browser: boolean } }>,
-): Promise<void> {
+export async function publishInstallations(skills: Record<string, { installed?: boolean; enabled?: boolean } | undefined>): Promise<void> {
 	const mine = await myInstallations();
 	for (const entry of CATALOG) {
 		const st = skills[entry.key];
@@ -418,24 +416,5 @@ export async function publishInstallations(
 		const error = status === "active" ? "" : (previous?.error ?? "");
 		if (status === "active" && previous?.error) void sweepHoldupBadges(entry.key);
 		await publishInstallation(entry.key, { status, error, auth: "none" });
-	}
-	for (const credential of credentials) {
-		const pending = mine.get(credential.key);
-		if (pending?.status === "needs_approval" || pending?.status === "processing") continue;
-		const auth: AuthMethod | undefined = credential.active.browser
-			? "browser_profile"
-			: credential.active.password
-				? "api_key"
-				: undefined;
-		const previous = mine.get(credential.key);
-		if (!auth) {
-			await publishInstallation(credential.key, {
-				status: previous?.error ? "needs_auth" : "missing",
-				error: previous?.error ?? "",
-			});
-			continue;
-		}
-		if (previous?.error) void sweepHoldupBadges(credential.key);
-		await publishInstallation(credential.key, { status: "active", auth, account: previous?.account ?? "", error: "" });
 	}
 }

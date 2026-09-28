@@ -18,7 +18,7 @@ import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
 import { callLLM, isContextOverflowError } from "./llm";
 import { channelInstructions, listSkills, remoteCapabilitiesSection, skillsPromptSection } from "./skills";
-import { credentialsPromptLine } from "./credentials";
+import { credentialsPromptLine } from "./credential-objects";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceAt, workspacePromptSection } from "./workspace";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
@@ -168,6 +168,7 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 		flag(agent.fields, "memory_digest_enabled") ? listMilestones(agentId) : Promise.resolve([]),
 		listSkills(agentId),
 	]);
+	const credsLine = await credentialsPromptLine(agent);
 	const repo = str(agent.fields, "repo_path");
 	const ws = repo ? await workspaceAt(repo).catch(() => null) : null;
 	const fingerprint = [
@@ -178,7 +179,7 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 		milestones.length,
 		maxUpdated(milestones),
 		skills.map((s) => s.id).sort().join(","),
-		credentialsPromptLine(),
+		credsLine,
 		channelId,
 		repo,
 		ws?.path ?? "",
@@ -196,7 +197,6 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	}
 	const skillsSection = skillsPromptSection(skills);
 	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
-	const credsLine = credentialsPromptLine();
 	if (credsLine) parts.push({ label: "Credentials", text: credsLine });
 	parts.push({ label: "Workspace contract", text: WORKSPACE_CONTRACT });
 	const requirementsId = opts.requirementsObjectId ?? objectId;

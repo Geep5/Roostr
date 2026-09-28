@@ -69,7 +69,7 @@ test("an agent card names its requirements by other cards' keys and keeps secret
 
 test("no card can carry a secret value", () => {
 	// The schema has no field for one; this pins the PROJECTION, so a future
-	// edit cannot start copying `credentials.json` into the DAG. A substring
+	// edit cannot start copying a login's keys onto its card. A substring
 	// scan would be wrong - the browserless install prompt says the word
 	// "password" on purpose ("nothing can type it, so the install would
 	// hang") - so walk the keys instead.

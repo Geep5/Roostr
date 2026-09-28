@@ -1,15 +1,23 @@
 /**
  * Minimal Chrome DevTools Protocol driver for credential-backed browser
- * actions. Headless Chrome owns the saved profile and all cookies; agents
- * receive only page text/screenshots and never the profile or cookies.
+ * work. A Credential's signed-in session travels as its cookies (the
+ * credential object's `session` property): sign-in exports them from the
+ * headed login window, and every later action injects them into a fresh,
+ * throwaway headless Chrome - so any computer can act with the login.
+ * Agents receive only page text, never the cookies.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const DEBUG_PORT_BASE = 9223;
 const DEFAULT_TIMEOUT_MS = 60_000;
+/**
+ * A throwaway profile's cookie store must not touch the OS keychain: with a
+ * temp HOME, macOS Chrome blocks on it and every cookie command hangs.
+ * (The legacy-profile export keeps the real keychain - it must decrypt.)
+ */
+const THROWAWAY_STORE = ["--use-mock-keychain", "--password-store=basic"];
 const PAGE_TEXT_LIMIT = 14_000;
 
 interface Target {
@@ -26,16 +34,49 @@ interface Frame {
 	error?: { message?: string };
 }
 
-function chromeBinary(): string | undefined {
-	return ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"].find((p) => Bun.file(p).size > 0);
+export function chromeBinary(): string | undefined {
+	return ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"].find((p) => Bun.file(p).size > 0);
+}
+
+/** A cookie as CDP reports and accepts it. */
+export interface SessionCookie {
+	name: string;
+	value: string;
+	domain: string;
+	path: string;
+	expires: number;
+	httpOnly: boolean;
+	secure: boolean;
+	sameSite?: string;
 }
 
 async function sleep(ms: number): Promise<void> {
 	await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function debuggerUrlFor(port: number, timeoutMs: number, url: string): Promise<string> {
+/**
+ * The DevTools port Chrome picked. Every launch passes
+ * `--remote-debugging-port=0` and reads the port back from the profile,
+ * so two Chromes never race for one fixed port (and a stale one on it is
+ * never mistaken for ours).
+ */
+async function devtoolsPort(profile: string, timeoutMs: number): Promise<number> {
 	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			const port = Number(readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]);
+			if (port > 0) return port;
+		} catch {
+			/* not written yet */
+		}
+		await sleep(100);
+	}
+	throw new Error("Chrome did not open DevTools");
+}
+
+async function debuggerUrlFor(profile: string, timeoutMs: number, url: string): Promise<string> {
+	const deadline = Date.now() + timeoutMs;
+	const port = await devtoolsPort(profile, timeoutMs);
 	let lastError = "";
 	while (Date.now() < deadline) {
 		try {
@@ -137,52 +178,48 @@ function pageTextExpression(): string {
 	return `(() => { const title = document.title || ""; const url = location.href; const body = document.body ? document.body.innerText : ""; return JSON.stringify({ title, url, text: body.slice(0, ${PAGE_TEXT_LIMIT}) }); })()`;
 }
 
-/** Run a JavaScript snippet in the logged-in profile and return the page after it. */
-export async function credentialPageAction(profile: string, url: string, actionJs: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<{ title: string; url: string; text: string; actionResult: string }> {
+/**
+ * Run a JavaScript snippet in a throwaway headless Chrome carrying the
+ * credential's session cookies and return the page after it. `arrived` is
+ * false when the site sent the page elsewhere (a login wall): the action is
+ * then NOT run, and the page returned is where it ended up.
+ */
+export async function credentialPageAction(cookies: SessionCookie[], url: string, actionJs: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<{ title: string; url: string; text: string; actionResult: string; arrived: boolean }> {
 	const chrome = chromeBinary();
 	if (!chrome) throw new Error("no Chrome/Chromium/Brave binary found");
 	const home = mkdtempSync(join(tmpdir(), "roostr-cdp-home-"));
-	const args = [
-		chrome,
-		"--headless=new",
-		"--disable-gpu",
-		"--disable-background-networking",
-		"--disable-component-update",
-		"--disable-sync",
-		"--metrics-recording-only",
-		"--no-first-run",
-		"--no-default-browser-check",
-		`--remote-debugging-port=${DEBUG_PORT_BASE}`,
-		`--remote-debugging-address=127.0.0.1`,
-		`--user-data-dir=${profile}`,
-		url,
-	];
-	const debugPort = DEBUG_PORT_BASE + (process.pid % 1000);
-	const proc: ChildProcess = spawn(args[0], args.slice(1).map((arg) => arg.replace(String(DEBUG_PORT_BASE), String(debugPort))), { stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, HOME: home } });
+	const profile = join(home, "profile");
+	const args = ["--headless=new", "--disable-gpu", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--metrics-recording-only", "--no-first-run", "--no-default-browser-check", ...THROWAWAY_STORE, "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", `--user-data-dir=${profile}`, "about:blank"];
+	const proc: ChildProcess = spawn(chrome, args, { stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, HOME: home } });
 	const timeout = setTimeout(() => {
 		spawn("pkill", ["-TERM", "-P", String(proc.pid ?? "")], { stdio: "ignore" });
 		proc.kill();
 	}, timeoutMs);
 	let cdp: CdpSocket | undefined;
 	try {
-		const debuggerUrl = await debuggerUrlFor(debugPort, timeoutMs, url);
-		cdp = await CdpSocket.open(debuggerUrl);
+		cdp = await CdpSocket.open(await debuggerUrlFor(profile, timeoutMs, "about:blank"));
 		await cdp.call("Runtime.enable");
 		await cdp.call("Page.enable");
+		await cdp.call("Network.enable");
+		// Sites refuse a "HeadlessChrome" user agent outright (x.com: 403); present as the Chrome it is.
+		const { userAgent } = await cdp.call<{ userAgent: string }>("Browser.getVersion");
+		await cdp.call("Network.setUserAgentOverride", { userAgent: userAgent.replace("HeadlessChrome", "Chrome") });
+		await cdp.call("Network.setCookies", { cookies: cookies.map((c) => ({ ...c, expires: c.expires > 0 ? c.expires : undefined })) });
+		await cdp.call("Page.navigate", { url });
 		const wanted = new URL(url);
 		const wantedHosts = new Set([wanted.host]);
 		if (wanted.host === "twitter.com") wantedHosts.add("x.com");
 		if (wanted.host === "x.com") wantedHosts.add("twitter.com");
-		await waitFor(cdp, `(() => { const ready = document.readyState === "interactive" || document.readyState === "complete"; const host = new URL(location.href).host; const requested = ${JSON.stringify([...wantedHosts])}.includes(host) && location.pathname === ${JSON.stringify(wanted.pathname)}; return ready && requested && !!document.body && document.body.innerText.length > 0; })()`, Math.min(20_000, timeoutMs), "requested rendered page");
+		const arrived = await waitFor(cdp, `(() => { const ready = document.readyState === "interactive" || document.readyState === "complete"; const host = new URL(location.href).host; const requested = ${JSON.stringify([...wantedHosts])}.includes(host) && location.pathname === ${JSON.stringify(wanted.pathname)}; return ready && requested && !!document.body && document.body.innerText.length > 0; })()`, Math.min(20_000, timeoutMs), "requested rendered page").then(() => true, () => false);
 		let actionResult = "";
-		if (actionJs.trim()) {
+		if (arrived && actionJs.trim()) {
 			const value = await evaluate(cdp, `(() => {\n${actionJs}\n})()`);
 			actionResult = typeof value === "string" ? value : JSON.stringify(value ?? null);
 		}
 		await sleep(1_000);
 		const state = JSON.parse(String(await evaluate(cdp, pageTextExpression()))) as { title: string; url: string; text: string };
 		if (!state.text) state.text = `NO TEXT title=${state.title} url=${state.url} requested=${url}`;
-		return { ...state, actionResult };
+		return { ...state, actionResult, arrived };
 	} finally {
 		clearTimeout(timeout);
 		cdp?.close();
@@ -190,6 +227,68 @@ export async function credentialPageAction(profile: string, url: string, actionJ
 		proc.kill();
 		rmSync(home, { recursive: true, force: true });
 	}
+}
+
+/** Every cookie a saved Chrome profile holds, decrypted by a headless Chrome on it (legacy migration). */
+export async function profileCookies(profile: string, timeoutMs = 20_000): Promise<SessionCookie[]> {
+	const chrome = chromeBinary();
+	if (!chrome) throw new Error("no Chrome/Chromium/Brave binary found");
+	rmSync(join(profile, "DevToolsActivePort"), { force: true });
+	const proc = spawn(chrome, ["--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+	let cdp: CdpSocket | undefined;
+	try {
+		cdp = await CdpSocket.open(await debuggerUrlFor(profile, timeoutMs, "about:blank"));
+		return (await cdp.call<{ cookies: SessionCookie[] }>("Network.getAllCookies")).cookies;
+	} finally {
+		cdp?.close();
+		proc.kill();
+	}
+}
+
+export interface LoginWindow {
+	/** Every cookie the window holds right now; null once the window is gone. */
+	cookies(): Promise<SessionCookie[] | null>;
+	close(): void;
+	exited: Promise<unknown>;
+}
+
+/**
+ * Open a HEADED Chrome on a fresh profile at a login page, with DevTools on
+ * a local port so the caller can read the cookies once the person signs in
+ * (2FA and all). The profile is thrown away on close; the cookies are the session.
+ */
+export async function openLoginWindow(loginUrl: string): Promise<LoginWindow> {
+	const chrome = chromeBinary();
+	if (!chrome) throw new Error("No Chrome, Chromium or Brave is installed on this computer.");
+	const profile = mkdtempSync(join(tmpdir(), "roostr-login-"));
+	const proc = spawn(chrome, [`--user-data-dir=${profile}`, ...THROWAWAY_STORE, "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--no-first-run", "--no-default-browser-check", "--new-window", loginUrl], { stdio: "ignore" });
+	const exited = new Promise((resolve) => proc.once("exit", resolve)).then(() => rmSync(profile, { recursive: true, force: true }));
+	let gone = false;
+	void exited.then(() => (gone = true));
+	const port = await devtoolsPort(profile, 20_000).catch((err) => {
+		proc.kill();
+		throw err;
+	});
+	return {
+		exited,
+		async cookies() {
+			if (gone) return null;
+			try {
+				const version = (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()) as { webSocketDebuggerUrl: string };
+				const cdp = await CdpSocket.open(version.webSocketDebuggerUrl);
+				try {
+					return (await cdp.call<{ cookies: SessionCookie[] }>("Storage.getCookies")).cookies;
+				} finally {
+					cdp.close();
+				}
+			} catch {
+				return gone ? null : [];
+			}
+		},
+		close() {
+			proc.kill();
+		},
+	};
 }
 
 /** Retweet and confirm the menu/dialog in one page action. */

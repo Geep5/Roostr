@@ -126,6 +126,8 @@ export interface CapabilitySeed {
 	key: string;
 	name: string;
 	description: string;
+	/** The object whose `status` gates this capability: a login's Credential. Absent = this machine's install row for the key. */
+	installId?: string;
 }
 
 /**
@@ -205,7 +207,7 @@ export async function syncCapabilities(seeds: CapabilitySeed[]): Promise<void> {
 		const mine = (await queryAll({ type: CAPABILITY_TYPE })).filter((r) => linkTarget(r.fields, "served_by") === id);
 		const wanted = new Map(seeds.map((s) => [s.key, s]));
 		for (const [key, seed] of wanted) {
-			const installId = installIdFor(key);
+			const installId = seed.installId ?? installIdFor(key);
 			const space = spaces.get(key) ?? "";
 			const hit = mine.find((r) => str(r.fields, "key") === key);
 			if (!hit) {

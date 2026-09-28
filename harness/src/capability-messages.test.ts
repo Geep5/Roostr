@@ -8,24 +8,20 @@ import { join } from "node:path";
 const fixture = String.raw`
 import { mock } from "bun:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
 const objects = new Map();
 const sent = [];
 let opened = 0;
 let authenticated = false;
-let saveFails = false;
 let skillStarts = 0;
 let skillState = { phase: "off", installed: false };
 let clock = 100;
-// Load the real local credential store before replacing only the browser boundary.
-const realCredentials = await import("./credentials");
-const saveLocal = realCredentials.setPasswordCredential;
-mock.module("./credentials", () => ({ ...realCredentials, setPasswordCredential: (key, fields) => { if (saveFails) throw new Error(fields.apiSecret); saveLocal(key, fields); }, startBrowserLogin: () => { opened++; return { pid: 1 }; }, finishBrowserLogin: () => authenticated }));
+// The login boundary: gws opens the person's browser; count launches instead.
+Bun.spawn = () => { opened++; return { exited: new Promise(() => {}) }; };
 mock.module("./roster", () => ({ machineId: async () => "owner-machine" }));
 mock.module("./descriptors", () => ({ INSTALL_TYPE: "install" }));
-mock.module("./skillmgr", () => ({ CATALOG: [{ key: "browserless" }, { key: "google" }], republishCapabilities: async () => {}, skillOperationState: async () => skillState, enableSkill: async () => { skillStarts++; skillState = { phase: "installing", installed: false }; return "installing"; }, disableSkill: async () => { throw new Error("unexpected disable"); }, uninstallSkill: async () => { throw new Error("unexpected uninstall"); }, recheckSkill: async () => "on" }));
+mock.module("./skillmgr", () => ({ CATALOG: [{ key: "browserless" }, { key: "google" }], republishCapabilities: async () => {}, skillOperationState: async () => skillState, enableSkill: async () => { skillStarts++; skillState = { phase: "installing", installed: false }; return "installing"; }, disableSkill: async () => { throw new Error("unexpected disable"); }, uninstallSkill: async () => { throw new Error("unexpected uninstall"); }, recheckSkill: async () => authenticated ? "on" : "off" }));
 mock.module("./google", () => ({ addGoogleAccount: async () => {}, removeGoogleAccount: () => {}, googleAccountStatus: async () => ({ authMethod: "none" }) }));
-const object = { id: "install-x", typeKey: "install", fields: { key: { stringValue: "x" }, machine_id: { stringValue: "owner-machine" }, status: { stringValue: "missing" } }, mailbox: [], blocks: [], deleted: false, createdAt: 0, updatedAt: 0 };
+const object = { id: "install-google", typeKey: "install", fields: { key: { stringValue: "google" }, machine_id: { stringValue: "owner-machine" }, status: { stringValue: "missing" } }, mailbox: [], blocks: [], deleted: false, createdAt: 0, updatedAt: 0 };
 objects.set(object.id, object);
 const source = { ...object, id: "requester", typeKey: "note", fields: {}, mailbox: [] };
 objects.set(source.id, source);
@@ -70,51 +66,26 @@ async function scenario(body: string): Promise<void> {
 
 test("sync only stages approval; historical and foreign-machine requests never execute", async () => {
 	await scenario(String.raw`
-const entry = addRequest("auth.save");
+const entry = addRequest("auth.login");
 const historical = addRequest("auth.login", { historical: true });
 await capability.receiveCapabilityRequests(structuredClone(object), "live-owner");
 assert.equal(entry.processing.status, "awaiting_approval");
 assert.equal(historical.processing.status, "pending");
 assert.equal(object.fields.status.stringValue, "needs_approval");
-assert.equal(existsSync(process.env.GLON_DATA + "/credentials.json"), false);
 assert.equal(opened, 0);
 assert.equal(sent.length, 0);
 object.fields.machine_id.stringValue = "another-machine";
 await capability.receiveCapabilityRequests(structuredClone(object), "live-owner");
-await assert.rejects(() => capability.approveCapabilityRequest(object.id, entry.message.id, {}), /another machine/);
+await assert.rejects(() => capability.approveCapabilityRequest(object.id, entry.message.id), /another machine/);
 assert.throws(() => capability.capabilityTarget({ ...object, fields: { ...object.fields, machine_id: { stringValue: "owner-machine" } } }, "constructor", "owner-machine"), /Unsupported/);
 assert.equal(opened, 0);
 `);
 });
 
-test("approved secret save stays local and cannot replay after completion", async () => {
-	await scenario(String.raw`
-const entry = addRequest("auth.save");
-await capability.receiveCapabilityRequests(structuredClone(object), "live-owner");
-const fields = { apiKey: "private-one", apiSecret: "private-two", accessToken: "private-three", accessTokenSecret: "private-four" };
-await assert.rejects(() => capability.approveCapabilityRequest(object.id, entry.message.id, { ...fields, command: "bad" }), /exactly/);
-assert.equal(entry.processing.status, "awaiting_approval");
-await capability.approveCapabilityRequest(object.id, entry.message.id, fields);
-assert.equal(entry.processing.status, "processed");
-assert.equal(object.fields.status.stringValue, "active");
-assert.equal(object.fields.error.stringValue, "");
-const local = JSON.parse(readFileSync(process.env.GLON_DATA + "/credentials.json", "utf8"));
-assert.deepEqual(local.credentials.x.fields, fields);
-const durable = JSON.stringify([...objects.values()]);
-for (const secret of Object.values(fields)) assert.equal(durable.includes(secret), false);
-assert.equal(sent.length, 1);
-assert.equal(sent[0].requestReply, false);
-assert.deepEqual(sent[0].recipients, [entry.message.sender]);
-await assert.rejects(() => capability.approveCapabilityRequest(object.id, entry.message.id, fields), /not awaiting/);
-assert.equal(sent.length, 1);
-`);
-});
-
-test("browser login stays pending until actual authentication and competing approvals claim once", async () => {
+test("login stays pending until actual authentication and competing approvals claim once", async () => {
 	await scenario(String.raw`
 const entry = addRequest("auth.login");
 await capability.receiveCapabilityRequests(structuredClone(object), "live-owner");
-await assert.rejects(() => capability.approveCapabilityRequest(object.id, entry.message.id, { token: "private" }), /Only auth.save/);
 const results = await Promise.allSettled([capability.approveCapabilityRequest(object.id, entry.message.id), capability.approveCapabilityRequest(object.id, entry.message.id)]);
 assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
 assert.equal(opened, 1);
@@ -127,7 +98,7 @@ assert.equal(entry.processing.status, "processing");
 authenticated = true;
 assert.deepEqual(await capability.finishCapabilityLogin(object.id, entry.message.id), { active: true });
 assert.equal(entry.processing.status, "processed");
-assert.equal(object.fields.auth.stringValue, "browser_profile");
+assert.equal(object.fields.auth.stringValue, "oauth");
 assert.equal(sent.length, 1);
 `);
 });
@@ -146,19 +117,6 @@ assert.equal(sent[0].sentAt, claimTime);
 await capability.receiveCapabilityRequests(structuredClone(object), "new-process-owner");
 assert.equal(opened, 1);
 assert.equal(sent.length, 1);
-`);
-});
-
-test("credential storage errors cannot put submitted values into results or installation history", async () => {
-	await scenario(String.raw`
-const entry = addRequest("auth.save");
-saveFails = true;
-await capability.approveCapabilityRequest(object.id, entry.message.id, { apiKey: "private-key", apiSecret: "sensitive-storage-error", accessToken: "private-token", accessTokenSecret: "private-secret" });
-assert.equal(entry.processing.status, "failed");
-assert.equal(object.fields.status.stringValue, "broken");
-assert.equal(JSON.stringify([...objects.values()]).includes("sensitive-storage-error"), false);
-assert.equal(JSON.stringify(await capability.listCapabilityRequests()).includes("sensitive-storage-error"), false);
-assert.equal(existsSync(process.env.GLON_DATA + "/credentials.json"), false);
 `);
 });
 

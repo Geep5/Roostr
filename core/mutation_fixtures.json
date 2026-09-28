@@ -4132,7 +4132,7 @@
             "fieldSet": {
               "key": "name",
               "value": {
-                "stringValue": "Credentials"
+                "stringValue": "Installation"
               }
             }
           },
@@ -4148,7 +4148,7 @@
             "fieldSet": {
               "key": "hidden",
               "value": {
-                "boolValue": false
+                "boolValue": true
               }
             }
           },
@@ -4203,6 +4203,125 @@
                   "items": [
                     {
                       "stringValue": "bundled-type-install-new-id"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-credentials-new-id",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "credentials"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "object"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Credentials"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🔑"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 0
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-credentials-new-id",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "object_types",
+              "value": {
+                "valuesValue": {
+                  "items": [
+                    {
+                      "stringValue": "bundled-type-credential-new-id"
                     }
                   ]
                 }
@@ -5600,6 +5719,68 @@
               "key": "iconEmoji",
               "value": {
                 "stringValue": "🔌"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "layout",
+              "value": {
+                "stringValue": "page"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-credential-new-id",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "type"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "credential"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Credential"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🔑"
               }
             }
           },
@@ -7817,7 +7998,7 @@
             "fieldSet": {
               "key": "name",
               "value": {
-                "stringValue": "Credentials"
+                "stringValue": "Installation"
               }
             }
           },
@@ -7833,7 +8014,7 @@
             "fieldSet": {
               "key": "hidden",
               "value": {
-                "boolValue": false
+                "boolValue": true
               }
             }
           },
@@ -7888,6 +8069,125 @@
                   "items": [
                     {
                       "stringValue": "bundled-type-install-s"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-credentials-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "credentials"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "object"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Credentials"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🔑"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 0
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-credentials-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "object_types",
+              "value": {
+                "valuesValue": {
+                  "items": [
+                    {
+                      "stringValue": "bundled-type-credential-s"
                     }
                   ]
                 }
@@ -8371,6 +8671,68 @@
               "key": "iconEmoji",
               "value": {
                 "stringValue": "🔌"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "layout",
+              "value": {
+                "stringValue": "page"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-credential-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "type"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "credential"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Credential"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🔑"
               }
             }
           },
@@ -10569,7 +10931,7 @@
             "fieldSet": {
               "key": "name",
               "value": {
-                "stringValue": "Credentials"
+                "stringValue": "Installation"
               }
             }
           },
@@ -10585,7 +10947,7 @@
             "fieldSet": {
               "key": "hidden",
               "value": {
-                "boolValue": false
+                "boolValue": true
               }
             }
           },
@@ -10640,6 +11002,125 @@
                   "items": [
                     {
                       "stringValue": "bundled-type-install-s"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-credentials-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "credentials"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "object"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Credentials"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🔑"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 0
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-credentials-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "object_types",
+              "value": {
+                "valuesValue": {
+                  "items": [
+                    {
+                      "stringValue": "bundled-type-credential-s"
                     }
                   ]
                 }
@@ -11185,6 +11666,68 @@
               "key": "iconEmoji",
               "value": {
                 "stringValue": "🔌"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "layout",
+              "value": {
+                "stringValue": "page"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-credential-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "type"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "credential"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Credential"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🔑"
               }
             }
           },

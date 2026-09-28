@@ -12,6 +12,8 @@ import { agentTurnStatus } from "./index";
 import { readRoster } from "./roster";
 import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, finishCapabilityLogin, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
+import { CREDENTIALS } from "./credentials";
+import { CredentialError, checkCredential, connectCredential, disconnectCredential, type CredentialRow } from "./credential-objects";
 import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
 import type { SpaceJoinLink } from "./nostrsync";
 
@@ -122,17 +124,16 @@ export function startAuthServer(served: Set<string>): void {
 				}
 				if (url.pathname.startsWith("/capability-requests/") && req.method === "POST") {
 					if (authorization.role !== "ui") return json({ error: "A paired human approval is required." }, 403);
-					let body: { objectId?: unknown; messageId?: unknown; fields?: unknown };
+					let body: { objectId?: unknown; messageId?: unknown };
 					try {
-						body = await req.json() as { objectId?: unknown; messageId?: unknown; fields?: unknown };
-						if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => !["objectId", "messageId", "fields"].includes(key))) throw new Error();
+						body = await req.json() as { objectId?: unknown; messageId?: unknown };
+						if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => !["objectId", "messageId"].includes(key))) throw new Error();
 					} catch {
 						return json({ error: "Invalid capability approval body." }, 400);
 					}
 					if (typeof body.objectId !== "string" || typeof body.messageId !== "string" || !body.objectId || !body.messageId) return json({ error: "objectId and messageId are required." }, 400);
-					if (url.pathname !== "/capability-requests/approve" && body.fields !== undefined) return json({ error: "Credential fields are only accepted by approval." }, 400);
 					try {
-						if (url.pathname === "/capability-requests/approve") return json(await approveCapabilityRequest(body.objectId, body.messageId, body.fields));
+						if (url.pathname === "/capability-requests/approve") return json(await approveCapabilityRequest(body.objectId, body.messageId));
 						if (url.pathname === "/capability-requests/finish-login") return json(await finishCapabilityLogin(body.objectId, body.messageId));
 						if (url.pathname === "/capability-requests/reject") {
 							await rejectCapabilityRequest(body.objectId, body.messageId);
@@ -141,6 +142,25 @@ export function startAuthServer(served: Set<string>): void {
 						return json({ error: "not found" }, 404);
 					} catch (error) {
 						return json({ error: error instanceof Error ? error.message : "Capability approval failed." }, 400);
+					}
+				}
+				if (req.method === "GET" && url.pathname === "/credentials/services") {
+					return json({ services: CREDENTIALS.map((c) => ({ key: c.key, label: c.label, note: c.note, ...(c.loginUrl ? { loginUrl: c.loginUrl } : {}), ...(c.passwordFields ? { fields: c.passwordFields } : {}) })) });
+				}
+				// Only the computer a credential's Served by names opens its sign-in
+				// window and writes its status; anyone else gets a 409 naming that computer.
+				const credentialOps: Record<string, (id: string) => Promise<CredentialRow>> = { "/credentials/connect": connectCredential, "/credentials/check": checkCredential, "/credentials/disconnect": disconnectCredential };
+				const credentialOp = req.method === "POST" ? credentialOps[url.pathname] : undefined;
+				if (credentialOp) {
+					if (authorization.role !== "ui") return json({ error: "A paired app is required." }, 403);
+					const body = (await req.json().catch(() => null)) as { id?: unknown } | null;
+					if (typeof body?.id !== "string" || !body.id) return json({ error: "id is required." }, 400);
+					try {
+						const row = await credentialOp(body.id);
+						return json({ status: row.status, ...(row.error ? { error: row.error } : {}) });
+					} catch (error) {
+						if (error instanceof CredentialError) return json({ error: error.message }, error.status);
+						throw error;
 					}
 				}
 				if (req.method === "GET" && url.pathname === "/auth/status") {

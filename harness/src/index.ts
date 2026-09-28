@@ -15,6 +15,7 @@ import { PROMPT_SEEDS, ensureSystemPrompt, promptFor } from "./prompts";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
+import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./credential-objects";
 import { capabilities, convergeCatalogScope, publishCapabilityObjects, publishInstallationState } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tools";
 import { startAuthServer } from "./authserver";
@@ -255,6 +256,10 @@ async function serve(): Promise<void> {
 	// And what is TRUE here per skill and login: one row per (thing ×
 	// machine), carrying `error` where a view can see it.
 	await publishInstallationState();
+	// Service logins are Credential objects: move this machine's old login
+	// rows over once, then check the credentials this machine looks after.
+	console.log("[harness] login migration:", JSON.stringify(await migrateLoginInstalls()));
+	await refreshCredentials();
 	// What this machine can DO, as one capability object per (skill/login ×
 	// this machine) linking its install row - after the installs exist, so
 	// every link lands. Invisible to agents and the resolver until active.
@@ -738,6 +743,10 @@ async function serve(): Promise<void> {
 			invalidateServing();
 			void armScheduler();
 		}
+		if (obj.typeKey === CREDENTIAL_TYPE) {
+			void refreshCredentials().catch((error) => console.error("[harness] credential refresh:", error));
+			return;
+		}
 		if (obj.typeKey === "agent") return; // other agents' brains
 		// ── One conversation per object (`__discussion__`). Humans and agents
 		// post there; an @-mention of a guest is the wake signal for that
@@ -795,6 +804,10 @@ async function serve(): Promise<void> {
 	// slow timer, so an envelope lands a turn even when its SSE event was
 	// missed (a quiet feed, a reconnect gap). scanMailboxes is cheap - it
 	// skips anything with nothing waiting.
+	// Sign-ins expire on their own; notice within a few minutes.
+	setInterval(() => {
+		void refreshCredentials().catch((error) => console.error("[harness] credential refresh:", error));
+	}, 5 * 60_000);
 	setInterval(() => {
 		void scanMailboxes().catch((error) => console.error("[harness] mailbox rescan:", error));
 	}, 15_000);

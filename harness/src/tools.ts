@@ -31,7 +31,8 @@ import { invalidateServing, machines, serverOf } from "./machine";
 import { machineId } from "./roster";
 import { CATALOG, fileHoldup, skillReady } from "./skillmgr";
 import { myInstallations, type InstallationRow } from "./descriptors";
-import { browserProfileDir, credentialStatus } from "./credentials";
+import { CREDENTIALS } from "./credentials";
+import { agentCredential } from "./credential-objects";
 import { credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
 import { blockLine, isAgentAuthor } from "./surfaces";
 import { readSkill } from "./skills";
@@ -503,7 +504,7 @@ const CAPABILITY_TOOL: RegisteredTool = {
 			type: "object",
 			properties: {
 				installation_object_id: { type: "string" },
-				operation: { type: "string", enum: ["skill.install", "skill.enable", "skill.disable", "skill.uninstall", "auth.login", "auth.check", "auth.revoke", "auth.save"] },
+				operation: { type: "string", enum: ["skill.install", "skill.enable", "skill.disable", "skill.uninstall", "auth.login", "auth.check", "auth.revoke"] },
 				text: { type: "string", description: "Why this action is needed; no secrets." },
 			},
 			required: ["installation_object_id", "operation"],
@@ -522,93 +523,74 @@ const CAPABILITY_TOOL: RegisteredTool = {
 	},
 };
 
+/**
+ * Open a page signed in with the agent's credential for a service and
+ * return its text. The cookies ride on the Credential object, so this works
+ * on any computer; the agent sees page text only, never the cookies.
+ */
+async function credentialPage(ctx: ToolContext, service: string, url: string, actionJs: string): Promise<string> {
+	let cred;
+	try {
+		cred = await agentCredential(await fetchObject(ctx.agentId), service);
+	} catch (error) {
+		return `Credential unavailable: ${error instanceof Error ? error.message : String(error)} Tell the person; do not retry this turn.`;
+	}
+	if (cred.cookies.length === 0) return `Credential unavailable: "${cred.row.name}" has no browser sign-in. Tell the person to press Connect on it.`;
+	try {
+		const page = await credentialPageAction(cred.cookies, url, actionJs);
+		if (!page.arrived && /login|signin|sign-in|onboarding|checkpoint|authwall/i.test(page.url + page.title)) {
+			return `Credential signed out: ${url} showed a login page, so "${cred.row.name}" is no longer signed in. Tell the person to press Reconnect on it.`;
+		}
+		if (!page.arrived) return `Did not reach ${url}: the site sent the page to ${page.url}. Nothing was done there.\n${page.text}`.slice(0, WEB_FETCH_CAP);
+		const result = page.actionResult ? `\nAction: ${page.actionResult}` : "";
+		return `${page.title}\n${page.url}\n${page.text}${result}`.slice(0, WEB_FETCH_CAP);
+	} catch (error) {
+		return `Credential page failed: ${error instanceof Error ? error.message : String(error)}`;
+	}
+}
+
 const WEB_TOOLS: RegisteredTool[] = [
 	{
 		def: {
 			name: "credential_action",
 			description:
-				"Act inside an active credential's logged-in, headless Chrome page and return the resulting page text. Actions: read_mentions (open X mentions), retweet_post (open the given X status URL and click Repost/Retweet through the page). Use credential_fetch for read-only pages; use this for actions the logged-in account must perform.",
+				"Act as a signed-in account through one of YOUR credentials (the Credentials property) in a headless Chrome, and return the resulting page text. Actions: read_mentions (open X mentions), retweet_post (open the given X status URL and repost it; the reply says whether the page confirmed it). Use credential_fetch for read-only pages.",
 			input_schema: {
 				type: "object",
 				properties: {
-					credential: { type: "string", enum: ["x"] },
+					service: { type: "string", enum: ["x"] },
 					action: { type: "string", enum: ["read_mentions", "retweet_post"] },
 					url: { type: "string", description: "X status URL for retweet_post" },
 				},
-				required: ["credential", "action"],
+				required: ["service", "action"],
 			},
 		},
 		handler: async (input, ctx) => {
-			const key = S(input.credential);
-			const entry = credentialStatus().find((c) => c.key === key);
-			if (!entry?.active.browser) {
-				const reason = `credential "${key}" has no logged-in browser profile`;
-				await fileCapabilityHoldup(key, reason, ctx);
-				return `Credential unavailable: ${reason}. A holdup has been filed for the human in the Machine panel.`;
-			}
+			const service = S(input.service);
 			const action = S(input.action);
 			const url = action === "read_mentions" ? "https://x.com/notifications/mentions" : S(input.url).trim();
 			if (!/^https:\/\/(?:x|twitter)\.com\//i.test(url)) return "error: url must be an x.com or twitter.com URL";
-			const js = action === "read_mentions" ? X_TIMELINE_JS : X_RETWEET_JS;
-			try {
-				const page = await credentialPageAction(browserProfileDir(key), url, js);
-				if (/sign in|log in|login/i.test(page.text) && !/notifications|repost|retweet/i.test(page.text)) {
-					return `Credential appears broken: the logged-out page was shown for ${url}. Re-login under This machine → Credentials.`;
-				}
-				const result = page.actionResult ? `\nAction: ${page.actionResult}` : "";
-				return `${page.title}\n${page.url}\n${page.text}${result}`.slice(0, WEB_FETCH_CAP);
-			} catch (error) {
-				const reason = error instanceof Error ? error.message : String(error);
-				await fileCapabilityHoldup(key, reason, ctx);
-				return `Credential action failed: ${reason}. A holdup has been filed for the human in the Machine panel.`;
-			}
+			return credentialPage(ctx, service, url, action === "read_mentions" ? X_TIMELINE_JS : X_RETWEET_JS);
 		},
 	},
 	{
 		def: {
 			name: "credential_fetch",
 			description:
-				"Fetch a live page through an active service credential's logged-in Chrome profile, headlessly, and return its rendered text. Use this instead of web_fetch or opening Chrome when the task depends on a signed-in account (currently X). If the credential is unavailable this files a holdup; if the page shows a login wall, report the credential as broken.",
+				"Fetch a live page signed in through one of YOUR credentials (the Credentials property) in a headless Chrome, and return its rendered text. Use this instead of web_fetch when the page depends on a signed-in account. If the page shows a login wall, report the credential as signed out.",
 			input_schema: {
 				type: "object",
 				properties: {
-					credential: { type: "string", enum: ["x"] },
+					service: { type: "string", enum: CREDENTIALS.filter((c) => c.loginUrl).map((c) => c.key), description: "the service of the credential to sign in with" },
 					url: { type: "string", description: "absolute http(s) URL" },
 				},
-				required: ["credential", "url"],
+				required: ["service", "url"],
 			},
 		},
 		handler: async (input, ctx) => {
-			const key = S(input.credential);
-			const entry = credentialStatus().find((c) => c.key === key);
-			if (!entry?.active.browser) {
-				const reason = `credential "${key}" has no logged-in browser profile`;
-				await fileCapabilityHoldup(key, reason, ctx);
-				return `Credential unavailable: ${reason}. A holdup has been filed for the human in the Machine panel.`;
-			}
 			const url = S(input.url).trim();
 			if (!/^https?:\/\//i.test(url)) return "error: url must be absolute http(s)";
-			const profile = browserProfileDir(key);
-			const chrome = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"].find((p) => Bun.file(p).size > 0);
-			if (!chrome) {
-				const reason = "no Chrome/Chromium/Brave binary found";
-				await fileCapabilityHoldup(key, reason, ctx);
-				return `Credential failed: ${reason}. A holdup has been filed for the human in the Machine panel.`;
-			}
-			const proc = Bun.spawn([chrome, "--headless=new", "--disable-gpu", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--metrics-recording-only", "--no-first-run", "--no-default-browser-check", "--virtual-time-budget=15000", `--user-data-dir=${profile}`, "--dump-dom", url], { stdout: "pipe", stderr: "pipe" });
-			const timer = setTimeout(() => {
-				proc.kill();
-				Bun.spawn(["pkill", "-TERM", "-P", String(proc.pid)], { stdout: "ignore", stderr: "ignore" });
-			}, WEB_FETCH_TIMEOUT_MS);
-			const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
-			const code = await proc.exited;
-			clearTimeout(timer);
-			if (code !== 0 || !out.trim()) {
-				const reason = `headless ${entry.label} Chrome failed on ${url}: ${(err || out || "no output").trim().slice(0, 300)}`;
-				await fileCapabilityHoldup(key, reason, ctx);
-				return `Credential failed: ${reason}. A holdup has been filed for the human in the Machine panel.`;
-			}
-			return domToText(out).slice(0, WEB_FETCH_CAP) || "(page rendered empty)";
+			return credentialPage(ctx, S(input.service), url, "");
 		},
 	},
 	{
@@ -1482,9 +1464,6 @@ const SHELL_TOOL: RegisteredTool = {
 	handler: async (input, ctx) => {
 		const command = S(input.command);
 		if (!command) return "error: command required";
-		if (/\bopen\b[\s\S]*Chrome|--new-window/.test(command) && command.includes("browser-profiles")) {
-			return "error: do not open a headed Chrome for machine credentials. Use credential_fetch for logged-in page reads; it runs headlessly.";
-		}
 		const proc = Bun.spawn(["sh", "-lc", command], { cwd: ctx.workspacePath || process.env.HOME, stdout: "pipe", stderr: "pipe" });
 		const timer = setTimeout(() => proc.kill(), SHELL_TIMEOUT_MS);
 		const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);

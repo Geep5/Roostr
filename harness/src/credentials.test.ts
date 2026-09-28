@@ -1,44 +1,27 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { Database } from "bun:sqlite";
-import { credentialsPromptLine } from "./credentials";
-import { resetScheduler } from "./schedule";
+import { expect, test } from "bun:test";
+import { credentialKeys, serviceCookies, sessionSignedIn } from "./credentials";
+import type { SessionCookie } from "./browser";
 
-let root = "";
-let previousRoot: string | undefined;
+const cookie = (name: string, domain: string, expires = Date.now() / 1000 + 3600): SessionCookie => ({ name, value: "v", domain, path: "/", expires, httpOnly: true, secure: true });
 
-beforeEach(async () => {
-	resetScheduler();
-	previousRoot = process.env.GLON_DATA;
-	root = await mkdtemp(join(tmpdir(), "roostr-credentials-"));
-	process.env.GLON_DATA = root;
+test("only the service's unexpired session cookie counts as signed in", () => {
+	expect(sessionSignedIn([cookie("gt", ".x.com")], "x")).toBe(false); // guest cookie from a first visit
+	expect(sessionSignedIn([cookie("auth_token", ".x.com", Date.now() / 1000 - 60)], "x")).toBe(false);
+	expect(sessionSignedIn([cookie("auth_token", ".x.com")], "x")).toBe(true);
+	expect(sessionSignedIn([cookie("auth_token", ".evil.com")], "x")).toBe(false);
+	expect(sessionSignedIn([cookie("li_at", ".linkedin.com", -1)], "linkedin")).toBe(true); // session cookie, no expiry
+	expect(sessionSignedIn([cookie("token", ".discord.com")], "discord-bot")).toBe(false); // keys-only service
 });
 
-afterEach(async () => {
-	resetScheduler();
-	if (previousRoot === undefined) delete process.env.GLON_DATA;
-	else process.env.GLON_DATA = previousRoot;
-	await rm(root, { recursive: true, force: true });
+test("a sign-in keeps only the service's own cookies", () => {
+	const kept = serviceCookies([cookie("auth_token", ".x.com"), cookie("SID", ".google.com"), cookie("ct0", "x.com")], "x");
+	expect(kept.map((c) => c.name)).toEqual(["auth_token", "ct0"]);
 });
 
-async function putSessionCookie(): Promise<void> {
-	const dir = join(root, "browser-profiles", "x", "Default", "Network");
-	await mkdir(dir, { recursive: true });
-	const db = new Database(join(dir, "Cookies"), { create: true });
-	db.exec("CREATE TABLE cookies (name TEXT, host_key TEXT)");
-	db.query("INSERT INTO cookies (name, host_key) VALUES (?, ?)").run("auth_token", ".x.com");
-	db.close();
-}
-
-test("browser credentials tell agents to use the logged-in Chrome profile, not browserless", async () => {
-	await putSessionCookie();
-	const line = credentialsPromptLine();
-	expect(line).toContain("browserless/web_fetch is deliberately logged out");
-	expect(line).toContain("logged-in Chrome profile");
-	expect(line).toContain("credential_fetch");
-	expect(line).toContain("x-retweet");
-	expect(line).toContain("x-retweet <status-url>");
-	expect(line).toContain("logged-in Chrome profile");
+test("keys count only when every field the service asks for is filled", () => {
+	const fields = (secret: string) => ({ service: { stringValue: "x" }, secret: { stringValue: secret } });
+	expect(credentialKeys(fields(JSON.stringify({ apiKey: "a", apiSecret: "b", accessToken: "c" })))).toBeNull();
+	expect(credentialKeys(fields(JSON.stringify({ apiKey: "a", apiSecret: "b", accessToken: "c", accessTokenSecret: " " })))).toBeNull();
+	expect(credentialKeys(fields("not json"))).toBeNull();
+	expect(credentialKeys(fields(JSON.stringify({ apiKey: " a ", apiSecret: "b", accessToken: "c", accessTokenSecret: "d" })))).toEqual({ apiKey: "a", apiSecret: "b", accessToken: "c", accessTokenSecret: "d" });
 });

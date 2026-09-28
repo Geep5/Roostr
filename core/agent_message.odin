@@ -384,7 +384,7 @@ message_validate :: proc(m: Agent_Message, states: map[string]^Object_State, obj
 	if m.reply_to == m.id do return "message cannot reply to itself"
 	if m.historical && m.request_reply do return "historical messages cannot request replies"
 	switch m.operation {
-	case "", "skill.install", "skill.enable", "skill.disable", "skill.uninstall", "auth.login", "auth.check", "auth.revoke", "auth.save":
+	case "", "skill.install", "skill.enable", "skill.disable", "skill.uninstall", "auth.login", "auth.check", "auth.revoke":
 	case: return "unsupported message operation"
 	}
 	if err := message_endpoint_error(m.sender, states, source, true, m.operation, m.reply_to); err != "" do return err

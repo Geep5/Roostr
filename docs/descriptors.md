@@ -121,10 +121,10 @@ installation, with the message as its payload. The generic object model still
 works — lists, links, views, the `error` badge — and a client that wants
 detail decodes the message instead of guessing at fields.
 
-**Secrets are structurally absent.** `FieldSpec.secret` says "a value exists
-for this, on that machine"; the value lives in `credentials.json`, a browser
-profile, or a `gws` config dir. There is no field in the schema that could
-carry it, which is stronger than a rule saying nobody should.
+**Secrets are structurally absent from descriptors.** `FieldSpec.secret` says
+"this field is a secret"; a login's value rides on its Credential object
+(`secret` / `session`), a Google account's in its `gws` config dir. There is
+no field in the descriptor schema that could carry it.
 
 ## What the desktop client can then infer
 

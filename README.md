@@ -6,10 +6,10 @@ Notes, tasks, people, projects: each is an object in a content-addressed
 protobuf Change-DAG, each object carries a mailbox, and any of them can
 be served by an agent. You talk to a thing where it lives — one object,
 or several gathered into a group exchange — and the answer lands in that
-object's own history. Agents run on machines you pair explicitly, ask a
-paired human before they act on any capability, and never see a
-credential: passwords, keys and tokens stay on the machine that approved
-them.
+object's own history. Agents run on machines you pair explicitly and ask a paired human before
+they install or change anything on a machine. Service logins are
+Credential objects: an agent uses the ones listed on it, and sees page
+text, never the secret.
 
 The substrate is **glon**, built on Odin + Svelte: a native backend
 serving the Change-DAG, with the object editor / queries / channels /
@@ -136,7 +136,7 @@ properties you'd click in the UI. There is no setup wizard and no `kind` field.
   prompt, model, requires, skills). Edit or point at a different prompt object.
 - **`model`** (select): per-agent override of the prompt's model.
 - **`requires`** (links → `capability` objects): what the machine must provide.
-- **`install`** (links → `install` objects): credentials it authenticates with.
+- **`credentials`** (links → `credential` objects): the logins it may act with.
 
 To make a working agent: create the object, set `served_by` to a machine and
 `prompt` to a `system_prompt` object. The machine it names adopts it on sight.
@@ -171,9 +171,34 @@ curl http://127.0.0.1:7334/agent/status -H "Authorization: Bearer $TOK"
 An agent is working when it is in `serving`, its state is `idle` or `working`
 (not `error`), and a `chat_post` with its `@Name` on a configured object gets a
 reply in `__discussion__`. An `error` state carries the reason (a missing
-capability, a credential that needs approval). Capability and credential
+capability, a credential that is not connected). Skill and Google-account
 requests that need a human are under `GET /capability-requests`; a paired human
 approves them (they never run on receipt).
+
+### Credentials
+
+A **Credential** (`credential` object) is one login for one service (`x`,
+`matcherino`, `linkedin`, `discord-bot`; the catalog is `CREDENTIALS` in
+`harness/src/credentials.ts`). It carries its secret as properties: pasted keys
+in `secret` (JSON), a browser sign-in's cookies in `session` (JSON). Because
+the object syncs, an agent on any computer can use a credential it lists in its
+`credentials` property - and **everyone in the credential's space can read the
+secret**.
+
+`served_by` names the computer that looks after it. That computer's harness
+opens the headed sign-in window (`POST /credentials/connect {id}` on :7334),
+saves the service's cookies to `session` the moment the login cookie appears,
+and keeps `status` (`missing` | `connecting` | `active` | `needs_auth` |
+`broken`), `auth`, `error` and `checked_at` true - at boot, on every change,
+and every 5 minutes. `/credentials/check` and `/credentials/disconnect` do the
+rest; another computer gets a 409 naming the one in charge. Keys need no
+computer: the app writes them to `secret` and the computer marks it active.
+
+Agents use browser credentials through `credential_fetch` (read a page) and
+`credential_action` (act), which inject the cookies into a throwaway headless
+Chrome. A page that lands on a login wall is reported as signed out; nothing is
+done there. An active credential also publishes a `capability` object for its
+service on its computer, gated by the credential's `status`.
 
 ## Verified
 
@@ -272,11 +297,11 @@ another response, avoiding agent reply loops. Existing exchanges migrate as
 historical messages and never run again merely because they were imported.
 
 Capability requests address the installation object owned by the relevant
-machine. Install, enable, disable, uninstall, login, credential save/check/revoke
-all use this message path. Receiving or syncing a request never starts an
-installation or login: **This machine → Capability requests** requires a paired
-human's approval. Passwords, API keys, cookies and OAuth tokens remain local;
-only requests, safe status and results enter object history.
+machine. Skill install, enable, disable, uninstall, and Google account
+login/check/revoke use this message path. Receiving or syncing a request never
+starts an installation or login: a paired human approves it on that machine.
+Google OAuth tokens remain local. Service logins are Credential objects instead
+(see Credentials).
 
 ### Recurring objects
 

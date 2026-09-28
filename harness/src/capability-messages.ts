@@ -2,12 +2,12 @@ import { fetchObject, mutate, queryAll, setField, str, sv, iv, type AgentEndpoin
 import { claimMessage, deliverOutbox, finishMessage, replyRecipients, sendMessage } from "./mailbox";
 import { machineId } from "./roster";
 import { CATALOG, disableSkill, enableSkill, recheckSkill, republishCapabilities, skillOperationState, uninstallSkill } from "./skillmgr";
-import { CREDENTIALS, credentialStatus, finishBrowserLogin, removeCredential, setPasswordCredential, startBrowserLogin } from "./credentials";
 import { addGoogleAccount, googleAccountStatus, removeGoogleAccount } from "./google";
 import { INSTALL_TYPE, type InstallationState } from "./descriptors";
 
-export type CapabilityOperation = "skill.install" | "skill.enable" | "skill.disable" | "skill.uninstall" | "auth.login" | "auth.check" | "auth.revoke" | "auth.save";
-const OPERATIONS: Record<string, true> = { "skill.install": true, "skill.enable": true, "skill.disable": true, "skill.uninstall": true, "auth.login": true, "auth.check": true, "auth.revoke": true, "auth.save": true };
+// Installations are skills and Google accounts; service logins are Credential objects (credential-objects.ts).
+export type CapabilityOperation = "skill.install" | "skill.enable" | "skill.disable" | "skill.uninstall" | "auth.login" | "auth.check" | "auth.revoke";
+const OPERATIONS: Record<string, true> = { "skill.install": true, "skill.enable": true, "skill.disable": true, "skill.uninstall": true, "auth.login": true, "auth.check": true, "auth.revoke": true };
 const INTERRUPTED = "Operation interrupted. Its effects are unknown; inspect this machine before explicitly retrying.";
 const WAITING_LOGIN = "Finish signing in on this machine, then confirm login completion.";
 let requestOwner = `capability:${crypto.randomUUID()}`;
@@ -33,13 +33,11 @@ export function capabilityTarget(object: ObjectJSON, operation: string, localMac
 	const key = str(object.fields, "key");
 	const account = str(object.fields, "account");
 	const skill = CATALOG.find((entry) => entry.key === key);
-	const credential = CREDENTIALS.find((entry) => entry.key === key);
-	if (!skill && !credential) throw new Error("This installation is not in the local catalog.");
+	if (!skill) throw new Error("This installation is not in the local catalog.");
 	if (account && (key !== "google" || !/^[^\s/\\]+@[^\s/\\]+$/.test(account))) throw new Error("Invalid installation account.");
 	if (operation.startsWith("skill.") && (!skill || account)) throw new Error("This installation does not accept skill operations.");
-	if (operation === "auth.save" && !credential?.passwordFields) throw new Error("This installation does not accept saved credentials.");
-	if (operation === "auth.login" && !credential?.loginUrl && key !== "google") throw new Error("This installation has no login workflow.");
-	if (operation === "auth.revoke" && !credential && !(key === "google" && account)) throw new Error("Choose an account installation to revoke.");
+	if (operation === "auth.login" && key !== "google") throw new Error("This installation has no login workflow.");
+	if (operation === "auth.revoke" && !(key === "google" && account)) throw new Error("Choose an account installation to revoke.");
 	return { key, account };
 }
 
@@ -138,7 +136,6 @@ export async function receiveCapabilityRequests(object: ObjectJSON, owner: strin
 export interface CapabilityRequestView {
 	objectId: string; messageId: string; key: string; account: string; operation: string; sender: AgentEndpoint;
 	status: string; error: string; sentAt: number; canApprove: boolean;
-	fields?: Array<{ key: string; label: string; secret: boolean }>;
 }
 export async function listCapabilityRequests(): Promise<CapabilityRequestView[]> {
 	const local = await machineId();
@@ -150,27 +147,18 @@ export async function listCapabilityRequests(): Promise<CapabilityRequestView[]>
 			if (entry.processing.status === "processed") continue;
 			let canApprove = true;
 			try { capabilityTarget(object, entry.message.operation, local); } catch { canApprove = false; }
-			requests.push({ objectId: object.id, messageId: entry.message.id, key: str(object.fields, "key"), account: str(object.fields, "account"), operation: entry.message.operation, sender: entry.message.sender, status: entry.processing.status, error: entry.processing.error || str(object.fields, "error"), sentAt: entry.message.sentAt, canApprove, ...(entry.message.operation === "auth.save" ? { fields: CREDENTIALS.find((c) => c.key === str(object.fields, "key"))?.passwordFields } : {}) });
+			requests.push({ objectId: object.id, messageId: entry.message.id, key: str(object.fields, "key"), account: str(object.fields, "account"), operation: entry.message.operation, sender: entry.message.sender, status: entry.processing.status, error: entry.processing.error || str(object.fields, "error"), sentAt: entry.message.sentAt, canApprove });
 		}
 	}
 	return requests.sort((a, b) => a.sentAt - b.sentAt || a.messageId.localeCompare(b.messageId));
 }
 
-export async function approveCapabilityRequest(objectId: string, messageId: string, fields?: unknown): Promise<{ pending: boolean }> {
+export async function approveCapabilityRequest(objectId: string, messageId: string): Promise<{ pending: boolean }> {
 	const initial = await canonical(objectId, messageId);
 	return locked(`catalog:${initial.target.key}:${initial.target.account}`, () => locked(objectId, async () => {
 		let { object, entry, target } = await canonical(objectId, messageId);
 		if (target.key !== initial.target.key || target.account !== initial.target.account) throw new Error("Installation identity changed before approval.");
 		if (!["pending", "awaiting_approval"].includes(entry.processing.status)) throw new Error("This request is not awaiting approval.");
-		if (fields !== undefined && entry.message.operation !== "auth.save") throw new Error("Only auth.save accepts local credential fields.");
-		let secrets: Record<string, string> | undefined;
-		if (entry.message.operation === "auth.save") {
-			const specs = CREDENTIALS.find((c) => c.key === target.key)!.passwordFields!;
-			if (!fields || typeof fields !== "object" || Array.isArray(fields)) throw new Error("Credential fields are required in this paired approval.");
-			const values = fields as Record<string, unknown>;
-			if (Object.keys(values).some((key) => !specs.some((spec) => spec.key === key)) || specs.some((spec) => typeof values[spec.key] !== "string" || !(values[spec.key] as string).trim())) throw new Error("Complete exactly the credential fields shown for this installation.");
-			secrets = values as Record<string, string>;
-		}
 		if ([...executions.values()].some((run) => run.key === target.key && run.account === target.account)) throw new Error("Another operation is in progress for this installation.");
 		if (!(await claimMessage(objectId, messageId, requestOwner))) throw new Error("This request has already been claimed.");
 		({ object, entry, target } = await canonical(objectId, messageId));
@@ -180,40 +168,29 @@ export async function approveCapabilityRequest(objectId: string, messageId: stri
 		try {
 			await publish(object, { status: "processing", error: "Approved operation in progress on this machine." });
 			const operation = entry.message.operation;
-			if (operation === "auth.save") {
-				// Never copy fields or caught storage exceptions into a message, object,
-				// log, or HTTP error. Only the paired request and local store see them.
-				setPasswordCredential(target.key, secrets!);
-				secrets = undefined;
-				await republishCapabilities();
-				await complete(object, entry, { status: "active", auth: "api_key" });
-			} else if (operation === "auth.revoke") {
-				if (target.key === "google") removeGoogleAccount(target.account);
-				else removeCredential(target.key);
+			if (operation === "auth.revoke") {
+				removeGoogleAccount(target.account);
 				await republishCapabilities();
 				await complete(object, entry, { status: "missing", auth: "none" });
 			} else if (operation === "auth.login") {
-				if (target.key === "google") {
-					if (target.account) await addGoogleAccount(target.account);
-					const proc = Bun.spawn(target.account ? ["gws-as", target.account, "auth", "login"] : ["gws", "auth", "login"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
-					void proc.exited.then(async (code) => {
-						if (code === 0) return;
-						await locked(objectId, async () => {
-							if (executions.get(objectId) !== execution) return;
-							const current = await canonical(objectId, messageId);
-							const error = "Google login exited without completing. Check the local gws setup and start a new request.";
-							await complete(current.object, current.entry, { status: "needs_auth", error }, error);
-						});
-					}).catch(() => {});
-				} else startBrowserLogin(target.key);
+				if (target.account) await addGoogleAccount(target.account);
+				const proc = Bun.spawn(target.account ? ["gws-as", target.account, "auth", "login"] : ["gws", "auth", "login"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+				void proc.exited.then(async (code) => {
+					if (code === 0) return;
+					await locked(objectId, async () => {
+						if (executions.get(objectId) !== execution) return;
+						const current = await canonical(objectId, messageId);
+						const error = "Google login exited without completing. Check the local gws setup and start a new request.";
+						await complete(current.object, current.entry, { status: "needs_auth", error }, error);
+					});
+				}).catch(() => {});
 				await publish(await fetchObject(objectId), { status: "processing", error: WAITING_LOGIN });
 				execution.starting = false;
 				return { pending: true };
 			} else if (operation === "auth.check") {
 				const ready = await authenticationReady(target);
 				const error = ready ? "" : "Authentication is not ready on this machine.";
-				const credential = credentialStatus().find((row) => row.key === target.key);
-				const auth = !ready ? "none" : target.key === "google" ? "oauth" : credential ? credential.active.browser ? "browser_profile" : "api_key" : "none";
+				const auth = ready && target.key === "google" ? "oauth" : "none";
 				await complete(object, entry, { status: ready ? "active" : "needs_auth", auth, error }, error);
 			} else {
 				if (operation === "skill.install" || operation === "skill.enable") await enableSkill(target.key);
@@ -226,7 +203,6 @@ export async function approveCapabilityRequest(objectId: string, messageId: stri
 			}
 			return { pending: false };
 		} catch {
-			secrets = undefined;
 			if (execution.outcome) throw new Error("The operation finished locally; its durable result is awaiting publication.");
 			const error = "The approved local operation failed. Check the installation on this machine before retrying.";
 			await complete(await fetchObject(objectId), entry, { status: "broken", error }, error);
@@ -235,15 +211,12 @@ export async function approveCapabilityRequest(objectId: string, messageId: stri
 	}));
 }
 
-async function authenticationReady(target: Target, browserOnly = false): Promise<boolean> {
+async function authenticationReady(target: Target): Promise<boolean> {
 	if (target.key === "google" && target.account) {
 		const status = await googleAccountStatus(target.account);
 		return !status.error && !!status.authMethod && status.authMethod !== "none" && status.credentialsExists;
 	}
-	if (CATALOG.some((entry) => entry.key === target.key)) return await recheckSkill(target.key) === "on";
-	if (browserOnly) return finishBrowserLogin(target.key);
-	const status = credentialStatus().find((entry) => entry.key === target.key);
-	return !!status && (status.active.password || status.active.browser);
+	return await recheckSkill(target.key) === "on";
 }
 
 export async function finishCapabilityLogin(objectId: string, messageId: string): Promise<{ active: boolean }> {
@@ -251,12 +224,12 @@ export async function finishCapabilityLogin(objectId: string, messageId: string)
 		const { object, entry, target } = await canonical(objectId, messageId);
 		const execution = executions.get(objectId);
 		if (entry.message.operation !== "auth.login" || entry.processing.status !== "processing" || entry.processing.owner !== requestOwner || execution?.messageId !== messageId || execution.key !== target.key || execution.account !== target.account) throw new Error("This login is not pending in this harness process.");
-		if (!(await authenticationReady(target, true))) {
+		if (!(await authenticationReady(target))) {
 			await publish(object, { status: "processing", error: WAITING_LOGIN });
 			return { active: false };
 		}
 		await republishCapabilities();
-		await complete(object, entry, { status: "active", auth: target.key === "google" ? "oauth" : "browser_profile" });
+		await complete(object, entry, { status: "active", auth: "oauth" });
 		return { active: true };
 	});
 }

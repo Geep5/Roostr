@@ -17,7 +17,8 @@ import { createObject, fetchObject, mutate, str, queryAll } from "./api";
 import { machines, publishMachine } from "./machine";
 import { machineId } from "./roster";
 import { humanRef, postTo } from "./conv";
-import { CREDENTIALS, activeCredentialKeys, credentialStatus } from "./credentials";
+import { serviceEntry } from "./credentials";
+import { localCredentials } from "./credential-objects";
 import { publishHoldup, publishInstallations, publishGoogleInstallations } from "./descriptors";
 import { activeCapabilityKeys, syncCapabilities, type CapabilitySeed } from "./capabilities";
 import { objectText } from "./skills";
@@ -95,7 +96,7 @@ export const CATALOG: CatalogEntry[] = [
 			"Use it when a page needs JavaScript to render (SPAs, dashboards) and plain curl returns an empty shell.\n" +
 			"`browserless <url>` prints the rendered DOM; `browserless --screenshot out.png <url>` and `browserless --pdf out.pdf <url>` capture the page.\n" +
 			"It runs in Chrome's own headless profile, never signed in as the human — expect logged-out pages.\n" +
-			"For a task that needs an account, do NOT use browserless for writes. Read logged-in pages with credential_fetch; perform an X retweet with the local `x-retweet <status-url>` command, which drives the saved profile headlessly and returns ok:true only after the page confirms the action.\n" +
+			"For a task that needs an account, do NOT use browserless. Read logged-in pages with credential_fetch and act with credential_action, both through a Credential the agent lists in its Credentials property.\n" +
 			"Prefer plain curl for static pages: this launches a browser per call.",
 	},
 	{
@@ -202,16 +203,19 @@ async function writeState(state: StateFile): Promise<void> {
 
 /**
  * What this machine can do for an object that `requires` it, as capability
- * seeds: catalog skills installed AND enabled here, plus active service
- * credentials (credentials.ts - an X login is a capability exactly like
- * browserless). Each seed becomes one capability object naming this
- * machine as `served_by`.
+ * seeds: catalog skills installed AND enabled here, plus the active
+ * Credentials this machine keeps (an X login is a capability exactly like
+ * browserless; its Credential's status gates it). Each seed becomes one
+ * capability object naming this machine as `served_by`.
  */
 function capabilitySeeds(state: StateFile): CapabilitySeed[] {
 	const skills = CATALOG.filter((c) => state.skills[c.key]?.enabled && state.skills[c.key]?.installed).map((c) => ({ key: c.key, name: c.name, description: c.description }));
-	const active = new Set(activeCredentialKeys());
-	const logins = CREDENTIALS.filter((c) => active.has(c.key)).map((c) => ({ key: c.key, name: c.label, description: c.note }));
-	return [...skills, ...logins];
+	const logins = new Map<string, CapabilitySeed>();
+	for (const c of localCredentials()) {
+		const entry = serviceEntry(c.service);
+		if (c.status === "active" && entry && !logins.has(c.service)) logins.set(c.service, { key: c.service, name: entry.label, description: entry.note, installId: c.id });
+	}
+	return [...skills, ...logins.values()];
 }
 
 /**
@@ -222,15 +226,15 @@ function capabilitySeeds(state: StateFile): CapabilitySeed[] {
 async function saveSkills(state: StateFile): Promise<void> {
 	await writeState(state);
 	await publishMachine();
-	await publishInstallations(state.skills, credentialStatus());
+	await publishInstallations(state.skills);
 	await syncCapabilities(capabilitySeeds(state));
 }
 
-/** Credential changes call this: the published set follows the store. */
+/** Credential changes call this: the published set follows the credentials kept here. */
 export async function republishCapabilities(): Promise<void> {
 	const state = await readState();
 	await publishMachine();
-	await publishInstallations(state.skills, credentialStatus());
+	await publishInstallations(state.skills);
 	await syncCapabilities(capabilitySeeds(state));
 }
 
@@ -241,7 +245,7 @@ export async function republishCapabilities(): Promise<void> {
  */
 export async function publishInstallationState(): Promise<void> {
 	const state = await readState();
-	await publishInstallations(state.skills, credentialStatus());
+	await publishInstallations(state.skills);
 	await publishGoogleInstallations();
 	// Holdups are install errors now; the file's old list is not replayed -
 	// a stale row would re-break a healed install on every boot.

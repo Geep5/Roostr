@@ -1054,7 +1054,7 @@ relation_value_cascade :: proc(states: map[string]^Object_State, object_id: stri
 // Types that never have an agent of their own; an `agent` field on them
 // means something else (a chat's owner, an installation's requester).
 // Mirrors the harness's UNMINTABLE set (harness/src/index.ts).
-AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "type", "skill", "descriptor", "install", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
+AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "type", "skill", "descriptor", "install", "credential", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
 
 /** Agents on an object's guest list. `agent` was a single string before it became a link list; both shapes read. */
 object_agents :: proc(fields: [dynamic]Value_Entry, allocator := context.temp_allocator) -> [dynamic]string {
@@ -1146,10 +1146,12 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// Agent-related properties are hidden from query/collection views by
 	// default (FeaturedProps shows them on the object page regardless).
 	{"agent", "object", "Agent", "🤖", false, false, 0, {}},
-	// Which installations (a machine's credentials/logins) this object uses.
-	// Rendered as credential badges that read status from the resolved
-	// machine's install rows; secrets never enter the object.
-	{"install", "object", "Credentials", "🔌", false, false, 0, {}},
+	// A capability's link to the software/login row that makes it usable on
+	// its machine: harness plumbing, not something people pick.
+	{"install", "object", "Installation", "🔌", true, false, 0, {}},
+	// Which logins an agent's work uses: Credential objects, each kept by the
+	// computer its own Served by names (secrets stay on that computer).
+	{"credentials", "object", "Credentials", "🔑", false, false, 0, {}},
 	// An agent's configuration is a system_prompt object: standing prompt,
 	// model, requires, skills. `prompt` links one; the harness reads it
 	// through the link, not a hardcoded kind.
@@ -1246,14 +1248,14 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 		if e, ok := rels[r.key]; ok {
 			ops := make([dynamic]Operation, context.temp_allocator)
 			if e.emoji != r.emoji do append(&ops, Operation{kind = .Field_Set, key = "iconEmoji", value = string_value(r.emoji)})
+			if e.name != "" && e.name != r.name do append(&ops, Operation{kind = .Field_Set, key = "name", value = string_value(r.name)})
 			if e.format != "" && e.format != r.format do append(&ops, Operation{kind = .Field_Set, key = "format", value = string_value(r.format)})
 			if e.hidden != r.hidden do append(&ops, Operation{kind = .Field_Set, key = "hidden", value = bool_value(r.hidden)})
 			if e.max_count != r.max_count do append(&ops, Operation{kind = .Field_Set, key = "maxCount", value = int_value(r.max_count)})
 			if len(r.options) > 0 do append(&ops, Operation{kind = .Field_Set, key = "options", value = options_value(r.options)})
-			// Agent, served_by and install pickers are restricted to one bundled
-			// type; older rows predate the restriction and get it here.
-			if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" || r.key == "prompt" {
-				target := r.key == "served_by" ? "machine" : r.key == "prompt" ? "system_prompt" : r.key
+			// Agent, served_by, credentials... pickers are restricted to one
+			// bundled type; older rows predate the restriction and get it here.
+			if target, restricted := bundled_picker_type(r.key); restricted {
 				types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
 				mutation_add(plan, input, e.id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
 			}
@@ -1275,9 +1277,8 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "options", value = options_value(r.options)},
 		}
 		mutation_add(plan, input, id, ops)
-		if r.key == "agent" || r.key == "served_by" || r.key == "install" || r.key == "requires" || r.key == "prompt" {
+		if target, restricted := bundled_picker_type(r.key); restricted {
 			// Picker restriction: the space's own bundled type (deterministic id).
-			target := r.key == "served_by" ? "machine" : r.key == "prompt" ? "system_prompt" : r.key
 			types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
 			mutation_add(plan, input, id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
 		}
@@ -1371,6 +1372,22 @@ bundled_relation_shipped :: proc(key: string) -> bool {
 	for r in BUNDLED_RELATIONS do if r.key == key do return true
 	return false
 }
+
+// The bundled type a relation's picker is restricted to, when it is.
+BUNDLED_PICKER_TYPES := [?][2]string {
+	{"agent", "agent"},
+	{"install", "install"},
+	{"requires", "requires"},
+	{"served_by", "machine"},
+	{"prompt", "system_prompt"},
+	{"credentials", "credential"},
+}
+
+bundled_picker_type :: proc(key: string) -> (string, bool) {
+	for pair in BUNDLED_PICKER_TYPES do if pair[0] == key do return pair[1], true
+	return "", false
+}
+
 Bundled_Type :: struct {
 	key:    string,
 	name:   string,
@@ -1398,6 +1415,9 @@ BUNDLED_TYPES :: []Bundled_Type{
 	// on one machine (fields, so `error` reaches views).
 	{"descriptor", "Descriptor", "🗂️", "page"},
 	{"install", "Installation", "🔌", "page"},
+	// A login for a service (X, LinkedIn, a bot token...) kept by the computer
+	// its Served by names; the object holds everything but the secret.
+	{"credential", "Credential", "🔑", "page"},
 	// A capability: one skill offered by one machine. Served by that machine
 	// with an active install before it is usable or offered to an agent.
 	{"capability", "Capability", "🧩", "page"},

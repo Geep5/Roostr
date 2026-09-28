@@ -21,9 +21,7 @@
 
 import { addBlock, fetchObject, str, type BlockJSON, type ObjectJSON } from "./api";
 import { addConvBlock, convBlocks, type ConvRef } from "./conv";
-import { passwordCredential } from "./credentials";
-import { requiredKeys } from "./capabilities";
-import { promptFor } from "./prompts";
+import { agentCredential } from "./credential-objects";
 
 const DISCORD_API = "https://discord.com/api/v10";
 const POLL_MS = 3_000;
@@ -61,9 +59,9 @@ export function discordConfigFor(agent: ObjectJSON): Omit<DiscordConfig, "token"
 	};
 }
 
-/** The bot token from this machine's credential store (`discord-bot`). */
-export async function discordToken(): Promise<string | null> {
-	return passwordCredential("discord-bot")?.token || null;
+/** The bot token of the Discord bot Credential an agent lists in its Credentials property. */
+export async function discordToken(agent: ObjectJSON): Promise<string | null> {
+	return (await agentCredential(agent, "discord-bot").catch(() => null))?.keys?.token || null;
 }
 
 export const discordThread = (channelId: string): string => `${THREAD_PREFIX}${channelId}`;
@@ -528,19 +526,16 @@ export function startDiscordManager(host: {
 	let syncing: Promise<void> | undefined;
 
 	async function pass(): Promise<void> {
-		const token = await discordToken();
 		const want = new Map<string, { objectId: string; config: DiscordConfig; key: string }>();
-		if (token) {
-			for (const { agentId, objectId } of host.served()) {
-				const agent = await fetchObject(agentId).catch(() => null);
-				if (!agent) continue;
-				const requires = [...(await promptFor(agent)).requires, ...(await requiredKeys(agent.fields))];
-				if (!requires.includes("discord-bot")) continue;
-				const cfg = discordConfigFor(agent);
-				if (!cfg) continue;
-				const config = { token, ...cfg };
-				want.set(agentId, { objectId, config, key: JSON.stringify({ objectId, config }) });
-			}
+		for (const { agentId, objectId } of host.served()) {
+			const agent = await fetchObject(agentId).catch(() => null);
+			if (!agent) continue;
+			const cfg = discordConfigFor(agent);
+			if (!cfg) continue;
+			const token = await discordToken(agent);
+			if (!token) continue;
+			const config = { token, ...cfg };
+			want.set(agentId, { objectId, config, key: JSON.stringify({ objectId, config }) });
 		}
 		for (const [agentId, poller] of running) {
 			if (want.get(agentId)?.key === poller.key) continue;
