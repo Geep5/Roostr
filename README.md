@@ -285,11 +285,17 @@ Recurring objects: the engine owns the rule (`repeat` field: `next`,
 the earliest unfired occurrence across the spaces this machine serves,
 re-arming on every `repeat` or `served_by` commit. When it fires it
 commits `occurrence_fire` (refused if another writer got there first), then
-either frames the object's body into the assigned agent's chat
-(`assignee`/`agent` naming an agent served here) and runs one turn -
-recorded on the object with `run_record` - or falls back to the machine
-serving the object: that machine's default agent for the space. A person's
-object still posts a one-line reminder on its discussion. Agents finish
-with the `occurrence_complete` tool; a recurring object is never `done`. Missed
+frames the object's body into the chat of the agent on its guest list
+(`agent`, else `assignee`) and runs one turn - recorded on the object with
+`run_record`. An object with no agent on its guest list gets an error, not a
+turn; a person's object still posts a one-line reminder on its discussion.
+Agents set and clear the rule with `object_set_repeat` / `object_clear_repeat`
+(the Repeat cell's own actions) and finish an occurrence with
+`occurrence_complete`; a recurring object is never `done`. Missed
 occurrences (sleep, downtime) fire once on the next start. To keep it
 running, see `harness/launchd/`.
+
+Agent writes land where a human sees them: `object_set_field` accepts only a
+property that exists in the space, in that property's type, and replies with
+the value as the Properties pane shows it; anything else is refused with
+"nothing written", never reported as done.

@@ -48,6 +48,8 @@ export interface RelDef {
 	emoji: string;
 	format: string;
 	definition: string;
+	/** Computed by the store (created/modified dates): nobody writes it. */
+	readOnly: boolean;
 }
 
 export async function relationDefs(spaceId: string): Promise<Map<string, RelDef>> {
@@ -63,6 +65,7 @@ export async function relationDefs(spaceId: string): Promise<Map<string, RelDef>
 			emoji: str(r.fields, "iconEmoji"),
 			format: str(r.fields, "format") || "shorttext",
 			definition: str(r.fields, "description"),
+			readOnly: r.fields["readOnly"]?.boolValue === true,
 		});
 	}
 	return out;

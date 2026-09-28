@@ -89,9 +89,9 @@ Declared on this object:
 - replies with each entry's live status, so an agent can confirm the
   object will run before the scheduler fires it.
 
-`object_set_field` stays for ordinary properties; it now writes
-tag/status/object relations as list values so they are no longer
-silently malformed.
+`object_set_field` stays for ordinary properties: it writes tag/status/object
+relations as list values, and refuses a key with no property in the space or
+a value its type cannot hold, so nothing is silently malformed or invisible.
 
 ## Agent contract
 

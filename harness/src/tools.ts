@@ -192,38 +192,73 @@ async function assertInSpace(obj: ObjectJSON, ctx: ToolContext): Promise<ObjectJ
 }
 
 /**
- * A field value in the relation's own type. Agents speak strings; the
- * store does not - a checkbox written as "true" text is unchecked, a date
- * as text never sorts. Unknown format (or unparseable input) stays text.
+ * A field value in the relation's own type, or why the input can't be one.
+ * Agents speak strings; the store does not - a checkbox written as "true"
+ * text is unchecked, a date as text never sorts. A value that would not
+ * read back as what was meant is refused, never stored as text.
  */
-function typedValue(format: string | undefined, raw: string): ValueJSON {
-	const n = raw.trim() === "" ? NaN : Number(raw);
+function typedValue(format: string, raw: string): ValueJSON | { error: string } {
+	const t = raw.trim();
+	const n = t === "" ? NaN : Number(t);
 	switch (format) {
 		case "checkbox":
-			return bv(raw.trim().toLowerCase() === "true");
+			if (t.toLowerCase() === "true") return bv(true);
+			if (t.toLowerCase() === "false") return bv(false);
+			return { error: `a checkbox takes true or false, not "${raw}"` };
 		case "number":
-			if (!Number.isFinite(n)) return sv(raw);
+			if (!Number.isFinite(n)) return { error: `a number property takes a number, not "${raw}"` };
 			return Number.isInteger(n) ? iv(n) : fv(n);
 		case "date": {
 			if (Number.isFinite(n)) return iv(n);
-			const parsed = Date.parse(raw);
-			return Number.isNaN(parsed) ? sv(raw) : iv(parsed);
+			const parsed = Date.parse(t);
+			return Number.isNaN(parsed) ? { error: `a date property takes an ISO date or epoch milliseconds, not "${raw}"` } : iv(parsed);
 		}
 		case "status":
-			return lv(raw.trim() ? [raw.trim()] : []);
+			return lv(t ? [t] : []);
 		// Tag and object relations are lists in the store (and in the UI):
 		// a bare string here would render as an empty cell.
 		case "tag":
 		case "object":
-			return lv(
-				raw
-					.split(",")
-					.map((s) => s.trim())
-					.filter(Boolean),
-			);
+			return lv(t.split(",").map((s) => s.trim()).filter(Boolean));
 		default:
 			return sv(raw);
 	}
+}
+
+/** A stored value as the Properties pane shows it - what the human now sees. */
+function renderValue(format: string, v: ValueJSON | undefined): string {
+	if (!v) return "(empty)";
+	if (v.boolValue !== undefined) return v.boolValue ? "checked" : "unchecked";
+	const ms = v.intValue ?? v.floatValue;
+	if (format === "date" && ms !== undefined) return new Date(ms).toLocaleString();
+	if (ms !== undefined) return String(ms);
+	const items = v.valuesValue?.items ?? [];
+	if (v.valuesValue) return items.length ? items.map((i) => i.stringValue ?? i.linkValue?.targetId ?? "").join(", ") : "(empty)";
+	return v.stringValue || "(empty)";
+}
+
+/** Field keys agents reach for when they mean a schedule: only object_set_repeat makes an object recur. */
+const SCHEDULE_KEYS = new Set(["repeat", "repeats", "recurrence", "recurring", "recurs", "schedule", "frequency", "cadence"]);
+
+const WEEKDAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+/**
+ * An object's repeat rule in the words the Repeat cell uses, with its next
+ * occurrence: "every 2 weeks on Wed at 9:00 AM · next Wed, Oct 8, 9:00 AM".
+ */
+function describeRepeat(v: ValueJSON | undefined): string {
+	const e = v?.mapValue?.entries;
+	if (!e) return "does not repeat";
+	const freq = e["freq"]?.stringValue ?? "";
+	const every = e["interval"]?.intValue ?? 1;
+	const unit = every === 1 ? freq : `${every} ${freq}s`;
+	const days = (e["weekdays"]?.valuesValue?.items ?? []).map((i) => WEEKDAY_NAMES[i.intValue ?? 0]).map((d) => d[0].toUpperCase() + d.slice(1));
+	const minutes = e["time"]?.intValue ?? 0;
+	const at = new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+	const next = e["next"]?.intValue;
+	const on = freq === "week" && days.length ? ` on ${days.join(", ")}` : "";
+	const when = next ? ` · next ${new Date(next).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : "";
+	return `every ${unit}${on} at ${at}${when}`;
 }
 
 /** The occurrence planner's clock params: now, and this machine's UTC offset. */
@@ -691,26 +726,115 @@ const TOOLS: RegisteredTool[] = [
 		def: {
 			name: "object_set_field",
 			description:
-				"Set a field on an object (e.g. name, status, done, dueDate). The value is written in the relation's own type: checkbox fields take true/false, number fields a number, date fields epoch milliseconds or an ISO date; anything else is text. Setting done=true on a recurring object completes its current occurrence. key=agent ADDS the given agent id(s) to the object's guest list (who may be @-asked here); it never removes anyone.",
+				"Set one of the object's properties - only a property that exists in this space (the reply lists them if the key is unknown); a value nothing can display is refused, never stored. The value is written in the property's own type: checkbox true/false, number a number, date epoch milliseconds or an ISO date, tag/object comma-separated; anything else is text. The reply is the value as the human now sees it. Setting done=true on a recurring object completes its current occurrence. key=agent ADDS the given agent id(s) to the guest list (who may be @-asked here); it never removes anyone. To make an object repeat, use object_set_repeat.",
 			input_schema: { type: "object", properties: { id: { type: "string" }, key: { type: "string" }, value: { type: "string" } }, required: ["id", "key", "value"] },
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
 			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx);
 			const key = S(input.key);
-			let value = typedValue((await relationDefs(await agentSpace(ctx))).get(key)?.format, S(input.value));
+			if (SCHEDULE_KEYS.has(key.toLowerCase())) {
+				return `error: nothing written. "${key}" does not make an object repeat - call object_set_repeat (every N days/weeks/months/years, weekdays, time).`;
+			}
+			const defs = await relationDefs(await agentSpace(ctx));
+			const def = defs.get(key);
+			if (!def) {
+				const known = [...defs.values()].filter((d) => !d.readOnly).map((d) => `${d.key} (${d.name}, ${d.format})`).join(", ");
+				return `error: nothing written. This space has no "${key}" property, so a value there would be invisible to everyone. Properties here: ${known}. If none fits, tell the human which property is missing - never report it as done.`;
+			}
+			if (def.readOnly) return `error: nothing written. ${def.name} is computed by the store and cannot be set.`;
+			let value: ValueJSON;
 			if (key === "agent") {
 				const adding = S(input.value).split(",").map((s) => s.trim()).filter(Boolean);
 				for (const aid of adding) {
 					const agent = await fetchObject(aid).catch(() => null);
-					if (agent?.typeKey !== "agent") throw new Error(`"${aid}" is not an agent object`);
+					if (agent?.typeKey !== "agent") return `error: nothing written. "${aid}" is not an agent object.`;
 				}
 				value = lv([...new Set([...guestAgents(obj.fields), ...adding])]);
+			} else {
+				const typed = typedValue(def.format, S(input.value));
+				if ("error" in typed) return `error: nothing written. ${def.name}: ${typed.error}.`;
+				value = typed;
 			}
 			// The clock rides along for the one case the engine needs it: done
 			// on a recurring object advances the occurrence in local time.
 			await mutate("set_field", { object_id: obj.id, key, value, ...localClock() });
-			return "ok";
+			const after = await fetchObject(obj.id);
+			if (key === "done" && after.fields["repeat"]) return `This object repeats, so the current occurrence was completed instead: ${describeRepeat(after.fields["repeat"])}.`;
+			return `${def.name} is now: ${renderValue(def.format, after.fields[key])}`;
+		},
+	},
+	{
+		def: {
+			name: "object_set_repeat",
+			description:
+				"Make an object repeat, or change how it repeats - exactly what the Repeat cell on the object sets. Every `every` `unit`s (day, week, month, year); weekly rules may name weekdays; time is local HH:MM (default 09:00); start is the first day (ISO date, default today). Each occurrence runs through an agent on the object's guest list. The reply is the rule and next occurrence as the human sees them.",
+			input_schema: {
+				type: "object",
+				properties: {
+					id: { type: "string", description: "object id; omit for the object of this conversation" },
+					every: { type: "number", description: "interval, default 1" },
+					unit: { type: "string", enum: ["day", "week", "month", "year"] },
+					weekdays: { type: "array", items: { type: "string" }, description: "weekly only: mon..sun; default the start day's weekday" },
+					time: { type: "string", description: "local HH:MM, 24h; default 09:00" },
+					monthly: { type: "string", enum: ["date", "weekday"], description: "monthly only: same date (default) or same nth weekday" },
+					start: { type: "string", description: "first day, ISO date; default today" },
+				},
+				required: ["unit"],
+			},
+		},
+		handler: async (input, ctx) => {
+			const id = S(input.id) || ctx.boundObject || "";
+			if (!id) return "error: nothing written. No object id and this turn is not running on an object.";
+			const obj = await assertInSpace(await fetchObject(id), ctx);
+			ctx.touched.add(obj.id);
+			const unit = S(input.unit);
+			if (!["day", "week", "month", "year"].includes(unit)) return `error: nothing written. unit must be day, week, month or year, not "${unit}".`;
+			const every = input.every === undefined ? 1 : Number(input.every);
+			if (!Number.isInteger(every) || every < 1 || every > 99) return `error: nothing written. every must be a whole number from 1 to 99.`;
+			const weekdays: number[] = [];
+			for (const w of A(input.weekdays)) {
+				const i = WEEKDAY_NAMES.indexOf(w.trim().toLowerCase().slice(0, 3));
+				if (i < 0) return `error: nothing written. "${w}" is not a weekday (mon..sun).`;
+				weekdays.push(i);
+			}
+			const hm = /^(\d{1,2}):(\d{2})$/.exec(S(input.time) || "09:00");
+			if (!hm || Number(hm[1]) > 23 || Number(hm[2]) > 59) return `error: nothing written. time must be HH:MM (24h), not "${S(input.time)}".`;
+			const rule: Record<string, unknown> = {
+				freq: unit,
+				interval: every,
+				weekdays: unit === "week" ? weekdays : [],
+				monthly: S(input.monthly) === "weekday" ? "weekday" : "date",
+				time: Number(hm[1]) * 60 + Number(hm[2]),
+				tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+			};
+			if (S(input.start)) {
+				const d = new Date(`${S(input.start).slice(0, 10)}T12:00:00`);
+				if (Number.isNaN(d.getTime())) return `error: nothing written. start must be an ISO date, not "${S(input.start)}".`;
+				// Noon, like the Repeat editor: the anchor lands on that local day whatever the UTC offset.
+				rule.anchor_ms = d.getTime();
+			}
+			await mutate("repeat_set", { object_id: obj.id, rule, ...localClock() });
+			const after = await fetchObject(obj.id);
+			const guests = guestAgents(after.fields);
+			const who = guests.length ? "" : " No agent is on its guest list, so nothing runs each occurrence until one is added (object_set_field key=agent).";
+			return `Repeats ${describeRepeat(after.fields["repeat"])}.${who}`;
+		},
+	},
+	{
+		def: {
+			name: "object_clear_repeat",
+			description: "Stop an object repeating - the Repeat cell's \"Turn off repeating\". Its history stays in the DAG.",
+			input_schema: { type: "object", properties: { id: { type: "string", description: "object id; omit for the object of this conversation" } } },
+		},
+		handler: async (input, ctx) => {
+			const id = S(input.id) || ctx.boundObject || "";
+			if (!id) return "error: nothing written. No object id and this turn is not running on an object.";
+			const obj = await assertInSpace(await fetchObject(id), ctx);
+			ctx.touched.add(obj.id);
+			if (!obj.fields["repeat"]) return "error: nothing written. This object does not repeat.";
+			await mutate("repeat_clear", { object_id: obj.id });
+			return "This object no longer repeats.";
 		},
 	},
 	{
