@@ -1135,8 +1135,8 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// objects (type `capability`). A capability is only usable once it is
 	// served by a machine with an active install - before that it does not
 	// count for the resolver and is not offered to an agent.
-	{"served_by", "object", "Served by", "🖥️", true, false, 1, {}},
-	{"requires", "object", "Requires", "🧩", true, false, 0, {}},
+	{"served_by", "object", "Served by", "🖥️", false, false, 1, {}},
+	{"requires", "object", "Requires", "🧩", false, false, 0, {}},
 	// An agent's checkout on the machine that serves it: the harness works
 	// in this folder.
 	{"repo_path", "shorttext", "Project folder", "📁", false, false, 1, {}},
@@ -1145,15 +1145,15 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// the space's agent type. Nothing answers an object without being on it.
 	// Agent-related properties are hidden from query/collection views by
 	// default (FeaturedProps shows them on the object page regardless).
-	{"agent", "object", "Agent", "🤖", true, false, 0, {}},
+	{"agent", "object", "Agent", "🤖", false, false, 0, {}},
 	// Which installations (a machine's credentials/logins) this object uses.
 	// Rendered as credential badges that read status from the resolved
 	// machine's install rows; secrets never enter the object.
-	{"install", "object", "Credentials", "🔌", true, false, 0, {}},
+	{"install", "object", "Credentials", "🔌", false, false, 0, {}},
 	// An agent's configuration is a system_prompt object: standing prompt,
 	// model, requires, skills. `prompt` links one; the harness reads it
 	// through the link, not a hardcoded kind.
-	{"prompt", "object", "System prompt", "📜", true, false, 1, {}},
+	{"prompt", "object", "System prompt", "📜", false, false, 1, {}},
 	// Per-agent overrides, set like any property (blank = follow the prompt).
 	// One model per agent: a single-select status; the harness reads the
 	// chosen string, so a status option stays compatible with a plain value.
