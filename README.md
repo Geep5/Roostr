@@ -315,3 +315,12 @@ existing property, under any spelling of its name or key, is reused instead).
 computed dates), and `object_set_type` retypes an object to one of the space's
 types - never into or out of infrastructure (agents, computers, spaces,
 properties, types, templates, queries, collections).
+
+Two guards keep this true. Every agent's prompt carries a fixed
+`<workspace-contract>` (harness `runner.ts`, not the editable prompt object):
+claim only what a tool's reply shows, act on or report an `error:` reply, and
+never imitate a missing tool with a made-up field or text. And
+`harness/src/agent-parity.test.ts` reads every engine mutation action from
+`core/mutate.odin` and fails unless each one has an agent tool or a stated
+reason agents don't get one - today's stated gaps are tables and line
+alignment/background.

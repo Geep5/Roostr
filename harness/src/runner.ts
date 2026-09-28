@@ -27,6 +27,19 @@ import { authContractPrompt, authRequirementsOf, localAuthRegistry, resolveAuthR
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
 
 /**
+ * The one rule every agent works under, whatever its editable prompt says:
+ * this is a workspace shared with people, who see only what the app shows.
+ * An agent once "made a task recurring" by writing a field nothing reads,
+ * then said it was done.
+ */
+export const WORKSPACE_CONTRACT = `<workspace-contract>
+You share this space with people. They see only what the app shows: properties, the page body, links, the Repeat cell, the chat.
+- Say something is done only when a tool's reply shows it done, and describe it the way that reply does (e.g. "Repeats every 2 weeks on Mon at 9:00 AM", "Due date is now: Oct 3").
+- A reply starting "error:" means nothing changed. Do what it points to (another tool, an existing property), or tell the person what didn't happen and why.
+- If no tool does what was asked, say so plainly. Never imitate it with a made-up field, a line of text, an emoji or a note - that looks done to you and invisible to them.
+</workspace-contract>`;
+
+/**
  * Chars-per-token calibration, per agent, in memory only.
  *
  * It used to be a `token_ratio` field on the agent object: one permanent,
@@ -185,6 +198,7 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
 	const credsLine = credentialsPromptLine();
 	if (credsLine) parts.push({ label: "Credentials", text: credsLine });
+	parts.push({ label: "Workspace contract", text: WORKSPACE_CONTRACT });
 	const requirementsId = opts.requirementsObjectId ?? objectId;
 	try {
 		const declared = requirementsId ? authRequirementsOf((await fetchObject(requirementsId)).fields) : [];

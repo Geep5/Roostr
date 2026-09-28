@@ -1269,14 +1269,30 @@ const TOOLS: RegisteredTool[] = [
 	{
 		def: {
 			name: "object_delete",
-			description: "Soft-delete an object (recoverable tombstone in the DAG).",
+			description: "Move an object to the space's bin (recoverable: object_restore brings it back, with its text, properties and history).",
 			input_schema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
-			await assertInSpace(await fetchObject(S(input.id)), ctx);
-			await mutate("delete", { object_id: S(input.id) });
-			return "ok";
+			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx);
+			if (obj.deleted) return `Nothing deleted: "${str(obj.fields, "name") || "Untitled"}" is already in the bin.`;
+			await mutate("delete", { object_id: obj.id });
+			return `Moved "${str(obj.fields, "name") || "Untitled"}" (${obj.typeKey}) to the bin; object_restore brings it back.`;
+		},
+	},
+	{
+		def: {
+			name: "object_restore",
+			description: "Bring an object back from the space's bin (the bin's Restore): its text, properties and history return with it.",
+			input_schema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+		},
+		handler: async (input, ctx) => {
+			ctx.touched.add(S(input.id));
+			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx);
+			if (!obj.deleted) return `error: nothing restored. "${str(obj.fields, "name") || "Untitled"}" is not in the bin.`;
+			await mutate("restore", { object_id: obj.id });
+			const after = await fetchObject(obj.id);
+			return after.deleted ? "error: the restore did not take - it is still in the bin." : `Restored "${str(after.fields, "name") || "Untitled"}" (${after.typeKey}) from the bin.`;
 		},
 	},
 	{
