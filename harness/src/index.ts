@@ -679,12 +679,15 @@ async function serve(): Promise<void> {
 			const agent = await fetchObject(objectId).catch(() => null);
 			if (agent) {
 				notePin(agent);
-				// Its Served by was cleared: no computer serves it, this one included.
-				if (!str(agent.fields, "spawn_parent") && !str(agent.fields, "served_by")) {
+				// Its Served by was cleared or moved to another computer: this
+				// one stops answering now, not at the next restart.
+				const pin = str(agent.fields, "served_by");
+				if (!str(agent.fields, "spawn_parent") && pin !== me) {
 					agents.delete(objectId);
 					served.delete(objectId);
+					heldUp.delete(objectId);
 					await setEnabled(objectId, false);
-					console.log(`[harness] released ${str(agent.fields, "name") || objectId.slice(0, 8)} (${objectId.slice(0, 8)}) - its Served by is empty`);
+					console.log(`[harness] released ${str(agent.fields, "name") || objectId.slice(0, 8)} (${objectId.slice(0, 8)}) - ${pin ? `now served by ${pin.slice(0, 8)}` : "its Served by is empty"}`);
 					return;
 				}
 			}
