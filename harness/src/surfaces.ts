@@ -96,9 +96,6 @@ export function mentions(text: string, name: string): boolean {
 	return !!name && new RegExp(`@${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w])`, "i").test(text);
 }
 
-/** Agent posts since the last human one after which an agent's @-mention stops waking anyone (as A2A_MAX_HOPS bounds exchanges). */
-export const CHAT_AGENT_HOPS = 3;
-
 /**
  * Unhandled user messages in a conversation, oldest first. Origin-tagged
  * copies (already ingested from another surface) never count. Seeding rules
@@ -106,11 +103,9 @@ export const CHAT_AGENT_HOPS = 3;
  *
  * `addressedAs`: on an object this agent is a guest of, only messages that
  * @-mention it are its to answer - a person's, or another agent's that
- * tagged it ("@Marco Dev Bot, which tournaments?"). An agent's tag counts
- * only within CHAT_AGENT_HOPS agent posts of the last human one, so two
- * agents tagging each other cannot loop. Without it (the agent's own page)
- * the thread is human-to-agent: every human message is its to answer and
- * no agent post ever wakes it.
+ * tagged it ("@Marco Dev Bot, which tournaments?"). Without it (the agent's
+ * own page) the thread is human-to-agent: every human message is its to
+ * answer and no agent post ever wakes it.
  */
 export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: string, addressedAs?: string): Promise<PendingMessage[]> {
 	if (!isHuman(ref)) return [];
@@ -143,14 +138,6 @@ export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: st
 	}
 
 	const markAt = startAfter === undefined ? -1 : msgs.findIndex((x) => x.id === startAfter);
-	// Agent posts since the last human post, before each message - over the
-	// whole conversation, so a long agent back-and-forth cannot reset it.
-	const agentRun = new Map<string, number>();
-	let run = 0;
-	for (const { id, block } of msgs) {
-		agentRun.set(id, run);
-		run = isAgentAuthor(block.content.custom?.meta?.["author"] ?? "") ? run + 1 : 0;
-	}
 	const pending: PendingMessage[] = [];
 	// Newest last, so the caller's `pending[last]` mark only ever advances.
 	for (const { id, block } of msgs.slice(markAt + 1)) {
@@ -162,7 +149,6 @@ export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: st
 		if (addressedAs !== undefined) {
 			// A guest answers what is addressed to it, whoever wrote it.
 			if (!mentions(text, addressedAs)) continue;
-			if (isAgentAuthor(author) && (agentRun.get(id) ?? 0) >= CHAT_AGENT_HOPS) continue;
 		} else if (isHuman(ref) && isAgentAuthor(author)) continue;
 		pending.push({ blockId: id, author, text });
 	}

@@ -1491,10 +1491,7 @@ const EVAL_TOOLS: RegisteredTool[] = [
 //
 // Guest list rule: a recipient object must name the asked agent in its
 // `agent` property. Adding someone to that list IS the way to bring them in
-// (object_set_field agent += id). Agent-to-agent asks are allowed but
-// bounded: A2A_MAX_HOPS agent-authored messages per exchange, so two minds
-// cannot volley forever.
-const A2A_MAX_HOPS = 3;
+// (object_set_field agent += id). Agent-to-agent asks are allowed.
 const A2A_TOOL: RegisteredTool = {
 	def: {
 		name: "agent_ask",
@@ -1556,12 +1553,6 @@ const A2A_TOOL: RegisteredTool = {
 		if (replyTo && !parent) throw new Error("reply_to must identify a message on your own object");
 		const exchangeId = S(input.exchange_id) || parent?.exchangeId || crypto.randomUUID();
 		if (parent && parent.exchangeId !== exchangeId) throw new Error("reply belongs to a different exchange");
-		if (!ctx.allowAsk) {
-			// Answering another agent: allowed, but every hop is an agent-authored
-			// message in this exchange. Past the cap, finish with a plain reply.
-			const hops = (subject.mailbox ?? []).filter((entry) => entry.message.exchangeId === exchangeId && entry.message.sender.agentId).length;
-			if (hops >= A2A_MAX_HOPS) throw new Error(`this exchange already has ${hops} agent-to-agent messages (limit ${A2A_MAX_HOPS}); answer in your reply instead of asking again`);
-		}
 		const message: AgentMessage = {
 			id: crypto.randomUUID(), exchangeId,
 			sender: { objectId: subject.id, agentId: me.id }, recipients,

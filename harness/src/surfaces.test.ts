@@ -15,7 +15,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHAT_AGENT_HOPS, mentions, pendingMessages, setMark } from "./surfaces";
+import { mentions, pendingMessages, setMark } from "./surfaces";
 import { humanRef, HUMAN_THREAD } from "./conv";
 import type { BlockJSON, ObjectJSON } from "./api";
 
@@ -164,16 +164,3 @@ test("a guest answers only what @-mentions it, including another agent's tag", a
 	expect(mentions("hey @marco dev bot!", "Marco Dev Bot")).toBe(true);
 });
 
-test("agents tagging each other stop after CHAT_AGENT_HOPS posts without a person", async () => {
-	const posts = [msg("p0", HUMAN, 100, "@Sharky Test ask Marco")];
-	for (let i = 1; i <= CHAT_AGENT_HOPS + 1; i++) {
-		posts.push(msg(`p${i}`, i % 2 ? AGENT : OTHER_AGENT, 100 + i, i % 2 ? "@Marco Dev Bot over to you" : "@Sharky Test back to you"));
-	}
-	const obj = objectWith("ping-pong", { threadId: HUMAN_THREAD, order: posts });
-	const chat = humanRef(obj.id);
-	await setMark(chat, "p0");
-	// p1 and p3 tag Marco; p3 comes after two agent posts (still under the cap), p5 would not.
-	expect((await pendingMessages(obj, chat, OTHER_AGENT, "Marco Dev Bot")).map((p) => p.blockId)).toEqual(["p1", "p3"]);
-	// Sharky: p2 counts; p4 follows three agent posts and wakes nobody.
-	expect((await pendingMessages(obj, chat, AGENT, "Sharky Test")).map((p) => p.blockId)).toEqual(["p2"]);
-});
