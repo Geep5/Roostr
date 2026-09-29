@@ -33,7 +33,7 @@ import { CATALOG, fileHoldup, skillReady } from "./skillmgr";
 import { myInstallations, type InstallationRow } from "./descriptors";
 import { CREDENTIALS } from "./credentials";
 import { agentCredential } from "./credential-objects";
-import { credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
+import { clickThenReadJs, credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
 import { blockLine, isAgentAuthor } from "./surfaces";
 import { readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor, typeDefs } from "./spacemap";
@@ -535,12 +535,13 @@ const WEB_TOOLS: RegisteredTool[] = [
 		def: {
 			name: "credential_fetch",
 			description:
-				"Fetch a live page signed in through one of YOUR credentials (the Credentials property) in a headless Chrome, and return its rendered text. Use this instead of web_fetch when the page depends on a signed-in account. If the page shows a login wall, report the credential as signed out.",
+				"Fetch a live page signed in through one of YOUR credentials (the Credentials property) in a headless Chrome, and return its rendered text. Some things only appear after a click (a profile menu showing a balance, a tab, a dropdown): pass `click`, a list of controls to click in order, and the result says what opened. Every reply lists the page's clickable controls with selectors you can pass in `click`. Only click to open or reveal things - never a control that buys, sends, deletes, posts or changes anything. Use this instead of web_fetch when the page depends on a signed-in account. If the page shows a login wall, report the credential as signed out.",
 			input_schema: {
 				type: "object",
 				properties: {
 					service: { type: "string", enum: CREDENTIALS.filter((c) => c.loginUrl).map((c) => c.key), description: "the service of the credential to sign in with" },
 					url: { type: "string", description: "absolute http(s) URL" },
+					click: { type: "array", items: { type: "string" }, description: "controls to click first, in order: a selector from a previous reply's controls list, or the control's visible text / label" },
 				},
 				required: ["service", "url"],
 			},
@@ -548,7 +549,7 @@ const WEB_TOOLS: RegisteredTool[] = [
 		handler: async (input, ctx) => {
 			const url = S(input.url).trim();
 			if (!/^https?:\/\//i.test(url)) return "error: url must be absolute http(s)";
-			return credentialPage(ctx, S(input.service), url, "");
+			return credentialPage(ctx, S(input.service), url, clickThenReadJs(A(input.click)));
 		},
 	},
 	{

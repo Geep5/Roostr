@@ -309,6 +309,48 @@ export function openLoginWindow(loginUrl: string): LoginWindow {
 }
 
 /**
+ * Click the named controls in order (to open a menu, a tab, a dropdown),
+ * then report what opened and the page's clickable controls, each with a
+ * selector that `clicks` accepts. A target is a CSS selector, or text
+ * matched against a control's visible text, aria-label, title or alt.
+ */
+export function clickThenReadJs(clicks: string[]): string {
+	return `
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const want = ${JSON.stringify(clicks)};
+await sleep(1200);
+const controls = () => [...document.querySelectorAll('a, button, [role="button"], [role="tab"], [role="menuitem"], summary, img, [tabindex]')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+const label = (e) => (e.innerText || e.getAttribute("aria-label") || e.getAttribute("title") || e.getAttribute("alt") || "").trim().replace(/\\s+/g, " ");
+const selectorOf = (e) => {
+	if (e.id) return "#" + CSS.escape(e.id);
+	for (const a of ["aria-label", "data-testid", "title", "alt"]) { const v = e.getAttribute(a); if (v) return e.tagName.toLowerCase() + "[" + a + '="' + v.replace(/"/g, '\\"') + '"]'; }
+	const cls = [...e.classList].find((c) => /^[a-z][\\w-]*$/i.test(c) && document.querySelectorAll("." + CSS.escape(c)).length === 1);
+	if (cls) return e.tagName.toLowerCase() + "." + cls;
+	return "";
+};
+const find = (t) => {
+	try { const el = document.querySelector(t); if (el) return el; } catch {}
+	const low = t.toLowerCase();
+	const all = controls();
+	return all.find((e) => label(e).toLowerCase() === low) ?? all.find((e) => label(e).toLowerCase().includes(low));
+};
+const press = (el) => { const target = el.closest('a, button, [role="button"], [role="tab"], [role="menuitem"], summary') ?? el; for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) target.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); };
+const done = [];
+for (const t of want) {
+	const el = find(t);
+	if (!el) { done.push({ click: t, ok: false, error: "no control matches" }); break; }
+	press(el);
+	done.push({ click: t, ok: true, matched: label(el).slice(0, 60) || selectorOf(el) });
+	await sleep(1200);
+}
+const opened = [...document.querySelectorAll('[role="menu"], [role="dialog"], [role="listbox"], [data-state="open"], [data-radix-popper-content-wrapper]')].map((m) => m.innerText.trim()).filter(Boolean);
+const seen = new Set();
+const list = controls().map((e) => ({ label: label(e).slice(0, 50), selector: selectorOf(e) })).filter((c) => (c.label || c.selector) && !seen.has(c.label + c.selector) && seen.add(c.label + c.selector)).slice(0, 60);
+return JSON.stringify({ clicks: done, opened: [...new Set(opened)].join(" | ").slice(0, 2000), controls: list });
+`;
+}
+
+/**
  * Page-action scripts are async function BODIES: they run in the page with
  * `await` available and `return` a string (JSON for structured answers).
  */
