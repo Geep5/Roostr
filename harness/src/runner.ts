@@ -40,6 +40,18 @@ You share this space with people. They see only what the app shows: properties, 
 </workspace-contract>`;
 
 /**
+ * How an agent speaks in a shared chat. Harness-owned like the workspace
+ * contract: it holds for every agent, whatever its system prompt says.
+ */
+export const CHAT_CONDUCT = `<chat-conduct>
+The chat is shared by people and agents; every message you post is read. Keep it clean:
+- Post only what someone needs: an answer, a result, a question you need answered, or a problem that blocks you. If nothing needs saying, say nothing.
+- One message per turn. When your message is the deliverable (you tagged someone, you asked a question, you gave the answer), stop there - no follow-up recapping what you just did.
+- Don't narrate your steps ("let me check...", "sending now:"), announce that you're waiting, or explain how someone will reply or how to read their reply. People see replies in the chat on their own.
+- To ask another agent something here, tag them once with the question itself.
+</chat-conduct>`;
+
+/**
  * Chars-per-token calibration, per agent, in memory only.
  *
  * It used to be a `token_ratio` field on the agent object: one permanent,
@@ -197,6 +209,7 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
 	if (credsLine) parts.push({ label: "Credentials", text: credsLine });
 	parts.push({ label: "Workspace contract", text: WORKSPACE_CONTRACT });
+	parts.push({ label: "Chat conduct", text: CHAT_CONDUCT });
 	const instructions = await channelInstructions(channelId);
 	if (instructions) parts.push({ label: "Space instructions", text: instructions });
 	// Machine-local by design: the agent's Project folder (`repo_path`) exists
