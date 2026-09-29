@@ -191,7 +191,9 @@ export async function credentialPageAction(cookies: SessionCookie[], url: string
 	const home = mkdtempSync(join(tmpdir(), "roostr-cdp-home-"));
 	const profile = join(home, "profile");
 	const args = ["--headless=new", "--disable-gpu", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--metrics-recording-only", "--no-first-run", "--no-default-browser-check", ...THROWAWAY_STORE, "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", `--user-data-dir=${profile}`, "about:blank"];
-	const proc: ChildProcess = spawn(chrome, args, { stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, HOME: home } });
+	// stderr is not read: a pipe nobody drains can stall a chatty Chrome.
+	const proc: ChildProcess = spawn(chrome, args, { stdio: "ignore", env: { ...process.env, HOME: home } });
+	const exited = new Promise((resolve) => proc.once("exit", resolve));
 	const timeout = setTimeout(() => {
 		spawn("pkill", ["-TERM", "-P", String(proc.pid ?? "")], { stdio: "ignore" });
 		proc.kill();
@@ -226,6 +228,8 @@ export async function credentialPageAction(cookies: SessionCookie[], url: string
 		cdp?.close();
 		spawn("pkill", ["-TERM", "-P", String(proc.pid ?? "")], { stdio: "ignore" });
 		proc.kill();
+		// Chrome keeps writing its profile while it shuts down; delete after it exits.
+		await exited;
 		rmSync(home, { recursive: true, force: true });
 	}
 }
