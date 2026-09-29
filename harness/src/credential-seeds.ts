@@ -176,8 +176,9 @@ export async function stampActions(cred: { id: string; fields: Record<string, Va
 	const service = str(cred.fields, "service");
 	if (!service || recipeMissing(cred.fields)) return false;
 	if (Object.keys(cred.fields).some((k) => k.startsWith(ACTION_PREFIX))) return false;
-	const pin = await pinOf(cred.fields);
-	if (pin && pin !== (await machineId())) return false;
+	// No pin check, unlike fillCredential: every machine writes the same
+	// bytes, so a concurrent stamp converges instead of conflicting - and
+	// the credential works before the machine looking after it updates.
 	const pool = templates ?? (await queryAll({ type: TEMPLATE_TYPE })).filter((t) => str(t.fields, "seed_key"));
 	const tpl = pool.find((t) => str(t.fields, "seed_key") === service && str(t.fields, "channel") === str(cred.fields, "channel"));
 	const seed = seedFor(service);
