@@ -32,6 +32,7 @@ import { machineId } from "./roster";
 import { CATALOG, fileHoldup, skillReady } from "./skillmgr";
 import { myInstallations, type InstallationRow } from "./descriptors";
 import { agentCredential } from "./credential-objects";
+import { actionsOf } from "./credentials";
 import { clickThenReadJs, credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
 import { blockLine, isAgentAuthor, listOrdinals } from "./surfaces";
 import { featuredEvents, matcherinoAccess, setFeatured } from "./matcherino";
@@ -557,14 +558,14 @@ const WEB_TOOLS: RegisteredTool[] = [
 		def: {
 			name: "credential_action",
 			description:
-				"Act as a signed-in account through one of YOUR credentials (the Credentials property). X (headless Chrome): read_mentions returns the account's recent mentions as a JSON list of posts {url, author, time, text, reposted}; retweet_post reposts the post at `url` (a post URL from that list) and returns {ok, detail|error}: ok:true only once the page shows it reposted; already:true when it was reposted before. Only report a repost that returned ok:true. Matcherino (its admin API): list_featured returns the events featured on the homepage now as JSON [{id, title}]; feature_events features each bounty id in `ids` that is not featured yet (it never unfeatures anything) and returns {featured, already, failed, notShownYet}: report only ids in `featured` or `already` as featured. Use credential_fetch for other read-only pages.",
+				"Act as a signed-in account through one of YOUR credentials (the Credentials property). The 'Your credentials' section lists each credential's actions as `key - what it does and returns (read|write)`; pass that credential's `service` and one of its action keys, with the inputs the summary names (`url`, `ids`). Only report done what the action's result confirms.",
 			input_schema: {
 				type: "object",
 				properties: {
-					service: { type: "string", enum: ["x", "matcherino"] },
-					action: { type: "string", enum: ["read_mentions", "retweet_post", "list_featured", "feature_events"] },
-					url: { type: "string", description: "X status URL for retweet_post" },
-					ids: { type: "array", items: { type: "number" }, description: "Matcherino bounty ids for feature_events" },
+					service: { type: "string", description: "the `service` of one of your credentials (see Your credentials)" },
+					action: { type: "string", description: "one of that credential's action keys" },
+					url: { type: "string", description: "page URL for actions whose summary names one" },
+					ids: { type: "array", items: { type: "number" }, description: "numeric ids for actions whose summary names them" },
 				},
 				required: ["service", "action"],
 			},
@@ -572,11 +573,27 @@ const WEB_TOOLS: RegisteredTool[] = [
 		handler: async (input, ctx) => {
 			const service = S(input.service);
 			const action = S(input.action);
+			// What a credential can do is data on the object (its action_* fields),
+			// not this list: a person edits the object's actions, the agent's next
+			// prompt and this check both follow.
+			let cred;
+			try {
+				cred = await agentCredential(await fetchObject(ctx.agentId), service);
+			} catch (error) {
+				return `Credential unavailable: ${error instanceof Error ? error.message : String(error)} Tell the person; do not retry this turn.`;
+			}
+			const actions = actionsOf(cred.row.fields);
+			if (!actions.some((a) => a.key === action)) {
+				const valid = actions.map((a) => a.key).join(", ");
+				return `error: "${cred.row.name}" declares no action "${action}"${valid ? `; it takes ${valid}` : ""}. Its actions are the action_* properties on the credential - add one there, don't retry with a guessed name.`;
+			}
 			if (service === "matcherino") return matcherinoAction(action, input.ids, ctx);
-			if (action !== "read_mentions" && action !== "retweet_post") return `error: ${action} is not an X action; X takes read_mentions or retweet_post`;
-			const url = action === "read_mentions" ? "https://x.com/notifications/mentions" : S(input.url).trim();
-			if (!/^https:\/\/(?:x|twitter)\.com\//i.test(url)) return "error: url must be an x.com or twitter.com URL";
-			return credentialPage(ctx, service, url, action === "read_mentions" ? X_TIMELINE_JS : X_RETWEET_JS);
+			if (service === "x") {
+				const url = action === "read_mentions" ? "https://x.com/notifications/mentions" : S(input.url).trim();
+				if (!/^https:\/\/(?:x|twitter)\.com\//i.test(url)) return "error: url must be an x.com or twitter.com URL";
+				return credentialPage(ctx, service, url, action === "read_mentions" ? X_TIMELINE_JS : X_RETWEET_JS);
+			}
+			return `error: ${service}.${action} is declared on the credential but no harness on this computer implements it`;
 		},
 	},
 	{

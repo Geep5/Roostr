@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ValueJSON } from "./api";
-import { credentialKeys, legacyKeyName, recipeHash, recipeMissing, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
+import { actionsOf, credentialKeys, legacyKeyName, recipeHash, recipeMissing, recipeOf, seedFor, seedRecipeFields, recipeFieldKeys, serviceCookies, sessionSignedIn } from "./credentials";
 import type { SessionCookie } from "./browser";
 
 const cookie = (name: string, domain: string, expires = Date.now() / 1000 + 3600): SessionCookie => ({ name, value: "v", domain, path: "/", expires, httpOnly: true, secure: true });
@@ -60,4 +60,23 @@ test("recipe fingerprint tracks only the recipe", () => {
 	expect(recipeHash({ ...seeded("x"), login_url: { stringValue: "https://x.com/i/flow/login" } })).not.toBe(base);
 	expect(recipeMissing({ service: { stringValue: "x" } })).toBe(true);
 	expect(recipeMissing(seeded("discord-bot"))).toBe(false);
+});
+
+test("a seed's actions survive the trip through fields, malformed ones drop out", () => {
+	const x = actionsOf(seeded("x"));
+	expect(x.map((a) => a.key)).toEqual(["read_mentions", "retweet_post"]);
+	expect(x[1].access).toBe("write");
+	// Matcherino declares its two admin actions; a keys-only service declares none.
+	expect(actionsOf(seeded("matcherino")).map((a) => a.key)).toEqual(["list_featured", "feature_events"]);
+	expect(actionsOf(seeded("discord-bot"))).toEqual([]);
+	// A field someone filled by hand, or with junk, is not an action.
+	const fields = {
+		...seeded("matcherino"),
+		action_custom: { stringValue: JSON.stringify({ summary: "do a custom thing", access: "read" }) },
+		action_junk: { stringValue: "not json" },
+		action_bad: { stringValue: JSON.stringify({ summary: "no access" }) },
+	};
+	expect(actionsOf(fields).map((a) => a.key)).toEqual(["list_featured", "feature_events", "custom"]);
+	// Actions ride the recipe field set, so writeRecipe/fillCredential carry them.
+	expect(recipeFieldKeys(seeded("matcherino"))).toContain("action_feature_events");
 });

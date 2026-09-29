@@ -16,7 +16,7 @@ import { hostname } from "node:os";
 import { createObject, deleteField, fetchObject, mutate, queryAll, setField, str, sv, iv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { linkTarget, linkValue } from "./capabilities";
 import { openLoginWindow, profileCookies, type LoginWindow, type SessionCookie } from "./browser";
-import { KEY_PREFIX, credentialKeys, credentialSession, dropLegacySecrets, legacyKeyName, legacyKeys, legacyProfileDir, legacyProfileExists, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
+import { actionsOf, KEY_PREFIX, credentialKeys, credentialSession, dropLegacySecrets, legacyKeyName, legacyKeys, legacyProfileDir, legacyProfileExists, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
 import { fetchInstallations } from "./descriptors";
 import { machines } from "./machine";
 import { machineId } from "./roster";
@@ -256,7 +256,9 @@ export async function credentialsPromptLine(agent: ObjectJSON): Promise<string> 
 	if (rows.length === 0) return "";
 	const lines = rows.map((c) => {
 		const how = c.status !== "active" ? `not connected (${c.status || "missing"}) - tell the person to connect it` : c.auth === "browser_profile" ? `signed in: credential_fetch reads pages, credential_action acts (service "${c.service}")` : "keys saved";
-		return `- ${c.name || c.service || "Credential"}${c.account ? ` (${c.account})` : ""} - service "${c.service}": ${how}`;
+		const acts = actionsOf(c.fields);
+		const doing = acts.length > 0 ? `; actions: ${acts.map((a) => `${a.key} - ${a.summary} (${a.access})`).join("; ")}` : "";
+		return `- ${c.name || c.service || "Credential"}${c.account ? ` (${c.account})` : ""} - service "${c.service}": ${how}${doing}`;
 	});
 	return `Your credentials (browserless/web_fetch are deliberately logged out):\n${lines.join("\n")}`;
 }

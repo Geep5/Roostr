@@ -16,7 +16,7 @@
 import { bv, createObject, iv, lv, mutate, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
 import { CREDENTIAL_TYPE, pinOf } from "./credential-objects";
 import { machineId } from "./roster";
-import { CREDENTIAL_PROPERTIES, CREDENTIAL_SEEDS, KEY_PREFIX, legacyKeyName, recipeFieldKeys, recipeHash, recipeMissing, seedFor, seedRecipeFields } from "./credentials";
+import { ACTION_PREFIX, CREDENTIAL_PROPERTIES, CREDENTIAL_SEEDS, KEY_PREFIX, legacyKeyName, recipeFieldKeys, recipeHash, recipeMissing, seedFor, seedRecipeFields } from "./credentials";
 
 const TEMPLATE_TYPE = "template";
 /** Shapes from before keys were properties; converted, then removed. */
@@ -61,8 +61,8 @@ async function convertLegacyKeys(row: QueryRow): Promise<boolean> {
 	return wrote;
 }
 
-export async function seedCredentials(): Promise<{ properties: number; templates: number; upgraded: number; deduped: number; converted: number; filled: number }> {
-	const out = { properties: 0, templates: 0, upgraded: 0, deduped: 0, converted: 0, filled: 0 };
+export async function seedCredentials(): Promise<{ properties: number; templates: number; upgraded: number; deduped: number; converted: number; filled: number; stamped: number }> {
+	const out = { properties: 0, templates: 0, upgraded: 0, deduped: 0, converted: 0, filled: 0, stamped: 0 };
 	const spaces = await queryAll({ type: "channel" });
 
 	// Properties first: a credential's fields show only through them.
@@ -109,15 +109,17 @@ export async function seedCredentials(): Promise<{ properties: number; templates
 			}
 			const keep = mine[0];
 			// Templates seeded with the old key shape were never edited as properties: reseed them.
+			// Same for one seeded before actions existed: untouched, just actionless.
 			const legacy = LEGACY_FIELDS.some((k) => keep.fields[k]);
-			if (legacy || (untouched(keep) && str(keep.fields, "seed_hash") !== hash)) {
+			const actionless = (seed.actions?.length ?? 0) > 0 && !Object.keys(keep.fields).some((k) => k.startsWith(ACTION_PREFIX));
+			if (legacy || (untouched(keep) && (str(keep.fields, "seed_hash") !== hash || actionless))) {
 				await writeRecipe(keep.id, keep.fields, fields);
 				for (const k of LEGACY_FIELDS) if (keep.fields[k]) await mutate("delete_field", { object_id: keep.id, key: k });
 				await setField(keep.id, "seed_hash", sv(hash));
 				out.upgraded += 1;
 			}
 		}
-	}
+}
 	templates = (await queryAll({ type: TEMPLATE_TYPE })).filter((t) => str(t.fields, "seed_key"));
 
 	for (const cred of await queryAll({ type: CREDENTIAL_TYPE })) {
@@ -127,6 +129,13 @@ export async function seedCredentials(): Promise<{ properties: number; templates
 	// takes its space's template for that service.
 	for (const cred of await queryAll({ type: CREDENTIAL_TYPE })) {
 		if (await fillCredential(cred, templates)) out.filled += 1;
+	}
+	// Credentials filled before actions existed carry none: stamp the service's
+	// set from its space template. Add-only - an action field someone edited
+	// is never rewritten, and one they deleted stays deleted while any other
+	// action field remains (removing them ALL reads as a pre-actions object).
+	for (const cred of await queryAll({ type: CREDENTIAL_TYPE })) {
+		if (await stampActions(cred, templates)) out.stamped += 1;
 	}
 	return out;
 }
@@ -154,5 +163,26 @@ export async function fillCredential(cred: { id: string; fields: Record<string, 
 	const name = str(cred.fields, "name").trim();
 	const label = tpl ? str(tpl.fields, "name") : seed?.label ?? "";
 	if (label && (!name || name === "New credential")) await setField(cred.id, "name", sv(label));
+	return true;
+}
+
+/**
+ * A credential with a recipe but no action declarations predates them: copy
+ * the `action_*` fields from its service's template in its space (else the
+ * code seed). Add-only, so it never overwrites; a credential that already
+ * declares any action is its owner's. Returns whether it wrote.
+ */
+export async function stampActions(cred: { id: string; fields: Record<string, ValueJSON> }, templates?: QueryRow[]): Promise<boolean> {
+	const service = str(cred.fields, "service");
+	if (!service || recipeMissing(cred.fields)) return false;
+	if (Object.keys(cred.fields).some((k) => k.startsWith(ACTION_PREFIX))) return false;
+	const pin = await pinOf(cred.fields);
+	if (pin && pin !== (await machineId())) return false;
+	const pool = templates ?? (await queryAll({ type: TEMPLATE_TYPE })).filter((t) => str(t.fields, "seed_key"));
+	const tpl = pool.find((t) => str(t.fields, "seed_key") === service && str(t.fields, "channel") === str(cred.fields, "channel"));
+	const seed = seedFor(service);
+	const actions = Object.entries(tpl?.fields ?? (seed ? seedRecipeFields(seed) : {})).filter(([k]) => k.startsWith(ACTION_PREFIX));
+	if (actions.length === 0) return false;
+	for (const [key, value] of actions) await setField(cred.id, key, value);
 	return true;
 }

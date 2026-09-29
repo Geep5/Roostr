@@ -52,6 +52,17 @@ export interface CredentialSeed {
 	sessionCookie?: { host: string; name: string };
 	/** Password setup: the fields the form asks for. */
 	passwordFields?: PasswordField[];
+	/** What the signed-in account can do; seeds one `action_*` field each. */
+	actions?: CredentialAction[];
+}
+
+/** One thing a signed-in credential can do, declared as data on the object. */
+export interface CredentialAction {
+	key: string;
+	/** What it does and what it takes, read by the agent (params like `ids`, `url`). */
+	summary: string;
+	/** read leaves the world alone; write changes something on the service. */
+	access: "read" | "write";
 }
 
 export const CREDENTIAL_SEEDS: CredentialSeed[] = [
@@ -67,6 +78,10 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 			{ key: "access_token", label: "Access token", secret: false },
 			{ key: "access_token_secret", label: "Access token secret", secret: true },
 		],
+		actions: [
+			{ key: "read_mentions", summary: "the account's recent mentions as a JSON list of posts {url, author, time, text, reposted}", access: "read" },
+			{ key: "retweet_post", summary: "repost the post at `url` (a post URL from read_mentions); ok:true only once the page shows it reposted; already:true when it was reposted before", access: "write" },
+		],
 	},
 	{
 		key: "matcherino",
@@ -74,6 +89,10 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 		note: "Log in with Chrome to let agents administer Matcherino featured content through this machine.",
 		loginUrl: "https://matcherino.com/login",
 		sessionCookie: { host: "matcherino.com", name: "credentials" },
+		actions: [
+			{ key: "list_featured", summary: "the events featured on the homepage now as JSON [{id, title}]", access: "read" },
+			{ key: "feature_events", summary: "feature each bounty id in `ids` that is not featured yet (never unfeatures); returns {featured, already, failed, notShownYet}", access: "write" },
+		],
 	},
 	{
 		key: "linkedin",
@@ -103,6 +122,28 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 		passwordFields: [{ key: "api_key", label: "API key", secret: true }],
 	},
 ];
+
+/** Fields named `action_<key>` declare one action each, as JSON {summary, access}. */
+export const ACTION_PREFIX = "action_";
+
+/** The action fields a credential carries, in field order: `action_feature_events` → `feature_events`. */
+function actionFieldNames(fields: Record<string, ValueJSON>): string[] {
+	return Object.keys(fields).filter((k) => k.startsWith(ACTION_PREFIX) && k.length > ACTION_PREFIX.length).map((k) => k.slice(ACTION_PREFIX.length));
+}
+
+/** A credential's declared actions. A field that is not {summary, access} JSON is not an action. */
+export function actionsOf(fields: Record<string, ValueJSON>): CredentialAction[] {
+	const out: CredentialAction[] = [];
+	for (const key of actionFieldNames(fields)) {
+		try {
+			const v = JSON.parse(fields[`${ACTION_PREFIX}${key}`]?.stringValue ?? "") as Partial<CredentialAction>;
+			if (typeof v.summary === "string" && (v.access === "read" || v.access === "write")) out.push({ key, summary: v.summary, access: v.access });
+		} catch {
+			// not an action declaration
+		}
+	}
+	return out;
+}
 
 export function seedFor(service: string): CredentialSeed | undefined {
 	return CREDENTIAL_SEEDS.find((c) => c.key === service);
@@ -152,7 +193,7 @@ export function recipeMissing(fields: Record<string, ValueJSON>): boolean {
 	return !fields["login_url"] && !fields["session_cookie"] && keyFieldNames(fields).length === 0;
 }
 
-/** A seed as the plain fields a Credential template carries: its recipe, and each key empty. */
+/** A seed as the plain fields a Credential template carries: its recipe, each key empty, each action declared. */
 export function seedRecipeFields(seed: CredentialSeed): Record<string, ValueJSON> {
 	const out: Record<string, ValueJSON> = {
 		service: { stringValue: seed.key },
@@ -164,14 +205,15 @@ export function seedRecipeFields(seed: CredentialSeed): Record<string, ValueJSON
 		out.session_cookie = { stringValue: seed.sessionCookie.name };
 	}
 	for (const f of seed.passwordFields ?? []) out[`${KEY_PREFIX}${f.key}`] = { stringValue: "" };
+	for (const a of seed.actions ?? []) out[`${ACTION_PREFIX}${a.key}`] = { stringValue: JSON.stringify({ summary: a.summary, access: a.access }) };
 	return out;
 }
 
 export const RECIPE_KEYS = ["service", "description", "login_url", "session_host", "session_cookie"] as const;
 
-/** The recipe's field keys on this object: the fixed ones plus its key fields. */
+/** The recipe's field keys on this object: the fixed ones plus its key and action fields. */
 export function recipeFieldKeys(fields: Record<string, ValueJSON>): string[] {
-	return [...RECIPE_KEYS, ...keyFieldNames(fields).map((k) => `${KEY_PREFIX}${k}`)];
+	return [...RECIPE_KEYS, ...keyFieldNames(fields).map((k) => `${KEY_PREFIX}${k}`), ...actionFieldNames(fields).map((k) => `${ACTION_PREFIX}${k}`)];
 }
 
 /**
