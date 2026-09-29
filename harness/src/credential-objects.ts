@@ -146,41 +146,40 @@ async function keptHere(id: string): Promise<CredentialRow> {
 }
 
 /**
- * Open the headed sign-in window for a browser-login credential and watch
- * its cookies: the moment the service's session cookie appears, the
- * service's cookies are saved to the credential's `session` and the window
- * closes. Closing the window first leaves the credential as it was.
+ * Open a plain headed sign-in window for a browser-login credential. The
+ * moment the service's session cookie shows up in the window's profile (or
+ * the person closes the window), the window is closed, its cookies are
+ * exported, and a signed-in set is saved to the credential's `session`.
  */
 export async function connectCredential(id: string): Promise<CredentialRow> {
 	const row = await keptHere(id);
 	const entry = serviceEntry(row.service);
-	if (!entry?.loginUrl) throw new CredentialError(400, `${entry?.label ?? "This service"} connects with pasted keys, not a sign-in window.`);
+	if (!entry?.loginUrl || !entry.sessionCookie) throw new CredentialError(400, `${entry?.label ?? "This service"} connects with pasted keys, not a sign-in window.`);
 	if (windows.has(row.id)) throw new CredentialError(409, "A sign-in window for this credential is already open on this computer.");
 	let win: LoginWindow;
 	try {
-		win = await openLoginWindow(entry.loginUrl);
+		win = openLoginWindow(entry.loginUrl);
 	} catch (err) {
 		throw new CredentialError(409, err instanceof Error ? err.message : String(err));
 	}
 	windows.set(row.id, win);
 	const state = await publishState(row, true);
 	const deadline = Date.now() + 15 * 60_000;
-	const finish = async () => {
-		windows.delete(row.id);
-		win.close();
-		await refreshCredentials().catch((err) => console.error("[credentials] refresh after sign-in failed:", err instanceof Error ? err.message : err));
-	};
+	let closed = false;
+	void win.exited.then(() => (closed = true));
+	const cookie = entry.sessionCookie;
 	void (async () => {
-		while (Date.now() < deadline) {
-			await Bun.sleep(2000);
-			const cookies = await win.cookies();
-			if (cookies === null) break; // the person closed the window
-			if (sessionSignedIn(cookies, row.service)) {
-				await setField(row.id, "session", sv(JSON.stringify(serviceCookies(cookies, row.service))));
-				break;
-			}
+		while (!closed && Date.now() < deadline && !win.hasCookie(cookie.host, cookie.name)) await Bun.sleep(2000);
+		// Let the site finish setting its other cookies before closing.
+		if (!closed) await Bun.sleep(3000);
+		try {
+			const cookies = serviceCookies(await win.finish(), row.service);
+			if (windows.get(row.id) === win && sessionSignedIn(cookies, row.service)) await setField(row.id, "session", sv(JSON.stringify(cookies)));
+		} catch (err) {
+			console.error("[credentials] reading the sign-in window's cookies failed:", err instanceof Error ? err.message : err);
 		}
-		await finish();
+		if (windows.get(row.id) === win) windows.delete(row.id);
+		await refreshCredentials().catch((err) => console.error("[credentials] refresh after sign-in failed:", err instanceof Error ? err.message : err));
 	})();
 	return state;
 }
@@ -195,8 +194,9 @@ export async function checkCredential(id: string): Promise<CredentialRow> {
 /** Clear a credential's secret; it stays, as never-connected. */
 export async function disconnectCredential(id: string): Promise<CredentialRow> {
 	const row = await keptHere(id);
-	windows.get(row.id)?.close();
+	const win = windows.get(row.id);
 	windows.delete(row.id);
+	void win?.finish().catch(() => {});
 	for (const key of ["session", "secret", "auth", "error"]) if (row.fields[key]) await deleteField(row.id, key);
 	await setField(row.id, "status", sv("missing"));
 	await setField(row.id, "checked_at", iv(Date.now()));

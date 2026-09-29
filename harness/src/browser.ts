@@ -6,7 +6,8 @@
  * throwaway headless Chrome - so any computer can act with the login.
  * Agents receive only page text, never the cookies.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { Database } from "bun:sqlite";
 import { spawn, type ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -246,47 +247,57 @@ export async function profileCookies(profile: string, timeoutMs = 20_000): Promi
 }
 
 export interface LoginWindow {
-	/** Every cookie the window holds right now; null once the window is gone. */
-	cookies(): Promise<SessionCookie[] | null>;
-	close(): void;
+	/** Whether the window's profile holds a cookie by that name for that host yet (names are plaintext on disk). */
+	hasCookie(host: string, name: string): boolean;
+	/** Close the window (Chrome flushes its cookies on a clean quit), export every cookie, delete the profile. */
+	finish(): Promise<SessionCookie[]>;
+	/** Resolves when the person closes the window. */
 	exited: Promise<unknown>;
 }
 
 /**
- * Open a HEADED Chrome on a fresh profile at a login page, with DevTools on
- * a local port so the caller can read the cookies once the person signs in
- * (2FA and all). The profile is thrown away on close; the cookies are the session.
+ * Open a plain HEADED Chrome on a fresh profile at a login page. Nothing is
+ * attached while the person signs in: sites' bot checks (Twitch, X) reject a
+ * window with a live DevTools connection. The cookies are read afterwards,
+ * from the closed profile; the profile is then thrown away.
  */
-export async function openLoginWindow(loginUrl: string): Promise<LoginWindow> {
+export function openLoginWindow(loginUrl: string): LoginWindow {
 	const chrome = chromeBinary();
 	if (!chrome) throw new Error("No Chrome, Chromium or Brave is installed on this computer.");
 	const profile = mkdtempSync(join(tmpdir(), "roostr-login-"));
-	const proc = spawn(chrome, [`--user-data-dir=${profile}`, ...THROWAWAY_STORE, "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--no-first-run", "--no-default-browser-check", "--new-window", loginUrl], { stdio: "ignore" });
-	const exited = new Promise((resolve) => proc.once("exit", resolve)).then(() => rmSync(profile, { recursive: true, force: true }));
+	const proc = spawn(chrome, [`--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--new-window", loginUrl], { stdio: "ignore" });
+	const exited = new Promise((resolve) => proc.once("exit", resolve));
 	let gone = false;
 	void exited.then(() => (gone = true));
-	const port = await devtoolsPort(profile, 20_000).catch((err) => {
-		proc.kill();
-		throw err;
-	});
 	return {
 		exited,
-		async cookies() {
-			if (gone) return null;
+		hasCookie(host, name) {
+			const db = [join(profile, "Default", "Network", "Cookies"), join(profile, "Default", "Cookies")].find((p) => existsSync(p));
+			if (!db) return false;
+			// Chrome holds the db open; read a snapshot.
+			const snap = join(tmpdir(), `roostr-cookies-${crypto.randomUUID()}`);
 			try {
-				const version = (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()) as { webSocketDebuggerUrl: string };
-				const cdp = await CdpSocket.open(version.webSocketDebuggerUrl);
-				try {
-					return (await cdp.call<{ cookies: SessionCookie[] }>("Storage.getCookies")).cookies;
-				} finally {
-					cdp.close();
-				}
+				copyFileSync(db, snap);
+				const sqlite = new Database(snap, { readonly: true });
+				const row = sqlite.query("SELECT 1 FROM cookies WHERE name = ? AND host_key LIKE ? LIMIT 1").get(name, `%${host.replace(/^www\./, "")}`);
+				sqlite.close();
+				return row !== null;
 			} catch {
-				return gone ? null : [];
+				return false;
+			} finally {
+				rmSync(snap, { force: true });
 			}
 		},
-		close() {
-			proc.kill();
+		async finish() {
+			if (!gone) {
+				proc.kill("SIGTERM");
+				await exited;
+			}
+			try {
+				return await profileCookies(profile);
+			} finally {
+				rmSync(profile, { recursive: true, force: true });
+			}
 		},
 	};
 }
