@@ -14,6 +14,7 @@ import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, finishCapabilityLogin, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
 import { CREDENTIALS } from "./credentials";
 import { CredentialError, checkCredential, connectCredential, disconnectCredential, type CredentialRow } from "./credential-objects";
+import { ensureBlob, blobDir, mimeOf, storeUpload } from "./files";
 import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
 import type { SpaceJoinLink } from "./nostrsync";
 
@@ -104,6 +105,10 @@ export function startAuthServer(served: Set<string>): void {
 	Bun.serve({
 		port: AUTH_PORT,
 		hostname: "127.0.0.1",
+		// Files arrive as one raw body (any type); keep headroom above Bun's 128 MB default.
+		maxRequestBodySize: 1024 * 1024 * 1024,
+		// A download may wait on a peer-to-peer fetch; Bun's 10 s default would drop it mid-transfer.
+		idleTimeout: 255,
 		fetch: async (req) => {
 			const url = new URL(req.url);
 			let authorization;
@@ -196,6 +201,24 @@ export function startAuthServer(served: Set<string>): void {
 				}
 				if (req.method === "GET" && url.pathname === "/agents") {
 					return json({ roster: await readRoster(), serving: [...served] });
+				}
+				// Upload: the raw bytes become a File object in `space`, held here.
+				if (req.method === "POST" && url.pathname === "/files") {
+					const bytes = new Uint8Array(await req.arrayBuffer());
+					if (bytes.byteLength === 0) return json({ error: "The file is empty." }, 400);
+					return json(await storeUpload(bytes, url.searchParams.get("name") ?? "", url.searchParams.get("mime") ?? "", url.searchParams.get("space") ?? ""));
+				}
+				// Download: fetched peer-to-peer first when this computer lacks the bytes.
+				if (req.method === "GET" && url.pathname.startsWith("/files/")) {
+					const hash = url.pathname.slice("/files/".length);
+					try {
+						await ensureBlob(hash);
+					} catch (err) {
+						return json({ error: err instanceof Error ? err.message : String(err) }, 503);
+					}
+					return new Response(Bun.file(`${blobDir()}/${hash}`), {
+						headers: { "Content-Type": await mimeOf(hash), "Cache-Control": "private, max-age=31536000, immutable", ...cors },
+					});
 				}
 				if (req.method === "GET" && url.pathname === "/machine") {
 					const { machineId } = await import("./roster");

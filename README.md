@@ -240,12 +240,23 @@ knowing one shared-space key is not authority over another space or its members.
 Browser edits enter a durable outbox before publication, and logout refuses
 unpublished work unless it is explicitly exported.
 
-Serving is per object (`docs/object-serving.md`): the engine's resolver
-(`core/serving.odin`) picks the machine from the object's `served_by` pin,
-then its first agent's pin, moving the work to a computer that has every
-catalog skill in its Skills working (each machine publishes a capability
-object per working skill). No heartbeats or
-leases - only the serving machine sets its own verified checkout path.
+Serving (`docs/object-serving.md`): an agent runs on its own computer (its
+`served_by`) on every object, except work on a computer or installation
+object, which stays on that computer. Its model, model login (an `anthropic`
+or `kimi` Credential), service logins and instructions are objects, so
+re-pinning it moves nothing else. An object's own resolution (`core/serving.odin`:
+its pin, else its first agent's pin, else a machine with its skills) only
+places the object's repeats and inbox recovery. No heartbeats or leases.
+
+Files move peer-to-peer, never through the relay. A `file` object names its
+bytes by sha256 (`file_hash`, plus `file_size`, `file_mime`, and
+`available_on`: the computers holding a copy). Each harness keeps bytes in
+`GLON_DATA/blobs/<sha256>` and serves `POST /files` / `GET /files/<hash>` on
+its loopback port (paired auth). A harness missing the bytes asks a holder over
+a WebRTC data channel (`harness/src/files.ts`, werift); the relay only carries
+the introduction, as owner-signed, self-encrypted ephemeral events (kind 21078).
+Received bytes are verified against the hash. With no holder online the
+File's `error` says so; there is no relay or server fallback.
 
 ## Harness (`harness/`)
 

@@ -1413,6 +1413,10 @@ BUNDLED_TYPES :: []Bundled_Type{
 	{"person", "Human", "👤", "page"},
 	{"project", "Project", "🔨", "page"},
 	{"bookmark", "Bookmark", "🔖", "page"},
+	// Bytes named by their sha256; each computer keeps its own copy and
+	// fetches missing ones peer-to-peer. Metadata rides plain fields (not
+	// bundled relations) so an older engine never retires them.
+	{"file", "File", "📎", "page"},
 	// Every harness registers its host at boot; without a type object the
 	// objects existed but had no definition, no sidebar row, and no way in.
 	{"machine", "Computer", "🖥️", "page"},

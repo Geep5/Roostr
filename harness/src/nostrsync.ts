@@ -44,7 +44,7 @@ const DELETE_BATCH = 254;
 /** The synced vanish ledger (see src/vanish.odin); never published as data to delete. */
 const VANISH_LOG_ID = "__vanished__";
 
-function dataRoot(): string {
+export function dataRoot(): string {
 	return process.env.GLON_DATA ?? `${process.env.HOME}/.glon`;
 }
 
@@ -205,7 +205,7 @@ async function recordJoinRequest(r: Omit<JoinRequest, "key">): Promise<void> {
 	await writeJoinRequests(rest);
 }
 
-interface Identity {
+export interface Identity {
 	sk: Uint8Array;
 	pk: string;
 	identityHash: string;
@@ -213,7 +213,7 @@ interface Identity {
 	relays: string[];
 }
 
-async function loadIdentity(): Promise<Identity | null> {
+export async function loadIdentity(): Promise<Identity | null> {
 	try {
 		const parsed = (await Bun.file(`${dataRoot()}/nostr.json`).json()) as { privkey?: string; relays?: string[] };
 		if (!parsed.privkey || parsed.privkey.length !== 64) return null;

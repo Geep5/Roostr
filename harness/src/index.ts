@@ -19,6 +19,7 @@ import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./cre
 import { capabilities, convergeCatalogScope, publishCapabilityObjects, publishInstallationState } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tools";
 import { startAuthServer } from "./authserver";
+import { startFilePeer } from "./files";
 import { machineId, readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishMachine, serverOf, servesHere } from "./machine";
@@ -796,6 +797,7 @@ async function serve(): Promise<void> {
 	}
 
 	startAuthServer(agents);
+	void startFilePeer().catch((err) => console.error("[files] peer failed to start:", err));
 	console.log(`[harness] serving ${agents.size} agent(s): ${[...agents].map((a) => a.slice(0, 8)).join(", ") || "(none — set an agent's Served by to this computer)"}`);
 
 	// Catch up on chat messages that arrived while the harness was down.
