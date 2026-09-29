@@ -1136,7 +1136,7 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// software a computer must have working (an active capability of that
 	// key), so the work only runs on a computer that does.
 	{"served_by", "object", "Served by", "🖥️", false, false, 1, {}},
-	{"skills", "object", "Skills", "🧠", false, false, 0, {}},
+	{"skills", "object", "Skills", "🛠️", false, false, 0, {}},
 	// An agent's checkout on the machine that serves it: the harness works
 	// in this folder.
 	{"repo_path", "shorttext", "Project folder", "📁", false, false, 1, {}},
@@ -1155,7 +1155,7 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// An agent's configuration is a system_prompt object: standing prompt
 	// and model. `prompt` links one; the harness reads it
 	// through the link, not a hardcoded kind.
-	{"prompt", "object", "System prompt", "📜", false, false, 1, {}},
+	{"prompt", "object", "System prompt", "🧠", false, false, 1, {}},
 	// Per-agent overrides, set like any property (blank = follow the prompt).
 	// One model per agent: a single-select status; the harness reads the
 	// chosen string, so a status option stays compatible with a plain value.
@@ -1428,10 +1428,10 @@ BUNDLED_TYPES :: []Bundled_Type{
 	{"capability", "Capability", "🧩", "page"},
 	// Instructions an agent reads; the ones an agent (or object) lists in
 	// Skills. A skill with a `key` is catalog software computers install.
-	{"skill", "Skill", "🧠", "page"},
+	{"skill", "Skill", "🛠️", "page"},
 	// An agent's configuration: standing prompt and model.
 	// An agent links one with `prompt`; there is no hardcoded kind.
-	{"system_prompt", "System prompt", "📜", "page"},
+	{"system_prompt", "System prompt", "🧠", "page"},
 	// Minds are objects like everything else: a type row so they list in
 	// the sidebar and a bare "+ New" is a real agent the harness can adopt.
 	{"agent", "Agent", "🤖", "page"},
