@@ -499,8 +499,9 @@ async function credentialPage(ctx: ToolContext, service: string, url: string, ac
 			return `Credential signed out: ${url} showed a login page, so "${cred.row.name}" is no longer signed in. Tell the person to press Reconnect on it.`;
 		}
 		if (!page.arrived) return `Did not reach ${url}: the site sent the page to ${page.url}. Nothing was done there.\n${page.text}`.slice(0, WEB_FETCH_CAP);
-		const result = page.actionResult ? `\nAction: ${page.actionResult}` : "";
-		return `${page.title}\n${page.url}\n${page.text}${result}`.slice(0, WEB_FETCH_CAP);
+		// An action's answer leads: the page text after it is context and may be cut.
+		if (page.actionResult) return `Result: ${page.actionResult}\n\n${page.title}\n${page.url}\n${page.text}`.slice(0, WEB_FETCH_CAP);
+		return `${page.title}\n${page.url}\n${page.text}`.slice(0, WEB_FETCH_CAP);
 	} catch (error) {
 		return `Credential page failed: ${error instanceof Error ? error.message : String(error)}`;
 	}
@@ -511,7 +512,7 @@ const WEB_TOOLS: RegisteredTool[] = [
 		def: {
 			name: "credential_action",
 			description:
-				"Act as a signed-in account through one of YOUR credentials (the Credentials property) in a headless Chrome, and return the resulting page text. Actions: read_mentions (open X mentions), retweet_post (open the given X status URL and repost it; the reply says whether the page confirmed it). Use credential_fetch for read-only pages.",
+				"Act as a signed-in account through one of YOUR credentials (the Credentials property) in a headless Chrome. read_mentions returns the account's recent mentions as a JSON list of posts {url, author, time, text, reposted}. retweet_post reposts the post at `url` (a post URL from that list) and returns {ok, detail|error}: ok:true only once the page shows it reposted; already:true when it was reposted before. Only report a repost that returned ok:true. Use credential_fetch for other read-only pages.",
 			input_schema: {
 				type: "object",
 				properties: {

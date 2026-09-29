@@ -154,7 +154,7 @@ class CdpSocket {
 
 async function evaluate(cdp: CdpSocket, expression: string, asyncBody = false): Promise<unknown> {
 	const source = asyncBody ? `(async () => {\n${expression}\n})()` : expression;
-	const out = await cdp.call<{ result?: { value?: unknown; description?: string }; exceptionDetails?: unknown }>("Runtime.evaluate", { expression: source, returnByValue: true, awaitPromise: asyncBody, replMode: asyncBody });
+	const out = await cdp.call<{ result?: { value?: unknown; description?: string }; exceptionDetails?: unknown }>("Runtime.evaluate", { expression: source, returnByValue: true, awaitPromise: asyncBody }, asyncBody ? 30_000 : 5_000);
 	if (out.exceptionDetails) {
 		const details = out.exceptionDetails as { text?: string; exception?: { description?: string; value?: unknown } };
 		return `EVAL EXCEPTION ${details.text ?? ""} ${details.exception?.description ?? JSON.stringify(details.exception ?? details)}`;
@@ -216,7 +216,7 @@ export async function credentialPageAction(cookies: SessionCookie[], url: string
 		const arrived = await waitFor(cdp, `(() => { const ready = document.readyState === "interactive" || document.readyState === "complete"; const host = new URL(location.href).host; const requested = ${JSON.stringify([...wantedHosts])}.includes(host) && location.pathname === ${JSON.stringify(wanted.pathname)}; return ready && requested && !!document.body && document.body.innerText.length > 0; })()`, Math.min(20_000, timeoutMs), "requested rendered page").then(() => true, () => false);
 		let actionResult = "";
 		if (arrived && actionJs.trim()) {
-			const value = await evaluate(cdp, `(() => {\n${actionJs}\n})()`);
+			const value = await evaluate(cdp, actionJs, true);
 			actionResult = typeof value === "string" ? value : JSON.stringify(value ?? null);
 		}
 		await sleep(1_000);
@@ -308,26 +308,55 @@ export function openLoginWindow(loginUrl: string): LoginWindow {
 	};
 }
 
-/** Retweet and confirm the menu/dialog in one page action. */
-export const X_RETWEET_JS = `(() => {
-	const label = document.body?.innerText ?? "";
-	const button = document.querySelector('[data-testid="retweet"]') ?? [...document.querySelectorAll('[aria-label*="Repost"], [aria-label*="Retweet"]')][0];
-	if (!button) return JSON.stringify({ ok: false, error: "retweet button not found", snippet: label.slice(0, 500) });
-	button.click();
-	let confirmed = false;
-	const started = Date.now();
-	const clickConfirm = () => {
-		const confirm = document.querySelector('[data-testid="retweetConfirm"]') ?? [...document.querySelectorAll('[role="button"]')].find((el) => /^(repost|retweet)$/i.test((el.textContent ?? "").trim()));
-		if (confirm) {
-			confirm.click();
-			confirmed = true;
-			return;
-		}
-		if (Date.now() - started < 2_000) setTimeout(clickConfirm, 150);
-	};
-	clickConfirm();
-	return confirmed ? "retweet confirmed" : "retweet click issued";
-})()`;
+/**
+ * Page-action scripts are async function BODIES: they run in the page with
+ * `await` available and `return` a string (JSON for structured answers).
+ */
 
-/** Read the visible X mentions/timeline text. */
-export const X_TIMELINE_JS = `(() => document.body?.innerText?.slice(0, ${PAGE_TEXT_LIMIT}) ?? "")()`;
+/**
+ * Repost exactly the post the page's /status/<id> URL names - never the
+ * first button on the page, which on a reply thread or an already-reposted
+ * post belongs to someone else - and confirm the page shows it reposted.
+ */
+export const X_RETWEET_JS = `
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const id = location.pathname.match(/\\/status\\/(\\d+)/)?.[1];
+if (!id) return JSON.stringify({ ok: false, error: "not a post URL: " + location.href });
+const focal = () => [...document.querySelectorAll('article[data-testid="tweet"]')].find((a) => [...a.querySelectorAll('a[href*="/status/' + id + '"]')].some((l) => l.querySelector("time")));
+let post;
+for (let t = 0; t < 40 && !(post = focal()); t++) await sleep(250);
+if (!post) return JSON.stringify({ ok: false, error: "the post did not load (deleted, protected, or the session is signed out)" });
+if (post.querySelector('[data-testid="unretweet"]')) return JSON.stringify({ ok: true, already: true, detail: "already reposted" });
+const button = post.querySelector('[data-testid="retweet"]');
+if (!button) return JSON.stringify({ ok: false, error: "this post has no repost button (reposts may be turned off)" });
+button.click();
+let confirm;
+for (let t = 0; t < 20 && !(confirm = document.querySelector('[data-testid="retweetConfirm"]')); t++) await sleep(150);
+if (!confirm) return JSON.stringify({ ok: false, error: "the Repost menu did not open" });
+confirm.click();
+for (let t = 0; t < 30; t++) {
+	await sleep(200);
+	if (focal()?.querySelector('[data-testid="unretweet"]')) return JSON.stringify({ ok: true, detail: "reposted and confirmed on the page" });
+}
+return JSON.stringify({ ok: false, error: "clicked Repost but the page never showed it reposted" });
+`;
+
+/**
+ * The posts on an X timeline page (mentions, a profile, search), each with
+ * the link retweet_post takes and whether it is already reposted.
+ */
+export const X_TIMELINE_JS = `
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+for (let t = 0; t < 40 && !document.querySelector('article[data-testid="tweet"]'); t++) await sleep(250);
+const posts = [...document.querySelectorAll('article[data-testid="tweet"]')].slice(0, 25).map((a) => {
+	const link = [...a.querySelectorAll('a[href*="/status/"]')].find((l) => l.querySelector("time"));
+	return {
+		url: link ? new URL(link.getAttribute("href"), location.origin).href : "",
+		author: (a.querySelector('[data-testid="User-Name"]')?.innerText ?? "").replace(/\\s*\\n\\s*/g, " "),
+		time: link?.querySelector("time")?.getAttribute("datetime") ?? "",
+		text: (a.querySelector('[data-testid="tweetText"]')?.innerText ?? "").slice(0, 280),
+		reposted: !!a.querySelector('[data-testid="unretweet"]'),
+	};
+});
+return JSON.stringify(posts);
+`;
