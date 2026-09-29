@@ -1540,10 +1540,12 @@ const A2A_TOOL: RegisteredTool = {
 			if (holder.id === ctx.agentId) throw new Error("an agent cannot send a request to itself");
 			// Both in this object's chat: a visible @-tag there reaches them (the
 			// tag wakes them) and keeps the person in the loop; a hidden
-			// exchange about this same object only splits the conversation.
-			if (ctx.boundObject && !S(input.exchange_id) && !S(input.reply_to) && guestAgents(subject.fields).includes(holder.id)) {
+			// exchange about this same object only splits the conversation -
+			// continuing an old one included, which is how an agent that once
+			// used agent_ask here keeps reaching for it.
+			if (ctx.boundObject && guestAgents(subject.fields).includes(holder.id)) {
 				const name = str(holder.fields, "name") || "the agent";
-				throw new Error(`${name} is in this chat with you. Don't use agent_ask: make your reply the question itself, starting "@${name} " - they see it and answer here.`);
+				throw new Error(`${name} is in this chat with you. Don't use agent_ask, not even to continue an exchange: make your reply the question itself, starting "@${name} " - they see it and answer here.`);
 			}
 			const endpoint = { objectId: endpointObjectId, agentId: holder.id };
 			if (recipients.some((entry) => entry.objectId === endpoint.objectId)) throw new Error("each recipient object must be distinct");
