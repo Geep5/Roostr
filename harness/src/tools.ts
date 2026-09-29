@@ -34,6 +34,7 @@ import { myInstallations, type InstallationRow } from "./descriptors";
 import { agentCredential } from "./credential-objects";
 import { clickThenReadJs, credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
 import { blockLine, isAgentAuthor, listOrdinals } from "./surfaces";
+import { featuredEvents, matcherinoAccess, setFeatured } from "./matcherino";
 import { readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor, typeDefs } from "./spacemap";
 import * as memory from "./memory";
@@ -507,18 +508,63 @@ async function credentialPage(ctx: ToolContext, service: string, url: string, ac
 	}
 }
 
+/**
+ * Matcherino's featured list through the agent's Matcherino credential.
+ * feature_events only ever adds: an id already featured is left alone, and
+ * nothing is unfeatured. Each id is read back from the live list afterwards;
+ * the public list is served from a short cache, so an id the API accepted
+ * but the list doesn't show yet is reported as `notShownYet`, not as done.
+ */
+async function matcherinoAction(action: string, rawIds: unknown, ctx: ToolContext): Promise<string> {
+	if (action !== "list_featured" && action !== "feature_events") return `error: ${action} is not a Matcherino action; Matcherino takes list_featured or feature_events`;
+	let access;
+	try {
+		access = await matcherinoAccess(ctx.agentId);
+	} catch (error) {
+		return `Credential unavailable: ${error instanceof Error ? error.message : String(error)} Tell the person; do not retry this turn.`;
+	}
+	try {
+		const before = await featuredEvents();
+		if (action === "list_featured") return JSON.stringify(before);
+		const ids = (Array.isArray(rawIds) ? rawIds : []).map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0);
+		if (ids.length === 0) return "error: pass the bounty ids to feature in `ids`";
+		const was = new Set(before.map((e) => e.id));
+		const already = ids.filter((id) => was.has(id));
+		const accepted: number[] = [];
+		const failed: Array<{ id: number; error: string }> = [];
+		for (const id of ids.filter((x) => !was.has(x))) {
+			try {
+				await setFeatured(access.token, id, true);
+				accepted.push(id);
+			} catch (error) {
+				failed.push({ id, error: error instanceof Error ? error.message : String(error) });
+			}
+		}
+		const now = new Set((await featuredEvents()).map((e) => e.id));
+		return JSON.stringify({
+			featured: accepted.filter((id) => now.has(id)),
+			already,
+			failed,
+			notShownYet: accepted.filter((id) => !now.has(id)),
+		});
+	} catch (error) {
+		return `Matcherino failed: ${error instanceof Error ? error.message : String(error)}`;
+	}
+}
+
 const WEB_TOOLS: RegisteredTool[] = [
 	{
 		def: {
 			name: "credential_action",
 			description:
-				"Act as a signed-in account through one of YOUR credentials (the Credentials property) in a headless Chrome. read_mentions returns the account's recent mentions as a JSON list of posts {url, author, time, text, reposted}. retweet_post reposts the post at `url` (a post URL from that list) and returns {ok, detail|error}: ok:true only once the page shows it reposted; already:true when it was reposted before. Only report a repost that returned ok:true. Use credential_fetch for other read-only pages.",
+				"Act as a signed-in account through one of YOUR credentials (the Credentials property). X (headless Chrome): read_mentions returns the account's recent mentions as a JSON list of posts {url, author, time, text, reposted}; retweet_post reposts the post at `url` (a post URL from that list) and returns {ok, detail|error}: ok:true only once the page shows it reposted; already:true when it was reposted before. Only report a repost that returned ok:true. Matcherino (its admin API): list_featured returns the events featured on the homepage now as JSON [{id, title}]; feature_events features each bounty id in `ids` that is not featured yet (it never unfeatures anything) and returns {featured, already, failed, notShownYet}: report only ids in `featured` or `already` as featured. Use credential_fetch for other read-only pages.",
 			input_schema: {
 				type: "object",
 				properties: {
-					service: { type: "string", enum: ["x"] },
-					action: { type: "string", enum: ["read_mentions", "retweet_post"] },
+					service: { type: "string", enum: ["x", "matcherino"] },
+					action: { type: "string", enum: ["read_mentions", "retweet_post", "list_featured", "feature_events"] },
 					url: { type: "string", description: "X status URL for retweet_post" },
+					ids: { type: "array", items: { type: "number" }, description: "Matcherino bounty ids for feature_events" },
 				},
 				required: ["service", "action"],
 			},
@@ -526,6 +572,8 @@ const WEB_TOOLS: RegisteredTool[] = [
 		handler: async (input, ctx) => {
 			const service = S(input.service);
 			const action = S(input.action);
+			if (service === "matcherino") return matcherinoAction(action, input.ids, ctx);
+			if (action !== "read_mentions" && action !== "retweet_post") return `error: ${action} is not an X action; X takes read_mentions or retweet_post`;
 			const url = action === "read_mentions" ? "https://x.com/notifications/mentions" : S(input.url).trim();
 			if (!/^https:\/\/(?:x|twitter)\.com\//i.test(url)) return "error: url must be an x.com or twitter.com URL";
 			return credentialPage(ctx, service, url, action === "read_mentions" ? X_TIMELINE_JS : X_RETWEET_JS);
