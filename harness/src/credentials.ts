@@ -6,11 +6,13 @@
  * object that describes itself, so an agent on ANY computer can use it and
  * a new login needs no code:
  *
- * - recipe (plain fields): `service` (stable key bespoke code looks up -
- *   discord-bot, anthropic, kimi), `description`, `login_url`,
- *   `session_host` + `session_cookie` (the cookie that proves a sign-in),
- *   `key_fields` (the keys a person pastes: [{key, label, secret}]).
- * - `secret`: the pasted keys as a JSON object keyed by `key_fields`.
+ * - recipe (plain fields, each an ordinary property of the space):
+ *   `service` (stable key bespoke code looks up - discord-bot, anthropic,
+ *   kimi), `description`, `login_url`, `session_host` + `session_cookie`
+ *   (the cookie that proves a sign-in).
+ * - keys: every field named `key_<name>` is one pasted key (`key_token`,
+ *   `key_api_key`, ...). Its property is the key's label; the credential
+ *   needs exactly the key fields present on it (templates carry them empty).
  * - `session`: a browser sign-in's cookies as a JSON array. The computer in
  *   `served_by` opens the headed sign-in window and exports them; every
  *   later action injects them into a throwaway headless Chrome (browser.ts).
@@ -60,10 +62,10 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 		loginUrl: "https://x.com/login",
 		sessionCookie: { host: "x.com", name: "auth_token" },
 		passwordFields: [
-			{ key: "apiKey", label: "API key", secret: false },
-			{ key: "apiSecret", label: "API secret", secret: true },
-			{ key: "accessToken", label: "Access token", secret: false },
-			{ key: "accessTokenSecret", label: "Access token secret", secret: true },
+			{ key: "api_key", label: "API key", secret: false },
+			{ key: "api_secret", label: "API secret", secret: true },
+			{ key: "access_token", label: "Access token", secret: false },
+			{ key: "access_token_secret", label: "Access token secret", secret: true },
 		],
 	},
 	{
@@ -92,13 +94,13 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 		key: "anthropic",
 		label: "Anthropic",
 		note: "Key for Claude models: an Anthropic API key (sk-ant-api…) or a long-lived Claude subscription token from `claude setup-token` (sk-ant-oat…). Agents whose Model is a Claude model use it on any computer.",
-		passwordFields: [{ key: "apiKey", label: "API key or token", secret: true }],
+		passwordFields: [{ key: "api_key", label: "API key or token", secret: true }],
 	},
 	{
 		key: "kimi",
 		label: "Kimi (Moonshot)",
 		note: "Moonshot API key for Kimi models. Agents whose Model is a kimi model use it on any computer.",
-		passwordFields: [{ key: "apiKey", label: "API key", secret: true }],
+		passwordFields: [{ key: "api_key", label: "API key", secret: true }],
 	},
 ];
 
@@ -117,73 +119,99 @@ export interface Recipe {
 	passwordFields: PasswordField[];
 }
 
+/** Fields named `key_<name>` hold one pasted key each. */
+export const KEY_PREFIX = "key_";
+
+/**
+ * `key_fields` is the pre-property list of key names, kept on credentials
+ * for computers still running the previous harness: it shares the prefix
+ * but is not a key.
+ */
+export const LEGACY_KEY_LIST = "key_fields";
+
+/** The key fields a credential carries, in field order: `key_api_key` → `api_key`. */
+function keyFieldNames(fields: Record<string, ValueJSON>): string[] {
+	return Object.keys(fields).filter((k) => k.startsWith(KEY_PREFIX) && k.length > KEY_PREFIX.length && k !== LEGACY_KEY_LIST).map((k) => k.slice(KEY_PREFIX.length));
+}
+
 export function recipeOf(fields: Record<string, ValueJSON>): Recipe {
 	const host = str(fields, "session_host").trim();
 	const name = str(fields, "session_cookie").trim();
-	const passwordFields = (fields["key_fields"]?.valuesValue?.items ?? []).flatMap((i) => {
-		const e = i.mapValue?.entries;
-		const key = e?.["key"]?.stringValue?.trim() ?? "";
-		return key ? [{ key, label: e?.["label"]?.stringValue || key, secret: e?.["secret"]?.boolValue ?? true }] : [];
-	});
 	return {
 		service: str(fields, "service"),
 		label: str(fields, "name") || str(fields, "service"),
 		note: str(fields, "description"),
 		loginUrl: str(fields, "login_url").trim(),
 		sessionCookie: host && name ? { host, name } : undefined,
-		passwordFields,
+		passwordFields: keyFieldNames(fields).map((key) => ({ key, label: key, secret: true })),
 	};
 }
 
-/** A credential that still has no recipe of its own (made before recipes lived on objects). */
+/** A credential that still has no recipe of its own: nothing says how it signs in. */
 export function recipeMissing(fields: Record<string, ValueJSON>): boolean {
-	return !fields["login_url"] && !fields["key_fields"] && !fields["session_cookie"];
+	return !fields["login_url"] && !fields["session_cookie"] && keyFieldNames(fields).length === 0;
 }
 
-/** A seed as the plain recipe fields a Credential or template carries. */
+/** A seed as the plain fields a Credential template carries: its recipe, and each key empty. */
 export function seedRecipeFields(seed: CredentialSeed): Record<string, ValueJSON> {
 	const out: Record<string, ValueJSON> = {
 		service: { stringValue: seed.key },
 		description: { stringValue: seed.note },
-		key_fields: {
-			valuesValue: {
-				items: (seed.passwordFields ?? []).map((f) => ({
-					mapValue: { entries: { key: { stringValue: f.key }, label: { stringValue: f.label }, secret: { boolValue: f.secret } } },
-				})),
-			},
-		},
 	};
 	if (seed.loginUrl) out.login_url = { stringValue: seed.loginUrl };
 	if (seed.sessionCookie) {
 		out.session_host = { stringValue: seed.sessionCookie.host };
 		out.session_cookie = { stringValue: seed.sessionCookie.name };
 	}
+	for (const f of seed.passwordFields ?? []) out[`${KEY_PREFIX}${f.key}`] = { stringValue: "" };
 	return out;
 }
 
-export const RECIPE_KEYS = ["service", "description", "login_url", "session_host", "session_cookie", "key_fields"] as const;
+export const RECIPE_KEYS = ["service", "description", "login_url", "session_host", "session_cookie"] as const;
 
-/** A fingerprint of the recipe fields, so a template nobody edited can be told apart from one someone did. */
-export function recipeHash(fields: Record<string, ValueJSON>): string {
-	return Bun.hash(JSON.stringify(RECIPE_KEYS.map((k) => fields[k] ?? null))).toString(16);
+/** The recipe's field keys on this object: the fixed ones plus its key fields. */
+export function recipeFieldKeys(fields: Record<string, ValueJSON>): string[] {
+	return [...RECIPE_KEYS, ...keyFieldNames(fields).map((k) => `${KEY_PREFIX}${k}`)];
 }
 
-/** A credential's pasted keys, when every field its service asks for is filled. */
+/**
+ * A fingerprint of the recipe, so a template nobody edited can be told apart
+ * from one someone did. Key fields count by name only - a value typed into a
+ * key never makes a template look edited.
+ */
+export function recipeHash(fields: Record<string, ValueJSON>): string {
+	return Bun.hash(JSON.stringify([RECIPE_KEYS.map((k) => fields[k] ?? null), keyFieldNames(fields).sort()])).toString(16);
+}
+
+/** A credential's pasted keys, when it lists some and every one is filled. */
 export function credentialKeys(fields: Record<string, ValueJSON>): Record<string, string> | null {
-	const specs = recipeOf(fields).passwordFields;
-	if (specs.length === 0) return null;
-	try {
-		const parsed = JSON.parse(str(fields, "secret") || "{}") as Record<string, unknown>;
-		const out: Record<string, string> = {};
-		for (const spec of specs) {
-			const v = parsed[spec.key];
-			if (typeof v !== "string" || !v.trim()) return null;
-			out[spec.key] = v.trim();
-		}
-		return out;
-	} catch {
-		return null;
+	const names = keyFieldNames(fields);
+	if (names.length === 0) return null;
+	const out: Record<string, string> = {};
+	for (const name of names) {
+		const v = str(fields, `${KEY_PREFIX}${name}`).trim();
+		if (!v) return null;
+		out[name] = v;
 	}
+	return out;
+}
+
+/** The properties a credential's fields are shown and edited through, seeded in every space. */
+export const CREDENTIAL_PROPERTIES: Array<{ key: string; name: string; format: string; emoji: string }> = [
+	{ key: "account", name: "Account", format: "shorttext", emoji: "🪪" },
+	{ key: "service", name: "Service", format: "shorttext", emoji: "🧩" },
+	{ key: "login_url", name: "Login page", format: "url", emoji: "🔗" },
+	{ key: "session_host", name: "Signed-in host", format: "shorttext", emoji: "🌐" },
+	{ key: "session_cookie", name: "Signed-in cookie", format: "shorttext", emoji: "🍪" },
+	// One per distinct seed key; the first seed's label names it ("API key").
+	...CREDENTIAL_SEEDS.flatMap((s) => s.passwordFields ?? [])
+		.filter((f, i, all) => all.findIndex((g) => g.key === f.key) === i)
+		.map((f) => ({ key: `${KEY_PREFIX}${f.key}`, name: f.label, format: "shorttext", emoji: "🔑" })),
+];
+
+/** Keys as the pre-property shapes stored them (camelCase JSON in `secret`), as key field names. */
+export function legacyKeyName(key: string): string {
+	return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 }
 
 /** A credential's browser session cookies, or [] when it has none. */

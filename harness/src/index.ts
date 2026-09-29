@@ -16,7 +16,7 @@ import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./credential-objects";
-import { seedCredentials } from "./credential-seeds";
+import { fillCredential, seedCredentials } from "./credential-seeds";
 import { capabilities, convergeCatalogScope, publishCapabilityObjects, publishInstallationState } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tools";
 import { startAuthServer } from "./authserver";
@@ -758,7 +758,10 @@ async function serve(): Promise<void> {
 			void armScheduler();
 		}
 		if (obj.typeKey === CREDENTIAL_TYPE) {
-			void refreshCredentials().catch((error) => console.error("[harness] credential refresh:", error));
+			// Service just set on a blank credential: take its template, then check it.
+			void fillCredential(obj)
+				.then(() => refreshCredentials())
+				.catch((error) => console.error("[harness] credential refresh:", error));
 			return;
 		}
 		if (obj.typeKey === "agent") return; // other agents' brains

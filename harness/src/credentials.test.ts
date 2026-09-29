@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ValueJSON } from "./api";
-import { credentialKeys, recipeHash, recipeMissing, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
+import { credentialKeys, legacyKeyName, recipeHash, recipeMissing, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
 import type { SessionCookie } from "./browser";
 
 const cookie = (name: string, domain: string, expires = Date.now() / 1000 + 3600): SessionCookie => ({ name, value: "v", domain, path: "/", expires, httpOnly: true, secure: true });
@@ -27,24 +27,31 @@ test("a browser sign-in needs both the host and the cookie name", () => {
 	expect(recipeOf({ session_host: { stringValue: " a.test " }, session_cookie: { stringValue: "sid" } }).sessionCookie).toEqual({ host: "a.test", name: "sid" });
 });
 
-test("keys count only when every key field the credential lists is filled", () => {
-	const fields = (secret: string) => ({ ...seeded("x"), secret: { stringValue: secret } });
-	expect(credentialKeys(fields(JSON.stringify({ apiKey: "a", apiSecret: "b", accessToken: "c" })))).toBeNull();
-	expect(credentialKeys(fields(JSON.stringify({ apiKey: "a", apiSecret: "b", accessToken: "c", accessTokenSecret: " " })))).toBeNull();
-	expect(credentialKeys(fields("not json"))).toBeNull();
-	expect(credentialKeys(fields(JSON.stringify({ apiKey: " a ", apiSecret: "b", accessToken: "c", accessTokenSecret: "d" })))).toEqual({ apiKey: "a", apiSecret: "b", accessToken: "c", accessTokenSecret: "d" });
-	// A credential without key fields has no keys, whatever `secret` holds.
-	expect(credentialKeys({ ...seeded("linkedin"), secret: { stringValue: JSON.stringify({ apiKey: "a" }) } })).toBeNull();
+test("keys count only when every key field the credential carries is filled", () => {
+	const x = (keys: Record<string, string>) => ({ ...seeded("x"), ...Object.fromEntries(Object.entries(keys).map(([k, v]) => [`key_${k}`, { stringValue: v }])) });
+	// Seeded empty: nothing to use yet.
+	expect(credentialKeys(seeded("x"))).toBeNull();
+	expect(credentialKeys(x({ api_key: "a", api_secret: "b", access_token: "c" }))).toBeNull();
+	expect(credentialKeys(x({ api_key: "a", api_secret: "b", access_token: "c", access_token_secret: " " }))).toBeNull();
+	expect(credentialKeys(x({ api_key: " a ", api_secret: "b", access_token: "c", access_token_secret: "d" }))).toEqual({ api_key: "a", api_secret: "b", access_token: "c", access_token_secret: "d" });
+	// A browser-only credential has no keys at all.
+	expect(credentialKeys(seeded("linkedin"))).toBeNull();
+	// A property someone added named "Key: App ID" is a key like any other.
+	expect(credentialKeys({ ...seeded("discord-bot"), key_token: { stringValue: "t" }, key_app_id: { stringValue: "" } })).toBeNull();
+	expect(credentialKeys({ ...seeded("discord-bot"), key_token: { stringValue: "t" }, key_app_id: { stringValue: "42" } })).toEqual({ token: "t", app_id: "42" });
+	// The pre-property key list shares the prefix but is not a key.
+	const legacyList = { valuesValue: { items: [{ mapValue: { entries: { key: { stringValue: "token" } } } }] } };
+	expect(credentialKeys({ ...seeded("discord-bot"), key_token: { stringValue: "t" }, key_fields: legacyList })).toEqual({ token: "t" });
 });
 
-test("a seed's recipe survives the trip through fields, secret flags included", () => {
+test("a seed's recipe survives the trip through fields", () => {
 	const x = recipe("x");
 	expect(x.service).toBe("x");
 	expect(x.loginUrl).toBe("https://x.com/login");
-	expect(x.passwordFields.filter((f) => f.secret).map((f) => f.key)).toEqual(["apiSecret", "accessTokenSecret"]);
-	expect(recipe("discord-bot").passwordFields).toEqual([{ key: "token", label: "Bot token", secret: true }]);
-	// A key field with no stated secret flag is treated as secret.
-	expect(recipeOf({ key_fields: { valuesValue: { items: [{ mapValue: { entries: { key: { stringValue: "k" } } } }] } } }).passwordFields).toEqual([{ key: "k", label: "k", secret: true }]);
+	expect(x.passwordFields.map((f) => f.key)).toEqual(["api_key", "api_secret", "access_token", "access_token_secret"]);
+	expect(recipe("discord-bot").passwordFields.map((f) => f.key)).toEqual(["token"]);
+	// Keys stored before they were properties map onto the property names.
+	expect(["apiKey", "accessTokenSecret", "token"].map(legacyKeyName)).toEqual(["api_key", "access_token_secret", "token"]);
 });
 
 test("recipe fingerprint tracks only the recipe", () => {

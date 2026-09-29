@@ -190,23 +190,31 @@ approves them (they never run on receipt).
 
 ### Credentials
 
-A **Credential** (`credential` object) is one login, and it describes itself -
-no service catalog in code decides how it signs in. Its recipe is plain fields:
-`service` (a stable key; bespoke code such as the Discord bot poller and the
-Anthropic/Kimi model calls finds its credential by it), `description`,
-`login_url`, `session_host` + `session_cookie` (the cookie that proves a real
-sign-in), and `key_fields` (`[{key, label, secret}]`, the keys a person pastes).
-A new browser login is a new credential with those fields filled in - no code.
-The presets (X, Matcherino, LinkedIn, Discord bot, Anthropic, Kimi) are
-Credential **templates** the harness seeds once per space
-(`harness/src/credential-seeds.ts`); like system prompts, a seed only upgrades
-a template nobody edited.
+A **Credential** (`credential` object) is one login, and it describes itself
+entirely through properties - its page is an ordinary page, and nothing in
+code decides how it signs in. The harness seeds these as ordinary properties
+in every space (`harness/src/credential-seeds.ts`): Account, **Service** (a
+stable key; bespoke code such as the Discord bot poller and the Anthropic/Kimi
+model calls finds its credential by it), Login page (`login_url`), Signed-in
+host + Signed-in cookie (`session_host`, `session_cookie`: the cookie that
+proves a real sign-in), and one property per pasted key - any field named
+`key_<name>` (`key_token` "Bot token", `key_api_key` "API key"...). A property
+you add named "Key: App ID" (`key_app_id`) is a key too. Status, Error and
+Served by are the built-in properties; the Status popover carries Connect /
+Check now / Disconnect.
 
-It carries its secret as properties too: pasted keys in `secret` (JSON keyed by
-`key_fields`), a browser sign-in's cookies in `session` (JSON). Because the
-object syncs, an agent on any computer can use a credential it lists in its
-`credentials` property - and **everyone in the credential's space can read the
-secret**.
+The presets (X, Matcherino, LinkedIn, Discord bot, Anthropic, Kimi) are
+Credential **templates** seeded once per space; like system prompts, a seed
+only upgrades a template nobody edited. Setting Service on a credential that
+says nothing yet about signing in copies that service's template onto it
+(including its empty key properties). A new browser login is a new credential
+with Login page and the signed-in cookie filled in - no code.
+
+Because the object syncs, an agent on any computer can use a credential it
+lists in its `credentials` property - and **everyone in the credential's space
+can read its keys** (and `session`, a browser sign-in's cookies as JSON).
+Credentials made before keys were properties still carry `key_fields` and
+`secret` for computers on the previous harness; new code reads only `key_*`.
 
 `served_by` names the computer that looks after it. That computer's harness
 opens the headed sign-in window (`POST /credentials/connect {id}` on :7334),
@@ -215,7 +223,7 @@ and keeps `status` (`missing` | `connecting` | `active` | `needs_auth` |
 `broken`), `auth`, `error` and `checked_at` true - at boot, on every change,
 and every 5 minutes. `/credentials/check` and `/credentials/disconnect` do the
 rest; another computer gets a 409 naming the one in charge. Keys need no
-computer: the app writes them to `secret` and the computer marks it active.
+computer: you type them into their key properties and the computer marks it active.
 
 Agents use browser credentials through `credential_fetch` (read a page) and
 `credential_action` (act), which inject the cookies into a throwaway headless

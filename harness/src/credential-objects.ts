@@ -16,7 +16,7 @@ import { hostname } from "node:os";
 import { createObject, deleteField, fetchObject, mutate, queryAll, setField, str, sv, iv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { linkTarget, linkValue } from "./capabilities";
 import { openLoginWindow, profileCookies, type LoginWindow, type SessionCookie } from "./browser";
-import { credentialKeys, credentialSession, dropLegacySecrets, legacyKeys, legacyProfileDir, legacyProfileExists, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
+import { KEY_PREFIX, credentialKeys, credentialSession, dropLegacySecrets, legacyKeyName, legacyKeys, legacyProfileDir, legacyProfileExists, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
 import { fetchInstallations } from "./descriptors";
 import { machines } from "./machine";
 import { machineId } from "./roster";
@@ -50,7 +50,7 @@ export function localCredentials(): CredentialRow[] {
  * or link; the app's object picker can write a link (or one-item list) to
  * the machine OBJECT - that maps to its machine_id.
  */
-async function pinOf(fields: Record<string, ValueJSON>): Promise<string> {
+export async function pinOf(fields: Record<string, ValueJSON>): Promise<string> {
 	const v = fields["served_by"];
 	const raw = linkTarget(fields, "served_by") || v?.valuesValue?.items?.[0]?.linkValue?.targetId || v?.valuesValue?.items?.[0]?.stringValue || "";
 	if (!raw) return "";
@@ -227,7 +227,7 @@ export async function agentModelKey(agent: ObjectJSON, provider: string): Promis
 	for (const id of agentCredentialIds(agent)) {
 		const row = await credentialObject(id).catch(() => null);
 		if (row?.service !== provider) continue;
-		const key = credentialKeys(row.fields)?.apiKey;
+		const key = credentialKeys(row.fields)?.api_key;
 		if (key) return key;
 	}
 	return null;
@@ -286,7 +286,7 @@ export async function migrateLoginInstalls(): Promise<{ credentials: number; van
 			...(row.account ? { account: sv(row.account) } : {}),
 			served_by: sv(me),
 			...(session.length ? { session: sv(JSON.stringify(session)) } : {}),
-			...(keys ? { secret: sv(JSON.stringify(keys)) } : {}),
+			...Object.fromEntries(Object.entries(keys ?? {}).map(([k, v]) => [`${KEY_PREFIX}${legacyKeyName(k)}`, sv(v)])),
 			status: sv("active"),
 			auth: sv(session.length ? "browser_profile" : "api_key"),
 			...(row.channel ? { channel: sv(row.channel) } : {}),
