@@ -16,6 +16,7 @@ import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./credential-objects";
+import { seedCredentials } from "./credential-seeds";
 import { capabilities, convergeCatalogScope, publishCapabilityObjects, publishInstallationState } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tools";
 import { startAuthServer } from "./authserver";
@@ -266,6 +267,9 @@ async function serve(): Promise<void> {
 	// Service logins are Credential objects: move this machine's old login
 	// rows over once, then check the credentials this machine looks after.
 	console.log("[harness] login migration:", JSON.stringify(await migrateLoginInstalls()));
+	// Service presets become Credential templates, and credentials carry their
+	// own recipe - before the check below reads those recipes.
+	console.log("[harness] credential seeds:", JSON.stringify(await seedCredentials()));
 	await refreshCredentials();
 	// What this machine can DO, as one capability object per (skill/login ×
 	// this machine) linking its install row - after the installs exist, so

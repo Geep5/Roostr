@@ -12,7 +12,6 @@ import { agentTurnStatus } from "./index";
 import { readRoster } from "./roster";
 import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, finishCapabilityLogin, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
-import { CREDENTIALS } from "./credentials";
 import { CredentialError, checkCredential, connectCredential, disconnectCredential, type CredentialRow } from "./credential-objects";
 import { ensureBlob, blobDir, mimeOf, storeUpload } from "./files";
 import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
@@ -148,9 +147,6 @@ export function startAuthServer(served: Set<string>): void {
 					} catch (error) {
 						return json({ error: error instanceof Error ? error.message : "Capability approval failed." }, 400);
 					}
-				}
-				if (req.method === "GET" && url.pathname === "/credentials/services") {
-					return json({ services: CREDENTIALS.map((c) => ({ key: c.key, label: c.label, note: c.note, ...(c.loginUrl ? { loginUrl: c.loginUrl } : {}), ...(c.passwordFields ? { fields: c.passwordFields } : {}) })) });
 				}
 				// Only the computer a credential's Served by names opens its sign-in
 				// window and writes its status; anyone else gets a 409 naming that computer.

@@ -3,8 +3,8 @@
  *
  * Two kinds of row, and the split is the design (`docs/descriptors.md`):
  *
- *  - a **descriptor** says what a thing IS - an X login needs four fields,
- *    two of them secret, and authenticates by browser profile or API key.
+ *  - a **descriptor** says what a thing IS - a skill needs these inputs and
+ *    checks itself this way; an agent kind starts with this prompt.
  *    It is machine-authored and versioned, so it travels as protobuf bytes in
  *    a block: a client older than the descriptor renders what it understands
  *    and hands the rest back untouched.
@@ -13,10 +13,10 @@
  *    `error` lands on the bundled Error property and every view, sort and
  *    badge already works on it.
  *
- * The catalogs (`CATALOG`, `CREDENTIALS`) stop being the runtime source of
- * truth and become the seed, exactly how `BUNDLED_TYPES` seeds types. That
- * kills the hand-copy the website admits to keeping in
- * `src/lib/serving.ts` ("Mirrors the harness catalogs …").
+ * The catalogs (`CATALOG`, `PROMPT_SEEDS`) stop being the runtime source of
+ * truth and become the seed, exactly how `BUNDLED_TYPES` seeds types. Logins
+ * have no descriptor: a Credential object carries its own sign-in recipe
+ * (credentials.ts), seeded from Credential templates.
  *
  * No secret value can appear here. `FieldSpec.secret` says a value exists;
  * a login's value rides on its Credential object, a skill's in a `gws`
@@ -24,7 +24,6 @@
  */
 
 import { API, apiFetch, createObject, fetchObject, mutate, queryAll, str, sv, iv, type ValueJSON } from "./api";
-import { CREDENTIALS } from "./credentials";
 import { CATALOG } from "./skillmgr";
 import { PROMPT_SEEDS, type AgentKindEntry } from "./prompts";
 import { machineId } from "./roster";
@@ -112,33 +111,6 @@ function skillDescriptor(entry: (typeof CATALOG)[number], author: string): Descr
 	};
 }
 
-/** Credential entry -> descriptor card. */
-function credentialDescriptor(entry: (typeof CREDENTIALS)[number], author: string): DescriptorJSON {
-	const auths: AuthMethod[] = [];
-	if (entry.loginUrl) auths.push("browser_profile");
-	if (entry.passwordFields?.length) auths.push("api_key");
-	if (auths.length === 0) auths.push("none");
-	return {
-		key: entry.key,
-		name: entry.label,
-		description: entry.note,
-		kind: "integration",
-		fields: (entry.passwordFields ?? []).map((f) => ({
-			key: f.key,
-			label: f.label,
-			secret: f.secret,
-			// A secret field is a password box; everything else is text. The
-			// client needs no table of its own to draw the form.
-			format: f.secret ? "password" : "text",
-			note: "",
-		})),
-		auths,
-		install: { prompt: "", uninstallPrompt: "", docsUrl: entry.loginUrl ?? "" },
-		version: DESCRIPTOR_VERSION,
-		author,
-	};
-}
-
 /** Agent kind -> descriptor card: the setup form is its non-secret fields; requirements are other cards' keys. */
 function agentDescriptor(entry: AgentKindEntry, author: string): DescriptorJSON {
 	return {
@@ -157,7 +129,6 @@ function agentDescriptor(entry: AgentKindEntry, author: string): DescriptorJSON 
 export function catalogDescriptors(author: string): DescriptorJSON[] {
 	return [
 		...CATALOG.map((c) => skillDescriptor(c, author)),
-		...CREDENTIALS.map((c) => credentialDescriptor(c, author)),
 		...PROMPT_SEEDS.map((c) => agentDescriptor(c, author)),
 	];
 }
@@ -189,7 +160,7 @@ async function cardBlock(objectId: string): Promise<{ id: string; bytes: string 
  * the form without its own protobuf reader. The row's fields stay as the
  * cheap projection lists and queries need.
  */
-export async function publishDescriptors(author?: string): Promise<{ created: number; updated: number }> {
+export async function publishDescriptors(author?: string): Promise<{ created: number; updated: number; retired: number }> {
 	const writer = author ?? (await vaultAuthorId());
 	const existing = await descriptorRows();
 	let created = 0;
@@ -234,7 +205,16 @@ export async function publishDescriptors(author?: string): Promise<{ created: nu
 		await mutate("set_field", { object_id: hit.id, key: "version", value: sv(descriptor.version) });
 		updated += 1;
 	}
-	return { created, updated };
+	// Logins are Credential objects that carry their own recipe; the
+	// integration cards that once described them in code are retired
+	// (every copy - each computer published its own).
+	let retired = 0;
+	for (const r of await queryAll({ type: DESCRIPTOR_TYPE })) {
+		if (str(r.fields, "kind") !== "integration") continue;
+		await mutate("delete", { object_id: r.id });
+		retired += 1;
+	}
+	return { created, updated, retired };
 }
 
 export interface InstallationRow {

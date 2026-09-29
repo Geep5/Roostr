@@ -1,15 +1,23 @@
 /**
- * Credentials: the catalog of services a Credential object can be for,
- * and reading the secret a Credential carries.
+ * Credentials: the sign-in recipe a Credential object carries, the seeds
+ * that start them, and reading the secret it holds.
  *
  * A Credential (typeKey `credential`, credential-objects.ts) is a synced
- * object and carries its secret in properties, so an agent on ANY computer
- * can use it:
+ * object that describes itself, so an agent on ANY computer can use it and
+ * a new login needs no code:
  *
- * - `secret`: the pasted keys (API keys, a bot token) as a JSON object.
+ * - recipe (plain fields): `service` (stable key bespoke code looks up -
+ *   discord-bot, anthropic, kimi), `description`, `login_url`,
+ *   `session_host` + `session_cookie` (the cookie that proves a sign-in),
+ *   `key_fields` (the keys a person pastes: [{key, label, secret}]).
+ * - `secret`: the pasted keys as a JSON object keyed by `key_fields`.
  * - `session`: a browser sign-in's cookies as a JSON array. The computer in
  *   `served_by` opens the headed sign-in window and exports them; every
  *   later action injects them into a throwaway headless Chrome (browser.ts).
+ *
+ * CREDENTIAL_SEEDS only start things: the harness seeds one Credential
+ * template per seed per space (credential-seeds.ts) and never overwrites a
+ * template someone edited. What runs is what the object says.
  *
  * Everyone in the credential's space can read these properties.
  */
@@ -25,7 +33,8 @@ export interface PasswordField {
 	secret: boolean;
 }
 
-export interface CredentialEntry {
+/** A service preset: seeds a Credential template; never read at run time. */
+export interface CredentialSeed {
 	key: string;
 	label: string;
 	/** Shown on the Credential page so the person picks the right path. */
@@ -43,7 +52,7 @@ export interface CredentialEntry {
 	passwordFields?: PasswordField[];
 }
 
-export const CREDENTIALS: CredentialEntry[] = [
+export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 	{
 		key: "x",
 		label: "X (Twitter)",
@@ -93,14 +102,76 @@ export const CREDENTIALS: CredentialEntry[] = [
 	},
 ];
 
-export function serviceEntry(service: string): CredentialEntry | undefined {
-	return CREDENTIALS.find((c) => c.key === service);
+export function seedFor(service: string): CredentialSeed | undefined {
+	return CREDENTIAL_SEEDS.find((c) => c.key === service);
+}
+
+/** How a credential signs in, read from its own fields. */
+export interface Recipe {
+	service: string;
+	label: string;
+	note: string;
+	loginUrl: string;
+	/** Present only when a browser sign-in can prove itself (host and cookie name both set). */
+	sessionCookie?: { host: string; name: string };
+	passwordFields: PasswordField[];
+}
+
+export function recipeOf(fields: Record<string, ValueJSON>): Recipe {
+	const host = str(fields, "session_host").trim();
+	const name = str(fields, "session_cookie").trim();
+	const passwordFields = (fields["key_fields"]?.valuesValue?.items ?? []).flatMap((i) => {
+		const e = i.mapValue?.entries;
+		const key = e?.["key"]?.stringValue?.trim() ?? "";
+		return key ? [{ key, label: e?.["label"]?.stringValue || key, secret: e?.["secret"]?.boolValue ?? true }] : [];
+	});
+	return {
+		service: str(fields, "service"),
+		label: str(fields, "name") || str(fields, "service"),
+		note: str(fields, "description"),
+		loginUrl: str(fields, "login_url").trim(),
+		sessionCookie: host && name ? { host, name } : undefined,
+		passwordFields,
+	};
+}
+
+/** A credential that still has no recipe of its own (made before recipes lived on objects). */
+export function recipeMissing(fields: Record<string, ValueJSON>): boolean {
+	return !fields["login_url"] && !fields["key_fields"] && !fields["session_cookie"];
+}
+
+/** A seed as the plain recipe fields a Credential or template carries. */
+export function seedRecipeFields(seed: CredentialSeed): Record<string, ValueJSON> {
+	const out: Record<string, ValueJSON> = {
+		service: { stringValue: seed.key },
+		description: { stringValue: seed.note },
+		key_fields: {
+			valuesValue: {
+				items: (seed.passwordFields ?? []).map((f) => ({
+					mapValue: { entries: { key: { stringValue: f.key }, label: { stringValue: f.label }, secret: { boolValue: f.secret } } },
+				})),
+			},
+		},
+	};
+	if (seed.loginUrl) out.login_url = { stringValue: seed.loginUrl };
+	if (seed.sessionCookie) {
+		out.session_host = { stringValue: seed.sessionCookie.host };
+		out.session_cookie = { stringValue: seed.sessionCookie.name };
+	}
+	return out;
+}
+
+export const RECIPE_KEYS = ["service", "description", "login_url", "session_host", "session_cookie", "key_fields"] as const;
+
+/** A fingerprint of the recipe fields, so a template nobody edited can be told apart from one someone did. */
+export function recipeHash(fields: Record<string, ValueJSON>): string {
+	return Bun.hash(JSON.stringify(RECIPE_KEYS.map((k) => fields[k] ?? null))).toString(16);
 }
 
 /** A credential's pasted keys, when every field its service asks for is filled. */
 export function credentialKeys(fields: Record<string, ValueJSON>): Record<string, string> | null {
-	const specs = serviceEntry(str(fields, "service"))?.passwordFields;
-	if (!specs) return null;
+	const specs = recipeOf(fields).passwordFields;
+	if (specs.length === 0) return null;
 	try {
 		const parsed = JSON.parse(str(fields, "secret") || "{}") as Record<string, unknown>;
 		const out: Record<string, string> = {};
@@ -130,16 +201,16 @@ export function credentialSession(fields: Record<string, ValueJSON>): SessionCoo
  * cookies (x.com's gt, linkedin's li_rm) appear on first load, so only the
  * service's session cookie counts.
  */
-export function sessionSignedIn(cookies: SessionCookie[], service: string): boolean {
-	const want = serviceEntry(service)?.sessionCookie;
+export function sessionSignedIn(cookies: SessionCookie[], recipe: Recipe): boolean {
+	const want = recipe.sessionCookie;
 	if (!want) return false;
 	const now = Date.now() / 1000;
 	return cookies.some((c) => c.name === want.name && c.domain.replace(/^\./, "").endsWith(want.host.replace(/^www\./, "")) && (c.expires <= 0 || c.expires > now));
 }
 
 /** The cookies worth keeping from a sign-in window: the service's own domain. */
-export function serviceCookies(cookies: SessionCookie[], service: string): SessionCookie[] {
-	const host = serviceEntry(service)?.sessionCookie?.host.replace(/^www\./, "");
+export function serviceCookies(cookies: SessionCookie[], recipe: Recipe): SessionCookie[] {
+	const host = recipe.sessionCookie?.host.replace(/^www\./, "");
 	return host ? cookies.filter((c) => c.domain.replace(/^\./, "").endsWith(host)) : [];
 }
 

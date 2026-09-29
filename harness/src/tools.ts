@@ -31,7 +31,6 @@ import { invalidateServing, machines, serverOf } from "./machine";
 import { machineId } from "./roster";
 import { CATALOG, fileHoldup, skillReady } from "./skillmgr";
 import { myInstallations, type InstallationRow } from "./descriptors";
-import { CREDENTIALS } from "./credentials";
 import { agentCredential } from "./credential-objects";
 import { clickThenReadJs, credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
 import { blockLine, isAgentAuthor } from "./surfaces";
@@ -539,7 +538,7 @@ const WEB_TOOLS: RegisteredTool[] = [
 			input_schema: {
 				type: "object",
 				properties: {
-					service: { type: "string", enum: CREDENTIALS.filter((c) => c.loginUrl).map((c) => c.key), description: "the service of the credential to sign in with" },
+					service: { type: "string", description: "the `service` of one of your credentials (see Your credentials) that signs in with a browser" },
 					url: { type: "string", description: "absolute http(s) URL" },
 					click: { type: "array", items: { type: "string" }, description: "controls to click first, in order: a selector from a previous reply's controls list, or the control's visible text / label" },
 				},

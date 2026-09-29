@@ -190,11 +190,21 @@ approves them (they never run on receipt).
 
 ### Credentials
 
-A **Credential** (`credential` object) is one login for one service (`x`,
-`matcherino`, `linkedin`, `discord-bot`; the catalog is `CREDENTIALS` in
-`harness/src/credentials.ts`). It carries its secret as properties: pasted keys
-in `secret` (JSON), a browser sign-in's cookies in `session` (JSON). Because
-the object syncs, an agent on any computer can use a credential it lists in its
+A **Credential** (`credential` object) is one login, and it describes itself -
+no service catalog in code decides how it signs in. Its recipe is plain fields:
+`service` (a stable key; bespoke code such as the Discord bot poller and the
+Anthropic/Kimi model calls finds its credential by it), `description`,
+`login_url`, `session_host` + `session_cookie` (the cookie that proves a real
+sign-in), and `key_fields` (`[{key, label, secret}]`, the keys a person pastes).
+A new browser login is a new credential with those fields filled in - no code.
+The presets (X, Matcherino, LinkedIn, Discord bot, Anthropic, Kimi) are
+Credential **templates** the harness seeds once per space
+(`harness/src/credential-seeds.ts`); like system prompts, a seed only upgrades
+a template nobody edited.
+
+It carries its secret as properties too: pasted keys in `secret` (JSON keyed by
+`key_fields`), a browser sign-in's cookies in `session` (JSON). Because the
+object syncs, an agent on any computer can use a credential it lists in its
 `credentials` property - and **everyone in the credential's space can read the
 secret**.
 

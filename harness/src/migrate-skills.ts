@@ -19,7 +19,7 @@
 import { deleteField, queryAll, setField, str, type QueryRow, type ValueJSON } from "./api";
 import { CAPABILITY_TYPE, linkTarget, linkValue } from "./capabilities";
 import { localCredentials } from "./credential-objects";
-import { CREDENTIALS } from "./credentials";
+import { seedFor } from "./credentials";
 import { promptTarget, SYSTEM_PROMPT_TYPE } from "./prompts";
 import { machineId } from "./roster";
 import { SKILL_TYPE, SKILLS_KEY, skillIds } from "./skills";
@@ -42,7 +42,7 @@ export async function migrateSkills(): Promise<{ objects: number; agents: number
 		const ids: string[] = [];
 		const logins: string[] = [];
 		for (const key of keys) {
-			if (CREDENTIALS.some((c) => c.key === key)) logins.push(key);
+			if (seedFor(key)) logins.push(key);
 			else if (skillByKey.has(key)) ids.push(skillByKey.get(key)!);
 			else unresolved.push(key);
 		}

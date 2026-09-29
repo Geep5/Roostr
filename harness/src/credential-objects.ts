@@ -16,7 +16,7 @@ import { hostname } from "node:os";
 import { createObject, deleteField, fetchObject, mutate, queryAll, setField, str, sv, iv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { linkTarget, linkValue } from "./capabilities";
 import { openLoginWindow, profileCookies, type LoginWindow, type SessionCookie } from "./browser";
-import { CREDENTIALS, credentialKeys, credentialSession, dropLegacySecrets, legacyKeys, legacyProfileDir, legacyProfileExists, serviceCookies, serviceEntry, sessionSignedIn } from "./credentials";
+import { credentialKeys, credentialSession, dropLegacySecrets, legacyKeys, legacyProfileDir, legacyProfileExists, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
 import { fetchInstallations } from "./descriptors";
 import { machines } from "./machine";
 import { machineId } from "./roster";
@@ -76,14 +76,17 @@ const windows = new Map<string, LoginWindow>();
 
 /** What is true for a credential right now, from what it carries. */
 function liveState(row: CredentialRow): { status: CredentialStatus; auth: CredentialRow["auth"]; error: string } {
-	const entry = serviceEntry(row.service);
-	if (!entry) return { status: "broken", auth: "", error: row.service ? `Unknown service "${row.service}".` : "Pick a service for this credential." };
+	const recipe = recipeOf(row.fields);
+	const label = recipe.label || "this service";
+	if (!recipe.sessionCookie && recipe.passwordFields.length === 0) {
+		return { status: "broken", auth: "", error: "Say how this credential signs in: a login page and signed-in cookie, or the keys to paste (or start from a template)." };
+	}
 	const session = credentialSession(row.fields);
-	if (sessionSignedIn(session, row.service)) return { status: "active", auth: "browser_profile", error: "" };
+	if (sessionSignedIn(session, recipe)) return { status: "active", auth: "browser_profile", error: "" };
 	if (credentialKeys(row.fields)) return { status: "active", auth: "api_key", error: "" };
-	if (windows.has(row.id)) return { status: "connecting", auth: "", error: `Finish signing in to ${entry.label} in the Chrome window on ${hostname()}.` };
+	if (windows.has(row.id)) return { status: "connecting", auth: "", error: `Finish signing in to ${label} in the Chrome window on ${hostname()}.` };
 	// It carried a login and the login is gone (expired, signed out): say so, rather than looking never-connected.
-	if (session.length > 0 || row.status === "active" || row.status === "needs_auth") return { status: "needs_auth", auth: "", error: `The ${entry.label} sign-in expired or was signed out - press Reconnect.` };
+	if (session.length > 0 || row.status === "active" || row.status === "needs_auth") return { status: "needs_auth", auth: "", error: `The ${label} sign-in expired or was signed out - press Reconnect.` };
 	return { status: "missing", auth: "", error: "" };
 }
 
@@ -146,12 +149,12 @@ async function keptHere(id: string): Promise<CredentialRow> {
  */
 export async function connectCredential(id: string): Promise<CredentialRow> {
 	const row = await keptHere(id);
-	const entry = serviceEntry(row.service);
-	if (!entry?.loginUrl || !entry.sessionCookie) throw new CredentialError(400, `${entry?.label ?? "This service"} connects with pasted keys, not a sign-in window.`);
+	const recipe = recipeOf(row.fields);
+	if (!recipe.loginUrl || !recipe.sessionCookie) throw new CredentialError(400, `${recipe.label || "This credential"} has no login page and signed-in cookie - it connects with pasted keys.`);
 	if (windows.has(row.id)) throw new CredentialError(409, "A sign-in window for this credential is already open on this computer.");
 	let win: LoginWindow;
 	try {
-		win = openLoginWindow(entry.loginUrl);
+		win = openLoginWindow(recipe.loginUrl);
 	} catch (err) {
 		throw new CredentialError(409, err instanceof Error ? err.message : String(err));
 	}
@@ -160,14 +163,14 @@ export async function connectCredential(id: string): Promise<CredentialRow> {
 	const deadline = Date.now() + 15 * 60_000;
 	let closed = false;
 	void win.exited.then(() => (closed = true));
-	const cookie = entry.sessionCookie;
+	const cookie = recipe.sessionCookie;
 	void (async () => {
 		while (!closed && Date.now() < deadline && !win.hasCookie(cookie.host, cookie.name)) await Bun.sleep(2000);
 		// Let the site finish setting its other cookies before closing.
 		if (!closed) await Bun.sleep(3000);
 		try {
-			const cookies = serviceCookies(await win.finish(), row.service);
-			if (windows.get(row.id) === win && sessionSignedIn(cookies, row.service)) await setField(row.id, "session", sv(JSON.stringify(cookies)));
+			const cookies = serviceCookies(await win.finish(), recipe);
+			if (windows.get(row.id) === win && sessionSignedIn(cookies, recipe)) await setField(row.id, "session", sv(JSON.stringify(cookies)));
 		} catch (err) {
 			console.error("[credentials] reading the sign-in window's cookies failed:", err instanceof Error ? err.message : err);
 		}
@@ -207,7 +210,7 @@ export async function agentCredential(agent: ObjectJSON, service: string): Promi
 	if (linked.length === 0) throw new Error("This agent lists no credentials. Add one to its Credentials property.");
 	const rows = await Promise.all(linked.map((id) => credentialObject(id).catch(() => null)));
 	const ofService = rows.filter((r): r is CredentialRow => !!r && r.service === service);
-	if (ofService.length === 0) throw new Error(`None of this agent's credentials is for ${serviceEntry(service)?.label ?? service}.`);
+	if (ofService.length === 0) throw new Error(`None of this agent's credentials is for "${service}".`);
 	const row = ofService.find((r) => r.status === "active") ?? ofService[0];
 	if (row.status !== "active") throw new Error(`Credential "${row.name}" is not connected (${row.status || "missing"}${row.error ? `: ${row.error}` : ""}).`);
 	return { row, cookies: credentialSession(row.fields), keys: credentialKeys(row.fields) };
@@ -252,9 +255,8 @@ export async function credentialsPromptLine(agent: ObjectJSON): Promise<string> 
 	const rows = (await Promise.all(agentCredentialIds(agent).map((id) => credentialObject(id).catch(() => null)))).filter((r): r is CredentialRow => !!r);
 	if (rows.length === 0) return "";
 	const lines = rows.map((c) => {
-		const label = serviceEntry(c.service)?.label ?? c.service;
 		const how = c.status !== "active" ? `not connected (${c.status || "missing"}) - tell the person to connect it` : c.auth === "browser_profile" ? `signed in: credential_fetch reads pages, credential_action acts (service "${c.service}")` : "keys saved";
-		return `- ${c.name || label}${c.account ? ` (${c.account})` : ""} - ${label}: ${how}`;
+		return `- ${c.name || c.service || "Credential"}${c.account ? ` (${c.account})` : ""} - service "${c.service}": ${how}`;
 	});
 	return `Your credentials (browserless/web_fetch are deliberately logged out):\n${lines.join("\n")}`;
 }
@@ -270,16 +272,17 @@ export async function credentialsPromptLine(agent: ObjectJSON): Promise<string> 
  */
 export async function migrateLoginInstalls(): Promise<{ credentials: number; vanished: number }> {
 	const me = await machineId();
-	const rows = (await fetchInstallations()).filter((r) => r.machineId === me && CREDENTIALS.some((c) => c.key === r.key));
+	const rows = (await fetchInstallations()).filter((r) => r.machineId === me && !!seedFor(r.key));
 	let credentials = 0;
 	for (const row of rows) {
-		const entry = serviceEntry(row.key)!;
-		const cookies = legacyProfileExists(row.key) ? serviceCookies(await profileCookies(legacyProfileDir(row.key)).catch(() => []), row.key) : [];
-		const session = sessionSignedIn(cookies, row.key) ? cookies : [];
+		const seed = seedFor(row.key)!;
+		const recipe = recipeOf({ name: sv(seed.label), ...seedRecipeFields(seed) });
+		const cookies = legacyProfileExists(row.key) ? serviceCookies(await profileCookies(legacyProfileDir(row.key)).catch(() => []), recipe) : [];
+		const session = sessionSignedIn(cookies, recipe) ? cookies : [];
 		const keys = legacyKeys(row.key);
 		if (session.length === 0 && !keys) continue;
-		const { id } = await createObject(entry.label, CREDENTIAL_TYPE, {
-			service: sv(row.key),
+		const { id } = await createObject(seed.label, CREDENTIAL_TYPE, {
+			...seedRecipeFields(seed),
 			...(row.account ? { account: sv(row.account) } : {}),
 			served_by: sv(me),
 			...(session.length ? { session: sv(JSON.stringify(session)) } : {}),
