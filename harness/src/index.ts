@@ -668,9 +668,9 @@ async function serve(): Promise<void> {
 	 * this waits for the agent's slot rather than queueing a surface, then
 	 * runs one turn. Not human-rooted: no agent_ask.
 	 */
-	async function driveScheduled(s: Served, systemSuffix: string, requirementsObjectId?: string): Promise<string> {
+	async function driveScheduled(s: Served, systemSuffix: string): Promise<string> {
 		await awaitSlot(s);
-		return withTurn(s, s.conv, () => runTurn(s.agentId, s.conv, { spawn: spawnSubagent, systemSuffix, requirementsObjectId, a2aTurn: true }));
+		return withTurn(s, s.conv, () => runTurn(s.agentId, s.conv, { spawn: spawnSubagent, systemSuffix, a2aTurn: true }));
 	}
 
 	/** Route an SSE object event to the agent whose surface it is. */
@@ -838,10 +838,10 @@ async function serve(): Promise<void> {
 			served.set(agentId, one);
 			return one;
 		},
-		turn(agentId, systemSuffix, requirementsObjectId) {
+		turn(agentId, systemSuffix) {
 			const s = served.get(agentId);
 			if (!s) return Promise.resolve("agent no longer served on this machine");
-			return driveScheduled(s, systemSuffix, requirementsObjectId);
+			return driveScheduled(s, systemSuffix);
 		},
 	});
 

@@ -23,7 +23,6 @@ import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceAt, workspacePromptSection } from "./workspace";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
-import { authContractPrompt, authRequirementsOf, localAuthRegistry, resolveAuthRequirements } from "./authreq";
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
 
 /**
@@ -86,8 +85,6 @@ export interface RunOptions {
 	spawn?: ToolContext["spawn"];
 	submitResult?: (content: string) => void;
 	systemSuffix?: string;
-	/** Scheduled/object work whose requirements are not the object this turn is about. */
-	requirementsObjectId?: string;
 	/** True when this turn answers another agent: agent_ask is withheld. */
 	a2aTurn?: boolean;
 }
@@ -183,7 +180,7 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 		channelId,
 		repo,
 		ws?.path ?? "",
-		opts.requirementsObjectId ?? objectId,
+		objectId,
 	].join("|");
 
 	const hit = slowCache.get(agentId);
@@ -199,18 +196,11 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
 	if (credsLine) parts.push({ label: "Credentials", text: credsLine });
 	parts.push({ label: "Workspace contract", text: WORKSPACE_CONTRACT });
-	const requirementsId = opts.requirementsObjectId ?? objectId;
-	try {
-		const declared = requirementsId ? authRequirementsOf((await fetchObject(requirementsId)).fields) : [];
-		parts.push({ label: "Auth contract", text: authContractPrompt(await localAuthRegistry(), await resolveAuthRequirements(declared)) });
-	} catch (err) {
-		console.error("[harness] auth contract failed:", err instanceof Error ? err.message : err);
-	}
 	try {
 		const elsewhere = await remoteCapabilitiesSection(objectId);
-		if (elsewhere) parts.push({ label: "Capabilities elsewhere", text: elsewhere });
+		if (elsewhere) parts.push({ label: "Skills elsewhere", text: elsewhere });
 	} catch (err) {
-		console.error("[harness] remote capabilities failed:", err instanceof Error ? err.message : err);
+		console.error("[harness] skills elsewhere failed:", err instanceof Error ? err.message : err);
 	}
 	const instructions = await channelInstructions(channelId);
 	if (instructions) parts.push({ label: "Space instructions", text: instructions });

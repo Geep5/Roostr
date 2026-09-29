@@ -20,7 +20,7 @@ const MEMBERSHIP = "space membership and keys stay with people";
 const COVERAGE: Record<string, Coverage> = {
 	// ── Objects ──
 	create: { tools: ["object_create"] },
-	set_field: { tools: ["object_set_field", "object_set_auth"] },
+	set_field: { tools: ["object_set_field"] },
 	delete_field: { tools: ["object_clear_field"] },
 	set_type: { tools: ["object_set_type"] },
 	delete: { tools: ["object_delete"] },

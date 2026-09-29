@@ -68,15 +68,14 @@ The install object carries, per machine:
 | `machine` | → Mac | the link that makes "2 machines have X" a query |
 | `integration` / `skill` | → X (Twitter) | the other half of the link |
 | `auth_method` | `browser_profile` \| `oauth` \| `api_key` | *how*, never the secret |
-| `account` | `@matcherino`, `support@matcherino.com` | which identity, for `requires_auth` |
+| `account` | `@matcherino`, `support@matcherino.com` | which identity |
 | `status` | `active` \| `needs_auth` \| `missing` | the answer agents need |
 | `checked_at` | timestamp | so "active" has an age |
 | **`error`** | `credential "x" has no logged-in browser profile` | the badge you already have |
 
 Secrets never move. The install object says *how it authenticates* and
 *whether it works*; the key itself stays in `credentials.json`, the browser
-profile, or the `gws` config dir — the rule `docs/auth-requirements.md`
-already sets.
+profile, or the `gws` config dir.
 
 ## Where the obvious design bites
 
@@ -112,10 +111,9 @@ integrations view, and `integration = X` is your "which machines have X" view.
 - **Holdups become first-class.** The machine-local holdup above becomes an
   `error` on "X on Mac". It shows on the Computer's page, in the space, and in
   any view — instead of only in the Machine modal on that one machine.
-- **Cross-machine answers.** `requires_auth` (already built) resolves against
-  local files today. With install rows it can answer from the DAG: "no machine
-  here has X; the Studio does" — which is what the existing
-  `<capabilities-elsewhere>` prompt section wants to say.
+- **Cross-machine answers.** With install rows the DAG can answer "no machine
+  here has X; the Studio does" — which is what the `<skills-elsewhere>`
+  prompt section says.
 - **Per-machine accounts, visibly.** Two machines, same integration, different
   accounts (`support@` vs `grant@`) stops being a guess.
 - **A chat per install row.** Each install object can hold a discussion
@@ -147,8 +145,8 @@ integrations view, and `integration = X` is your "which machines have X" view.
    because it can read the rows instead of the JSON.
 4. **Seed the views.** "Integrations", "Needs auth", "Broken" as bundled saved
    queries, so the paradigm is visible without anyone building a panel.
-5. **Teach resolution.** `requires_auth` consults install rows first, local
-   files second — so a missing integration can name the machine that has it.
+5. **Teach resolution.** Skills consult install rows, so a missing
+   integration can name the machine that has it.
 
 ## Open questions for you
 
