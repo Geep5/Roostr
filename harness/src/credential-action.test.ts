@@ -1,7 +1,7 @@
 /**
- * credential_action takes its catalog from the credential object's action_*
- * fields, not from the harness: an action the credential does not declare
- * is refused with the valid keys named, before any network call.
+ * credential_action runs only the actions a credential's Allowed actions
+ * property lists: anything else is refused with the allowed keys named,
+ * before any network call.
  */
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
@@ -33,8 +33,8 @@ function object(id: string, typeKey = "task", fields: Record<string, ValueJSON> 
 	return { id, typeKey, fields, blocks: [], deleted: false, createdAt: 0, updatedAt: 0, mailbox: [] };
 }
 
-/** A signed-in Matcherino credential declaring the two seeded actions. */
-function matcherinoCredential(actionFields: Record<string, ValueJSON>): ObjectJSON {
+/** A signed-in Matcherino credential with the given Allowed actions. */
+function matcherinoCredential(allowed: string[] | null): ObjectJSON {
 	return object("cred", "credential", {
 		name: { stringValue: "Matcherino - Test" },
 		service: { stringValue: "matcherino" },
@@ -44,7 +44,7 @@ function matcherinoCredential(actionFields: Record<string, ValueJSON>): ObjectJS
 		session_cookie: { stringValue: "credentials" },
 		session: { stringValue: JSON.stringify([{ name: "credentials", value: "%7B%7D", domain: "matcherino.com", path: "/", expires: Date.now() / 1000 + 3600, httpOnly: true, secure: true }]) },
 		status: { stringValue: "active" },
-		...actionFields,
+		...(allowed ? { actions: { valuesValue: { items: allowed.map((stringValue) => ({ stringValue })) } } } : {}),
 	});
 }
 
@@ -66,21 +66,18 @@ const agent = object("agent", "agent", {
 	credentials: { valuesValue: { items: [{ linkValue: { relationKey: "credentials", targetId: "cred" } }] } },
 });
 
-test("an action the credential does not declare is refused, naming the valid keys", async () => {
-	const credObj = matcherinoCredential({
-		action_list_featured: { stringValue: JSON.stringify({ summary: "what the homepage features", access: "read" }) },
-		action_feature_events: { stringValue: JSON.stringify({ summary: "feature bounty ids", access: "write" }) },
-	});
-	server([agent, credObj]);
-	const result = await dispatchTool("credential_action", { service: "matcherino", action: "delete_event" }, ctx);
+test("an action the credential does not allow is refused, naming the allowed keys", async () => {
+	server([agent, matcherinoCredential(["list_featured"])]);
+	const result = await dispatchTool("credential_action", { service: "matcherino", action: "feature_events" }, ctx);
 	expect(result.isError).toBe(false); // soft error: the model reads it, the turn continues
-	expect(result.content).toContain('declares no action "delete_event"');
-	expect(result.content).toContain("list_featured, feature_events");
+	expect(result.content).toContain('does not allow action "feature_events"');
+	expect(result.content).toContain("it allows list_featured");
 });
 
-test("a credential with no action fields sends the agent to the properties, not to guesses", async () => {
-	server([agent, matcherinoCredential({})]);
+test("a credential that allows nothing sends the agent to the property, not to guesses", async () => {
+	server([agent, matcherinoCredential(null)]);
 	const result = await dispatchTool("credential_action", { service: "matcherino", action: "list_featured" }, ctx);
-	expect(result.isError).toBe(false); // soft error: the model reads it, the turn continues
-	expect(result.content).toContain("action_* properties");
+	expect(result.isError).toBe(false);
+	expect(result.content).toContain("it allows none");
+	expect(result.content).toContain("Allowed actions");
 });

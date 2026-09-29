@@ -573,9 +573,9 @@ const WEB_TOOLS: RegisteredTool[] = [
 		handler: async (input, ctx) => {
 			const service = S(input.service);
 			const action = S(input.action);
-			// What a credential can do is data on the object (its action_* fields),
-			// not this list: a person edits the object's actions, the agent's next
-			// prompt and this check both follow.
+			// Which actions a credential allows is its Allowed actions property; what
+			// each action does is code (the service seed). A person narrows the list
+			// on the object, and the agent's next prompt and this check both follow.
 			let cred;
 			try {
 				cred = await agentCredential(await fetchObject(ctx.agentId), service);
@@ -585,7 +585,7 @@ const WEB_TOOLS: RegisteredTool[] = [
 			const actions = actionsOf(cred.row.fields);
 			if (!actions.some((a) => a.key === action)) {
 				const valid = actions.map((a) => a.key).join(", ");
-				return `error: "${cred.row.name}" declares no action "${action}"${valid ? `; it takes ${valid}` : ""}. Its actions are the action_* properties on the credential - add one there, don't retry with a guessed name.`;
+				return `error: "${cred.row.name}" does not allow action "${action}"${valid ? `; it allows ${valid}` : " - it allows none"}. Its Allowed actions property says what agents may do with it; a person changes it there. Don't retry with another name.`;
 			}
 			if (service === "matcherino") return matcherinoAction(action, input.ids, ctx);
 			if (service === "x") {

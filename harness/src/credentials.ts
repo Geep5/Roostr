@@ -123,26 +123,25 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 	},
 ];
 
-/** Fields named `action_<key>` declare one action each, as JSON {summary, access}. */
-export const ACTION_PREFIX = "action_";
+/**
+ * Which of its service's actions a credential lets agents use: a tag list of
+ * action keys (`list_featured`, `feature_events`). The actions themselves -
+ * what each does, what it takes, read or write - are code (the seed's
+ * `actions`), so their descriptions live here, not on the object; the
+ * object carries only the person's setting. Absent = never set (seeding
+ * allows all); an empty list allows none.
+ */
+export const ACTIONS_FIELD = "actions";
 
-/** The action fields a credential carries, in field order: `action_feature_events` → `feature_events`. */
-function actionFieldNames(fields: Record<string, ValueJSON>): string[] {
-	return Object.keys(fields).filter((k) => k.startsWith(ACTION_PREFIX) && k.length > ACTION_PREFIX.length).map((k) => k.slice(ACTION_PREFIX.length));
+/** The action keys a credential's Allowed actions lists. */
+export function allowedActionKeys(fields: Record<string, ValueJSON>): string[] {
+	return (fields[ACTIONS_FIELD]?.valuesValue?.items ?? []).map((i) => i.stringValue ?? "").filter(Boolean);
 }
 
-/** A credential's declared actions. A field that is not {summary, access} JSON is not an action. */
+/** The service's actions this credential allows, in the service's order; unknown names drop out. */
 export function actionsOf(fields: Record<string, ValueJSON>): CredentialAction[] {
-	const out: CredentialAction[] = [];
-	for (const key of actionFieldNames(fields)) {
-		try {
-			const v = JSON.parse(fields[`${ACTION_PREFIX}${key}`]?.stringValue ?? "") as Partial<CredentialAction>;
-			if (typeof v.summary === "string" && (v.access === "read" || v.access === "write")) out.push({ key, summary: v.summary, access: v.access });
-		} catch {
-			// not an action declaration
-		}
-	}
-	return out;
+	const allowed = new Set(allowedActionKeys(fields));
+	return (seedFor(str(fields, "service"))?.actions ?? []).filter((a) => allowed.has(a.key));
 }
 
 export function seedFor(service: string): CredentialSeed | undefined {
@@ -193,7 +192,7 @@ export function recipeMissing(fields: Record<string, ValueJSON>): boolean {
 	return !fields["login_url"] && !fields["session_cookie"] && keyFieldNames(fields).length === 0;
 }
 
-/** A seed as the plain fields a Credential template carries: its recipe, each key empty, each action declared. */
+/** A seed as the plain fields a Credential template carries: its recipe, each key empty, every action allowed. */
 export function seedRecipeFields(seed: CredentialSeed): Record<string, ValueJSON> {
 	const out: Record<string, ValueJSON> = {
 		service: { stringValue: seed.key },
@@ -205,15 +204,15 @@ export function seedRecipeFields(seed: CredentialSeed): Record<string, ValueJSON
 		out.session_cookie = { stringValue: seed.sessionCookie.name };
 	}
 	for (const f of seed.passwordFields ?? []) out[`${KEY_PREFIX}${f.key}`] = { stringValue: "" };
-	for (const a of seed.actions ?? []) out[`${ACTION_PREFIX}${a.key}`] = { stringValue: JSON.stringify({ summary: a.summary, access: a.access }) };
+	if (seed.actions?.length) out[ACTIONS_FIELD] = { valuesValue: { items: seed.actions.map((a) => ({ stringValue: a.key })) } };
 	return out;
 }
 
 export const RECIPE_KEYS = ["service", "description", "login_url", "session_host", "session_cookie"] as const;
 
-/** The recipe's field keys on this object: the fixed ones plus its key and action fields. */
+/** The recipe's field keys on this object: the fixed ones, its key fields and Allowed actions. */
 export function recipeFieldKeys(fields: Record<string, ValueJSON>): string[] {
-	return [...RECIPE_KEYS, ...keyFieldNames(fields).map((k) => `${KEY_PREFIX}${k}`), ...actionFieldNames(fields).map((k) => `${ACTION_PREFIX}${k}`)];
+	return [...RECIPE_KEYS, ...keyFieldNames(fields).map((k) => `${KEY_PREFIX}${k}`), ACTIONS_FIELD];
 }
 
 /**
@@ -239,7 +238,7 @@ export function credentialKeys(fields: Record<string, ValueJSON>): Record<string
 }
 
 /** The properties a credential's fields are shown and edited through, seeded in every space. */
-export const CREDENTIAL_PROPERTIES: Array<{ key: string; name: string; format: string; emoji: string }> = [
+export const CREDENTIAL_PROPERTIES: Array<{ key: string; name: string; format: string; emoji: string; options?: Array<{ text: string; color: string }> }> = [
 	{ key: "account", name: "Account", format: "shorttext", emoji: "🪪" },
 	{ key: "service", name: "Service", format: "shorttext", emoji: "🧩" },
 	{ key: "login_url", name: "Login page", format: "url", emoji: "🔗" },
@@ -249,6 +248,14 @@ export const CREDENTIAL_PROPERTIES: Array<{ key: string; name: string; format: s
 	...CREDENTIAL_SEEDS.flatMap((s) => s.passwordFields ?? [])
 		.filter((f, i, all) => all.findIndex((g) => g.key === f.key) === i)
 		.map((f) => ({ key: `${KEY_PREFIX}${f.key}`, name: f.label, format: "shorttext", emoji: "🔑" })),
+	// Every service's action keys are its options: blue reads, orange changes something.
+	{
+		key: ACTIONS_FIELD,
+		name: "Allowed actions",
+		format: "tag",
+		emoji: "⚡",
+		options: CREDENTIAL_SEEDS.flatMap((s) => s.actions ?? []).map((a) => ({ text: a.key, color: a.access === "write" ? "orange" : "blue" })),
+	},
 ];
 
 /** Keys as the pre-property shapes stored them (camelCase JSON in `secret`), as key field names. */
