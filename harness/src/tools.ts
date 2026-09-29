@@ -33,7 +33,7 @@ import { CATALOG, fileHoldup, skillReady } from "./skillmgr";
 import { myInstallations, type InstallationRow } from "./descriptors";
 import { agentCredential } from "./credential-objects";
 import { clickThenReadJs, credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
-import { blockLine, isAgentAuthor } from "./surfaces";
+import { blockLine, isAgentAuthor, listOrdinals } from "./surfaces";
 import { readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor, typeDefs } from "./spacemap";
 import * as memory from "./memory";
@@ -152,6 +152,7 @@ const A = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is strin
  */
 function bodyBlocks(obj: ObjectJSON): Array<{ id: string; depth: number; line: string; block: BlockJSON }> {
 	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
+	const ordinals = listOrdinals(obj);
 	const referenced = new Set<string>();
 	for (const b of obj.blocks) for (const c of b.childrenIds) referenced.add(c);
 	const out: Array<{ id: string; depth: number; line: string; block: BlockJSON }> = [];
@@ -160,7 +161,7 @@ function bodyBlocks(obj: ObjectJSON): Array<{ id: string; depth: number; line: s
 		if (!b) return;
 		const kind = b.content.custom?.contentType;
 		if (kind === "chat" || kind === "discussion" || kind === "agent_message") return;
-		out.push({ id, depth, line: blockLine(b), block: b });
+		out.push({ id, depth, line: blockLine(b, ordinals.get(b.id)), block: b });
 		for (const c of b.childrenIds) walk(c, depth + 1);
 	};
 	for (const b of obj.blocks) if (!referenced.has(b.id) && b.id !== "__discussion__") walk(b.id, 0);

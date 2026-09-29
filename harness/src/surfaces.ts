@@ -165,6 +165,29 @@ const HOST_BODY_LIMIT = 2000;
 const STYLE_PREFIX: Record<number, string> = { 1: "# ", 2: "## ", 3: "### ", 4: "> ", 6: "- ", 7: "1. ", 8: "- [ ] " };
 
 /**
+ * Each numbered block's position in its run of numbered siblings (1, 2, 3 -
+ * restarting after any other block), as the page shows it. Without it every
+ * item read "1.", and an instruction like "stop after step 2" pointed nowhere.
+ */
+export function listOrdinals(obj: ObjectJSON): Map<string, number> {
+	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
+	const referenced = new Set<string>();
+	for (const b of obj.blocks) for (const c of b.childrenIds) referenced.add(c);
+	const out = new Map<string, number>();
+	const number = (ids: string[]) => {
+		let n = 0;
+		for (const id of ids) {
+			const style = byId.get(id)?.content.text?.style;
+			n = style === 7 ? n + 1 : 0;
+			if (n) out.set(id, n);
+		}
+	};
+	number(obj.blocks.filter((b) => !referenced.has(b.id)).map((b) => b.id));
+	for (const b of obj.blocks) if (b.childrenIds.length) number(b.childrenIds);
+	return out;
+}
+
+/**
  * One block, as a line an agent can read.
  *
  * Text blocks are not the only content. A page whose body is a bookmark, an
@@ -179,9 +202,9 @@ const STYLE_PREFIX: Record<number, string> = { 1: "# ", 2: "## ", 3: "### ", 4: 
  * root, which the walk skips) and are excluded here too, so a future caller
  * that walks them cannot leak a thread into the body.
  */
-export function blockLine(b: BlockJSON): string {
+export function blockLine(b: BlockJSON, ordinal?: number): string {
 	const t = b.content.text;
-	if (t?.text) return (t.style === 8 && t.checked ? "- [x] " : (STYLE_PREFIX[t.style ?? 0] ?? "")) + t.text;
+	if (t?.text) return (t.style === 8 && t.checked ? "- [x] " : t.style === 7 && ordinal ? `${ordinal}. ` : (STYLE_PREFIX[t.style ?? 0] ?? "")) + t.text;
 	const custom = b.content.custom;
 	if (!custom) return "";
 	const meta = custom.meta ?? {};
@@ -216,6 +239,7 @@ export function blockLine(b: BlockJSON): string {
 /** Serialize an object's blocks to markdown-ish, line-boundary capped. */
 export function serializeBody(obj: ObjectJSON): { body: string; truncated: boolean } {
 	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
+	const ordinals = listOrdinals(obj);
 	const referenced = new Set<string>();
 	for (const b of obj.blocks) for (const c of b.childrenIds) referenced.add(c);
 	const lines: string[] = [];
@@ -224,7 +248,7 @@ export function serializeBody(obj: ObjectJSON): { body: string; truncated: boole
 			const b = byId.get(id);
 			if (!b) continue;
 			if (b.content.custom?.contentType === "chat" || b.content.custom?.contentType === "discussion") continue;
-			const line = blockLine(b);
+			const line = blockLine(b, ordinals.get(b.id));
 			if (line) lines.push(line);
 			if (b.childrenIds.length) walk(b.childrenIds);
 		}

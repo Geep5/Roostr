@@ -17,7 +17,7 @@
 import { fetchObject, query, queryAll, str, type ObjectJSON, type ValueJSON } from "./api";
 import { machines, serverOf } from "./machine";
 import { machineId } from "./roster";
-import { blockLine } from "./surfaces";
+import { blockLine, listOrdinals } from "./surfaces";
 
 export const SKILL_TYPE = "skill";
 export const SKILLS_KEY = "skills";
@@ -57,6 +57,7 @@ export async function skillForKey(key: string): Promise<{ id: string; name: stri
  */
 export function objectText(obj: ObjectJSON): string {
 	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
+	const ordinals = listOrdinals(obj);
 	const referenced = new Set<string>();
 	for (const b of obj.blocks) for (const c of b.childrenIds) referenced.add(c);
 	const roots = obj.blocks.filter((b) => !referenced.has(b.id) && b.id !== "__discussion__");
@@ -66,7 +67,7 @@ export function objectText(obj: ObjectJSON): string {
 		if (!b) return;
 		const kind = b.content.custom?.contentType;
 		if (kind === "chat" || kind === "discussion") return;
-		const line = blockLine(b);
+		const line = blockLine(b, ordinals.get(b.id));
 		if (line) out.push(line);
 		for (const c of b.childrenIds) walk(c);
 	};
