@@ -146,6 +146,16 @@ To make a working agent: create the object, set `served_by` to a machine and
 An agent with no `served_by` runs nowhere; the engine writes `no machine serves
 this agent: …` on its `error` property until one is set.
 
+**Genesis.** The first turn of each conversation opens with the agent reading
+itself, as tool calls kept in that transcript: `object_get` on its own object
+(properties + body), `object_get` on the object it is working on (when that is
+another object), and `discussion_read` on the conversation. Later turns carry
+those reads instead of repeating them. Genesis runs again in a conversation
+once one of the agent's important properties has changed - name, model,
+prompt (the link or the prompt object's text), skills, credentials,
+`served_by`, `repo_path` (`harness/src/genesis.ts`); other edits, like tags or
+status, do not trigger it.
+
 Which objects an agent works on is its **guest list** placement, not a setting
 on the agent: put it in an object's `agent` property, or in a type's template's
 `agent` property so every object created from that template starts with it.

@@ -21,6 +21,7 @@ import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
 import { agentModelKey, credentialsPromptLine } from "./credential-objects";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceAt, workspacePromptSection } from "./workspace";
+import { genesisCalls, genesisFingerprint, lastGenesis } from "./genesis";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
@@ -318,6 +319,24 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		}
 
 		if (view.turns.length === 0) return lastText;
+
+		// Genesis: the first turn of this conversation, or the first since an
+		// important property changed, opens with the agent reading itself,
+		// the object it is on, and this conversation - as tool calls kept in
+		// the transcript, so later turns carry them instead of repeating them.
+		if (iter === 0 && ctx.depth === 0) {
+			const fingerprint = genesisFingerprint(agent, model, (await promptFor(agent)).system);
+			if (lastGenesis(view.items) !== fingerprint) {
+				for (const call of genesisCalls(agent, ref, fingerprint)) {
+					const use = { id: `toolu_genesis_${crypto.randomUUID().replaceAll("-", "")}`, name: call.name, input: call.input };
+					await persistToolUse(ref, use);
+					const out = await dispatchTool(use.name, use.input, ctx);
+					await persistToolResult(ref, use.id, out.content, out.isError);
+				}
+				view = buildConversationView(await fetchObject(ref.objectId), agentId, ratio, ref.threadId);
+				console.log(`[harness] genesis for ${str(agent.fields, "name") || agentId.slice(0, 8)} on ${ref.objectId.slice(0, 8)}/${ref.threadId}`);
+			}
+		}
 
 		let res;
 		try {
