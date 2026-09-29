@@ -112,8 +112,7 @@ integrations view, and `integration = X` is your "which machines have X" view.
   `error` on "X on Mac". It shows on the Computer's page, in the space, and in
   any view — instead of only in the Machine modal on that one machine.
 - **Cross-machine answers.** With install rows the DAG can answer "no machine
-  here has X; the Studio does" — which is what the `<skills-elsewhere>`
-  prompt section says.
+  here has X; the Studio does".
 - **Per-machine accounts, visibly.** Two machines, same integration, different
   accounts (`support@` vs `grant@`) stops being a guess.
 - **A chat per install row.** Each install object can hold a discussion

@@ -141,9 +141,8 @@ Given descriptors + installations, and nothing else compiled in:
   query — the machine-local holdup that is invisible today
   (`credential "x" has no logged-in browser profile`, seen 3 times) becomes a
   row you can sort.
-- **Route work honestly.** An object's Skills resolve against installations:
-  "no machine here has X, the Studio does" — which is what the
-  `<skills-elsewhere>` prompt says.
+- **Route work honestly.** An agent's Skills resolve against installations:
+  "this agent's computer lacks X, the Studio has it" is a holdup a person can see.
 - **Describe local agents the same way.** An agent is already an object; a
   descriptor for its model, tools and prompt sections lets a remote client show
   *what that agent can do* without the harness explaining itself over a side

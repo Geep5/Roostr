@@ -141,36 +141,6 @@ export function skillsPromptSection(skills: SkillListing[]): string {
 	return `<skills>\nReusable skills. When a task matches one, call skill_read BEFORE starting to load its full instructions:\n${lines.join("\n")}\n</skills>`;
 }
 
-/**
- * Prompt section for an object's agent: catalog skills other machines have
- * working and this one lacks, so the agent knows that `object_add_skill`
- * can move its object's work there (`docs/object-serving.md`). Skills the
- * object already lists are not repeated - if the work is still here,
- * adding them again changes nothing. Empty when the turn has no object
- * (the agent's own page) and when nothing is missing.
- */
-export async function remoteCapabilitiesSection(objectId: string): Promise<string> {
-	if (!objectId) return "";
-	// Dynamic, as in listSkills: skillmgr imports objectText from this
-	// module, and capabilities.ts pulls in descriptors -> skillmgr.
-	const { CATALOG, capabilities } = await import("./skillmgr");
-	const { fetchCapabilities, fullySetUp } = await import("./capabilities");
-	const me = await machineId();
-	const [local, roster, serving, caps] = await Promise.all([capabilities(), machines(), serverOf(objectId), fetchCapabilities()]);
-	const required = serving.skills;
-	const nameOf = new Map(roster.map((m) => [m.machineId, m.name]));
-	const lines: string[] = [];
-	for (const c of CATALOG) {
-		if (local.includes(c.key) || required.includes(c.key)) continue;
-		const where = caps
-			.filter((cap) => cap.key === c.key && fullySetUp(cap) && cap.servedBy !== me)
-			.map((cap) => nameOf.get(cap.servedBy) ?? cap.servedBy.slice(0, 8));
-		if (where.length > 0) lines.push(`- ${c.key} (${where.join(", ")})`);
-	}
-	if (lines.length === 0) return "";
-	return `<skills-elsewhere>\nSkills this machine lacks that other machines have working:\n${lines.join("\n")}\nTo use one, call object_add_skill with its key; this object's work then moves to that machine on the next turn.\n</skills-elsewhere>`;
-}
-
 /** Channel instructions (CLAUDE.md analog): inlined fully. */
 export async function channelInstructions(channelId: string): Promise<string> {
 	if (!channelId) return "";

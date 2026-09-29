@@ -17,7 +17,7 @@ import { objectContext } from "./spacemap";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
 import { callLLM, isContextOverflowError } from "./llm";
-import { channelInstructions, listSkills, remoteCapabilitiesSection, skillsPromptSection } from "./skills";
+import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
 import { credentialsPromptLine } from "./credential-objects";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceAt, workspacePromptSection } from "./workspace";
@@ -196,12 +196,6 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
 	if (credsLine) parts.push({ label: "Credentials", text: credsLine });
 	parts.push({ label: "Workspace contract", text: WORKSPACE_CONTRACT });
-	try {
-		const elsewhere = await remoteCapabilitiesSection(objectId);
-		if (elsewhere) parts.push({ label: "Skills elsewhere", text: elsewhere });
-	} catch (err) {
-		console.error("[harness] skills elsewhere failed:", err instanceof Error ? err.message : err);
-	}
 	const instructions = await channelInstructions(channelId);
 	if (instructions) parts.push({ label: "Space instructions", text: instructions });
 	// Machine-local by design: the agent's Project folder (`repo_path`) exists

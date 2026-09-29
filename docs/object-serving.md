@@ -143,15 +143,11 @@ as capability objects and **consumed** by the resolver and the prompt.
 - `skillmgr` publishes one capability object per enabled catalog skill on
   this machine whenever installed/enabled state changes. This is durable
   fact, not liveness.
-- An agent's Skills both narrow the instructions it sees (`listSkills`)
-  and route its work to a machine that has each machine skill working. The
-  prompt adds `<skills-elsewhere>`: machine skills other computers have
-  and this one lacks.
-- Agent tool `object_add_skill(skill)`: appends the skill to the current
-  bound object's Skills. The turn's closing text tells the human the
-  work moved. The next message or occurrence is served by the resolved
-  machine; pending unanswered messages are re-driven on adoption
-  (existing `pendingMessages` path). No mid-turn migration.
+- Skills belong to the agent: its Skills narrow the instructions it sees
+  (`listSkills`), and a machine skill its own computer lacks makes the
+  agent `pinned-uncapable` - it holds and files a holdup rather than run
+  without it. Objects carry no Skills of their own; work moves by pinning
+  the agent to a computer that has them.
 - Brokered tools (`web_fetch`) keep filing holdups when the *serving*
   machine lacks the capability — that now only happens with a
   `pinned-uncapable` or `unsatisfied` resolution, and the holdup names it.
@@ -211,8 +207,7 @@ second — unchanged).
 2. **Harness**: `capabilities` publish in `skillmgr`; `machine.ts` loses
    `spaceMine`/`claims`, gains `serverOf(objectId)` over cached machines +
    channels (20 s TTL as today, invalidated on relevant commits);
-   `schedule.ts`, `index.ts` gates, `workspace.ts` binding check; `object_add_skill`
-   tool; prompt section for skills elsewhere; machine-object discussion
+   `schedule.ts`, `index.ts` gates, `workspace.ts` binding check; machine-object discussion
    served by its machine.
 3. **Website**: header chip + picker, Repeat cell, Machine panel "serves"
    list. iOS follows through the bundle.

@@ -135,10 +135,10 @@ properties you'd click in the UI. There is no setup wizard and no `kind` field.
 - **`prompt`** (link → `system_prompt` object): its standing prompt and
   model. Edit or point at a different prompt object.
 - **`model`** (select): per-agent override of the prompt's model.
-- **`skills`** (links → `skill` objects): the skills it uses. A skill is
-  instructions the agent reads; a catalog skill (one with a `key`, like
-  browserless or google) is also software, so the agent then only runs on a
-  computer that has it working.
+- **`skills`** (links → `skill` objects): the skills it uses - a property of
+  the agent, not of the objects it works on. A skill is instructions the agent
+  reads; a catalog skill (one with a `key`, like browserless or google) is also
+  software, so the agent's computer must have it working or the agent holds.
 - **`credentials`** (links → `credential` objects): the logins it may act with.
 
 To make a working agent: create the object, set `served_by` to a machine and
