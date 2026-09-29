@@ -590,12 +590,21 @@ async function serve(): Promise<void> {
 		}
 		busy.add(s.agentId);
 		active.set(s.agentId, convKey(surface));
+		// What the agent last really did: a turn that finds nothing to answer
+		// must not paint over it - an unanswered failure would vanish from the
+		// chat and the agent's Error the moment any event re-checked a surface.
+		const before = agentTurnStatus.get(s.agentId);
 		report("working");
 		let failure = "";
 		try {
-			await body();
-			report("idle");
-			await markRunError(s.agentId, "");
+			const ran = await body();
+			if (ran === false) {
+				if (before) agentTurnStatus.set(s.agentId, before);
+				else report("idle");
+			} else {
+				report("idle");
+				await markRunError(s.agentId, "");
+			}
 		} catch (err) {
 			console.error(`[harness] turn failed for ${s.agentId.slice(0, 8)}:`, err);
 			let msg = (err instanceof Error ? err.message : String(err)).split("\n")[0];
