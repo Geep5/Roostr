@@ -131,7 +131,9 @@ async function claim(key: string, open: () => Promise<ConvRef>): Promise<ConvRef
 export async function agentThreadOn(agent: ObjectJSON, subject: string): Promise<ConvRef> {
 	const title = str(agent.fields, "name") || "Agent";
 	return claim(`agent:${agent.id}:${subject}`, async () => {
-		const threads = (await conversationsOf(subject)).filter((c) => c.kind === "agent_private");
+		// A closed thread is retired history: kept, never fed to the agent again,
+		// so closing a derailed transcript gives the agent a fresh one here.
+		const threads = (await conversationsOf(subject)).filter((c) => c.kind === "agent_private" && !c.closed);
 		const mine = threads
 			.filter((c) => c.participants.includes(agent.id))
 			.map((c) => c.id)
