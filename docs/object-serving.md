@@ -31,9 +31,10 @@ identically. No heartbeats, no leases, no coordinator.
 | machine  | `machine_id`   | string      | that machine               | stable id from `~/.glon/harness.json`                  |
 | machine  | `name`         | string      | that machine / human       | hostname by default                                    |
 | install  | `machine_id`   | string      | owning machine            | fixed owner for local capability/authentication work  |
-| agent    | `served_by`    | string      | human, harness migration   | the agent's machine: lends its pin to objects naming it |
+| agent    | `served_by`    | string      | human, harness migration   | the agent's computer: it runs there on every object    |
 | agent    | `repo_path`    | string      | human                      | "Project folder": the agent's checkout on that machine |
-| any      | `served_by`    | string      | human, agent tool          | pin: this machine serves this object                   |
+| agent    | `credentials`  | link list   | human, agent tool          | Credential objects: service logins AND its model login |
+| any      | `served_by`    | string      | human, agent tool          | pin: where the object's repeats fire and inbox recovers |
 | any      | `agent`        | link list   | human, agent tool          | guest list; the first pinned guest lends its pin       |
 | any      | `skills`       | link list   | human, agent tool          | skill objects the work uses (Skills)                   |
 | skill    | `key`          | string      | harness catalog            | catalog key: the skill is software a computer installs |
@@ -110,20 +111,39 @@ and an agent answering another agent may ask on, bounded to `A2A_MAX_HOPS`
 each other directly; the object's DAG holds both copies.
 
 The object resolves through its guest list: without a pin of its own, the
-first listed guest with a `served_by` lends it, and every guest runs where
-the object resolves. The harness adopts each guest into its roster when it
-serves the object (`adoptForObject`).
+first listed guest with a `served_by` lends it. That resolution places the
+object's own work (repeats, inbox recovery); it never moves an agent.
 
 ### Every agent names its own computer
 
-An agent runs only where its own `served_by` says. An unpinned agent
-resolves `unserved` whatever skills it lists - no capability fallback, no pin
-borrowed from an object - and no machine runs it on any object either
-(`agentRunsOn`). The engine keeps the reason on the agent's `error`
-property (`core/agent_serving.odin`): `create`, `set_field`/`delete_field`
-of `served_by`, and the boot converger set it on a pinless agent and clear
-exactly that message once a pin lands. Subagents and external responders
-are exempt.
+An agent runs only where its own `served_by` says - on its own page and on
+every object that names it (`agentRunsOn`). An object's pin, capability
+routing, or another guest's pin never moves it. The one exception is an
+object that is itself physical - a computer or an installation (`self`) -
+whose work happens on that computer. An unpinned agent resolves
+`unserved` and runs nowhere. The engine keeps the reason on the agent's
+`error` property (`core/agent_serving.odin`): `create`,
+`set_field`/`delete_field` of `served_by`, and the boot converger set it on
+a pinless agent and clear exactly that message once a pin lands.
+Subagents and external responders are exempt.
+
+### What travels with an agent
+
+Everything an agent needs to run lives on objects, so re-pinning it to
+another computer changes nothing about how it behaves:
+
+- **Model**: its `model` property (else its prompt's), read every turn.
+- **Model login**: an `anthropic` or `kimi` Credential in its Credentials
+  (`agentModelKey`). An Anthropic credential takes an API key or a
+  `claude setup-token` subscription token. Only when it lists none does
+  the harness fall back to that computer's own login (`~/.glon/auth.json`,
+  env, Claude Code keychain).
+- **Service logins**: its other Credentials (Discord bot, X, …).
+- **Prompt and skill instructions**: objects.
+
+What cannot travel is physical: skills that are installed software (a
+skill with a `key` needs an active capability on the agent's computer, else
+`pinned-uncapable` and a holdup) and the project folder on disk.
 
 ### Recurring objects
 

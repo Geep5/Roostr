@@ -15,6 +15,8 @@ export interface LLMRequest {
 	tools: ToolDef[];
 	maxTokens?: number;
 	temperature?: number;
+	/** The agent's own model key (a Credential it lists); overrides this computer's login. */
+	apiKey?: string;
 }
 
 export function isContextOverflowError(err: unknown): boolean {
@@ -90,7 +92,8 @@ function applyPromptCaching(body: Record<string, unknown>): void {
 }
 
 async function callAnthropic(req: LLMRequest): Promise<LLMResult> {
-	const auth = await resolveAnthropicAuth();
+	// A pasted subscription token (`claude setup-token`) is OAuth; an API key is not.
+	const auth = req.apiKey ? { token: req.apiKey, isOAuth: req.apiKey.startsWith("sk-ant-oat") } : await resolveAnthropicAuth();
 	const body: Record<string, unknown> = {
 		model: req.model,
 		max_tokens: req.maxTokens ?? 4096,
@@ -159,8 +162,8 @@ async function callAnthropic(req: LLMRequest): Promise<LLMResult> {
 	};
 }
 async function callKimi(req: LLMRequest): Promise<LLMResult> {
-	const key = await resolveKimiKey();
-	if (!key) throw new Error("No Kimi key: add one in Settings → Agent or set KIMI_API_KEY.");
+	const key = req.apiKey || (await resolveKimiKey());
+	if (!key) throw new Error("No Kimi key: add a Kimi credential to the agent's Credentials, or set one in Settings → Agent.");
 	// OpenAI-shaped; tools mapped to function-calling.
 	const messages: Array<Record<string, unknown>> = [{ role: "system", content: req.system }];
 	for (const t of req.turns) {
@@ -246,8 +249,15 @@ function callMock(req: LLMRequest): LLMResult {
 	return { text: `mock reply: ${lastText.slice(0, 200)}`, toolUses: [], stopReason: "end_turn", inputTokens: 50, outputTokens: 10 };
 }
 
+/** Which credential service a model's key comes from; "" when it needs none. */
+export function modelProvider(model: string): string {
+	if (model === "mock") return "";
+	return model.startsWith("kimi") ? "kimi" : "anthropic";
+}
+
 export async function callLLM(req: LLMRequest): Promise<LLMResult> {
-	if (req.model === "mock") return callMock(req);
-	if (req.model.startsWith("kimi")) return callKimi(req);
+	const provider = modelProvider(req.model);
+	if (!provider) return callMock(req);
+	if (provider === "kimi") return callKimi(req);
 	return callAnthropic(req);
 }

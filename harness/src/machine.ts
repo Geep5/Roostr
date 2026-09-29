@@ -110,31 +110,17 @@ export function agentServedHere(agent: { id: string; fields: Record<string, Valu
 	return servesHere(agentSubject(agent));
 }
 
-/** Whether the object's own placement decides, whoever the agent is. */
-const OBJECT_PLACED: Record<Serving["reason"], boolean> = {
-	self: true,
-	pinned: true,
-	"pinned-uncapable": true,
-	capability: true,
-	agent: false,
-	"agent-capable": false,
-	unsatisfied: false,
-	unserved: false,
-};
-
 /**
- * The machine that runs an agent on an object ("" = none). An agent with no
- * pin of its own (`served_by`) runs nowhere, whatever the object says.
- * Otherwise object pin > agent pin:
- *   - the object is placed on purpose (a machine or install, an explicit
- *     pin, a capability only another machine has) → the object's server,
- *     for every agent on it;
- *   - otherwise → the agent's own pin, even when another guest's pin
- *     serves the object.
+ * The machine that runs an agent on an object ("" = none): the agent's own
+ * computer (`served_by`), whatever object it is working on - models, logins
+ * and skills travel as objects, so the object's placement has no say. An
+ * agent with no pin runs nowhere. One exception: an object that IS a
+ * computer or an installation on one (`self`) is physical, so work on it
+ * happens on that computer.
  */
 export function agentRunsOn(serving: Serving, agentPin: string): string {
 	if (!agentPin) return "";
-	return OBJECT_PLACED[serving.reason] ? serving.machineId : agentPin;
+	return serving.reason === "self" ? serving.machineId : agentPin;
 }
 
 /**

@@ -213,6 +213,23 @@ export async function agentCredential(agent: ObjectJSON, service: string): Promi
 	return { row, cookies: credentialSession(row.fields), keys: credentialKeys(row.fields) };
 }
 
+/**
+ * The model key an agent carries for `provider` ("anthropic" | "kimi"): the
+ * first credential it lists of that service with its key filled in. Read
+ * straight from the synced object - no computer has to vouch for it - so
+ * the agent authenticates identically wherever it runs. null = it lists
+ * none; the caller falls back to this computer's own login.
+ */
+export async function agentModelKey(agent: ObjectJSON, provider: string): Promise<string | null> {
+	for (const id of agentCredentialIds(agent)) {
+		const row = await credentialObject(id).catch(() => null);
+		if (row?.service !== provider) continue;
+		const key = credentialKeys(row.fields)?.apiKey;
+		if (key) return key;
+	}
+	return null;
+}
+
 /** Credential ids an agent lists in its Credentials property. */
 export function agentCredentialIds(agent: ObjectJSON): string[] {
 	const v = agent.fields["credentials"];

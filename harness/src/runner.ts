@@ -16,9 +16,9 @@ import { addConvBlock, postTo, type ConvRef } from "./conv";
 import { objectContext } from "./spacemap";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
-import { callLLM, isContextOverflowError } from "./llm";
+import { callLLM, isContextOverflowError, modelProvider } from "./llm";
 import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
-import { credentialsPromptLine } from "./credential-objects";
+import { agentModelKey, credentialsPromptLine } from "./credential-objects";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceAt, workspacePromptSection } from "./workspace";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
@@ -295,6 +295,8 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		const cfg = compactionConfig(agent);
 		// The model picked on the agent (a select stores a one-item list), else its prompt's.
 		const model = choice(agent.fields, "model") || (await promptFor(agent)).model;
+		// Its login travels with it: a model credential it lists beats this computer's.
+		const apiKey = (await agentModelKey(agent, modelProvider(model))) ?? undefined;
 		// Re-read every iteration with everything else, so revoking the grant
 		// takes effect on the agent's next tool call rather than its next turn.
 		const tools = toolDefs(opts.template ?? "", ctx.depth, ctx.allowAsk);
@@ -319,7 +321,7 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 
 		let res;
 		try {
-			res = await callLLM({ model, system, turns: view.turns, tools, temperature: num(agent.fields, "temperature") });
+			res = await callLLM({ model, system, turns: view.turns, tools, temperature: num(agent.fields, "temperature"), apiKey });
 		} catch (err) {
 			// Overflow → compact → retry (agent-runner.ts:507-527).
 			if (isContextOverflowError(err) && overflowRetries < 2 && cfg.enabled) {

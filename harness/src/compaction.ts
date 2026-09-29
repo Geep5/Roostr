@@ -11,7 +11,8 @@
 import { choice, fetchObject, flag, str, type ObjectJSON } from "./api";
 import { addConvBlock, type ConvRef } from "./conv";
 import { estimateAskTokens, estimateTokens, findCutIndex, itemText, type ConversationView } from "./conversation";
-import { callLLM } from "./llm";
+import { callLLM, modelProvider } from "./llm";
+import { agentModelKey } from "./credential-objects";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import {
 	BLOCK_COMPACTION,
@@ -159,7 +160,7 @@ const MEMORY_TOOL_NAMES = new Set([
 ]);
 
 /** Stage A: extraction mini-loop, max 8 iterations, never blocks Stage B. */
-async function runExtractionLoop(agentId: string, model: string, items: ClassifiedItem[]): Promise<boolean> {
+async function runExtractionLoop(agentId: string, model: string, items: ClassifiedItem[], apiKey: string | undefined): Promise<boolean> {
 	const tools = toolDefs("", 0).filter((t) => MEMORY_TOOL_NAMES.has(t.name));
 	const ctx: ToolContext = { agentId, channelId: "", depth: 0, touched: new Set() };
 	const turns: Turn[] = [
@@ -167,7 +168,7 @@ async function runExtractionLoop(agentId: string, model: string, items: Classifi
 	];
 	try {
 		for (let i = 0; i < 8; i++) {
-			const res = await callLLM({ model, system: EXTRACTION_SYSTEM, turns, tools, maxTokens: 2048 });
+			const res = await callLLM({ model, system: EXTRACTION_SYSTEM, turns, tools, maxTokens: 2048, apiKey });
 			if (res.toolUses.length === 0) return true;
 			const assistantContent: AnthropicContent[] = [];
 			if (res.text) assistantContent.push({ type: "text", text: res.text });
@@ -199,9 +200,11 @@ export async function doCompact(agentId: string, ref: ConvRef, view: Conversatio
 	const firstKept = view.items[cut];
 
 	const agent = await fetchObject(agentId);
+	// The summariser runs on the agent's own login, same as its turns.
+	const apiKey = (await agentModelKey(agent, modelProvider(cfg.model))) ?? undefined;
 	let extractionRan = false;
 	if (flag(agent.fields, "memory_extraction_enabled")) {
-		extractionRan = await runExtractionLoop(agentId, cfg.model, toCompact);
+		extractionRan = await runExtractionLoop(agentId, cfg.model, toCompact, apiKey);
 	}
 
 	const prior = view.latestCompaction;
@@ -212,6 +215,7 @@ export async function doCompact(agentId: string, ref: ConvRef, view: Conversatio
 		tools: [],
 		maxTokens: SUMMARY_MAX_TOKENS,
 		temperature: SUMMARY_TEMPERATURE,
+		apiKey,
 	});
 
 	// OMP lift: carry touched object ids across stacked compactions.

@@ -77,6 +77,20 @@ export const CREDENTIALS: CredentialEntry[] = [
 		note: "Bot token for a Discord application; agents of the Marco kind poll and answer their channels with it.",
 		passwordFields: [{ key: "token", label: "Bot token", secret: true }],
 	},
+	// Model logins: the agent's Model picks the provider, its Credentials
+	// carry the key - so the agent runs the same on any computer.
+	{
+		key: "anthropic",
+		label: "Anthropic",
+		note: "Key for Claude models: an Anthropic API key (sk-ant-api…) or a long-lived Claude subscription token from `claude setup-token` (sk-ant-oat…). Agents whose Model is a Claude model use it on any computer.",
+		passwordFields: [{ key: "apiKey", label: "API key or token", secret: true }],
+	},
+	{
+		key: "kimi",
+		label: "Kimi (Moonshot)",
+		note: "Moonshot API key for Kimi models. Agents whose Model is a kimi model use it on any computer.",
+		passwordFields: [{ key: "apiKey", label: "API key", secret: true }],
+	},
 ];
 
 export function serviceEntry(service: string): CredentialEntry | undefined {

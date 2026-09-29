@@ -358,12 +358,11 @@ async function serve(): Promise<void> {
 
 	/**
 	 * Does THIS machine run `agent` on `object`? Exactly one machine answers:
-	 * object pin > agent pin > nothing (`agentRunsOn`). An object placed on
-	 * purpose (an explicit pin, a capability need, a machine) runs every
-	 * guest on its server; otherwise each agent runs on its own `served_by`,
-	 * and an unpinned agent runs nowhere. Every machine evaluates the same
-	 * DAG state, so two harnesses never both answer one message. Pin swaps
-	 * take effect on the next event: served_by commits invalidate the cache.
+	 * the agent's own `served_by` (`agentRunsOn`), on every object - except
+	 * a computer or installation object, whose work stays on that computer.
+	 * An unpinned agent runs nowhere. Every machine evaluates the same DAG
+	 * state, so two harnesses never both answer one message. Pin swaps take
+	 * effect on the next event: served_by commits invalidate the cache.
 	 */
 	async function runsAgentHere(objectId: string, agentId: string): Promise<boolean> {
 		const [serving, agent] = await Promise.all([serverOf(objectId), fetchObject(agentId).catch(() => null)]);
@@ -391,6 +390,8 @@ async function serve(): Promise<void> {
 	 */
 	async function adoptForObject(obj: ObjectJSON, aid: string): Promise<Served | null> {
 		if (!aid || !guestAgents(obj.fields).includes(aid) || externalAgents.has(aid)) return null;
+		// Only the computer that runs the agent here takes it in.
+		if (!(await runsAgentHere(obj.id, aid))) return null;
 		const known = served.get(aid);
 		if (known) return known;
 		const agent = await fetchObject(aid).catch(() => null);
