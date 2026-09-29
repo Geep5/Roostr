@@ -230,12 +230,13 @@ export async function credentialPageAction(cookies: SessionCookie[], url: string
 	}
 }
 
-/** Every cookie a saved Chrome profile holds, decrypted by a headless Chrome on it (legacy migration). */
+/** Every cookie a saved Chrome profile holds, decrypted by a headless Chrome on it. Returns after that Chrome has exited, so the caller may delete the profile. */
 export async function profileCookies(profile: string, timeoutMs = 20_000): Promise<SessionCookie[]> {
 	const chrome = chromeBinary();
 	if (!chrome) throw new Error("no Chrome/Chromium/Brave binary found");
 	rmSync(join(profile, "DevToolsActivePort"), { force: true });
 	const proc = spawn(chrome, ["--headless=new", "--disable-gpu", "--no-first-run", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+	const exited = new Promise((resolve) => proc.once("exit", resolve));
 	let cdp: CdpSocket | undefined;
 	try {
 		cdp = await CdpSocket.open(await debuggerUrlFor(profile, timeoutMs, "about:blank"));
@@ -243,6 +244,7 @@ export async function profileCookies(profile: string, timeoutMs = 20_000): Promi
 	} finally {
 		cdp?.close();
 		proc.kill();
+		await exited;
 	}
 }
 
