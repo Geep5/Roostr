@@ -10,45 +10,45 @@ package core
 //   object.served_by      pin: this machine, whatever it can do
 //   object.agent          guest list: the first listed agent with a served_by
 //                         lends its pin (the agent pin)
-//   object.requires       capability keys the work needs (catalog keys)
-//   machine.capabilities  catalog keys installed AND enabled on that machine
+//   object.skills         skill objects the work uses; a skill with a `key`
+//                         needs a computer with an active capability of it
+//   capability objects    one per (skill key x machine), usable once active
 //
 // Resolution, in order:
 //   self                the object is a machine (or an install): its own machine_id
-//   pinned              served_by set and capable (or nothing required)
-//   pinned-uncapable    served_by set but lacks a requirement - the host files a holdup
-//   agent               nothing required → the agent pin
-//   agent-capable       the agent pin has every requirement
+//   pinned              served_by set and capable (or no machine skill needed)
+//   pinned-uncapable    served_by set but lacks a skill - the host files a holdup
+//   agent               no machine skill needed → the agent pin
+//   agent-capable       the agent pin has every machine skill
 //   capability          smallest machine_id among capable machines
 //   unsatisfied         nothing capable → the agent pin (else nobody), and a holdup
-//   unserved            no pin, no agent pin, nothing required → nobody
+//   unserved            no pin, no agent pin, no machine skill → nobody
 //
 // Machine choice lives on agents; the space plays no part. An agent object's
 // own served_by is its pin, so its transcript resolves `pinned`, and every
 // object naming it follows through the agent pin. An agent with no pin is
-// `unserved` whatever it requires - nothing picks a computer for it.
+// `unserved` whatever skills it lists - nothing picks a computer for it.
 
 import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
 
 SERVED_BY_KEY :: "served_by"
-REQUIRES_KEY :: "requires"
-CAPABILITIES_KEY :: "capabilities"
+SKILLS_KEY :: "skills"
 MACHINE_ID_KEY :: "machine_id"
 MACHINE_TYPE_KEY :: "machine"
 
 Serving :: struct {
 	machine_id: string,
 	reason:     string,
-	requires:   [dynamic]string,
+	skills:     [dynamic]string, // keys of the machine skills the work needs
 	candidates: [dynamic]string, // machine ids able to serve, sorted
 }
 
 // Strings of a list-valued field: String_List (`listValue`) or a List of
 // strings or links (`valuesValue`) - hosts write any of these shapes.
-// `requires` links capability objects; `served_by` links a machine. Empty
-// for anything else.
+// `skills` links skill objects; `served_by` links a machine. Empty for
+// anything else.
 field_strings :: proc(fields: [dynamic]Value_Entry, key: string, allocator := context.temp_allocator) -> [dynamic]string {
 	out := make([dynamic]string, allocator)
 	v, ok := fields_get(fields, key)
@@ -70,15 +70,6 @@ field_strings :: proc(fields: [dynamic]Value_Entry, key: string, allocator := co
 }
 
 @(private = "file")
-has_all :: proc(have, need: [dynamic]string) -> bool {
-	outer: for n in need {
-		for h in have do if h == n do continue outer
-		return false
-	}
-	return true
-}
-
-@(private = "file")
 insert_sorted :: proc(ids: ^[dynamic]string, id: string) {
 	for existing, i in ids {
 		if existing == id do return
@@ -90,33 +81,48 @@ insert_sorted :: proc(ids: ^[dynamic]string, id: string) {
 	append(ids, id)
 }
 
-// A machine serves a requirement only when it hosts the required capability
-// object AND that capability's install is active. An unset or inactive
-// capability does not exist for the resolver - it is not offered to an agent
-// and its machine does not count.
-capability_servers :: proc(states: map[string]^Object_State, capability_id: string, allocator := context.temp_allocator) -> [dynamic]string {
+// The machine skill keys an object's work needs: the `key` of each skill
+// object it lists. A skill with no key is instructions only (no software to
+// have), and a skill the states do not carry cannot be resolved - neither
+// constrains the machine.
+skill_keys :: proc(object: ^Object_State, states: map[string]^Object_State, allocator := context.temp_allocator) -> [dynamic]string {
 	out := make([dynamic]string, allocator)
-	cap := states[capability_id]
-	if cap == nil || cap.deleted || cap.type_key != "capability" do return out
-	machine := field_string(cap.fields, "served_by")
-	if machine == "" {
-		if v, ok := fields_get(cap.fields, "served_by"); ok && v.kind == .Link do machine = v.link_target
+	if object == nil do return out
+	for id in field_strings(object.fields, SKILLS_KEY, allocator) {
+		skill := states[id]
+		if skill == nil || skill.deleted || skill.type_key != "skill" do continue
+		key := field_string(skill.fields, "key")
+		if key == "" do continue
+		dup := false
+		for k in out do if k == key { dup = true; break }
+		if !dup do append(&out, key)
 	}
-	if machine == "" do return out
-	// The capability's install must be active. It links the install object,
-	// else a same-key same-machine install is the fallback while links migrate.
-	install_id := field_string(cap.fields, "install")
-	if install_id == "" {
-		if v, ok := fields_get(cap.fields, "install"); ok && v.kind == .Link do install_id = v.link_target
-	}
-	inst := states[install_id]
-	if inst == nil {
-		for _, s in states {
-			if s.deleted || s.type_key != "install" do continue
-			if field_string(s.fields, "key") == field_string(cap.fields, "key") && field_string(s.fields, "machine_id") == machine do inst = s
+	return out
+}
+
+// Machines that have a skill working: each serves a capability object of
+// that key whose gate (its linked install, else the same-key install on
+// that machine) is active. An unset or inactive capability does not exist
+// for the resolver.
+skill_servers :: proc(states: map[string]^Object_State, key: string, allocator := context.temp_allocator) -> [dynamic]string {
+	out := make([dynamic]string, allocator)
+	for _, cap in states {
+		if cap.deleted || cap.type_key != "capability" || field_string(cap.fields, "key") != key do continue
+		machine := served_by(cap)
+		if machine == "" do continue
+		install_id := field_string(cap.fields, "install")
+		if install_id == "" {
+			if v, ok := fields_get(cap.fields, "install"); ok && v.kind == .Link do install_id = v.link_target
 		}
+		inst := states[install_id]
+		if inst == nil {
+			for _, s in states {
+				if s.deleted || s.type_key != "install" do continue
+				if field_string(s.fields, "key") == key && field_string(s.fields, "machine_id") == machine do inst = s
+			}
+		}
+		if inst != nil && field_string(inst.fields, "status") == "active" do insert_sorted(&out, machine)
 	}
-	if inst != nil && field_string(inst.fields, "status") == "active" do append(&out, machine)
 	return out
 }
 
@@ -143,13 +149,13 @@ agent_pin :: proc(object: ^Object_State, states: map[string]^Object_State) -> st
 	return ""
 }
 
-// `states` carries the candidate machines, the capability objects and their
-// installs, and the agents the object's guest list names.
+// `states` carries the candidate machines, the skill objects the object
+// lists, the capability objects and their installs, and the agents the
+// object's guest list names.
 resolve_server :: proc(object: ^Object_State, states: map[string]^Object_State, allocator := context.temp_allocator) -> Serving {
 	out: Serving
 	out.candidates = make([dynamic]string, allocator)
-	if object != nil do out.requires = field_strings(object.fields, REQUIRES_KEY, allocator)
-	else do out.requires = make([dynamic]string, allocator)
+	out.skills = skill_keys(object, states, allocator)
 	// Installations are machine-owned services. Neither an agent pin nor an
 	// object pin may approve credentials or install software elsewhere. An
 	// installation missing its owner stays unserved, rather than falling back
@@ -160,18 +166,18 @@ resolve_server :: proc(object: ^Object_State, states: map[string]^Object_State, 
 		return out
 	}
 
-	// A machine is a candidate iff it serves every required capability. With
-	// no requirements every live machine is a candidate (a pin decides
-	// between them).
-	if len(out.requires) == 0 {
+	// A machine is a candidate iff it has every machine skill working. With
+	// none needed every live machine is a candidate (a pin decides between
+	// them).
+	if len(out.skills) == 0 {
 		for _, m in states {
 			if m.deleted || m.type_key != "machine" do continue
 			if id := field_string(m.fields, MACHINE_ID_KEY); id != "" do insert_sorted(&out.candidates, id)
 		}
 	} else {
 		server_sets := make([dynamic][dynamic]string, allocator)
-		for req in out.requires {
-			append(&server_sets, capability_servers(states, req, allocator))
+		for key in out.skills {
+			append(&server_sets, skill_servers(states, key, allocator))
 		}
 		for _, m in states {
 			if m.deleted || m.type_key != "machine" do continue
@@ -211,15 +217,15 @@ resolve_server :: proc(object: ^Object_State, states: map[string]^Object_State, 
 		// An agent runs only where its own served_by says: no capability
 		// fallback, no borrowed pin. Its error says so (agent_serving.odin).
 		out.machine_id, out.reason = "", "unserved"
-	case pin != "" && (len(out.requires) == 0 || capable(&out, pin)):
+	case pin != "" && (len(out.skills) == 0 || capable(&out, pin)):
 		out.machine_id, out.reason = pin, "pinned"
 	case pin != "":
 		out.machine_id, out.reason = pin, "pinned-uncapable"
-	case lent != "" && len(out.requires) == 0:
+	case lent != "" && len(out.skills) == 0:
 		out.machine_id, out.reason = lent, "agent"
 	case lent != "" && capable(&out, lent):
 		out.machine_id, out.reason = lent, "agent-capable"
-	case len(out.requires) == 0:
+	case len(out.skills) == 0:
 		out.machine_id, out.reason = "", "unserved"
 	case len(out.candidates) > 0:
 		out.machine_id, out.reason = out.candidates[0], "capability"
@@ -245,11 +251,12 @@ payload_states :: proc(payload: json.Value, key, noun: string, states: ^map[stri
 }
 
 // {action: "resolve", object?: ObjectJSON, agents?: [ObjectJSON],
-//  machines?: [ObjectJSON], capabilities?: [ObjectJSON]}
-// → {machineId, reason, requires: [key], candidates: [machineId]}
+//  machines?: [ObjectJSON], skills?: [ObjectJSON], capabilities?: [ObjectJSON]}
+// → {machineId, reason, skills: [key], candidates: [machineId]}
 // `agents` are the agent objects the object's guest list names, in any order:
-// the object's own list order decides. Capability objects ride with their
-// installs: the resolver needs both alongside the machines.
+// the object's own list order decides. `skills` are the skill objects it
+// lists. Capability objects ride with their installs: the resolver needs
+// both alongside the machines.
 serving_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	switch json_str(payload, "action") {
 	case "resolve":
@@ -259,6 +266,7 @@ serving_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		if object != nil do states[object.id] = object
 		if err := payload_states(payload, "agents", "agent", &states); err != "" do return nil, err
 		if err := payload_states(payload, "machines", "machine", &states); err != "" do return nil, err
+		if err := payload_states(payload, "skills", "skill", &states); err != "" do return nil, err
 		if err := payload_states(payload, "capabilities", "capability", &states); err != "" do return nil, err
 		return serving_to_json(resolve_server(object, states)), ""
 	}
@@ -276,9 +284,9 @@ serving_to_json :: proc(s: Serving, allocator := context.temp_allocator) -> json
 	out := jobj(allocator)
 	out["machineId"] = json.String(s.machine_id)
 	out["reason"] = json.String(s.reason)
-	requires := make([dynamic]json.Value, allocator)
-	for r in s.requires do append(&requires, json.String(r))
-	out["requires"] = json.Array(requires)
+	skills := make([dynamic]json.Value, allocator)
+	for k in s.skills do append(&skills, json.String(k))
+	out["skills"] = json.Array(skills)
 	candidates := make([dynamic]json.Value, allocator)
 	for c in s.candidates do append(&candidates, json.String(c))
 	out["candidates"] = json.Array(candidates)

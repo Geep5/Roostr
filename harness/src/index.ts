@@ -11,7 +11,7 @@
  */
 
 import { API, apiFetch, chatPost, deleteField, fetchObject, guestAgents, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
-import { PROMPT_SEEDS, ensureSystemPrompt, promptFor } from "./prompts";
+import { PROMPT_SEEDS, ensureSystemPrompt } from "./prompts";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
@@ -23,7 +23,9 @@ import { machineId, readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishMachine, serverOf, servesHere } from "./machine";
 import { publishDescriptors, INSTALL_TYPE } from "./descriptors";
-import { CAPABILITY_TYPE, linkValue, requiredKeys } from "./capabilities";
+import { CAPABILITY_TYPE, linkValue } from "./capabilities";
+import { SKILLS_KEY, machineSkillKeys, skillForKey } from "./skills";
+import { migrateSkills } from "./migrate-skills";
 import { migrateCapabilities } from "./migrate-capabilities";
 import { migratePrompts } from "./migrate-prompts";
 import { startDiscordManager } from "./discord";
@@ -85,6 +87,10 @@ async function setup(): Promise<void> {
 	};
 	if (channel) fields.channel = sv(channel);
 	if (argValue("--model")) fields.model = sv(argValue("--model"));
+	// The seed's skills, as links to the skill objects that exist so far (a
+	// machine creates a catalog skill's object on its first install).
+	const skills = (await Promise.all(seed.skills.map(skillForKey))).filter((x) => x !== null);
+	if (skills.length > 0) fields[SKILLS_KEY] = { valuesValue: { items: skills.map((x) => linkValue(x.id)) } };
 	for (const f of seed.fields) {
 		if (f.secret) continue;
 		const value = argValue(`--${f.key}`) || seed.defaults[f.key];
@@ -94,7 +100,7 @@ async function setup(): Promise<void> {
 	// Setup on this machine claims serving responsibility here — "mine"
 	// is a local fact, not a synced one.
 	await setEnabled(id, true);
-	console.log(`created ${seed.key} agent "${name}": ${id} (enabled on this machine; prompt "${seed.promptName}" ${prompt.created ? "created" : "linked"}${seed.requires.length ? `; requires ${seed.requires.join(", ")}` : ""})`);
+	console.log(`created ${seed.key} agent "${name}": ${id} (enabled on this machine; prompt "${seed.promptName}" ${prompt.created ? "created" : "linked"}${skills.length ? `; skills ${skills.map((x) => x.name).join(", ")}` : ""})`);
 }
 
 interface Served {
@@ -276,11 +282,13 @@ async function serve(): Promise<void> {
 	// channel served_by -> each agent's own pin; spaces no longer serve, and
 	// their checkout bindings give way to the agent's Project folder.
 	console.log("[harness] space-computer migration:", JSON.stringify(await migrateSpaceComputers()));
-	// machine.capabilities -> capability objects; requires keys -> capability links.
+	// machine.capabilities -> capability objects.
 	console.log("[harness] capability migration:", JSON.stringify(await migrateCapabilities()));
-	// agent.kind -> a linked system_prompt object; after capabilities exist so
-	// the prompt's requires links land on capability objects.
+	// agent.kind -> a linked system_prompt object.
 	console.log("[harness] prompt migration:", JSON.stringify(await migratePrompts()));
+	// requires (capability links) and prompt skills -> each object's Skills;
+	// after the login migration so a required login becomes a Credential link.
+	console.log("[harness] skills migration:", JSON.stringify(await migrateSkills()));
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
 
@@ -510,8 +518,8 @@ async function serve(): Promise<void> {
 	}
 
 	/**
-	 * Why the agent cannot run here, or "" when it can: its prompt's
-	 * `requires` (and its own) name capabilities this machine lacks. The
+	 * Why the agent cannot run here, or "" when it can: its Skills name
+	 * catalog software this machine does not have working. The
 	 * resolver still says "pinned-uncapable" for it, so the agent stays
 	 * ours - it just does not take turns, and the holdup says why: filed
 	 * once per distinct reason (the ledger and the installation row are the
@@ -522,7 +530,7 @@ async function serve(): Promise<void> {
 	async function requirementsHoldup(s: Served): Promise<string> {
 		const agent = await fetchObject(s.agentId).catch(() => null);
 		if (!agent) return "";
-		const required = [...new Set([...(await promptFor(agent)).requires, ...(await requiredKeys(agent.fields))])];
+		const required = await machineSkillKeys(agent.fields);
 		const have = required.length > 0 ? await capabilities() : [];
 		const missing = required.filter((k) => !have.includes(k));
 		if (missing.length === 0) {
@@ -534,7 +542,7 @@ async function serve(): Promise<void> {
 			heldUp.set(s.agentId, reason);
 			console.log(`[harness] holding ${s.name} (${s.agentId.slice(0, 8)}): ${reason}`);
 			for (const capability of missing) {
-				await fileCapabilityHoldup(capability, `${s.name} requires ${capability} to run here`, { agentId: s.agentId, channelId: s.channelId, boundObject: agentSubject(agent), depth: 0, touched: new Set() });
+				await fileCapabilityHoldup(capability, `${s.name} uses the ${capability} skill, which is not working here`, { agentId: s.agentId, channelId: s.channelId, boundObject: agentSubject(agent), depth: 0, touched: new Set() });
 			}
 		}
 		return reason;
@@ -736,10 +744,10 @@ async function serve(): Promise<void> {
 		// may move the earliest occurrence.
 		if (obj.fields["repeat"]) void armScheduler();
 		// Serving inputs changed: a machine or capability object, an install
-		// status flip, a pin (served_by) or requires on any object. Refresh
+		// status flip, a pin (served_by) or Skills on any object. Refresh
 		// the resolver cache and re-arm, so the next event and the clock
 		// follow the new answer.
-		if (obj.typeKey === MACHINE_TYPE || obj.typeKey === CAPABILITY_TYPE || obj.typeKey === INSTALL_TYPE || obj.fields["served_by"] || obj.fields["requires"]) {
+		if (obj.typeKey === MACHINE_TYPE || obj.typeKey === CAPABILITY_TYPE || obj.typeKey === INSTALL_TYPE || obj.fields["served_by"] || obj.fields[SKILLS_KEY]) {
 			invalidateServing();
 			void armScheduler();
 		}

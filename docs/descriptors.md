@@ -143,7 +143,7 @@ Given descriptors + installations, and nothing else compiled in:
   row you can sort.
 - **Route work honestly.** `requires_auth` already resolves against local
   files; against installations it can answer "no machine here has X, the Studio
-  does" — which is what the `<capabilities-elsewhere>` prompt wants to say.
+  does" — which is what the `<skills-elsewhere>` prompt wants to say.
 - **Describe local agents the same way.** An agent is already an object; a
   descriptor for its model, tools and prompt sections lets a remote client show
   *what that agent can do* without the harness explaining itself over a side

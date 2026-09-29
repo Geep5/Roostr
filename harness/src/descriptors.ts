@@ -50,7 +50,7 @@ export interface DescriptorJSON {
 	check?: { command: string; expectContains: string; timeoutMs: number };
 	install?: { prompt: string; uninstallPrompt: string; docsUrl: string };
 	/** Present only on `kind: "agent"` cards: the defaults an agent of this kind starts from. */
-	agent?: { system: string; model: string; requires: string[]; skills: string[] };
+	agent?: { system: string; model: string; skills: string[] };
 	version: string;
 	author: string;
 	/** Bytes a newer writer added; re-emitted verbatim. */
@@ -148,7 +148,7 @@ function agentDescriptor(entry: AgentKindEntry, author: string): DescriptorJSON 
 		kind: "agent",
 		fields: entry.fields,
 		auths: ["none"],
-		agent: { system: entry.system, model: entry.model, requires: entry.requires, skills: entry.skills },
+		agent: { system: entry.system, model: entry.model, skills: entry.skills },
 		version: DESCRIPTOR_VERSION,
 		author,
 	};

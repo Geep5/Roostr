@@ -115,8 +115,8 @@ export interface Serving {
 	/** "" when nothing pins the object, no agent it names is pinned, and no machine qualifies. */
 	machineId: string;
 	reason: "self" | "pinned" | "pinned-uncapable" | "agent" | "agent-capable" | "capability" | "unsatisfied" | "unserved";
-	/** The object's `requires`, verbatim: capability object ids where links were written, legacy catalog keys where strings remain. */
-	requires: string[];
+	/** Catalog keys of the machine skills the object's Skills need. */
+	skills: string[];
 	/** Machine ids serving every required capability (capability object + active install), sorted. */
 	candidates: string[];
 }

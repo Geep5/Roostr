@@ -58,8 +58,8 @@ function mailboxServer() {
 		const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
 		if (path === "/api/serving") {
 			const body = JSON.parse(String(init?.body));
-			const out: Record<string, { machineId: string; reason: string; requires: string[]; candidates: string[] }> = {};
-			for (const id of body.objectIds ?? []) out[id] = unserved.has(id) ? { machineId: "", reason: "unserved", requires: [], candidates: [] } : { machineId: "machine-1", reason: "agent", requires: [], candidates: [] };
+			const out: Record<string, { machineId: string; reason: string; skills: string[]; candidates: string[] }> = {};
+			for (const id of body.objectIds ?? []) out[id] = unserved.has(id) ? { machineId: "", reason: "unserved", skills: [], candidates: [] } : { machineId: "machine-1", reason: "agent", skills: [], candidates: [] };
 			return Response.json(out);
 		}
 

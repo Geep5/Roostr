@@ -43,7 +43,8 @@ import { authRequirementsOf, localAuthRegistry, resolveAuthRequirements, validat
 import { HUMAN_THREAD, agentSubject, convBlocks, humanRef, postTo } from "./conv";
 import { sendMessage } from "./mailbox";
 import { fetchInstallations } from "./descriptors";
-import { chooseCapability, fetchCapabilities, linkValue, requiredKeys, requirementKeys, requiresItems } from "./capabilities";
+import { fetchCapabilities, fullySetUp, linkValue } from "./capabilities";
+import { SKILLS_KEY, machineSkillKeys, skillForKey, skillIds } from "./skills";
 import { requestCapability, type CapabilityOperation } from "./capability-messages";
 import type { AgentEndpoint, AgentMessage } from "./api";
 
@@ -386,9 +387,7 @@ function domToText(html: string): string {
 async function resolutionNote(capability: string, ctx: ToolContext): Promise<string> {
 	if (!ctx.boundObject) return "";
 	const s = await serverOf(ctx.boundObject).catch(() => null);
-	// The engine returns requires verbatim: capability object ids where the
-	// object links them, catalog keys where legacy strings remain.
-	if (!s || !requirementKeys(s.requires, await fetchCapabilities()).includes(capability)) return "";
+	if (!s || !s.skills.includes(capability)) return "";
 	if (s.reason === "pinned-uncapable") return ` (serving: pinned-uncapable - the object is pinned to this machine, which lacks ${capability})`;
 	if (s.reason === "unsatisfied") return ` (serving: unsatisfied - no machine has ${capability})`;
 	return "";
@@ -442,44 +441,43 @@ const FLAG_ERROR_TOOL: RegisteredTool = {
 	},
 };
 
-const REQUIRE_TOOL: RegisteredTool = {
+const ADD_SKILL_TOOL: RegisteredTool = {
 	def: {
-		name: "object_require",
+		name: "object_add_skill",
 		description:
-			"Declare that the object of this conversation needs a machine capability listed under <capabilities-elsewhere> (a catalog key such as browserless or google). Links the matching capability object in the object's `requires`; the machine that serves the capability serves the object from the next turn on - nothing moves mid-turn. Only turns running on an object can call this. Tell the human the work moved, then finish the turn.",
+			"Add a machine skill listed under <skills-elsewhere> (a catalog key such as browserless or google) to the Skills of the object of this conversation; a computer that has the skill working serves the object from the next turn on - nothing moves mid-turn. Only turns running on an object can call this. Tell the human the work moved, then finish the turn.",
 		input_schema: {
 			type: "object",
-			properties: { capability: { type: "string", description: "catalog capability key" } },
-			required: ["capability"],
+			properties: { skill: { type: "string", description: "catalog skill key" } },
+			required: ["skill"],
 		},
 	},
 	handler: async (input, ctx) => {
-		const key = S(input.capability).trim();
-		if (!CATALOG.some((c) => c.key === key)) return `error: unknown capability "${key}"; known: ${CATALOG.map((c) => c.key).join(", ")}`;
-		if (!ctx.boundObject) return "error: this turn is not running on an object, so there is nothing to require it on";
+		const key = S(input.skill).trim();
+		if (!CATALOG.some((c) => c.key === key)) return `error: unknown skill "${key}"; known: ${CATALOG.map((c) => c.key).join(", ")}`;
+		if (!ctx.boundObject) return "error: this turn is not running on an object, so there is nothing to add it to";
 		const obj = await fetchObject(ctx.boundObject);
 		const name = str(obj.fields, "name") || obj.id.slice(0, 8);
-		const caps = await fetchCapabilities();
 		const me = await machineId();
-		// A capability with no object yet is not offered: refuse rather than
-		// write a requirement nothing can ever resolve.
-		const chosen = chooseCapability(caps.filter((c) => c.key === key), me);
-		if (!chosen) return `error: no machine offers "${key}" yet - it appears under <capabilities-elsewhere> once a machine installs and enables it. Nothing was required; tell the human.`;
-		if (!(await requiredKeys(obj.fields, caps)).includes(key)) {
-			await setField(obj.id, "requires", { valuesValue: { items: [...requiresItems(obj.fields), linkValue(chosen.id)] } });
+		// A skill no machine has ever installed has no object and no computer:
+		// refuse rather than list something nothing can ever serve.
+		const skill = await skillForKey(key);
+		if (!skill || !(await fetchCapabilities()).some((c) => c.key === key && fullySetUp(c))) return `error: no machine has "${key}" working yet - it appears under <skills-elsewhere> once one installs and enables it. Nothing was added; tell the human.`;
+		if (!(await machineSkillKeys(obj.fields)).includes(key)) {
+			await setField(obj.id, SKILLS_KEY, { valuesValue: { items: [...skillIds(obj.fields).map(linkValue), linkValue(skill.id)] } });
 			ctx.touched.add(obj.id);
 		}
 		invalidateServing();
 		const [s, roster] = await Promise.all([serverOf(obj.id), machines()]);
 		if (s.reason === "pinned-uncapable" || s.reason === "unsatisfied") {
 			const why = s.reason === "pinned-uncapable" ? `"${name}" is pinned to a machine that lacks ${key}` : `no machine has ${key}`;
-			await fileCapabilityHoldup(key, `object_require(${key}): ${why}`, ctx);
+			await fileCapabilityHoldup(key, `object_add_skill(${key}): ${why}`, ctx);
 			const installations = (await fetchInstallations()).filter((row) => row.key === key && (!row.account || key !== "google"));
-			return `"${name}" now requires ${key}, but ${why}. A holdup has been filed. Installation objects: ${JSON.stringify(installations.map((row) => ({ id: row.id, machine: row.machineId, status: row.status })))}. Use capability_request to request setup on the chosen installation; its owning machine requires human approval. Tell the human plainly; do not retry this turn.`;
+			return `"${name}" now lists ${key} in Skills, but ${why}. A holdup has been filed. Installation objects: ${JSON.stringify(installations.map((row) => ({ id: row.id, machine: row.machineId, status: row.status })))}. Use capability_request to request setup on the chosen installation; its owning machine requires human approval. Tell the human plainly; do not retry this turn.`;
 		}
-		if (s.machineId === me) return `ok: "${name}" requires ${key}, which this machine already has; the work stays here.`;
+		if (s.machineId === me) return `ok: "${name}" lists ${key} in Skills, which this machine already has working; the work stays here.`;
 		const server = roster.find((m) => m.machineId === s.machineId)?.name ?? s.machineId.slice(0, 8);
-		return `ok: "${name}" now requires ${key} and will be served by ${server} from the next turn on. Tell the human the work moved there and finish this turn.`;
+		return `ok: "${name}" now lists ${key} in Skills and will be served by ${server} from the next turn on. Tell the human the work moved there and finish this turn.`;
 	},
 };
 
@@ -1644,7 +1642,7 @@ const A2A_TOOL: RegisteredTool = {
 
 export function toolDefs(template: string, depth: number, allowAsk = false): ToolDef[] {
 	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read", "capability_list"]);
-	let defs = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, REQUIRE_TOOL, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL].map((t) => t.def);
+	let defs = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, ADD_SKILL_TOOL, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL].map((t) => t.def);
 	if (template === "" && depth === 0) defs.push(A2A_TOOL.def);
 	if (template === "explore") defs = defs.filter((d) => READ_ONLY.has(d.name));
 	const out = [...defs];
@@ -1672,7 +1670,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>,
 			ctx.submitResult(S(input.content));
 			return { content: "result submitted", isError: false };
 		}
-		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, REQUIRE_TOOL, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL, A2A_TOOL].find((t) => t.def.name === name);
+		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, ADD_SKILL_TOOL, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL, A2A_TOOL].find((t) => t.def.name === name);
 		if (!tool) return { content: `unknown tool: ${name}`, isError: true };
 		const content = await tool.handler(input, ctx);
 		return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };

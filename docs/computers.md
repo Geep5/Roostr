@@ -67,7 +67,7 @@ Machines are device facts, not space content. Two options:
   that machine's own harness**: `resolve_server` must answer "itself" for a
   machine object. Verify `core/serving.odin` does this; if it does not, add the
   rule there (one place, every host) rather than in the harness.
-- The agent's prompt already carries `<capabilities-elsewhere>`, credentials and
+- The agent's prompt already carries `<skills-elsewhere>`, credentials and
   holdups; the agent serving a machine object (named by the machine's `agent`
   field) should additionally get that machine row (capabilities, holdups,
   skills installed here) so "install browserless" is answerable.

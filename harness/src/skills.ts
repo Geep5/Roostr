@@ -1,18 +1,51 @@
 /**
  * Skills — OMP's progressive-disclosure pattern (skill:// + description-only
  * prompt listing) on DAG objects instead of SKILL.md dirs:
- *   skill object  {name, description} + body text blocks
+ *   skill object  {name, description, key?} + body text blocks
  * The system prompt lists name+description only; the agent reads the body
  * on demand via the skill_read tool. Channel `instructions` objects are the
  * CLAUDE.md analog: their text is inlined into every prompt for agents in
  * that channel.
+ *
+ * An agent (or any object) lists the skills its work uses in its Skills
+ * property (`skills`, links to skill objects). A skill with a `key` is
+ * catalog software (browserless, google): the work then only runs on a
+ * computer that has it working - the engine's serving resolver reads the
+ * same links (core/serving.odin).
  */
 
-import { fetchObject, query, queryAll, str, type ObjectJSON } from "./api";
+import { fetchObject, query, queryAll, str, type ObjectJSON, type ValueJSON } from "./api";
 import { machines, serverOf } from "./machine";
 import { machineId } from "./roster";
 import { blockLine } from "./surfaces";
-import { DEFAULT_PROMPT, promptFor } from "./prompts";
+
+export const SKILL_TYPE = "skill";
+export const SKILLS_KEY = "skills";
+
+/** Skill object ids an object lists in its Skills property. */
+export function skillIds(fields: Record<string, ValueJSON>): string[] {
+	const v = fields[SKILLS_KEY];
+	if (!v) return [];
+	const items = v.valuesValue?.items ?? [v];
+	return items.map((i) => i.linkValue?.targetId || i.stringValue || "").filter(Boolean);
+}
+
+/** The catalog keys of the machine skills an object's Skills need (skills with a `key`). */
+export async function machineSkillKeys(fields: Record<string, ValueJSON>): Promise<string[]> {
+	const keys: string[] = [];
+	for (const id of skillIds(fields)) {
+		const skill = await fetchObject(id).catch(() => null);
+		const key = skill && !skill.deleted && skill.typeKey === SKILL_TYPE ? str(skill.fields, "key") : "";
+		if (key && !keys.includes(key)) keys.push(key);
+	}
+	return keys;
+}
+
+/** The skill object for a catalog key, if one exists yet (a machine creates it on first install). */
+export async function skillForKey(key: string): Promise<{ id: string; name: string } | null> {
+	const hit = (await queryAll({ type: SKILL_TYPE })).find((r) => str(r.fields, "key") === key);
+	return hit ? { id: hit.id, name: str(hit.fields, "name") || key } : null;
+}
 
 /**
  * Serialize an object's blocks in tree order.
@@ -61,37 +94,36 @@ export interface SkillListing {
  *
  * Spaces do not enter into it: an agent already belongs to exactly one,
  * so ownership is the finer grain and a global skill stays reachable
- * from anywhere. An agent's system prompt may narrow the list further
- * (the prompt object's `skills` links, by skill name); empty means
- * everything above.
+ * from anywhere. An agent's Skills property narrows the list to the skills
+ * it names; empty means everything above. A machine skill (one with a
+ * `key`) is listed only while this machine has it working.
  */
 export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 	// Dynamic: skillmgr imports objectText from this module, so a static
 	// import here would be a module cycle.
-	const { CATALOG, capabilities } = await import("./skillmgr");
+	const { capabilities } = await import("./skillmgr");
 	// A catalog skill is offered only once its capability object on this
 	// machine is fully set up (served_by + active install) - before that the
 	// skill stays invisible, however the toggle looks.
 	const ready = new Set(await capabilities());
-	const managed = new Set(CATALOG.map((c) => c.name.toLowerCase()));
 	const agent = agentId ? await fetchObject(agentId).catch(() => null) : null;
-	const only = new Set((agent ? await promptFor(agent) : DEFAULT_PROMPT).skills.map((k) => k.toLowerCase()));
-	const rows = await queryAll({ type: "skill" });
+	const only = new Set(agent ? skillIds(agent.fields) : []);
+	const rows = await queryAll({ type: SKILL_TYPE });
 	return rows
 		.map((r) => ({
 			id: r.id,
 			name: str(r.fields, "name") || r.id.slice(0, 8),
 			description: str(r.fields, "description"),
 			owner: str(r.fields, "agent"),
+			key: str(r.fields, "key"),
 		}))
 		.filter((s) => {
 			// Someone else's playbook: invisible, whoever is asking.
 			if (s.owner !== "" && s.owner !== agentId) return false;
-			const key = s.name.toLowerCase();
-			if (only.size > 0 && !only.has(key)) return false;
-			if (!managed.has(key)) return true;
-			return ready.has(key);
-		});
+			if (only.size > 0 && !only.has(s.id)) return false;
+			return !s.key || ready.has(s.key);
+		})
+		.map(({ key: _key, ...listing }) => listing);
 }
 
 export async function readSkill(name: string, agentId?: string): Promise<string> {
@@ -110,11 +142,11 @@ export function skillsPromptSection(skills: SkillListing[]): string {
 }
 
 /**
- * Prompt section for an object's agent: catalog capabilities other machines
- * have and this one lacks, so the agent knows that `object_require` can
- * move its object's work there (`docs/object-serving.md`). Keys the
- * object already requires are not repeated - if the work is still here,
- * requiring them again changes nothing. Empty when the turn has no object
+ * Prompt section for an object's agent: catalog skills other machines have
+ * working and this one lacks, so the agent knows that `object_add_skill`
+ * can move its object's work there (`docs/object-serving.md`). Skills the
+ * object already lists are not repeated - if the work is still here,
+ * adding them again changes nothing. Empty when the turn has no object
  * (the agent's own page) and when nothing is missing.
  */
 export async function remoteCapabilitiesSection(objectId: string): Promise<string> {
@@ -122,10 +154,10 @@ export async function remoteCapabilitiesSection(objectId: string): Promise<strin
 	// Dynamic, as in listSkills: skillmgr imports objectText from this
 	// module, and capabilities.ts pulls in descriptors -> skillmgr.
 	const { CATALOG, capabilities } = await import("./skillmgr");
-	const { fetchCapabilities, fullySetUp, requirementKeys } = await import("./capabilities");
+	const { fetchCapabilities, fullySetUp } = await import("./capabilities");
 	const me = await machineId();
 	const [local, roster, serving, caps] = await Promise.all([capabilities(), machines(), serverOf(objectId), fetchCapabilities()]);
-	const required = requirementKeys(serving.requires, caps);
+	const required = serving.skills;
 	const nameOf = new Map(roster.map((m) => [m.machineId, m.name]));
 	const lines: string[] = [];
 	for (const c of CATALOG) {
@@ -136,7 +168,7 @@ export async function remoteCapabilitiesSection(objectId: string): Promise<strin
 		if (where.length > 0) lines.push(`- ${c.key} (${where.join(", ")})`);
 	}
 	if (lines.length === 0) return "";
-	return `<capabilities-elsewhere>\nCapabilities this machine lacks that other machines have:\n${lines.join("\n")}\nTo use one, call object_require with its key; this object's work then moves to that machine on the next turn.\n</capabilities-elsewhere>`;
+	return `<skills-elsewhere>\nSkills this machine lacks that other machines have working:\n${lines.join("\n")}\nTo use one, call object_add_skill with its key; this object's work then moves to that machine on the next turn.\n</skills-elsewhere>`;
 }
 
 /** Channel instructions (CLAUDE.md analog): inlined fully. */

@@ -54,12 +54,12 @@ test("a skill card carries its check and install work, and asks for nothing", ()
 	expect((browserless?.install?.prompt ?? "").length).toBeGreaterThan(0);
 });
 
-test("an agent card names its requirements by other cards' keys and keeps secrets off the form", () => {
+test("an agent card names its skills by skill cards' keys and keeps secrets off the form", () => {
 	const marco = byKey.get("marco");
 	expect(marco?.kind).toBe("agent");
-	// Assigning the kind to a machine means those cards must be active there.
-	for (const key of marco?.agent?.requires ?? []) expect(byKey.get(key)?.kind).not.toBe("agent");
-	expect(marco?.agent?.requires).toContain("discord-bot");
+	// Its skills are catalog skills a computer installs; its Discord login is a credential, not a skill.
+	for (const key of marco?.agent?.skills ?? []) expect(byKey.get(key)?.kind).toBe("skill");
+	expect(marco?.agent?.skills).toEqual(["matcherino-dev"]);
 	// The bot token belongs to the discord-bot credential, never to the agent object.
 	expect(marco?.fields.some((f) => f.secret)).toBe(false);
 	expect(byKey.get("discord-bot")?.fields.filter((f) => f.secret).map((f) => f.key)).toEqual(["token"]);

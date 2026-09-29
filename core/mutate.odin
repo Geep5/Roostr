@@ -1130,13 +1130,13 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	{"done", "checkbox", "Done", "✅", false, false, 0, {}},
 	// Rendered by the Repeat cell, not the generic property editor.
 	{"repeat", "repeat", "Repeat", "↻", true, false, 0, {}},
-	// Per-object serving: who runs this object, and the capabilities it needs.
-	// `served_by` links the machine object; `requires` links capability
-	// objects (type `capability`). A capability is only usable once it is
-	// served by a machine with an active install - before that it does not
-	// count for the resolver and is not offered to an agent.
+	// Per-object serving: who runs this object, and the skills its work uses.
+	// `served_by` links the machine object; `skills` links skill objects.
+	// A skill is instructions an agent reads; one with a `key` is also
+	// software a computer must have working (an active capability of that
+	// key), so the work only runs on a computer that does.
 	{"served_by", "object", "Served by", "🖥️", false, false, 1, {}},
-	{"requires", "object", "Requires", "🧩", false, false, 0, {}},
+	{"skills", "object", "Skills", "🧠", false, false, 0, {}},
 	// An agent's checkout on the machine that serves it: the harness works
 	// in this folder.
 	{"repo_path", "shorttext", "Project folder", "📁", false, false, 1, {}},
@@ -1152,8 +1152,8 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// Which logins an agent's work uses: Credential objects, each kept by the
 	// computer its own Served by names (secrets stay on that computer).
 	{"credentials", "object", "Credentials", "🔑", false, false, 0, {}},
-	// An agent's configuration is a system_prompt object: standing prompt,
-	// model, requires, skills. `prompt` links one; the harness reads it
+	// An agent's configuration is a system_prompt object: standing prompt
+	// and model. `prompt` links one; the harness reads it
 	// through the link, not a hardcoded kind.
 	{"prompt", "object", "System prompt", "📜", false, false, 1, {}},
 	// Per-agent overrides, set like any property (blank = follow the prompt).
@@ -1283,6 +1283,9 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			mutation_add(plan, input, id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
 		}
 	}
+	for key in RETIRED_BUNDLED_RELATIONS {
+		if e, ok := rels[key]; ok do mutation_add(plan, input, e.id, {Operation{kind = .Object_Delete}})
+	}
 	for t in BUNDLED_TYPES {
 		if e, ok := types[t.key]; ok {
 			ops := make([dynamic]Operation, context.temp_allocator)
@@ -1377,11 +1380,15 @@ bundled_relation_shipped :: proc(key: string) -> bool {
 BUNDLED_PICKER_TYPES := [?][2]string {
 	{"agent", "agent"},
 	{"install", "install"},
-	{"requires", "requires"},
+	{"skills", "skill"},
 	{"served_by", "machine"},
 	{"prompt", "system_prompt"},
 	{"credentials", "credential"},
 }
+
+// Bundled relations that were replaced: seeding deletes a space's copy.
+// `requires` (links to per-machine capability objects) became `skills`.
+RETIRED_BUNDLED_RELATIONS :: []string{"requires"}
 
 bundled_picker_type :: proc(key: string) -> (string, bool) {
 	for pair in BUNDLED_PICKER_TYPES do if pair[0] == key do return pair[1], true
@@ -1398,9 +1405,7 @@ Bundled_Type :: struct {
 // Anytype's default library (heart bundle/types.json), emoji equivalents
 // of their iconNames: page/document, note/create, task/checkbox,
 // profile("Human")/man, project/hammer, bookmark/bookmark. `person` keeps
-// its key so existing objects stay typed. Agent infrastructure (skills)
-// deliberately has NO type object - it lives outside the knowledge space
-// (harness reads typeKey "skill" through the raw query API).
+// its key so existing objects stay typed.
 BUNDLED_TYPES :: []Bundled_Type{
 	{"page", "Page", "📄", "page"},
 	{"note", "Note", "📝", "page"},
@@ -1421,7 +1426,10 @@ BUNDLED_TYPES :: []Bundled_Type{
 	// A capability: one skill offered by one machine. Served by that machine
 	// with an active install before it is usable or offered to an agent.
 	{"capability", "Capability", "🧩", "page"},
-	// An agent's configuration: standing prompt, model, requires, skills.
+	// Instructions an agent reads; the ones an agent (or object) lists in
+	// Skills. A skill with a `key` is catalog software computers install.
+	{"skill", "Skill", "🧠", "page"},
+	// An agent's configuration: standing prompt and model.
 	// An agent links one with `prompt`; there is no hardcoded kind.
 	{"system_prompt", "System prompt", "📜", "page"},
 	// Minds are objects like everything else: a type row so they list in

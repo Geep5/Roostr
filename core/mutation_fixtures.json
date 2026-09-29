@@ -3763,7 +3763,7 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "bundled-rel-requires-new-id",
+        "objectId": "bundled-rel-skills-new-id",
         "ops": [
           {
             "objectCreate": {
@@ -3782,7 +3782,7 @@
             "fieldSet": {
               "key": "key",
               "value": {
-                "stringValue": "requires"
+                "stringValue": "skills"
               }
             }
           },
@@ -3798,7 +3798,7 @@
             "fieldSet": {
               "key": "name",
               "value": {
-                "stringValue": "Requires"
+                "stringValue": "Skills"
               }
             }
           },
@@ -3806,7 +3806,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "🧩"
+                "stringValue": "🧠"
               }
             }
           },
@@ -3859,7 +3859,7 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "bundled-rel-requires-new-id",
+        "objectId": "bundled-rel-skills-new-id",
         "ops": [
           {
             "fieldSet": {
@@ -3868,7 +3868,7 @@
                 "valuesValue": {
                   "items": [
                     {
-                      "stringValue": "bundled-type-requires-new-id"
+                      "stringValue": "bundled-type-skill-new-id"
                     }
                   ]
                 }
@@ -5869,6 +5869,68 @@
       {
         "author": "alice",
         "id": "",
+        "objectId": "bundled-type-skill-new-id",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "type"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "skill"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Skill"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🧠"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "layout",
+              "value": {
+                "stringValue": "page"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
         "objectId": "bundled-type-system_prompt-new-id",
         "ops": [
           {
@@ -7629,7 +7691,7 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "bundled-rel-requires-s",
+        "objectId": "bundled-rel-skills-s",
         "ops": [
           {
             "objectCreate": {
@@ -7648,7 +7710,7 @@
             "fieldSet": {
               "key": "key",
               "value": {
-                "stringValue": "requires"
+                "stringValue": "skills"
               }
             }
           },
@@ -7664,7 +7726,7 @@
             "fieldSet": {
               "key": "name",
               "value": {
-                "stringValue": "Requires"
+                "stringValue": "Skills"
               }
             }
           },
@@ -7672,7 +7734,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "🧩"
+                "stringValue": "🧠"
               }
             }
           },
@@ -7725,7 +7787,7 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "bundled-rel-requires-s",
+        "objectId": "bundled-rel-skills-s",
         "ops": [
           {
             "fieldSet": {
@@ -7734,7 +7796,7 @@
                 "valuesValue": {
                   "items": [
                     {
-                      "stringValue": "bundled-type-requires-s"
+                      "stringValue": "bundled-type-skill-s"
                     }
                   ]
                 }
@@ -8795,6 +8857,68 @@
               "key": "iconEmoji",
               "value": {
                 "stringValue": "🧩"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "layout",
+              "value": {
+                "stringValue": "page"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-skill-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "type"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "skill"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Skill"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🧠"
               }
             }
           },
@@ -10562,7 +10686,7 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "bundled-rel-requires-s",
+        "objectId": "bundled-rel-skills-s",
         "ops": [
           {
             "objectCreate": {
@@ -10581,7 +10705,7 @@
             "fieldSet": {
               "key": "key",
               "value": {
-                "stringValue": "requires"
+                "stringValue": "skills"
               }
             }
           },
@@ -10597,7 +10721,7 @@
             "fieldSet": {
               "key": "name",
               "value": {
-                "stringValue": "Requires"
+                "stringValue": "Skills"
               }
             }
           },
@@ -10605,7 +10729,7 @@
             "fieldSet": {
               "key": "iconEmoji",
               "value": {
-                "stringValue": "🧩"
+                "stringValue": "🧠"
               }
             }
           },
@@ -10658,7 +10782,7 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "bundled-rel-requires-s",
+        "objectId": "bundled-rel-skills-s",
         "ops": [
           {
             "fieldSet": {
@@ -10667,7 +10791,7 @@
                 "valuesValue": {
                   "items": [
                     {
-                      "stringValue": "bundled-type-requires-s"
+                      "stringValue": "bundled-type-skill-s"
                     }
                   ]
                 }
@@ -11790,6 +11914,68 @@
               "key": "iconEmoji",
               "value": {
                 "stringValue": "🧩"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "layout",
+              "value": {
+                "stringValue": "page"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-skill-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "type"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "skill"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Skill"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🧠"
               }
             }
           },

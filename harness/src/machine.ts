@@ -5,8 +5,8 @@
  * Responsibility is a function of DAG state that every machine evaluates
  * identically: an object is served by its `served_by` pin, else by the pin
  * of the first agent on its guest list (`agent`) that has one, unless its
- * `requires` list names capabilities that machine lacks - then the lowest
- * machine id that has them. Nothing pinned and nothing required: nobody.
+ * Skills name catalog software that machine does not have working - then
+ * the lowest machine id that does. Nothing pinned and no machine skill: nobody.
  * The engine owns the rule (`core/serving.odin`); the daemon evaluates it
  * over the local replica (`POST /api/serving`) and this module only caches
  * the answers and asks "is it me?".
@@ -89,7 +89,7 @@ export async function primeServing(objectIds: string[]): Promise<void> {
 /** The engine's resolution for one object. */
 export async function serverOf(objectId: string): Promise<Serving> {
 	await primeServing([objectId]);
-	return servingCache.get(objectId)?.serving ?? { machineId: "", reason: "unserved", requires: [], candidates: [] };
+	return servingCache.get(objectId)?.serving ?? { machineId: "", reason: "unserved", skills: [], candidates: [] };
 }
 
 /**

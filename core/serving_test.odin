@@ -28,7 +28,7 @@ serving_fixture_contract :: proc(t: ^testing.T) {
 		testing.expectf(t, derr == "", "%s: %s", name, derr)
 		if derr != "" do continue
 		expected, _ := json_field(fixture, "expected")
-		for key in ([]string{"machineId", "reason", "requires", "candidates"}) {
+		for key in ([]string{"machineId", "reason", "skills", "candidates"}) {
 			got, _ := json_field(result, key)
 			want, _ := json_field(expected, key)
 			testing.expectf(t, string(marshal(got)) == string(marshal(want)), "%s: %s = %s, want %s", name, key, string(marshal(got)), string(marshal(want)))
@@ -39,16 +39,18 @@ serving_fixture_contract :: proc(t: ^testing.T) {
 @(test)
 installation_serving_never_leaves_its_owning_machine :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
-	// The requirement is genuinely served elsewhere: "other" hosts the
+	// The skill is genuinely served elsewhere: "other" hosts the
 	// capability and its install is active, and the install's agent is pinned
 	// there. An install still answers for its owning machine - it never
 	// borrows the machine that could do the work.
 	object := Object_State{id = "i-self", type_key = "install", fields = make([dynamic]Value_Entry)}
-	append(&object.fields, Value_Entry{key = "machine_id", value = string_value("owner")}, Value_Entry{key = "served_by", value = string_value("other")}, Value_Entry{key = "requires", value = list_value([]Value{Value{kind = .Link, link_target = "c1", link_relation = "requires"}})}, Value_Entry{key = "agent", value = list_value([]Value{Value{kind = .Link, link_target = "a", link_relation = "agent"}})})
+	append(&object.fields, Value_Entry{key = "machine_id", value = string_value("owner")}, Value_Entry{key = "served_by", value = string_value("other")}, Value_Entry{key = "skills", value = list_value([]Value{Value{kind = .Link, link_target = "s1", link_relation = "skills"}})}, Value_Entry{key = "agent", value = list_value([]Value{Value{kind = .Link, link_target = "a", link_relation = "agent"}})})
 	agent := Object_State{id = "a", type_key = "agent", fields = make([dynamic]Value_Entry)}
 	append(&agent.fields, Value_Entry{key = "served_by", value = string_value("other")})
 	machine := Object_State{id = "m", type_key = "machine", fields = make([dynamic]Value_Entry)}
 	append(&machine.fields, Value_Entry{key = "machine_id", value = string_value("other")})
+	skill := Object_State{id = "s1", type_key = "skill", fields = make([dynamic]Value_Entry)}
+	append(&skill.fields, Value_Entry{key = "key", value = string_value("browserless")})
 	capability := Object_State{id = "c1", type_key = "capability", fields = make([dynamic]Value_Entry)}
 	append(&capability.fields, Value_Entry{key = "key", value = string_value("browserless")}, Value_Entry{key = "served_by", value = string_value("other")}, Value_Entry{key = "install", value = Value{kind = .Link, link_target = "i-cap", link_relation = "install"}})
 	cap_install := Object_State{id = "i-cap", type_key = "install", fields = make([dynamic]Value_Entry)}
@@ -57,6 +59,7 @@ installation_serving_never_leaves_its_owning_machine :: proc(t: ^testing.T) {
 	states["i-self"] = &object
 	states["a"] = &agent
 	states["m"] = &machine
+	states["s1"] = &skill
 	states["c1"] = &capability
 	states["i-cap"] = &cap_install
 	serving := resolve_server(&object, states)

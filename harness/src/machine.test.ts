@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { Serving } from "./api";
 import { agentRunsOn } from "./machine";
 
-const serving = (reason: Serving["reason"], machineId: string): Serving => ({ machineId, reason, requires: [], candidates: [] });
+const serving = (reason: Serving["reason"], machineId: string): Serving => ({ machineId, reason, skills: [], candidates: [] });
 
 test("an unpinned agent runs nowhere; otherwise a placed object runs every guest on its server, else each on its own pin", () => {
 	// Object pin, machine/install, and capability routing beat the agent's

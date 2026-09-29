@@ -132,10 +132,13 @@ An agent is a blank object you configure by setting its properties — the same
 properties you'd click in the UI. There is no setup wizard and no `kind` field.
 
 - **`served_by`** (link → `machine` object): the computer it runs on.
-- **`prompt`** (link → `system_prompt` object): its configuration (standing
-  prompt, model, requires, skills). Edit or point at a different prompt object.
+- **`prompt`** (link → `system_prompt` object): its standing prompt and
+  model. Edit or point at a different prompt object.
 - **`model`** (select): per-agent override of the prompt's model.
-- **`requires`** (links → `capability` objects): what the machine must provide.
+- **`skills`** (links → `skill` objects): the skills it uses. A skill is
+  instructions the agent reads; a catalog skill (one with a `key`, like
+  browserless or google) is also software, so the agent then only runs on a
+  computer that has it working.
 - **`credentials`** (links → `credential` objects): the logins it may act with.
 
 To make a working agent: create the object, set `served_by` to a machine and
@@ -197,8 +200,7 @@ computer: the app writes them to `secret` and the computer marks it active.
 Agents use browser credentials through `credential_fetch` (read a page) and
 `credential_action` (act), which inject the cookies into a throwaway headless
 Chrome. A page that lands on a login wall is reported as signed out; nothing is
-done there. An active credential also publishes a `capability` object for its
-service on its computer, gated by the credential's `status`.
+done there.
 
 ## Verified
 
@@ -240,8 +242,9 @@ unpublished work unless it is explicitly exported.
 
 Serving is per object (`docs/object-serving.md`): the engine's resolver
 (`core/serving.odin`) picks the machine from the object's `served_by` pin,
-its `requires` capabilities against each machine object's published
-`capabilities`, then the space's `served_by` default. No heartbeats or
+then its first agent's pin, moving the work to a computer that has every
+catalog skill in its Skills working (each machine publishes a capability
+object per working skill). No heartbeats or
 leases - only the serving machine sets its own verified checkout path.
 
 ## Harness (`harness/`)

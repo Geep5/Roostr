@@ -1,9 +1,9 @@
 /**
  * System prompts - what an agent IS before its object says otherwise.
  *
- * An agent's configuration (standing prompt, model, the machine
- * capabilities it `requires`, the skills it sees) is a `system_prompt`
- * object the agent links with its `prompt` property; the object is edited,
+ * An agent's standing prompt and model are a `system_prompt` object the
+ * agent links with its `prompt` property (the skills it uses are the
+ * agent's own Skills property, skills.ts); the object is edited,
  * shared, and space-scoped like any other. An agent with no `prompt` link
  * is linked to its space's "Assistant" prompt object before it runs
  * (`ensureAgentPrompt`) - there is no hidden prompt behind the UI. The
@@ -32,9 +32,7 @@ export interface AgentKindEntry {
 	description: string;
 	system: string;
 	model: string;
-	/** Capability keys (resolved from the prompt object's `requires` links for a live agent). */
-	requires: string[];
-	/** Skill keys surfaced to this prompt, by skill name; empty = all. */
+	/** Catalog keys of the skills an agent seeded from this entry lists in its Skills. */
 	skills: string[];
 	fields: Array<{ key: string; label: string; secret: boolean; format: "text" | "password" | "url" | "email"; note: string }>;
 	/** Values written for fields the setup left blank (harness-side; the card's `note` tells the human). */
@@ -100,7 +98,7 @@ const MARCO_SYSTEM = readFileSync(`${import.meta.dir}/../kinds/marco.md`, "utf8"
 /** Default checkout for the Matcherino dev bot; also the `matcherino-dev` skill's check path. */
 export const MATCHERINO_REPO = "/home/geep/Matcherino";
 
-/** The prompt-less default: a generic standing prompt, the default model, no requires/skills. */
+/** The prompt-less default: a generic standing prompt, the default model, no skills. */
 export const DEFAULT_PROMPT: AgentKindEntry = {
 	key: "assistant",
 	name: "Assistant",
@@ -108,7 +106,6 @@ export const DEFAULT_PROMPT: AgentKindEntry = {
 	description: "A general Roostr agent: answers its chat and object discussions, reads and organizes the space.",
 	system: DEFAULT_SYSTEM,
 	model: DEFAULT_MODEL,
-	requires: [],
 	skills: [],
 	fields: [],
 	defaults: {},
@@ -125,8 +122,8 @@ export const PROMPT_SEEDS: AgentKindEntry[] = [
 		// Moonshot's model list for the stored key (GET /v1/models): kimi-k3,
 		// kimi-k2.7-code, kimi-k2.6. BotAdmin ran on omp's kimi-code/k3.
 		model: "kimi-k3",
-		requires: ["matcherino-dev", "discord-bot"],
-		skills: [],
+		// Its Discord bot token is a Credential the agent lists, not a skill.
+		skills: ["matcherino-dev"],
 		fields: [
 			{ key: "discord_channel_id", label: "Discord channel id", secret: false, format: "text", note: "Admin channel the bot answers in. Required." },
 			{ key: "discord_extra_channel_ids", label: "Extra channel ids", secret: false, format: "text", note: "Comma-separated additional guild channels to answer in." },
@@ -147,21 +144,11 @@ export function promptTarget(fields: Record<string, ValueJSON>): string {
 	return first?.linkValue?.targetId ?? first?.stringValue ?? "";
 }
 
-/** Skill names a prompt's `skills` links point at; a legacy string item reads as a name. */
-async function promptSkillNames(fields: Record<string, ValueJSON>): Promise<string[]> {
-	const v = fields["skills"];
-	const items = v?.valuesValue?.items ?? (v?.linkValue ? [v] : v?.stringValue ? [sv(v.stringValue)] : []);
-	const names: string[] = [];
-	for (const item of items) {
-		const target = item.linkValue?.targetId ?? "";
-		if (!target) {
-			if (item.stringValue) names.push(item.stringValue);
-			continue;
-		}
-		const skill = await fetchObject(target).catch(() => null);
-		if (skill) names.push(str(skill.fields, "name") || skill.id.slice(0, 8));
-	}
-	return names;
+/** What a linked system_prompt object configures: the standing text and the model. */
+export interface PromptConfig {
+	name: string;
+	system: string;
+	model: string;
 }
 
 /**
@@ -169,32 +156,19 @@ async function promptSkillNames(fields: Record<string, ValueJSON>): Promise<stri
  * `prompt` property links. Every served agent is linked before it runs
  * (`ensureAgentPrompt`), so the base prompt is always one a human can see
  * and edit in Roostr; a blank `system` there means no base prompt, never a
- * hidden one. DEFAULT_PROMPT is returned only for the instant between an
- * agent's creation and that link landing, and only for its model/skills.
- * `requires` comes back as capability keys - the same id→key mapping the
- * agent's own `requires` gets - so the gating call sites compare like with like.
+ * hidden one. The default model covers the instant between an agent's
+ * creation and that link landing.
  */
-export async function promptFor(agent: ObjectJSON): Promise<AgentKindEntry> {
+export async function promptFor(agent: ObjectJSON): Promise<PromptConfig> {
 	const id = promptTarget(agent.fields);
 	const prompt = id ? await fetchObject(id).catch(() => null) : null;
-	if (!prompt) return { ...DEFAULT_PROMPT, system: "" };
-	// Dynamic, as in skills.ts: capabilities -> descriptors -> skillmgr ->
-	// skills -> here would be a module cycle.
-	const { requiredKeys } = await import("./capabilities");
-	const name = str(prompt.fields, "name");
+	if (!prompt) return { name: DEFAULT_PROMPT.name, system: "", model: DEFAULT_PROMPT.model };
 	return {
-		key: name || prompt.id.slice(0, 8),
-		name: name || DEFAULT_PROMPT.name,
-		promptName: name || DEFAULT_PROMPT.promptName,
-		description: str(prompt.fields, "description"),
+		name: str(prompt.fields, "name") || DEFAULT_PROMPT.name,
 		// The page body is the prompt. The legacy `system` field is read only
 		// until this machine's boot migration moves it onto the page.
 		system: pageText(prompt) || str(prompt.fields, "system"),
 		model: choice(prompt.fields, "model") || DEFAULT_MODEL,
-		requires: await requiredKeys(prompt.fields),
-		skills: await promptSkillNames(prompt.fields),
-		fields: [],
-		defaults: {},
 	};
 }
 
@@ -232,14 +206,11 @@ export async function ensureSystemPrompt(seed: AgentKindEntry, channelId: string
 		(r) => str(r.fields, "name") === seed.promptName && str(r.fields, "channel") === channel,
 	);
 	if (existing) return { id: existing.id, created: false };
-	// Dynamic: the module cycle noted in promptFor.
-	const { requiresValueForKeys } = await import("./capabilities");
 	const fields: Record<string, ValueJSON> = {
 		model: sv(seed.model),
 		description: sv(seed.description),
 	};
 	if (channel) fields.channel = sv(channel);
-	if (seed.requires.length > 0) fields.requires = await requiresValueForKeys(seed.requires);
 	const { id } = await createObject(seed.promptName, SYSTEM_PROMPT_TYPE, fields);
 	// The standing prompt IS the page: what you open is what the agent runs on.
 	await writePageText(id, seed.system);

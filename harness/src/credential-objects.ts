@@ -104,19 +104,12 @@ async function publishState(row: CredentialRow, stamp = false): Promise<Credenti
 
 /**
  * Re-read the credentials this computer looks after and write any status
- * that changed. Capability objects follow (an active login is a capability).
- * Boot, every credential change and a slow timer call it.
+ * that changed. Boot, every credential change and a slow timer call it.
  */
 export async function refreshCredentials(): Promise<CredentialRow[]> {
 	const me = await machineId();
 	const rows = await Promise.all((await queryAll({ type: CREDENTIAL_TYPE })).map(rowOf));
-	const before = new Set(mine.filter((c) => c.status === "active").map((c) => c.id));
 	mine = await Promise.all(rows.filter((r) => r.servedBy === me).map((r) => publishState(r)));
-	const after = new Set(mine.filter((c) => c.status === "active").map((c) => c.id));
-	if (before.size !== after.size || [...after].some((id) => !before.has(id))) {
-		const { republishCapabilities } = await import("./skillmgr");
-		await republishCapabilities();
-	}
 	return mine;
 }
 

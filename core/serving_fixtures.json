@@ -1,7 +1,7 @@
 {
  "resolve": [
   {
-   "name": "no requirements: the agent pin",
+   "name": "no skills: the agent pin",
    "object": {
     "id": "o",
     "typeKey": "task",
@@ -54,15 +54,15 @@
    "expected": {
     "machineId": "laptop",
     "reason": "agent",
-    "requires": [],
     "candidates": [
      "laptop",
      "studio"
-    ]
+    ],
+    "skills": []
    }
   },
   {
-   "name": "no pin, no agent, no requirements: unserved",
+   "name": "no pin, no agent, no skills: unserved",
    "object": {
     "id": "o",
     "typeKey": "task",
@@ -91,11 +91,11 @@
    "expected": {
     "machineId": "",
     "reason": "unserved",
-    "requires": [],
     "candidates": [
      "laptop",
      "studio"
-    ]
+    ],
+    "skills": []
    }
   },
   {
@@ -167,11 +167,11 @@
    "expected": {
     "machineId": "studio",
     "reason": "agent",
-    "requires": [],
     "candidates": [
      "laptop",
      "studio"
-    ]
+    ],
+    "skills": []
    }
   },
   {
@@ -239,11 +239,11 @@
    "expected": {
     "machineId": "laptop",
     "reason": "agent",
-    "requires": [],
     "candidates": [
      "laptop",
      "studio"
-    ]
+    ],
+    "skills": []
    }
   },
   {
@@ -316,11 +316,11 @@
    "expected": {
     "machineId": "laptop",
     "reason": "agent",
-    "requires": [],
     "candidates": [
      "laptop",
      "studio"
-    ]
+    ],
+    "skills": []
    }
   },
   {
@@ -366,11 +366,11 @@
    "expected": {
     "machineId": "",
     "reason": "unserved",
-    "requires": [],
     "candidates": [
      "laptop",
      "studio"
-    ]
+    ],
+    "skills": []
    }
   },
   {
@@ -407,31 +407,19 @@
    "expected": {
     "machineId": "laptop",
     "reason": "pinned",
-    "requires": [],
     "candidates": [
      "laptop",
      "studio"
-    ]
+    ],
+    "skills": []
    }
   },
   {
-   "name": "requirement moves work off the agent pin to the capable machine",
+   "name": "a skill moves work off the agent pin to the capable machine",
    "object": {
     "id": "o",
     "typeKey": "task",
     "fields": {
-     "requires": {
-      "valuesValue": {
-       "items": [
-        {
-         "linkValue": {
-          "targetId": "c-browserless",
-          "relationKey": "requires"
-         }
-        }
-       ]
-      }
-     },
      "agent": {
       "valuesValue": {
        "items": [
@@ -439,6 +427,18 @@
          "linkValue": {
           "targetId": "a",
           "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     },
+     "skills": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "s-browserless",
+          "relationKey": "skills"
          }
         }
        ]
@@ -525,10 +525,271 @@
    "expected": {
     "machineId": "studio",
     "reason": "capability",
-    "requires": [
-     "c-browserless"
-    ],
     "candidates": [
+     "studio"
+    ],
+    "skills": [
+     "browserless"
+    ]
+   },
+   "skills": [
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      },
+      "key": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "a skill without a key is instructions only: the agent pin",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     },
+     "skills": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "s-browserless",
+          "relationKey": "skills"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "agents": [
+    {
+     "id": "a",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "laptop"
+      }
+     }
+    }
+   ],
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c-browserless",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "served_by": {
+       "linkValue": {
+        "targetId": "studio",
+        "relationKey": "served_by"
+       }
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i-browserless",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i-browserless",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "status": {
+       "stringValue": "active"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "agent",
+    "skills": [],
+    "candidates": [
+     "laptop",
+     "studio"
+    ]
+   },
+   "skills": [
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "a listed skill the host did not supply does not constrain the machine",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {
+     "agent": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "a",
+          "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     },
+     "skills": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "s-browserless",
+          "relationKey": "skills"
+         }
+        }
+       ]
+      }
+     }
+    }
+   },
+   "agents": [
+    {
+     "id": "a",
+     "typeKey": "agent",
+     "fields": {
+      "served_by": {
+       "stringValue": "laptop"
+      }
+     }
+    }
+   ],
+   "machines": [
+    {
+     "id": "m1",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "laptop"
+      },
+      "capabilities": {
+       "listValue": {
+        "values": [
+         "browserless"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "id": "m2",
+     "typeKey": "machine",
+     "fields": {
+      "machine_id": {
+       "stringValue": "studio"
+      }
+     }
+    }
+   ],
+   "capabilities": [
+    {
+     "id": "c-browserless",
+     "typeKey": "capability",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "served_by": {
+       "linkValue": {
+        "targetId": "studio",
+        "relationKey": "served_by"
+       }
+      },
+      "install": {
+       "linkValue": {
+        "targetId": "i-browserless",
+        "relationKey": "install"
+       }
+      }
+     }
+    },
+    {
+     "id": "i-browserless",
+     "typeKey": "install",
+     "fields": {
+      "key": {
+       "stringValue": "browserless"
+      },
+      "machine_id": {
+       "stringValue": "studio"
+      },
+      "status": {
+       "stringValue": "active"
+      }
+     }
+    }
+   ],
+   "expected": {
+    "machineId": "laptop",
+    "reason": "agent",
+    "skills": [],
+    "candidates": [
+     "laptop",
      "studio"
     ]
    }
@@ -539,18 +800,6 @@
     "id": "o",
     "typeKey": "task",
     "fields": {
-     "requires": {
-      "valuesValue": {
-       "items": [
-        {
-         "linkValue": {
-          "targetId": "c1",
-          "relationKey": "requires"
-         }
-        }
-       ]
-      }
-     },
      "agent": {
       "valuesValue": {
        "items": [
@@ -558,6 +807,18 @@
          "linkValue": {
           "targetId": "a",
           "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     },
+     "skills": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "s-browserless",
+          "relationKey": "skills"
          }
         }
        ]
@@ -640,27 +901,41 @@
    "expected": {
     "machineId": "studio",
     "reason": "agent-capable",
-    "requires": [
-     "c1"
-    ],
     "candidates": [
      "studio"
+    ],
+    "skills": [
+     "browserless"
     ]
-   }
+   },
+   "skills": [
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      },
+      "key": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
   },
   {
-   "name": "a requirement is satisfied by one of two machines",
+   "name": "a skill is had by every machine with it working: the smallest id serves",
    "object": {
     "id": "o",
     "typeKey": "task",
     "fields": {
-     "requires": {
+     "skills": {
       "valuesValue": {
        "items": [
         {
          "linkValue": {
-          "targetId": "c-alpha",
-          "relationKey": "requires"
+          "targetId": "s-browserless",
+          "relationKey": "skills"
          }
         }
        ]
@@ -771,38 +1046,35 @@
    "expected": {
     "machineId": "alpha",
     "reason": "capability",
-    "requires": [
-     "c-alpha"
-    ],
     "candidates": [
-     "alpha"
+     "alpha",
+     "studio"
+    ],
+    "skills": [
+     "browserless"
     ]
-   }
+   },
+   "skills": [
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      },
+      "key": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
   },
   {
-   "name": "all requirements must be present: the agent pin, unsatisfied",
+   "name": "every listed skill must be had: the agent pin, unsatisfied",
    "object": {
     "id": "o",
     "typeKey": "task",
     "fields": {
-     "requires": {
-      "valuesValue": {
-       "items": [
-        {
-         "linkValue": {
-          "targetId": "c-gws",
-          "relationKey": "requires"
-         }
-        },
-        {
-         "linkValue": {
-          "targetId": "c-browserless",
-          "relationKey": "requires"
-         }
-        }
-       ]
-      }
-     },
      "agent": {
       "valuesValue": {
        "items": [
@@ -810,6 +1082,24 @@
          "linkValue": {
           "targetId": "a",
           "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     },
+     "skills": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "s-gws",
+          "relationKey": "skills"
+         }
+        },
+        {
+         "linkValue": {
+          "targetId": "s-browserless",
+          "relationKey": "skills"
          }
         }
        ]
@@ -925,12 +1215,38 @@
    "expected": {
     "machineId": "laptop",
     "reason": "unsatisfied",
-    "requires": [
-     "c-gws",
-     "c-browserless"
-    ],
-    "candidates": []
-   }
+    "candidates": [],
+    "skills": [
+     "gws",
+     "browserless"
+    ]
+   },
+   "skills": [
+    {
+     "id": "s-gws",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "gws"
+      },
+      "key": {
+       "stringValue": "gws"
+      }
+     }
+    },
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      },
+      "key": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
   },
   {
    "name": "capability with no served_by serves nobody",
@@ -938,13 +1254,13 @@
     "id": "o",
     "typeKey": "task",
     "fields": {
-     "requires": {
+     "skills": {
       "valuesValue": {
        "items": [
         {
          "linkValue": {
-          "targetId": "c1",
-          "relationKey": "requires"
+          "targetId": "s-browserless",
+          "relationKey": "skills"
          }
         }
        ]
@@ -1007,11 +1323,25 @@
    "expected": {
     "machineId": "",
     "reason": "unsatisfied",
-    "requires": [
-     "c1"
-    ],
-    "candidates": []
-   }
+    "candidates": [],
+    "skills": [
+     "browserless"
+    ]
+   },
+   "skills": [
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      },
+      "key": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
   },
   {
    "name": "capability with an inactive install serves nobody",
@@ -1019,18 +1349,6 @@
     "id": "o",
     "typeKey": "task",
     "fields": {
-     "requires": {
-      "valuesValue": {
-       "items": [
-        {
-         "linkValue": {
-          "targetId": "c1",
-          "relationKey": "requires"
-         }
-        }
-       ]
-      }
-     },
      "agent": {
       "valuesValue": {
        "items": [
@@ -1038,6 +1356,18 @@
          "linkValue": {
           "targetId": "a",
           "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     },
+     "skills": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "s-browserless",
+          "relationKey": "skills"
          }
         }
        ]
@@ -1114,11 +1444,25 @@
    "expected": {
     "machineId": "laptop",
     "reason": "unsatisfied",
-    "requires": [
-     "c1"
-    ],
-    "candidates": []
-   }
+    "candidates": [],
+    "skills": [
+     "browserless"
+    ]
+   },
+   "skills": [
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      },
+      "key": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
   },
   {
    "name": "pin wins over the agent pin when capable",
@@ -1129,18 +1473,6 @@
      "served_by": {
       "stringValue": "studio"
      },
-     "requires": {
-      "valuesValue": {
-       "items": [
-        {
-         "linkValue": {
-          "targetId": "c1",
-          "relationKey": "requires"
-         }
-        }
-       ]
-      }
-     },
      "agent": {
       "valuesValue": {
        "items": [
@@ -1148,6 +1480,18 @@
          "linkValue": {
           "targetId": "a",
           "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     },
+     "skills": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "s-browserless",
+          "relationKey": "skills"
          }
         }
        ]
@@ -1227,16 +1571,30 @@
    "expected": {
     "machineId": "studio",
     "reason": "pinned",
-    "requires": [
-     "c1"
-    ],
     "candidates": [
      "studio"
+    ],
+    "skills": [
+     "browserless"
     ]
-   }
+   },
+   "skills": [
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      },
+      "key": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
   },
   {
-   "name": "pin with no requirements never needs capabilities",
+   "name": "pin with no skills never needs capabilities",
    "object": {
     "id": "o",
     "typeKey": "task",
@@ -1273,8 +1631,8 @@
    "expected": {
     "machineId": "laptop",
     "reason": "pinned",
-    "requires": [],
-    "candidates": []
+    "candidates": [],
+    "skills": []
    }
   },
   {
@@ -1286,13 +1644,13 @@
      "served_by": {
       "stringValue": "laptop"
      },
-     "requires": {
+     "skills": {
       "valuesValue": {
        "items": [
         {
          "linkValue": {
-          "targetId": "c1",
-          "relationKey": "requires"
+          "targetId": "s-browserless",
+          "relationKey": "skills"
          }
         }
        ]
@@ -1361,21 +1719,35 @@
    "expected": {
     "machineId": "laptop",
     "reason": "pinned-uncapable",
-    "requires": [
-     "c1"
-    ],
     "candidates": [
      "studio"
+    ],
+    "skills": [
+     "browserless"
     ]
-   }
+   },
+   "skills": [
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      },
+      "key": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
   },
   {
-   "name": "machines without an id and blank requirement entries are ignored",
+   "name": "machines without an id and blank skill entries are ignored",
    "object": {
     "id": "o",
     "typeKey": "task",
     "fields": {
-     "requires": {
+     "skills": {
       "valuesValue": {
        "items": [
         {
@@ -1383,8 +1755,8 @@
         },
         {
          "linkValue": {
-          "targetId": "c1",
-          "relationKey": "requires"
+          "targetId": "s-browserless",
+          "relationKey": "skills"
          }
         }
        ]
@@ -1451,13 +1823,27 @@
    "expected": {
     "machineId": "studio",
     "reason": "capability",
-    "requires": [
-     "c1"
-    ],
     "candidates": [
      "studio"
+    ],
+    "skills": [
+     "browserless"
     ]
-   }
+   },
+   "skills": [
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      },
+      "key": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
   },
   {
    "name": "an install answers for its owning machine",
@@ -1471,18 +1857,6 @@
      "served_by": {
       "stringValue": "other"
      },
-     "requires": {
-      "valuesValue": {
-       "items": [
-        {
-         "linkValue": {
-          "targetId": "c1",
-          "relationKey": "requires"
-         }
-        }
-       ]
-      }
-     },
      "agent": {
       "valuesValue": {
        "items": [
@@ -1490,6 +1864,18 @@
          "linkValue": {
           "targetId": "a",
           "relationKey": "agent"
+         }
+        }
+       ]
+      }
+     },
+     "skills": {
+      "valuesValue": {
+       "items": [
+        {
+         "linkValue": {
+          "targetId": "s-browserless",
+          "relationKey": "skills"
          }
         }
        ]
@@ -1560,25 +1946,39 @@
    "expected": {
     "machineId": "owner",
     "reason": "self",
-    "requires": [
-     "c1"
-    ],
-    "candidates": []
-   }
+    "candidates": [],
+    "skills": [
+     "browserless"
+    ]
+   },
+   "skills": [
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      },
+      "key": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
   },
   {
-   "name": "an unpinned agent is unserved even when a machine has what it requires",
+   "name": "an unpinned agent is unserved even when a machine has the skill",
    "object": {
     "id": "agent-x",
     "typeKey": "agent",
     "fields": {
-     "requires": {
+     "skills": {
       "valuesValue": {
        "items": [
         {
          "linkValue": {
-          "targetId": "c1",
-          "relationKey": "requires"
+          "targetId": "s-browserless",
+          "relationKey": "skills"
          }
         }
        ]
@@ -1635,13 +2035,27 @@
    "expected": {
     "machineId": "",
     "reason": "unserved",
-    "requires": [
-     "c1"
-    ],
     "candidates": [
      "studio"
+    ],
+    "skills": [
+     "browserless"
     ]
-   }
+   },
+   "skills": [
+    {
+     "id": "s-browserless",
+     "typeKey": "skill",
+     "fields": {
+      "name": {
+       "stringValue": "browserless"
+      },
+      "key": {
+       "stringValue": "browserless"
+      }
+     }
+    }
+   ]
   },
   {
    "name": "no object at all: unserved",
@@ -1649,8 +2063,8 @@
    "expected": {
     "machineId": "",
     "reason": "unserved",
-    "requires": [],
-    "candidates": []
+    "candidates": [],
+    "skills": []
    }
   },
   {
@@ -1664,6 +2078,18 @@
     42
    ],
    "error": "invalid machine state"
+  },
+  {
+   "name": "malformed skill entry is an error",
+   "object": {
+    "id": "o",
+    "typeKey": "task",
+    "fields": {}
+   },
+   "skills": [
+    42
+   ],
+   "error": "invalid skill state"
   },
   {
    "name": "malformed capability entry is an error",
@@ -1730,11 +2156,11 @@
    "expected": {
     "machineId": "studio",
     "reason": "self",
-    "requires": [],
     "candidates": [
      "alpha",
      "studio"
-    ]
+    ],
+    "skills": []
    }
   },
   {
@@ -1781,11 +2207,11 @@
    "expected": {
     "machineId": "studio",
     "reason": "self",
-    "requires": [],
     "candidates": [
      "alpha",
      "studio"
-    ]
+    ],
+    "skills": []
    }
   }
  ]

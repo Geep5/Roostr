@@ -17,8 +17,6 @@ import { createObject, fetchObject, mutate, str, queryAll } from "./api";
 import { machines, publishMachine } from "./machine";
 import { machineId } from "./roster";
 import { humanRef, postTo } from "./conv";
-import { serviceEntry } from "./credentials";
-import { localCredentials } from "./credential-objects";
 import { publishHoldup, publishInstallations, publishGoogleInstallations } from "./descriptors";
 import { activeCapabilityKeys, syncCapabilities, type CapabilitySeed } from "./capabilities";
 import { objectText } from "./skills";
@@ -202,20 +200,13 @@ async function writeState(state: StateFile): Promise<void> {
 }
 
 /**
- * What this machine can do for an object that `requires` it, as capability
- * seeds: catalog skills installed AND enabled here, plus the active
- * Credentials this machine keeps (an X login is a capability exactly like
- * browserless; its Credential's status gates it). Each seed becomes one
- * capability object naming this machine as `served_by`.
+ * What this machine can do for an object whose Skills need it, as
+ * capability seeds: catalog skills installed AND enabled here. Each seed
+ * becomes one capability object naming this machine as `served_by`.
+ * (Logins are Credentials the agent carries, not machine capabilities.)
  */
 function capabilitySeeds(state: StateFile): CapabilitySeed[] {
-	const skills = CATALOG.filter((c) => state.skills[c.key]?.enabled && state.skills[c.key]?.installed).map((c) => ({ key: c.key, name: c.name, description: c.description }));
-	const logins = new Map<string, CapabilitySeed>();
-	for (const c of localCredentials()) {
-		const entry = serviceEntry(c.service);
-		if (c.status === "active" && entry && !logins.has(c.service)) logins.set(c.service, { key: c.service, name: entry.label, description: entry.note, installId: c.id });
-	}
-	return [...skills, ...logins.values()];
+	return CATALOG.filter((c) => state.skills[c.key]?.enabled && state.skills[c.key]?.installed).map((c) => ({ key: c.key, name: c.name, description: c.description }));
 }
 
 /**
@@ -230,7 +221,7 @@ async function saveSkills(state: StateFile): Promise<void> {
 	await syncCapabilities(capabilitySeeds(state));
 }
 
-/** Credential changes call this: the published set follows the credentials kept here. */
+/** Republish this machine's installation rows and capability objects from current state. */
 export async function republishCapabilities(): Promise<void> {
 	const state = await readState();
 	await publishMachine();
@@ -277,14 +268,19 @@ export async function capabilities(): Promise<string[]> {
  */
 export const GLOBAL_SCOPE = "global";
 
-/** Backfill the marker on catalog objects installed before it existed. */
+/**
+ * Backfill the markers on catalog skill objects made before they existed:
+ * the global scope, and `key` - the catalog key that makes a skill machine
+ * software, so listing it in Skills routes work to a machine that has it.
+ */
 export async function convergeCatalogScope(): Promise<void> {
 	const names = new Map(CATALOG.map((c) => [c.name.toLowerCase(), c]));
 	const rows = await queryAll({ type: "skill" });
 	for (const r of rows) {
-		const name = str(r.fields, "name").toLowerCase();
-		if (!names.has(name) || str(r.fields, "scope") === GLOBAL_SCOPE) continue;
-		await mutate("set_field", { object_id: r.id, key: "scope", value: { stringValue: GLOBAL_SCOPE } });
+		const entry = names.get(str(r.fields, "name").toLowerCase());
+		if (!entry) continue;
+		if (str(r.fields, "scope") !== GLOBAL_SCOPE) await mutate("set_field", { object_id: r.id, key: "scope", value: { stringValue: GLOBAL_SCOPE } });
+		if (!str(r.fields, "key")) await mutate("set_field", { object_id: r.id, key: "key", value: { stringValue: entry.key } });
 	}
 }
 
@@ -344,25 +340,22 @@ async function postSetupNotice(text: string): Promise<void> {
 /** The catalog entry's skill object, if it exists. */
 async function findSkillObject(entry: CatalogEntry): Promise<string | null> {
 	const rows = await queryAll({ type: "skill" });
-	return rows.find((r) => str(r.fields, "name") === entry.name)?.id ?? null;
+	return (rows.find((r) => str(r.fields, "key") === entry.key) ?? rows.find((r) => str(r.fields, "name") === entry.name))?.id ?? null;
 }
 
 /**
  * Seed the agent-facing skill object in the DAG. An existing body is the
- * user's to edit (Settings exposes it) - only an empty shell is reseeded
- * with the catalog default.
+ * user's to edit (Settings exposes it) - only an empty shell gets the
+ * catalog default. The object keeps its id: agents link it in Skills.
  */
 async function upsertSkillObject(entry: CatalogEntry): Promise<void> {
 	const hitId = await findSkillObject(entry);
-	if (hitId) {
-		const obj = await fetchObject(hitId);
-		if (objectText(obj).trim() !== "") return;
-		await mutate("delete", { object_id: hitId });
-	}
-	const { id } = await createObject(entry.name, "skill", {
+	if (hitId && objectText(await fetchObject(hitId)).trim() !== "") return;
+	const id = hitId ?? (await createObject(entry.name, "skill", {
+		key: { stringValue: entry.key },
 		description: { stringValue: entry.description },
 		scope: { stringValue: GLOBAL_SCOPE },
-	});
+	})).id;
 	await mutate("block_add", { object_id: id, block: { content: { text: { text: entry.skillBody, style: 0 } } } });
 }
 
