@@ -120,7 +120,19 @@ async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: Conve
 	const spec = await promptFor(agent);
 	// The linked prompt object's text. Never a hardcoded fallback - what runs
 	// is what Roostr shows.
-	const parts: SystemPart[] = [{ label: "Base prompt", text: spec.system }];
+	const parts: SystemPart[] = [];
+	// Identity first: a prompt object may carry a persona from another
+	// context (a Discord bot, a template), and chat tags name the OBJECT
+	// ("@Marco Dev Bot"). Without this anchor the model reads its own tag
+	// as someone else's name and plays messenger instead of answering.
+	const name = str(agent.fields, "name");
+	if (name) {
+		parts.push({
+			label: "Identity",
+			text: `You are ${name}. In a shared chat, messages that begin "@${name}" are addressed to you - answer them directly; you never need to relay to yourself. "[from ...]" prefixes name each message's author.`,
+		});
+	}
+	parts.push({ label: "Base prompt", text: spec.system });
 	// Fast parts: per-turn context that can change between tool iterations -
 	// always re-rendered, never cached.
 	if (objectId) {
