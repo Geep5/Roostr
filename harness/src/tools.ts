@@ -1499,7 +1499,7 @@ const A2A_TOOL: RegisteredTool = {
 	def: {
 		name: "agent_ask",
 		description:
-			"Send a durable question to agents on an object's guest list (its Agent property). Every recipient receives its own DAG copy and answers asynchronously on its serving machine, including after being offline. Read replies with discussion_read using the returned threadId. To ask an agent that is not yet on the object, add it first with object_set_field(key=agent). Agents never create minds. Specify the complete group audience for each message; a reply preserves its exchange_id and reply_to.",
+			"Send a durable question to agents on ANOTHER object's guest list (its Agent property), as a separate exchange thread. For an agent that is in this chat with you (a guest on the object you're working on), don't use this - make your reply the question, starting with \"@Their Name \", and they answer in the same chat. Every recipient receives its own DAG copy and answers asynchronously on its serving machine, including after being offline. Read replies with discussion_read using the returned threadId. To ask an agent that is not yet on the object, add it first with object_set_field(key=agent). Agents never create minds. Specify the complete group audience for each message; a reply preserves its exchange_id and reply_to.",
 		input_schema: {
 			type: "object",
 			properties: {
@@ -1538,6 +1538,13 @@ const A2A_TOOL: RegisteredTool = {
 			}
 			if (!holder || holder.typeKey !== "agent") throw new Error(`the agent named on "${str(target.fields, "name") || id}" does not exist`);
 			if (holder.id === ctx.agentId) throw new Error("an agent cannot send a request to itself");
+			// Both in this object's chat: a visible @-tag there reaches them (the
+			// tag wakes them) and keeps the person in the loop; a hidden
+			// exchange about this same object only splits the conversation.
+			if (ctx.boundObject && !S(input.exchange_id) && !S(input.reply_to) && guestAgents(subject.fields).includes(holder.id)) {
+				const name = str(holder.fields, "name") || "the agent";
+				throw new Error(`${name} is in this chat with you. Don't use agent_ask: make your reply the question itself, starting "@${name} " - they see it and answer here.`);
+			}
 			const endpoint = { objectId: endpointObjectId, agentId: holder.id };
 			if (recipients.some((entry) => entry.objectId === endpoint.objectId)) throw new Error("each recipient object must be distinct");
 			recipients.push(endpoint);
