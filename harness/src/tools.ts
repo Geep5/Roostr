@@ -549,7 +549,17 @@ const WEB_TOOLS: RegisteredTool[] = [
 		handler: async (input, ctx) => {
 			const url = S(input.url).trim();
 			if (!/^https?:\/\//i.test(url)) return "error: url must be absolute http(s)";
-			return credentialPage(ctx, S(input.service), url, clickThenReadJs(A(input.click)));
+			// Models sometimes send the list JSON-encoded, or one target as a string: read all three.
+			let clicks = A(input.click);
+			if (clicks.length === 0 && typeof input.click === "string" && input.click.trim()) {
+				try {
+					const parsed = JSON.parse(input.click) as unknown;
+					clicks = Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+				} catch {
+					clicks = [input.click.trim()];
+				}
+			}
+			return credentialPage(ctx, S(input.service), url, clickThenReadJs(clicks));
 		},
 	},
 	{

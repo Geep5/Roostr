@@ -335,6 +335,9 @@ const find = (t) => {
 	return all.find((e) => label(e).toLowerCase() === low) ?? all.find((e) => label(e).toLowerCase().includes(low));
 };
 const press = (el) => { const target = el.closest('a, button, [role="button"], [role="tab"], [role="menuitem"], summary') ?? el; for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) target.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); };
+const openNow = () => [...document.querySelectorAll('[role="menu"], [role="dialog"], [role="listbox"], [data-state="open"], [data-radix-popper-content-wrapper]')].map((m) => m.innerText.trim()).filter(Boolean);
+// Panels already open before any click (a chat widget, a banner) are not what a click opened.
+const before = new Set(openNow());
 const done = [];
 for (const t of want) {
 	const el = find(t);
@@ -343,10 +346,10 @@ for (const t of want) {
 	done.push({ click: t, ok: true, matched: label(el).slice(0, 60) || selectorOf(el) });
 	await sleep(1200);
 }
-const opened = [...document.querySelectorAll('[role="menu"], [role="dialog"], [role="listbox"], [data-state="open"], [data-radix-popper-content-wrapper]')].map((m) => m.innerText.trim()).filter(Boolean);
+const opened = openNow().filter((t) => !before.has(t));
 const seen = new Set();
 const list = controls().map((e) => ({ label: label(e).slice(0, 50), selector: selectorOf(e) })).filter((c) => (c.label || c.selector) && !seen.has(c.label + c.selector) && seen.add(c.label + c.selector)).slice(0, 60);
-return JSON.stringify({ clicks: done, opened: [...new Set(opened)].join(" | ").slice(0, 2000), controls: list });
+return JSON.stringify({ clicks: done, opened: want.length ? ([...new Set(opened)].join(" | ").slice(0, 2000) || "(nothing new opened)") : "", controls: list });
 `;
 }
 
