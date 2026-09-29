@@ -91,18 +91,28 @@ export function isAgentAuthor(author: string): boolean {
 	return /^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(author);
 }
 
+/** Whether `text` @-mentions `name` (whole name, any case): "@Marco Dev Bot" yes, "tag marco" no. */
+export function mentions(text: string, name: string): boolean {
+	return !!name && new RegExp(`@${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w])`, "i").test(text);
+}
+
+/** Agent posts since the last human one after which an agent's @-mention stops waking anyone (as A2A_MAX_HOPS bounds exchanges). */
+export const CHAT_AGENT_HOPS = 3;
+
 /**
  * Unhandled user messages in a conversation, oldest first. Origin-tagged
  * copies (already ingested from another surface) never count. Seeding rules
  * per the bridge's seed_mark.
  *
- * A human thread is human-to-agent only: another agent's post there never
- * wakes this one. Two agents driven onto one object otherwise answer each
- * other forever, each seeing the other's reply as a new question, and the
- * human's thread fills with agent chatter. Agent-to-agent exchanges use
- * addressed mailbox envelopes, never this human-discussion watermark path.
+ * `addressedAs`: on an object this agent is a guest of, only messages that
+ * @-mention it are its to answer - a person's, or another agent's that
+ * tagged it ("@Marco Dev Bot, which tournaments?"). An agent's tag counts
+ * only within CHAT_AGENT_HOPS agent posts of the last human one, so two
+ * agents tagging each other cannot loop. Without it (the agent's own page)
+ * the thread is human-to-agent: every human message is its to answer and
+ * no agent post ever wakes it.
  */
-export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: string): Promise<PendingMessage[]> {
+export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: string, addressedAs?: string): Promise<PendingMessage[]> {
 	if (!isHuman(ref)) return [];
 	const m = await loadMarks();
 	const mark = markFor(m, ref);
@@ -133,6 +143,14 @@ export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: st
 	}
 
 	const markAt = startAfter === undefined ? -1 : msgs.findIndex((x) => x.id === startAfter);
+	// Agent posts since the last human post, before each message - over the
+	// whole conversation, so a long agent back-and-forth cannot reset it.
+	const agentRun = new Map<string, number>();
+	let run = 0;
+	for (const { id, block } of msgs) {
+		agentRun.set(id, run);
+		run = isAgentAuthor(block.content.custom?.meta?.["author"] ?? "") ? run + 1 : 0;
+	}
 	const pending: PendingMessage[] = [];
 	// Newest last, so the caller's `pending[last]` mark only ever advances.
 	for (const { id, block } of msgs.slice(markAt + 1)) {
@@ -140,8 +158,13 @@ export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: st
 		const author = meta["author"] ?? "";
 		if (author === agentId) continue;
 		if (meta["origin"]) continue; // ingested copy, handled with its origin surface
-		if (isHuman(ref) && isAgentAuthor(author)) continue;
-		pending.push({ blockId: id, author, text: meta["text"] ?? "" });
+		const text = meta["text"] ?? "";
+		if (addressedAs !== undefined) {
+			// A guest answers what is addressed to it, whoever wrote it.
+			if (!mentions(text, addressedAs)) continue;
+			if (isAgentAuthor(author) && (agentRun.get(id) ?? 0) >= CHAT_AGENT_HOPS) continue;
+		} else if (isHuman(ref) && isAgentAuthor(author)) continue;
+		pending.push({ blockId: id, author, text });
 	}
 
 	// Never-spoken surface with no mark: only the newest message is live

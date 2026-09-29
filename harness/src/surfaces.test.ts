@@ -15,7 +15,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pendingMessages, setMark } from "./surfaces";
+import { CHAT_AGENT_HOPS, mentions, pendingMessages, setMark } from "./surfaces";
 import { humanRef, HUMAN_THREAD } from "./conv";
 import type { BlockJSON, ObjectJSON } from "./api";
 
@@ -142,4 +142,38 @@ test("legacy shared threads and private transcripts never wake the human-discuss
 	);
 	expect(await pendingMessages(obj, humanRef(obj.id), AGENT)).toEqual([]);
 	expect(await pendingMessages(obj, { objectId: obj.id, threadId: PRIVATE }, AGENT)).toEqual([]);
+});
+
+test("a guest answers only what @-mentions it, including another agent's tag", async () => {
+	// The task chat: a person asks Sharky to ask Marco; Sharky tags Marco.
+	// Marco must take Sharky's question, not the person's instruction to Sharky.
+	const obj = objectWith("guests", {
+		threadId: HUMAN_THREAD,
+		order: [
+			msg("g0", HUMAN, 50, "earlier, already answered"),
+			msg("g1", HUMAN, 100, "@Sharky Test tag marco in this chat and ask him what he'd feature"),
+			msg("g2", AGENT, 200, "@Marco Dev Bot - which tournaments would you feature?"),
+		],
+	});
+	const chat = humanRef(obj.id);
+	await setMark(chat, "g0");
+	expect((await pendingMessages(obj, chat, OTHER_AGENT, "Marco Dev Bot")).map((p) => p.blockId)).toEqual(["g2"]);
+	expect((await pendingMessages(obj, chat, AGENT, "Sharky Test")).map((p) => p.blockId)).toEqual(["g1"]);
+	// Saying a name without the @ addresses nobody.
+	expect(mentions("tag marco in this chat", "Marco Dev Bot")).toBe(false);
+	expect(mentions("hey @marco dev bot!", "Marco Dev Bot")).toBe(true);
+});
+
+test("agents tagging each other stop after CHAT_AGENT_HOPS posts without a person", async () => {
+	const posts = [msg("p0", HUMAN, 100, "@Sharky Test ask Marco")];
+	for (let i = 1; i <= CHAT_AGENT_HOPS + 1; i++) {
+		posts.push(msg(`p${i}`, i % 2 ? AGENT : OTHER_AGENT, 100 + i, i % 2 ? "@Marco Dev Bot over to you" : "@Sharky Test back to you"));
+	}
+	const obj = objectWith("ping-pong", { threadId: HUMAN_THREAD, order: posts });
+	const chat = humanRef(obj.id);
+	await setMark(chat, "p0");
+	// p1 and p3 tag Marco; p3 comes after two agent posts (still under the cap), p5 would not.
+	expect((await pendingMessages(obj, chat, OTHER_AGENT, "Marco Dev Bot")).map((p) => p.blockId)).toEqual(["p1", "p3"]);
+	// Sharky: p2 counts; p4 follows three agent posts and wakes nobody.
+	expect((await pendingMessages(obj, chat, AGENT, "Sharky Test")).map((p) => p.blockId)).toEqual(["p2"]);
 });

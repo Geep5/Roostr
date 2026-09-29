@@ -205,6 +205,17 @@ async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
 // event is safe because the drain loop re-checks after the turn.
 const ingesting = new Set<string>();
 
+/**
+ * The name an agent answers to on `ref`: on an object it is a guest of,
+ * only messages @-mentioning it are its; on its own page, none needed.
+ * Read fresh, so a renamed agent answers to its new name.
+ */
+async function addressedAs(s: Served, ref: ConvRef): Promise<string | undefined> {
+	if (ref.objectId === s.agentId) return undefined;
+	const agent = await fetchObject(s.agentId).catch(() => null);
+	return (agent && str(agent.fields, "name")) || s.name;
+}
+
 /** Fetch → pending → advance mark → copy the human's words into the transcript. Returns the transcript to run the turn in, or null when nothing was ingested. */
 async function ingestSurface(s: Served, origin: ConvRef): Promise<ConvRef | null> {
 	const lock = convKey(origin);
@@ -214,7 +225,7 @@ async function ingestSurface(s: Served, origin: ConvRef): Promise<ConvRef | null
 		const surface = await fetchObject(origin.objectId);
 		// Only a human discussion is a surface. Addressed exchanges have
 		// durable processing receipts instead of local discussion watermarks.
-		const pending = await pendingMessages(surface, origin, s.agentId);
+		const pending = await pendingMessages(surface, origin, s.agentId, await addressedAs(s, origin));
 		if (pending.length === 0) return null;
 		await setMark(origin, pending[pending.length - 1].blockId);
 		// Idempotence by identity, not marks: a message whose copy is already
@@ -636,7 +647,7 @@ async function serve(): Promise<void> {
 			for (const key of [convKey(humanRef(s.conv.objectId)), ...queued]) {
 				const ref = parseConvKey(key);
 				const surface = await fetchObject(ref.objectId).catch(() => null);
-				if (surface && (await pendingMessages(surface, ref, s.agentId)).length > 0) {
+				if (surface && (await pendingMessages(surface, ref, s.agentId, await addressedAs(s, ref))).length > 0) {
 					void drive(s, ref);
 					break;
 				}
