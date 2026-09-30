@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { str } from "./api";
-import { kbPromptSection, KB_TYPE, parseKbFile } from "./kb";
+import { kbPromptSection, KB_TYPE, knowledgeBaseChannels, parseKbFile } from "./kb";
 
 test("parseKbFile splits a file into one entry per ## section", () => {
 	const entries = parseKbFile("pin.md", [
@@ -81,6 +81,13 @@ function entry(id: string, name: string, category: string, audience: string, sta
 	};
 }
 
+test("knowledgeBaseChannels reads the agent's Knowledge bases link list", () => {
+	const agent = entry("a", "Support", "", "", "", []);
+	expect(knowledgeBaseChannels(agent)).toEqual([]);
+	agent.fields["knowledge_bases"] = { valuesValue: { items: [{ linkValue: { targetId: "space-1" } }, { linkValue: { targetId: "space-2" } }] } };
+	expect(knowledgeBaseChannels(agent)).toEqual(["space-1", "space-2"]);
+});
+
 test("kbPromptSection groups by category and marks staff entries", async () => {
 	const objects = [
 		entry("1", "Pin types", "pin", "customer", "current", ["Contributor pins are variable-priced."]),
@@ -88,18 +95,16 @@ test("kbPromptSection groups by category and marks staff entries", async () => {
 		entry("3", "Routing", "other", "staff", "current", ["Pins go to Sam."]),
 		entry("4", "Old policy", "pin", "customer", "outdated", ["Superseded."]),
 	];
-	globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+	globalThis.fetch = (async (input: string | URL | Request) => {
 		const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
-		if (url.pathname === "/api/query") {
-			return Response.json({ records: objects.map((o) => ({ id: o.id, typeKey: KB_TYPE, name: str(o.fields, "name"), createdAt: 0, updatedAt: 0, fields: o.fields })) });
-		}
 		if (url.pathname.startsWith("/api/objects/")) {
 			const found = objects.find((o) => o.id === url.pathname.slice("/api/objects/".length));
 			if (found) return Response.json(found);
 		}
 		return new Response("not found", { status: 404 });
 	}) as typeof fetch;
-	const section = await kbPromptSection("space-1");
+	const rows = objects.map((o) => ({ id: o.id, typeKey: KB_TYPE, name: str(o.fields, "name"), createdAt: 0, updatedAt: 0, fields: o.fields }));
+	const section = await kbPromptSection(rows);
 	expect(section).not.toBeNull();
 	const text = section!.text;
 	expect(text.indexOf("## global")).toBeLessThan(text.indexOf("## other"));
@@ -109,7 +114,6 @@ test("kbPromptSection groups by category and marks staff entries", async () => {
 	expect(text).toContain("Contributor pins are variable-priced.");
 });
 
-test("kbPromptSection is null for a space with no entries", async () => {
-	globalThis.fetch = (async () => Response.json({ records: [] })) as unknown as typeof fetch;
-	expect(await kbPromptSection("space-1")).toBeNull();
+test("kbPromptSection is null with no rows (opt-in: no links, no section)", async () => {
+	expect(await kbPromptSection([])).toBeNull();
 });

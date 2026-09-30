@@ -121,14 +121,29 @@ export async function importKb(opts: { dir: string; space: string }): Promise<Im
 	return result;
 }
 
+/** Spaces (channels) whose kb_entry objects the agent carries, from its Knowledge bases link list. */
+export function knowledgeBaseChannels(agent: ObjectJSON): string[] {
+	const v = agent.fields["knowledge_bases"];
+	if (!v) return [];
+	const items = v.valuesValue?.items ?? [v];
+	return items.map((i) => i.linkValue?.targetId || i.stringValue || "").filter(Boolean);
+}
+
+/** All kb_entry rows across the agent's linked knowledge bases. */
+export async function knowledgeBaseRows(agent: ObjectJSON): Promise<QueryRow[]> {
+	const perSpace = await Promise.all(knowledgeBaseChannels(agent).map((ch) => queryAll({ type: KB_TYPE, filters: [{ key: "channel", condition: "equal", value: ch }] })));
+	return perSpace.flat();
+}
+
 /**
  * The deterministic knowledge-base prompt section: every entry in the
- * agent's space, grouped by category, staff entries marked. Whole-corpus
- * stuffing, not retrieval - the KB is a few hundred lines. Callers that
+ * knowledge bases the agent links to (its Knowledge bases property),
+ * grouped by category, staff entries marked. Whole-corpus stuffing, not
+ * retrieval - the KB is a few hundred lines. Opt-in: no links, no section,
+ * so agents sharing a space with a KB are not force-fed it. Callers that
  * already queried the rows (runner's fingerprint phase) pass them in.
  */
-export async function kbPromptSection(channelId: string, rows?: QueryRow[]): Promise<{ entries: ObjectJSON[]; text: string } | null> {
-	rows ??= await queryAll({ type: KB_TYPE, filters: [{ key: "channel", condition: "equal", value: channelId }] });
+export async function kbPromptSection(rows: QueryRow[]): Promise<{ entries: ObjectJSON[]; text: string } | null> {
 	if (!rows.length) return null;
 	const entries = await Promise.all(rows.map((r) => fetchObject(r.id)));
 	entries.sort((a, b) => (str(a.fields, "kb_category") + str(a.fields, "name")).localeCompare(str(b.fields, "kb_category") + str(b.fields, "name")));

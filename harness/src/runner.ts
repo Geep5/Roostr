@@ -26,7 +26,7 @@ import { genesisCalls, genesisFingerprint, lastGenesis } from "./genesis";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
 import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
-import { kbPromptSection, KB_TYPE } from "./kb";
+import { knowledgeBaseRows, kbPromptSection } from "./kb";
 
 /**
  * The one rule every agent works under, whatever its editable prompt says:
@@ -198,7 +198,7 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 		flag(agent.fields, "memory_digest_enabled") ? listMilestones(agentId) : Promise.resolve([]),
 		listSkills(agentId, granted),
 	]);
-	const kbRows = await queryAll({ type: KB_TYPE, filters: [{ key: "channel", condition: "equal", value: channelId }] });
+	const kbRows = await knowledgeBaseRows(agent);
 	const credsLine = await credentialsPromptLine(agent);
 	const repo = str(agent.fields, "repo_path");
 	const ws = repo ? await workspaceAt(repo).catch(() => null) : null;
@@ -231,8 +231,10 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	const skillsSection = skillsPromptSection(skills);
 	if (skillsSection) parts.push({ label: "Skills", text: skillsSection });
 	if (credsLine) parts.push({ label: "Credentials", text: credsLine });
-	const kb = kbRows.length ? await kbPromptSection(channelId, kbRows) : null;
-	if (kb) parts.push({ label: "Knowledge base", text: kb.text });
+	if (kbRows.length) {
+		const kb = await kbPromptSection(kbRows);
+		if (kb) parts.push({ label: "Knowledge base", text: kb.text });
+	}
 	parts.push({ label: "Workspace contract", text: WORKSPACE_CONTRACT });
 	parts.push({ label: "Chat conduct", text: CHAT_CONDUCT });
 	const instructions = await channelInstructions(channelId);
