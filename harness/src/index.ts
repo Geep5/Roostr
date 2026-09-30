@@ -956,6 +956,15 @@ if (cmd === "setup") await setup();
 else if (cmd === "serve") await serve();
 else if (cmd === "ask") await ask();
 else if (cmd === "vanish") await vanish();
+else if (cmd === "import-email") {
+	// import-email <mailbox> --space <id> [--agent <id>] [--max 10]
+	const { importEmails } = await import("./gmail");
+	const mailbox = process.argv[3] ?? "";
+	if (!mailbox.includes("@") || !argValue("--space")) throw new Error("usage: import-email <mailbox> --space <spaceId> [--agent <agentId>] [--max 10]");
+	const res = await importEmails({ mailbox, space: argValue("--space"), agentId: argValue("--agent") || undefined, max: Number(argValue("--max") || 10) });
+	console.log(`[email] created ${res.created.length}, updated ${res.updated.length}, unchanged ${res.skipped}`);
+	process.exit(0);
+}
 else {
-	console.log("commands: setup --name X [--kind assistant|marco] [--model m] [--channel id] [--<kind field> v] | serve | ask <agentId> <msg> | vanish <objectId…>|--trash [--yes]");
+	console.log("commands: setup --name X [--kind assistant|marco] [--model m] [--channel id] [--<kind field> v] | serve | ask <agentId> <msg> | vanish <objectId…>|--trash [--yes] | import-email <mailbox> --space <id> [--agent <id>] [--max 10]");
 }
