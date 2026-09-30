@@ -62,18 +62,12 @@ test("recipe fingerprint tracks only the recipe", () => {
 	expect(recipeMissing(seeded("discord-bot"))).toBe(false);
 });
 
-test("a credential allows only the actions its Allowed actions lists, described by code", () => {
-	// A seeded credential allows every action its service has.
+test("a credential's actions are its service's", () => {
 	const x = actionsOf(seeded("x"));
 	expect(x.map((a) => a.key)).toEqual(["read_mentions", "retweet_post"]);
 	expect(x[1].access).toBe("write");
+	expect(actionsOf(seeded("matcherino")).map((a) => a.key)).toEqual(["list_featured", "feature_events"]);
 	expect(actionsOf(seeded("discord-bot"))).toEqual([]);
-	// Narrowed to reads: the write action is gone. Unknown names never become actions.
-	const readOnly = { ...seeded("matcherino"), actions: { valuesValue: { items: [{ stringValue: "list_featured" }, { stringValue: "made_up" }] } } };
-	expect(actionsOf(readOnly).map((a) => a.key)).toEqual(["list_featured"]);
-	// An empty list allows nothing; another service's action names don't carry over.
-	expect(actionsOf({ ...seeded("matcherino"), actions: { valuesValue: { items: [] } } })).toEqual([]);
-	expect(actionsOf({ ...seeded("matcherino"), actions: { valuesValue: { items: [{ stringValue: "retweet_post" }] } } })).toEqual([]);
-	// The list rides the recipe field set, so fillCredential copies a template's choice.
-	expect(recipeFieldKeys(seeded("matcherino"))).toContain("actions");
+	// Actions are code, never fields on the object.
+	expect(Object.keys(seeded("matcherino")).some((k) => k.startsWith("action"))).toBe(false);
 });

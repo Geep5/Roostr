@@ -16,14 +16,16 @@
 import { bv, createObject, iv, lv, mutate, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
 import { CREDENTIAL_TYPE, pinOf } from "./credential-objects";
 import { machineId } from "./roster";
-import { ACTIONS_FIELD, CREDENTIAL_PROPERTIES, CREDENTIAL_SEEDS, KEY_PREFIX, legacyKeyName, recipeFieldKeys, recipeHash, recipeMissing, seedFor, seedRecipeFields } from "./credentials";
+import { CREDENTIAL_PROPERTIES, CREDENTIAL_SEEDS, KEY_PREFIX, legacyKeyName, recipeFieldKeys, recipeHash, recipeMissing, seedFor, seedRecipeFields } from "./credentials";
 
 /**
- * The first shape of credential actions: one `action_<key>` field per action
- * holding its description JSON. Descriptions are code now; the object keeps
- * only which actions it allows (`actions`), so these become that list.
+ * Retired shapes of credential actions, removed from credentials, templates
+ * and the space's properties: `action_<key>` description fields, then an
+ * `actions` allow-list ("Allowed actions"). Actions are code now; having the
+ * credential is the permission, and a task's body says which to use.
  */
 const OLD_ACTION_PREFIX = "action_";
+const OLD_ACTIONS_FIELD = "actions";
 
 const TEMPLATE_TYPE = "template";
 /** Shapes from before keys were properties; converted, then removed. */
@@ -68,8 +70,8 @@ async function convertLegacyKeys(row: QueryRow): Promise<boolean> {
 	return wrote;
 }
 
-export async function seedCredentials(): Promise<{ properties: number; templates: number; upgraded: number; deduped: number; converted: number; filled: number; stamped: number }> {
-	const out = { properties: 0, templates: 0, upgraded: 0, deduped: 0, converted: 0, filled: 0, stamped: 0 };
+export async function seedCredentials(): Promise<{ properties: number; templates: number; upgraded: number; deduped: number; converted: number; filled: number; cleaned: number }> {
+	const out = { properties: 0, templates: 0, upgraded: 0, deduped: 0, converted: 0, filled: 0, cleaned: 0 };
 	const spaces = await queryAll({ type: "channel" });
 
 	// Properties first: a credential's fields show only through them.
@@ -87,13 +89,7 @@ export async function seedCredentials(): Promise<{ properties: number; templates
 				hidden: bv(false),
 				readOnly: bv(false),
 				maxCount: iv(0),
-				options: {
-					valuesValue: {
-						items: (p.options ?? []).map((o, i) => ({
-							mapValue: { entries: { id: sv(`${p.key}-${o.text}`), text: sv(o.text), color: sv(o.color), orderId: sv(String(i).padStart(6, "0")) } },
-						})),
-					},
-				},
+				options: lv([]),
 				bundled: bv(false),
 			});
 			out.properties += 1;
@@ -131,9 +127,15 @@ export async function seedCredentials(): Promise<{ properties: number; templates
 			}
 		}
 	}
-	// Templates first, so a credential stamped below copies its template's Allowed actions.
 	for (const tpl of (await queryAll({ type: TEMPLATE_TYPE })).filter((t) => str(t.fields, "seed_key"))) {
-		if (await stampActions(tpl)) out.stamped += 1;
+		if (await dropActionFields(tpl)) out.cleaned += 1;
+	}
+	// The "Allowed actions" property this seeding once made in every space.
+	for (const rel of relations) {
+		if (str(rel.fields, "key") === OLD_ACTIONS_FIELD && str(rel.fields, "name") === "Allowed actions" && !rel.fields["bundled"]?.boolValue) {
+			await mutate("delete", { object_id: rel.id });
+			out.cleaned += 1;
+		}
 	}
 	templates = (await queryAll({ type: TEMPLATE_TYPE })).filter((t) => str(t.fields, "seed_key"));
 
@@ -146,7 +148,7 @@ export async function seedCredentials(): Promise<{ properties: number; templates
 		if (await fillCredential(cred, templates)) out.filled += 1;
 	}
 	for (const cred of await queryAll({ type: CREDENTIAL_TYPE })) {
-		if (await stampActions(cred, templates)) out.stamped += 1;
+		if (await dropActionFields(cred)) out.cleaned += 1;
 	}
 	return out;
 }
@@ -177,35 +179,9 @@ export async function fillCredential(cred: { id: string; fields: Record<string, 
 	return true;
 }
 
-/**
- * Give a credential (or template) its Allowed actions when it has none, and
- * retire the first shape (`action_<key>` description fields): their keys
- * become the list, then they go. With neither, it allows what its space's
- * template for the service allows, else every action the service has. A
- * list that exists - even an empty one - is the person's and is kept.
- * No pin check, unlike fillCredential: every machine writes the same
- * bytes, so concurrent stamps converge. Returns whether it wrote.
- */
-export async function stampActions(cred: { id: string; fields: Record<string, ValueJSON> }, templates?: QueryRow[]): Promise<boolean> {
-	const old = Object.keys(cred.fields).filter((k) => k.startsWith(OLD_ACTION_PREFIX) && k.length > OLD_ACTION_PREFIX.length);
-	let wrote = false;
-	if (!cred.fields[ACTIONS_FIELD]) {
-		let allow: ValueJSON | undefined;
-		if (old.length > 0) allow = lv(old.map((k) => k.slice(OLD_ACTION_PREFIX.length)));
-		else {
-			const service = str(cred.fields, "service");
-			const seed = seedFor(service);
-			if (service && seed?.actions?.length && !recipeMissing(cred.fields)) {
-				const pool = templates ?? (await queryAll({ type: TEMPLATE_TYPE })).filter((t) => str(t.fields, "seed_key"));
-				const tpl = pool.find((t) => t.id !== cred.id && str(t.fields, "seed_key") === service && str(t.fields, "channel") === str(cred.fields, "channel"));
-				allow = tpl?.fields[ACTIONS_FIELD] ?? seedRecipeFields(seed)[ACTIONS_FIELD];
-			}
-		}
-		if (allow) {
-			await setField(cred.id, ACTIONS_FIELD, allow);
-			wrote = true;
-		}
-	}
-	for (const k of old) await mutate("delete_field", { object_id: cred.id, key: k });
-	return wrote || old.length > 0;
+/** Remove the retired action fields from a credential or template; returns whether it wrote. */
+export async function dropActionFields(obj: { id: string; fields: Record<string, ValueJSON> }): Promise<boolean> {
+	const keys = Object.keys(obj.fields).filter((k) => k === OLD_ACTIONS_FIELD || (k.startsWith(OLD_ACTION_PREFIX) && k.length > OLD_ACTION_PREFIX.length));
+	for (const key of keys) await mutate("delete_field", { object_id: obj.id, key });
+	return keys.length > 0;
 }
