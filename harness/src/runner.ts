@@ -66,14 +66,19 @@ function tokenRatio(obj: ObjectJSON): number {
 	return tokenRatios.get(obj.id) ?? 1;
 }
 
-async function persistToolUse(ref: ConvRef, use: { id: string; name: string; input: Record<string, unknown> }): Promise<void> {
+/**
+ * One tool call, persisted. `note` is the text the model wrote alongside it
+ * ("let me check the list") - its working notes: kept on the call so the
+ * model's own history reads unchanged, never posted as a chat message.
+ */
+async function persistToolUse(ref: ConvRef, use: { id: string; name: string; input: Record<string, unknown> }, note = ""): Promise<void> {
 	await addConvBlock(ref, {
 		id: crypto.randomUUID(),
 		childrenIds: [],
 		content: {
 			custom: {
 				contentType: BLOCK_TOOL_USE,
-				meta: { tool_use_id: use.id, tool_name: use.name, input: JSON.stringify(use.input), ts: String(Date.now()) },
+				meta: { tool_use_id: use.id, tool_name: use.name, input: JSON.stringify(use.input), ts: String(Date.now()), ...(note ? { note } : {}) },
 			},
 		},
 	});
@@ -283,7 +288,11 @@ export async function publishSystemSnapshot(agentId: string, ref: ConvRef): Prom
 }
 
 /**
- * Run the agent until it stops calling tools. Returns the final reply text.
+ * Run the agent until it stops calling tools. Returns the final reply text:
+ * what the model wrote in its last step, the one with no tool calls. Text it
+ * wrote alongside tool calls is working notes (kept on the call, never
+ * posted), so an agent that works and then ends silent says nothing - it
+ * never falls back to an earlier "let me check" as its answer.
  * The conversation is a thread inside the object it is about: `ref.objectId`
  * is that object (an agent's own transcript lives on the agent object, so
  * ref.objectId === agentId there) and `ref.threadId` is the thread. Every
@@ -292,8 +301,6 @@ export async function publishSystemSnapshot(agentId: string, ref: ConvRef): Prom
  */
 export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = {}): Promise<string> {
 	let overflowRetries = 0;
-	let lastText = "";
-
 	const ctx: ToolContext = {
 		agentId,
 		channelId: "",
@@ -343,7 +350,7 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 			}
 		}
 
-		if (view.turns.length === 0) return lastText;
+		if (view.turns.length === 0) return "";
 
 		// Genesis: the first turn of this conversation, or the first since an
 		// important property changed, opens with the agent reading itself,
@@ -386,24 +393,23 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 			}
 		}
 
-		if (res.text.trim()) {
-			await postTo(ref, res.text.trim(), agentId);
-			lastText = res.text.trim();
+		const text = res.text.trim();
+		if (res.toolUses.length === 0) {
+			if (text) await postTo(ref, text, agentId);
+			return text;
 		}
 
-		if (res.toolUses.length === 0) return lastText;
-
-		for (const use of res.toolUses) {
+		for (const [i, use] of res.toolUses.entries()) {
 			// Persist into the CONVERSATION thread - the same one the next
 			// iteration's view is built from. Writing these to the agent
 			// object instead once made every turn amnesiac about its own
 			// tool calls: the model re-ran the same action until the
 			// iteration cap (14 grocery lists on one page).
-			await persistToolUse(ref, use);
+			await persistToolUse(ref, use, i === 0 ? text : "");
 			const out = await dispatchTool(use.name, use.input, ctx);
 			await persistToolResult(ref, use.id, out.content, out.isError);
 		}
 	}
 	await setField(agentId, "last_run_iterations", iv(MAX_TOOL_ITERATIONS));
-	return lastText || "(stopped: tool iteration limit)";
+	return "(stopped: tool iteration limit)";
 }

@@ -37,8 +37,14 @@ export interface ScheduleHost {
 	turn(agentId: string, systemSuffix: string): Promise<string>;
 }
 
+/**
+ * The scheduler's own words for a run. The object's body is the instructions
+ * and wins: it once said "report briefly in this chat" here, and agents did
+ * that on top of a body that said to stop - announcing what they had just
+ * done in every run.
+ */
 const TURN_SUFFIX =
-	"This turn was started by the scheduler, not a person. Do the task described, report briefly in this chat, and call occurrence_complete when done. If you cannot complete it, say why and do not call occurrence_complete.";
+	"This turn was started by the scheduler, not a person. Follow the object's instructions exactly - they decide what to post and when the run is done. If they say to stop, end with no reply. Call occurrence_complete only when they say the run is done; if something blocks the run, say what, once, and do not call it.";
 
 /** setTimeout's ceiling; longer waits re-arm when it elapses. */
 const MAX_DELAY_MS = 2 ** 31 - 1;
@@ -213,7 +219,7 @@ async function dispatch(d: Due, me: string): Promise<void> {
 	}
 	const body = objectText(obj).slice(0, 4000);
 	const frame = [
-		`Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}. Instructions follow. When you have finished, call occurrence_complete on object ${obj.id}.`,
+		`Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}. Its instructions follow; occurrence_complete on object ${obj.id} ends the run when they say it is done.`,
 		body || "(this object has no body text)",
 	].join("\n");
 	await postScheduled(owner.conv, frame, d, me);

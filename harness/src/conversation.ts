@@ -68,6 +68,9 @@ export function classifyBlocks(object: ObjectJSON, agentId: string, threadId = H
 				break;
 			}
 			case BLOCK_TOOL_USE:
+				// The text the model wrote alongside the call: its own words, so
+				// the next request reads exactly as it answered.
+				if (meta["note"]) items.push({ kind: "assistant_text", blockId: cid, text: meta["note"] });
 				items.push({
 					kind: "tool_use",
 					blockId: cid,
