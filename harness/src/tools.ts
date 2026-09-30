@@ -170,11 +170,27 @@ function bodyBlocks(obj: ObjectJSON): Array<{ id: string; depth: number; line: s
 	return out;
 }
 
+/**
+ * A stored value as plain JSON for the agent: links as their target ids,
+ * maps as objects, lists of either. Only strings used to survive - a
+ * query's filters, an agent's credentials, a task's agent all read as
+ * null, and an agent guessed at a view it could not see.
+ */
+function plainValue(v: ValueJSON | undefined): unknown {
+	if (!v) return null;
+	if (v.stringValue !== undefined) return v.stringValue;
+	if (v.intValue !== undefined) return v.intValue;
+	if (v.floatValue !== undefined) return v.floatValue;
+	if (v.boolValue !== undefined) return v.boolValue;
+	if (v.linkValue) return v.linkValue.targetId ?? null;
+	if (v.valuesValue) return v.valuesValue.items.map(plainValue);
+	if (v.mapValue) return Object.fromEntries(Object.entries(v.mapValue.entries ?? {}).map(([k, x]) => [k, plainValue(x)]));
+	return null;
+}
+
 async function summarizeObject(obj: ObjectJSON): Promise<string> {
 	const fields: Record<string, unknown> = {};
-	for (const [k, v] of Object.entries(obj.fields)) {
-		fields[k] = v.stringValue ?? v.intValue ?? v.floatValue ?? v.boolValue ?? (v.valuesValue ? v.valuesValue.items.map((i) => i.stringValue) : undefined);
-	}
+	for (const [k, v] of Object.entries(obj.fields)) fields[k] = plainValue(v);
 	const blocks = bodyBlocks(obj).slice(0, 400);
 	// A link card reads as the linked object's name on the page, so the agent sees that too (plus the id to open it).
 	const lines = await Promise.all(

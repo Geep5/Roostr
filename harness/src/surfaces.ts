@@ -295,8 +295,12 @@ export function frameMessage(surface: ObjectJSON, ref: ConvRef, pending: Pending
 	} else if (body) {
 		parts.push(`--- contents of this ${kind}, as of now ---\n${body}${truncated ? "\n[…truncated; read the object for the rest]" : ""}\n--- end ---`);
 	} else {
-		parts.push(`--- this ${kind} is empty ---`);
+		// No page text is not an empty object: a query's results, a task's
+		// properties are all still there. "this query is empty" was read as
+		// "no results" and repeated to a person looking at a full table.
+		parts.push(`--- this ${kind}'s page has no text ---`);
 	}
+	if (["query", "set", "collection"].includes(surface.typeKey)) parts.push(`[a saved view: query_run ${surface.id} lists what it shows]`);
 
 	const chatCount = chatBlocks(surface, ref).filter((row) => (row.block.content.custom?.meta?.["text"] ?? "").trim()).length;
 	const earlier = chatCount - pending.length;
