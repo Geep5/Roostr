@@ -11,12 +11,13 @@
  * its human discussion, the agent's own transcript and any pair thread, and
  * a message in one must never count as answered because another moved on.
  */
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mentions, pendingMessages, setMark } from "./surfaces";
 import { humanRef, HUMAN_THREAD } from "./conv";
+import * as api from "./api";
 import type { BlockJSON, ObjectJSON } from "./api";
 
 const AGENT = "9b08be05-ed4b-4417-a976-1efead0cb561";
@@ -164,3 +165,32 @@ test("a guest answers only what @-mentions it, including another agent's tag", a
 	expect(mentions("hey @marco dev bot!", "Marco Dev Bot")).toBe(true);
 });
 
+
+test("an agent's answer to a guest's question is that guest's to read, once", async () => {
+	// Support tags Marco for account data; Marco answers without tagging back.
+	// Support must pick the answer up to finish its draft - and nothing else
+	// Marco says later, and nothing a person says untagged.
+	const names: Record<string, string> = { [AGENT]: "Support Helper", [OTHER_AGENT]: "Marco Dev Bot" };
+	const fetchSpy = spyOn(api, "fetchObject").mockImplementation(async (id: string) => ({ id, typeKey: "agent", fields: { name: { stringValue: names[id] ?? "" } }, blocks: [] }) as unknown as ObjectJSON);
+	const obj = objectWith("asked", {
+		threadId: HUMAN_THREAD,
+		order: [
+			msg("a0", HUMAN, 100, "@Support Helper please handle this email"),
+			msg("a1", AGENT, 200, "Not in the knowledge base. @Marco Dev Bot what is user 1431402's account status?"),
+			msg("a2", OTHER_AGENT, 300, "Status pending, fraud flag 99."),
+			msg("a3", OTHER_AGENT, 400, "Also: last cashout completed."),
+			msg("a4", HUMAN, 500, "thanks all"),
+		],
+	});
+	const chat = humanRef(obj.id);
+	await setMark(chat, "a1");
+	expect((await pendingMessages(obj, chat, AGENT, "Support Helper")).map((p) => p.blockId)).toEqual(["a2"]);
+	// A question that tagged nobody gets no answer routed back.
+	const untagged = objectWith("untagged", {
+		threadId: HUMAN_THREAD,
+		order: [msg("u1", AGENT, 100, "I'll check with the team."), msg("u2", OTHER_AGENT, 200, "Status pending.")],
+	});
+	await setMark(humanRef(untagged.id), "u1");
+	expect(await pendingMessages(untagged, humanRef(untagged.id), AGENT, "Support Helper")).toEqual([]);
+	fetchSpy.mockRestore();
+});

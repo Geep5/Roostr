@@ -32,7 +32,7 @@ import { migrateSkills } from "./migrate-skills";
 import { migrateCapabilities } from "./migrate-capabilities";
 import { migratePrompts } from "./migrate-prompts";
 import { startDiscordManager } from "./discord";
-import { chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, pendingMessages, setMark } from "./surfaces";
+import { answersGuestQuestion, chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, mentions, pendingMessages, setMark } from "./surfaces";
 import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { migrateExchanges } from "./migrate-exchanges";
@@ -805,21 +805,20 @@ async function serve(): Promise<void> {
 		await wakeMentionedGuests(obj);
 	}
 
-	/** Wake every guest the newest human discussion message @-mentions. */
+	/** Wake every guest the newest discussion message @-mentions, or answers (an agent replying to that guest's question). */
 	async function wakeMentionedGuests(obj: ObjectJSON): Promise<void> {
 		const msgs = chatBlocks(obj, humanRef(obj.id))
 			.map((row, index) => ({ ...row, index, ts: Number(row.block.content.custom?.meta?.["ts"] ?? 0) }))
 			.sort((a, b) => a.ts - b.ts || a.index - b.index);
 		if (msgs.length === 0) return;
 		const newest = msgs[msgs.length - 1].block.content.custom?.meta?.["text"] ?? "";
-		if (!newest.includes("@")) return;
 		for (const aid of guestAgents(obj.fields)) {
 			if (!(await runsAgentHere(obj.id, aid))) continue;
 			const agent = await fetchObject(aid).catch(() => null);
 			if (!agent) continue;
 			const name = str(agent.fields, "name");
 			if (!name) continue;
-			if (!new RegExp(`@${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(newest)) continue;
+			if (!mentions(newest, name) && !(await answersGuestQuestion(msgs, msgs.length - 1, aid))) continue;
 			const s2 = await adoptForObject(obj, aid);
 			if (s2) void drive(s2, humanRef(obj.id));
 		}

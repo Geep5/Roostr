@@ -21,7 +21,7 @@
  * newest message is picked up (their SEED_BACKLOG idea, conservative).
  */
 
-import { str, type BlockJSON, type ObjectJSON } from "./api";
+import { fetchObject, str, type BlockJSON, type ObjectJSON } from "./api";
 import { addConvBlock, convBlocks, convKey, HUMAN_THREAD, isHuman, parseConvKey, type ConvRef } from "./conv";
 
 // ── Marks ─────────────────────────────────────────────────────────
@@ -96,6 +96,28 @@ export function mentions(text: string, name: string): boolean {
 	return !!name && new RegExp(`@${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w])`, "i").test(text);
 }
 
+type ChatRow = { id: string; block: BlockJSON };
+
+/**
+ * Whether `msgs[at]` answers a question guest `agentId` asked: it is another
+ * agent's first post since the guest's latest message, and that message
+ * @-mentioned the answering agent. Agents rarely tag the asker back, so
+ * without this the asker never sees the answer it is waiting for.
+ * `msgs` is chronological.
+ */
+export async function answersGuestQuestion(msgs: ChatRow[], at: number, agentId: string): Promise<boolean> {
+	const author = msgs[at].block.content.custom?.meta?.["author"] ?? "";
+	if (!isAgentAuthor(author) || author === agentId) return false;
+	for (let i = at - 1; i >= 0; i--) {
+		const meta = msgs[i].block.content.custom?.meta ?? {};
+		if (meta["author"] === author) return false; // it already answered
+		if (meta["author"] !== agentId) continue;
+		const answerer = await fetchObject(author).catch(() => null);
+		return !!answerer && mentions(meta["text"] ?? "", str(answerer.fields, "name"));
+	}
+	return false;
+}
+
 /**
  * Unhandled user messages in a conversation, oldest first. Origin-tagged
  * copies (already ingested from another surface) never count. Seeding rules
@@ -103,7 +125,8 @@ export function mentions(text: string, name: string): boolean {
  *
  * `addressedAs`: on an object this agent is a guest of, only messages that
  * @-mention it are its to answer - a person's, or another agent's that
- * tagged it ("@Marco Dev Bot, which tournaments?"). Without it (the agent's
+ * tagged it ("@Marco Dev Bot, which tournaments?") - plus an agent's answer
+ * to a question it asked (answersGuestQuestion). Without it (the agent's
  * own page) the thread is human-to-agent: every human message is its to
  * answer and no agent post ever wakes it.
  */
@@ -140,7 +163,8 @@ export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: st
 	const markAt = startAfter === undefined ? -1 : msgs.findIndex((x) => x.id === startAfter);
 	const pending: PendingMessage[] = [];
 	// Newest last, so the caller's `pending[last]` mark only ever advances.
-	for (const { id, block } of msgs.slice(markAt + 1)) {
+	for (let at = markAt + 1; at < msgs.length; at++) {
+		const { id, block } = msgs[at];
 		const meta = block.content.custom?.meta ?? {};
 		const author = meta["author"] ?? "";
 		if (author === agentId) continue;
@@ -148,7 +172,7 @@ export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: st
 		const text = meta["text"] ?? "";
 		if (addressedAs !== undefined) {
 			// A guest answers what is addressed to it, whoever wrote it.
-			if (!mentions(text, addressedAs)) continue;
+			if (!mentions(text, addressedAs) && !(await answersGuestQuestion(msgs, at, agentId))) continue;
 		} else if (isHuman(ref) && isAgentAuthor(author)) continue;
 		pending.push({ blockId: id, author, text });
 	}
