@@ -27,7 +27,7 @@ import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishMachine, serverOf, servesHere } from "./machine";
 import { publishDescriptors, INSTALL_TYPE } from "./descriptors";
 import { CAPABILITY_TYPE, linkValue } from "./capabilities";
-import { SKILLS_KEY, machineSkillKeys, skillForKey } from "./skills";
+import { GRANTS_KEY, SKILLS_KEY, machineSkillKeys, seedGrantSkills, skillForKey } from "./skills";
 import { migrateSkills } from "./migrate-skills";
 import { migrateCapabilities } from "./migrate-capabilities";
 import { migratePrompts } from "./migrate-prompts";
@@ -93,7 +93,11 @@ async function setup(): Promise<void> {
 	// The seed's skills, as links to the skill objects that exist so far (a
 	// machine creates a catalog skill's object on its first install).
 	const skills = (await Promise.all(seed.skills.map(skillForKey))).filter((x) => x !== null);
-	if (skills.length > 0) fields[SKILLS_KEY] = { valuesValue: { items: skills.map((x) => linkValue(x.id)) } };
+	// A normal agent can run commands and fetch the web: list both grant skills.
+	await seedGrantSkills();
+	const grants = (await queryAll({ type: "skill" })).filter((r) => str(r.fields, GRANTS_KEY)).map((r) => ({ id: r.id }));
+	const listed = [...skills, ...grants];
+	if (listed.length > 0) fields[SKILLS_KEY] = { valuesValue: { items: listed.map((x) => linkValue(x.id)) } };
 	for (const f of seed.fields) {
 		if (f.secret) continue;
 		const value = argValue(`--${f.key}`) || seed.defaults[f.key];
@@ -307,6 +311,8 @@ async function serve(): Promise<void> {
 	// requires (capability links) and prompt skills -> each object's Skills;
 	// after the login migration so a required login becomes a Credential link.
 	console.log("[harness] skills migration:", JSON.stringify(await migrateSkills()));
+	// Shell and web as page items (skills.ts): created once, then listed on every agent.
+	console.log("[harness] grant skills:", JSON.stringify(await seedGrantSkills()));
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
 

@@ -45,7 +45,7 @@ import { HUMAN_THREAD, agentSubject, convBlocks, humanRef, postTo } from "./conv
 import { sendMessage } from "./mailbox";
 import { fetchInstallations } from "./descriptors";
 import { fetchCapabilities, fullySetUp, linkValue } from "./capabilities";
-import { SKILLS_KEY, machineSkillKeys, skillForKey, skillIds } from "./skills";
+import { GATED_TOOLS, SKILLS_KEY, machineSkillKeys, skillForKey, skillIds } from "./skills";
 import { requestCapability, type CapabilityOperation } from "./capability-messages";
 import type { AgentEndpoint, AgentMessage } from "./api";
 
@@ -96,6 +96,8 @@ export interface ToolContext {
 	submitResult?: (content: string) => void;
 	/** Compaction carryover: object ids touched by tools this run. */
 	touched: Set<string>;
+	/** Gated tools (shell_exec, web_fetch) the agent's Skills grant; unset = no gating (tests, internal callers). */
+	granted?: ReadonlySet<string>;
 	/** The agent's Project folder (`repo_path`) on this machine - shell_exec's cwd when set. */
 	workspacePath?: string;
 }
@@ -1610,7 +1612,17 @@ const A2A_TOOL: RegisteredTool = {
 	},
 };
 
-export function toolDefs(template: string, depth: number, allowAsk = false): ToolDef[] {
+/**
+ * The tools an agent is offered. `granted`: the gated tools (shell_exec,
+ * web_fetch) its Skills grant - a gated tool it wasn't granted is not
+ * offered at all (skills.ts GRANT_SKILLS). Omitted = all, for callers that
+ * only inspect the catalog.
+ */
+export function toolDefs(template: string, depth: number, allowAsk = false, granted: ReadonlySet<string> = GATED_TOOLS): ToolDef[] {
+	return toolDefsUngated(template, depth, allowAsk).filter((d) => !GATED_TOOLS.has(d.name) || granted.has(d.name));
+}
+
+function toolDefsUngated(template: string, depth: number, allowAsk: boolean): ToolDef[] {
 	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read", "capability_list"]);
 	let defs = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL].map((t) => t.def);
 	if (template === "" && depth === 0) defs.push(A2A_TOOL.def);
@@ -1630,6 +1642,9 @@ export function toolDefs(template: string, depth: number, allowAsk = false): Too
 
 export async function dispatchTool(name: string, input: Record<string, unknown>, ctx: ToolContext): Promise<{ content: string; isError: boolean }> {
 	try {
+		if (ctx.granted && GATED_TOOLS.has(name) && !ctx.granted.has(name)) {
+			return { content: `error: ${name} is not one of your tools - your Skills don't include it. Do the task without it, or tell the person what you'd need.`, isError: false };
+		}
 		if (name === "spawn") {
 			if (!ctx.spawn) throw new Error("spawn unavailable at this depth");
 			const content = await ctx.spawn(S(input.task), S(input.template) || "task", ctx);

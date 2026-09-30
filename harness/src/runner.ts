@@ -17,7 +17,7 @@ import { objectContext } from "./spacemap";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
 import { callLLM, isContextOverflowError, modelProvider } from "./llm";
-import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
+import { channelInstructions, grantedTools, listSkills, skillsPromptSection } from "./skills";
 import { agentModelKey, credentialsPromptLine } from "./credential-objects";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { workspaceAt, workspacePromptSection } from "./workspace";
@@ -332,7 +332,12 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		const apiKey = (await agentModelKey(agent, modelProvider(model))) ?? undefined;
 		// Re-read every iteration with everything else, so revoking the grant
 		// takes effect on the agent's next tool call rather than its next turn.
-		const tools = toolDefs(opts.template ?? "", ctx.depth, ctx.allowAsk);
+		// Shell and web only where the agent's Skills grant them (skills.ts).
+		// A spawned helper has no Skills of its own: it carries its parent's.
+		const parentId = str(agent.fields, "spawn_parent");
+		const grantor = parentId ? await fetchObject(parentId).catch(() => null) : null;
+		ctx.granted = await grantedTools((grantor ?? agent).fields);
+		const tools = toolDefs(opts.template ?? "", ctx.depth, ctx.allowAsk, ctx.granted);
 
 		let view = buildConversationView(conv, agentId, ratio, ref.threadId);
 		const systemParts = await buildSystemParts(agent, conv, view, opts);
