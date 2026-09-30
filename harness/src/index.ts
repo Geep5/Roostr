@@ -16,6 +16,7 @@ import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./credential-objects";
+import { installGwsAs } from "./google-credentials";
 import { fillCredential, seedCredentials } from "./credential-seeds";
 import { capabilities, convergeCatalogScope, publishCapabilityObjects, publishInstallationState } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tools";
@@ -269,6 +270,7 @@ async function serve(): Promise<void> {
 	const inboxOwner = `${await machineId()}:${crypto.randomUUID()}`;
 	setCapabilityRequestOwner(inboxOwner);
 	await publishMachine(); // register this machine before serving resolves against the roster
+	installGwsAs();
 	// Publish what a skill or login IS, as data, so a client can render its
 	// setup form without a compiled-in table (docs/descriptors.md).
 	await publishDescriptors();

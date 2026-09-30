@@ -107,6 +107,23 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 		note: "Bot token for a Discord application; agents of the Marco kind poll and answer their channels with it.",
 		passwordFields: [{ key: "token", label: "Bot token", secret: true }],
 	},
+	// A Google account for the gws CLI. The sign-in itself lives on the
+	// object (an OAuth client + refresh token, what `gws auth export`
+	// prints), so it works on whichever computer runs the agent: that
+	// computer's harness writes it where `gws-as <account>` finds it.
+	// Not "google": that key is the gws skill, and a seed sharing a skill's
+	// key reads as an old login row to the migrations (which vanished the
+	// skill's install rows on every boot).
+	{
+		key: "google-account",
+		label: "Google Workspace",
+		note: "A Google account (Gmail, Calendar, Drive) for agents, through `gws-as <account> …`. Account is the email. Sign in once on any computer with `gws-as <email> auth login`; Roostr copies the sign-in here and every computer uses it.",
+		passwordFields: [
+			{ key: "client_id", label: "OAuth client ID", secret: false },
+			{ key: "client_secret", label: "OAuth client secret", secret: true },
+			{ key: "refresh_token", label: "Refresh token", secret: true },
+		],
+	},
 	// Model logins: the agent's Model picks the provider, its Credentials
 	// carry the key - so the agent runs the same on any computer.
 	{

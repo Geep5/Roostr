@@ -110,10 +110,10 @@ export const CATALOG: CatalogEntry[] = [
 			"Uninstall the `gws` Google Workspace CLI from this Mac (reverse however it was installed — brew or npm). " +
 			"Finish when `command -v gws` fails.",
 		checkCmd: "command -v gws",
-		authCheckCmd: "gws auth status",
-		authHint: "Run `gws auth login` in a terminal and sign in with your Google account, then hit Re-check.",
+		// No machine-wide sign-in to check: each account's sign-in is a Google
+		// Credential (google-credentials.ts), used per call by gws-as.
 		skillBody:
-			"Google Workspace access through the `gws` CLI. Never call bare `gws` when the object names an account or has a `google_account` property; call `gws-as <account> ...` so the mailbox/calendar/drive identity is explicit. If no account is named, first check the object and its discussion; if still ambiguous, say which account you need before reading private data.\n" +
+			"Google Workspace access through the `gws` CLI. Google accounts are Credentials (service google-account) listed in your Credentials property - `gws-as <that account> ...` uses its sign-in on whatever computer you run on. Never call bare `gws` when the object names an account or has a `google_account` property; call `gws-as <account> ...` so the mailbox/calendar/drive identity is explicit. If no account is named, first check the object and its discussion; if still ambiguous, say which account you need before reading private data.\n" +
 			"Check auth FIRST: `gws-as <account> auth status` — `auth_method` must not be `none`.\n" +
 			"An absent or under-scoped token makes Gmail list calls answer `exit 0` with `{\"resultSizeEstimate\": 0}`, which is indistinguishable from an empty mailbox. Never conclude \"no such mail\" from a zero result you did not auth-check.\n" +
 			"Shape: `gws <service> <resource> [sub-resource] <method> --params '<JSON>'`. Path parameters go INSIDE --params (`userId` for Gmail), not as flags — there is no `--user-id`, and omitting it fails with \"Required path parameter userId is missing\".\n" +
@@ -420,15 +420,6 @@ export async function recheckSkill(key: string): Promise<SkillPhase> {
 	}
 	if (entry.authCheckCmd) {
 		const auth = await sh(entry.authCheckCmd);
-		// gws exits successfully even when no identity is authenticated.
-		if (key === "google" && auth.ok) {
-			try {
-				const status = JSON.parse(auth.out) as { auth_method?: string };
-				auth.ok = !!status.auth_method && status.auth_method !== "none";
-			} catch {
-				auth.ok = false;
-			}
-		}
 		if (!auth.ok) {
 			state.skills[key] = { enabled: false, installed: true, log: `[needs-auth] ${entry.authHint ?? "authentication required"}\n${auth.out}`, updatedAt: Date.now() };
 			await saveSkills(state);

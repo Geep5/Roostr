@@ -1,0 +1,42 @@
+#!/bin/bash
+# Run gws as one explicitly named Google account.
+# Usage: gws-as <account-email> <gws args...>
+#
+# The account's sign-in comes from its Roostr Credential when this computer
+# has one written (<GLON_DATA>/google/<email>.json, kept by the harness for
+# the Google credentials its agents list); otherwise from a local
+# `gws-as <email> auth login`. Each account keeps its own config dir, so
+# token caches never mix. Shipped with the harness (harness/bin/gws-as).
+set -euo pipefail
+
+ACCOUNT="${1:-}"
+if [[ -z "$ACCOUNT" || "$ACCOUNT" != *@* ]]; then
+  echo "usage: gws-as <account-email> <gws args...>" >&2
+  exit 2
+fi
+shift
+
+BASE="${GOOGLE_WORKSPACE_ACCOUNTS_DIR:-$HOME/.config/gws/accounts}"
+DIR="$BASE/$ACCOUNT"
+mkdir -p "$DIR"
+
+# Every account shares the same OAuth client config but owns its token cache.
+if [[ ! -f "$DIR/client_secret.json" ]]; then
+  for src in "$HOME/.config/gws/client_secret.json" "$BASE/client_secret.json"; do
+    if [[ -f "$src" ]]; then
+      cp "$src" "$DIR/client_secret.json"
+      break
+    fi
+  done
+fi
+
+export GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$DIR"
+export GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND="${GOOGLE_WORKSPACE_CLI_KEYRING_BACKEND:-file}"
+
+# `auth ...` manages the local sign-in itself; everything else prefers Roostr's.
+LOWER="$(printf '%s' "$ACCOUNT" | tr '[:upper:]' '[:lower:]')"
+ROOSTR="${GLON_DATA:-$HOME/.glon}/google/$LOWER.json"
+if [[ "${1:-}" != "auth" && -f "$ROOSTR" ]]; then
+  export GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE="$ROOSTR"
+fi
+exec gws "$@"

@@ -19,6 +19,7 @@ import { openLoginWindow, profileCookies, type LoginWindow, type SessionCookie }
 import { actionsOf, KEY_PREFIX, credentialKeys, credentialSession, dropLegacySecrets, legacyKeyName, legacyKeys, legacyProfileDir, legacyProfileExists, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
 import { fetchInstallations } from "./descriptors";
 import { renewMatcherinoSession } from "./matcherino";
+import { GOOGLE_SERVICE, syncGoogleCredentials } from "./google-credentials";
 import { machines } from "./machine";
 import { machineId } from "./roster";
 
@@ -142,6 +143,8 @@ export async function refreshCredentials(): Promise<CredentialRow[]> {
 	const me = await machineId();
 	const rows = await Promise.all((await queryAll({ type: CREDENTIAL_TYPE })).map(rowOf));
 	mine = await Promise.all(rows.filter((r) => r.servedBy === me).map(async (r) => publishState(await renewSession(r))));
+	// Google sign-ins travel on their Credentials: import local ones, write the listed ones here.
+	await syncGoogleCredentials().catch((err) => console.error("[google] sync failed:", err instanceof Error ? err.message : err));
 	return mine;
 }
 
@@ -284,7 +287,7 @@ export async function credentialsPromptLine(agent: ObjectJSON): Promise<string> 
 	const rows = (await Promise.all(agentCredentialIds(agent).map((id) => credentialObject(id).catch(() => null)))).filter((r): r is CredentialRow => !!r);
 	if (rows.length === 0) return "";
 	const lines = rows.map((c) => {
-		const how = c.status !== "active" ? `not connected (${c.status || "missing"}) - tell the person to connect it` : c.auth === "browser_profile" ? `signed in: credential_fetch reads pages, credential_action acts (service "${c.service}")` : "keys saved";
+		const how = c.status !== "active" ? `not connected (${c.status || "missing"}) - tell the person to connect it` : c.service === GOOGLE_SERVICE ? `signed in: run \`gws-as ${c.account} …\` in the shell (the google skill says how)` : c.auth === "browser_profile" ? `signed in: credential_fetch reads pages, credential_action acts (service "${c.service}")` : "keys saved";
 		const acts = actionsOf(c.fields);
 		const doing = acts.length > 0 ? `; actions: ${acts.map((a) => `${a.key} - ${a.summary} (${a.access})`).join("; ")}` : "";
 		return `- ${c.name || c.service || "Credential"}${c.account ? ` (${c.account})` : ""} - service "${c.service}": ${how}${doing}`;
