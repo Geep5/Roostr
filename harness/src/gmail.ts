@@ -7,6 +7,8 @@
  * Dedup is by Gmail thread id (`gmail_thread_id`): a thread already
  * imported is never created twice - if it has new messages they are
  * appended to its page, after the last one it holds (`gmail_last_message_id`).
+ * An Email is task-shaped: the system Done checkbox closes it, and a new
+ * reply on a done thread opens it again.
  * Read-only: nothing here sends, labels or marks mail read.
  */
 import { createObject, mutate, queryAll, setField, str, sv, type ValueJSON } from "./api";
@@ -18,7 +20,6 @@ const EMAIL_PROPERTIES: Array<{ key: string; name: string; format: string; emoji
 	{ key: "email_from", name: "From", format: "shorttext", emoji: "✉️" },
 	{ key: "email_received", name: "Received", format: "date", emoji: "🕒" },
 	{ key: "email_mailbox", name: "Mailbox", format: "email", emoji: "📮" },
-	{ key: "email_status", name: "Email status", format: "status", emoji: "🚦", options: [["New", "blue"], ["Replied", "lime"], ["Done", "grey"]] },
 	{ key: "gmail_thread_id", name: "Gmail thread", format: "shorttext", emoji: "🧵" },
 	{ key: "gmail_last_message_id", name: "Gmail last message", format: "shorttext", emoji: "🧵" },
 ];
@@ -27,7 +28,8 @@ const EMAIL_PROPERTIES: Array<{ key: string; name: string; format: string; emoji
 export async function ensureEmailType(space: string): Promise<void> {
 	const types = await queryAll({ type: "type" });
 	if (!types.some((t) => str(t.fields, "key") === EMAIL_TYPE && str(t.fields, "channel") === space)) {
-		await createObject("Email", "type", { key: sv(EMAIL_TYPE), name: sv("Email"), iconEmoji: sv("📧"), layout: sv("page"), channel: sv(space) });
+		// Task layout: an email is work to finish - the system Done checkbox closes it.
+		await createObject("Email", "type", { key: sv(EMAIL_TYPE), name: sv("Email"), iconEmoji: sv("📧"), layout: sv("task"), channel: sv(space) });
 	}
 	const have = new Set((await queryAll({ type: "relation" })).filter((r) => str(r.fields, "channel") === space).map((r) => str(r.fields, "key")));
 	for (const p of EMAIL_PROPERTIES) {
@@ -168,7 +170,8 @@ export async function importEmails(opts: { mailbox: string; space: string; agent
 			await appendMessages(have.id, fresh);
 			await setField(have.id, "gmail_last_message_id", sv(last.id));
 			await setField(have.id, "email_received", { intValue: Number(last.internalDate) });
-			await setField(have.id, "email_status", { valuesValue: { items: [{ stringValue: "New" }] } });
+			// A reply on a finished thread reopens it.
+			await setField(have.id, "done", { boolValue: false });
 			result.updated.push(have.id);
 			continue;
 		}
@@ -178,7 +181,7 @@ export async function importEmails(opts: { mailbox: string; space: string; agent
 			email_from: sv(header(first, "From")),
 			email_received: { intValue: Number(last.internalDate) },
 			email_mailbox: sv(opts.mailbox),
-			email_status: { valuesValue: { items: [{ stringValue: "New" }] } },
+			done: { boolValue: false },
 			gmail_thread_id: sv(threadId),
 			gmail_last_message_id: sv(last.id),
 			...(opts.agentIds.length ? { agent: { valuesValue: { items: opts.agentIds.map((targetId) => ({ linkValue: { relationKey: "agent", targetId } })) } } } : {}),
