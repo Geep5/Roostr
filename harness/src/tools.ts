@@ -35,6 +35,7 @@ import { agentCredential, type CredentialRow } from "./credential-objects";
 import { actionsOf } from "./credentials";
 import { clickThenReadJs, credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
 import { blockLine, isAgentAuthor, listOrdinals } from "./surfaces";
+import { inlineMarks, mdToTree, STYLE, type MdBlock } from "./markdown";
 import { featuredEvents, matcherinoToken, setFeatured } from "./matcherino";
 import { readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor, typeDefs } from "./spacemap";
@@ -48,54 +49,14 @@ import { SKILLS_KEY, machineSkillKeys, skillForKey, skillIds } from "./skills";
 import { requestCapability, type CapabilityOperation } from "./capability-messages";
 import type { AgentEndpoint, AgentMessage } from "./api";
 
-/** proto TextStyle values the editor renders. */
-const STYLE = { paragraph: 0, h1: 1, h2: 2, h3: 3, quote: 4, bullet: 6, numbered: 7, checkbox: 8 } as const;
-
-/**
- * Markdown lines -> body blocks, mirroring what the editor produces:
- * checkboxes, bullets, numbered items, headings, quotes; anything else
- * is a paragraph. One block per line - a pasted list must never end up
- * as a single paragraph blob.
- */
-function mdToBlocks(text: string): Array<Record<string, unknown>> {
-	const blocks: Array<Record<string, unknown>> = [];
-	for (const raw of text.split("\n")) {
-		const line = raw.trimEnd();
-		if (!line.trim()) continue;
-		let style: number = STYLE.paragraph;
-		let checked = false;
-		let body = line.trim();
-		let m: RegExpMatchArray | null;
-		if ((m = body.match(/^[-*] \[([ xX])\] (.*)$/))) {
-			style = STYLE.checkbox;
-			checked = m[1] !== " ";
-			body = m[2];
-		} else if ((m = body.match(/^[-*] (.*)$/))) {
-			style = STYLE.bullet;
-			body = m[1];
-		} else if ((m = body.match(/^\d+[.)] (.*)$/))) {
-			style = STYLE.numbered;
-			body = m[1];
-		} else if ((m = body.match(/^(#{1,3}) (.*)$/))) {
-			style = m[1].length;
-			body = m[2];
-		} else if ((m = body.match(/^> (.*)$/))) {
-			style = STYLE.quote;
-			body = m[1];
-		}
-		const content: Record<string, unknown> = { text: { text: body, style, ...(style === STYLE.checkbox ? { checked } : {}) } };
-		blocks.push({ id: crypto.randomUUID(), childrenIds: [], content });
-	}
-	return blocks;
-}
-
 const POSITION_INNER = 5; // glon.Position.Inner - append as the target's last child
 
 /**
- * Append blocks, optionally nested under an existing block matched by
- * its text (case-insensitive). "under" is how the model joins an
+ * Append markdown as blocks (markdown.ts: one block per line, indentation
+ * nests, inline marks), optionally nested under an existing block matched
+ * by its text (case-insensitive). "under" is how the model joins an
  * existing list (e.g. under: "Walmart") instead of dumping new blocks
- * at the page root.
+ * at the page root. Parents are written before their children.
  */
 export async function appendBody(objectId: string, text: string, under = ""): Promise<string> {
 	let targetId = "";
@@ -107,15 +68,18 @@ export async function appendBody(objectId: string, text: string, under = ""): Pr
 		if (!hit) return `error: no block matching "${under.trim()}" - blocks were NOT added; re-check the text or omit "under"`;
 		targetId = hit.id;
 	}
-	const blocks = mdToBlocks(text);
-	for (const block of blocks) {
-		await mutate("block_add", {
-			object_id: objectId,
-			block,
-			...(targetId ? { target_id: targetId, position: POSITION_INNER } : {}),
-		});
-	}
-	return `ok: ${blocks.length} block(s) added${targetId ? ` under "${under.trim()}"` : ""}`;
+	let added = 0;
+	const add = async (blocks: MdBlock[], parent: string): Promise<void> => {
+		for (const b of blocks) {
+			const id = crypto.randomUUID();
+			const content = { text: { text: b.text, style: b.style, ...(b.marks.length ? { marks: b.marks } : {}), ...(b.style === STYLE.checkbox ? { checked: b.checked === true } : {}) } };
+			await mutate("block_add", { object_id: objectId, block: { id, childrenIds: [], content }, ...(parent ? { target_id: parent, position: POSITION_INNER } : {}) });
+			added += 1;
+			await add(b.children, id);
+		}
+	};
+	await add(mdToTree(text), targetId);
+	return `ok: ${added} block(s) added${targetId ? ` under "${under.trim()}"` : ""}`;
 }
 
 export interface ToolContext {
@@ -1069,7 +1033,7 @@ const TOOLS: RegisteredTool[] = [
 		def: {
 			name: "object_add_text",
 			description:
-				"Append NEW text to an object's body. Markdown lines become real blocks: '- [ ] x' checkboxes, '- x' bullets, '1. x' numbered, '# x' headings, '> x' quotes; plain lines become paragraphs. When the object already has a matching list or section, pass 'under' with that block's text (e.g. under: \"Walmart\") so new items join it as children instead of landing at the page root. To change what is already there, use object_edit_block / object_check / object_set_block_style / object_move_block / object_remove_blocks; to link another object, object_add_link (never write '🔗 Name' text).",
+				"Append NEW text to an object's body. Markdown lines become real blocks: '- [ ] x' checkboxes, '- x' bullets, '1. x' numbered, '# x' headings, '> x' quotes; plain lines become paragraphs. Indent a line to nest it under the one above; **bold**, *italic*, `code` and [text](url) become formatting. When the object already has a matching list or section, pass 'under' with that block's text (e.g. under: \"Walmart\") so new items join it as children instead of landing at the page root. To change what is already there, use object_edit_block / object_check / object_set_block_style / object_move_block / object_remove_blocks; to link another object, object_add_link (never write '🔗 Name' text).",
 			input_schema: {
 				type: "object",
 				properties: {
@@ -1102,8 +1066,10 @@ const TOOLS: RegisteredTool[] = [
 			if (typeof hit === "string") return hit;
 			const t = hit.entry.block.content.text;
 			if (!t) return `error: nothing written. That line is a ${hit.entry.block.content.custom?.contentType ?? "non-text"} block, not text.`;
-			const cleared = (t.marks ?? []).length > 0;
-			await mutate("block_update", { object_id: hit.obj.id, block_id: hit.entry.id, content: { ...hit.entry.block.content, text: { ...t, text: S(input.text), marks: [] } } });
+			// Inline markdown in the new text (**bold**, [link](url), `code`) becomes real formatting.
+			const { text, marks } = inlineMarks(S(input.text));
+			const cleared = (t.marks ?? []).length > 0 && marks.length === 0;
+			await mutate("block_update", { object_id: hit.obj.id, block_id: hit.entry.id, content: { ...hit.entry.block.content, text: { ...t, text, marks } } });
 			return `${await lineNow(hit.obj.id, hit.entry.id)}${cleared ? "\n(Its inline formatting - bold, links, mentions - was cleared with the old text.)" : ""}`;
 		},
 	},
