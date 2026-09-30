@@ -107,20 +107,34 @@ function htmlText(html: string): string {
  */
 export function messageLines(m: GmailMessage): string[] {
 	const raw = findPart(m.payload, "text/plain") || htmlText(findPart(m.payload, "text/html"));
-	const out: string[] = [];
+	const own: string[] = [];
+	const quoted: string[] = [];
+	let inQuote = false;
+	const push = (to: string[], t: string) => {
+		if (!t && (to.length === 0 || to[to.length - 1] === "")) return;
+		to.push(t);
+	};
 	for (const line of raw.replace(/[\u034f\u200b-\u200d\u2060\ufeff\u00ad]/g, "").split(/\r?\n/)) {
 		const t = line.trim();
 		// Where quoted history starts: the reply attribution in any language
 		// ("On … <a@b> wrote:", "… <a@b> şunu yazdı:") - a line naming an
 		// address and ending in a colon - or an Outlook-style divider.
-		if (/<[^>\s]+@[^>\s]+>.{0,80}:$/.test(t) || /^-{2,}\s*Original Message\s*-{2,}$/i.test(t) || /^_{10,}$/.test(t)) break;
-		if (t.startsWith(">")) continue;
-		if (!t && (out.length === 0 || out[out.length - 1] === "")) continue;
-		out.push(t);
-		if (out.length >= 120) break;
+		if (!inQuote && (/<[^>\s]+@[^>\s]+>.{0,80}:$/.test(t) || /^-{2,}\s*Original Message\s*-{2,}$/i.test(t) || /^_{10,}$/.test(t))) {
+			inQuote = true;
+			continue;
+		}
+		if (inQuote || t.startsWith(">")) push(quoted, t.replace(/^(>\s?)+/, "").trim());
+		else push(own, t);
 	}
-	while (out.length && out[out.length - 1] === "") out.pop();
-	return out;
+	const trim = (xs: string[]) => {
+		while (xs.length && xs[xs.length - 1] === "") xs.pop();
+		return xs;
+	};
+	trim(own);
+	// A reply with no words of its own still says something - "about this" -
+	// so keep what it quoted, labelled, rather than an empty message.
+	if (own.length === 0 && trim(quoted).length > 0) return ["(No text of their own - they replied to this earlier message:)", ...quoted.slice(0, 60)];
+	return own.slice(0, 120);
 }
 
 /** Append messages to an Email page: a small heading per message (who, when), then its lines as paragraphs. */
