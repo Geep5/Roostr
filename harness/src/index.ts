@@ -969,6 +969,15 @@ if (cmd === "setup") await setup();
 else if (cmd === "serve") await serve();
 else if (cmd === "ask") await ask();
 else if (cmd === "vanish") await vanish();
+else if (cmd === "import-kb") {
+	// import-kb <dir> --space <id>
+	const { importKb } = await import("./kb");
+	const dir = process.argv[3] ?? "";
+	if (!dir || !argValue("--space")) throw new Error("usage: import-kb <dir> --space <spaceId>");
+	const res = await importKb({ dir, space: argValue("--space") as string });
+	console.log(`[kb] created ${res.created.length}, skipped ${res.skipped}`);
+	process.exit(0);
+}
 else {
-	console.log("commands: setup --name X [--kind assistant|marco] [--model m] [--channel id] [--<kind field> v] | serve | ask <agentId> <msg> | vanish <objectId…>|--trash [--yes]");
+	console.log("commands: setup --name X [--kind assistant|marco] [--model m] [--channel id] [--<kind field> v] | serve | ask <agentId> <msg> | vanish <objectId…>|--trash [--yes] | import-kb <dir> --space <id>");
 }
