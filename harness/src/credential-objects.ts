@@ -18,6 +18,7 @@ import { linkTarget, linkValue } from "./capabilities";
 import { openLoginWindow, profileCookies, type LoginWindow, type SessionCookie } from "./browser";
 import { actionsOf, KEY_PREFIX, credentialKeys, credentialSession, dropLegacySecrets, legacyKeyName, legacyKeys, legacyProfileDir, legacyProfileExists, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
 import { fetchInstallations } from "./descriptors";
+import { renewMatcherinoSession } from "./matcherino";
 import { machines } from "./machine";
 import { machineId } from "./roster";
 
@@ -106,13 +107,41 @@ async function publishState(row: CredentialRow, stamp = false): Promise<Credenti
 }
 
 /**
+ * Services whose session cookie's browser clock is not the truth: the site
+ * re-sets it on every visit while the login behind it lives much longer.
+ * Each renews the way a visit would, returning the re-stamped cookies, or
+ * null when the login is really gone.
+ */
+const SESSION_RENEWERS: Record<string, (fields: Record<string, ValueJSON>) => Promise<SessionCookie[] | null>> = {
+	matcherino: renewMatcherinoSession,
+};
+/** Renew this long before the cookie runs out, so a 5-minute refresh never lets it lapse. */
+const RENEW_AHEAD_S = 20 * 60;
+
+/** A renewable credential whose session cookie is about to lapse (or has), renewed; else unchanged. */
+async function renewSession(row: CredentialRow): Promise<CredentialRow> {
+	const renew = SESSION_RENEWERS[row.service];
+	const recipe = recipeOf(row.fields);
+	const session = credentialSession(row.fields);
+	if (!renew || !recipe.sessionCookie || session.length === 0) return row;
+	const soon = Date.now() / 1000 + RENEW_AHEAD_S;
+	const cookie = session.find((c) => c.name === recipe.sessionCookie!.name);
+	if (!cookie || (cookie.expires > 0 && cookie.expires > soon)) return row;
+	const renewed = await renew(row.fields).catch(() => null);
+	if (!renewed) return row;
+	const value = sv(JSON.stringify(renewed));
+	await setField(row.id, "session", value);
+	return { ...row, fields: { ...row.fields, session: value } };
+}
+
+/**
  * Re-read the credentials this computer looks after and write any status
  * that changed. Boot, every credential change and a slow timer call it.
  */
 export async function refreshCredentials(): Promise<CredentialRow[]> {
 	const me = await machineId();
 	const rows = await Promise.all((await queryAll({ type: CREDENTIAL_TYPE })).map(rowOf));
-	mine = await Promise.all(rows.filter((r) => r.servedBy === me).map((r) => publishState(r)));
+	mine = await Promise.all(rows.filter((r) => r.servedBy === me).map(async (r) => publishState(await renewSession(r))));
 	return mine;
 }
 

@@ -31,11 +31,11 @@ import { invalidateServing, machines, serverOf } from "./machine";
 import { machineId } from "./roster";
 import { CATALOG, fileHoldup, skillReady } from "./skillmgr";
 import { myInstallations, type InstallationRow } from "./descriptors";
-import { agentCredential } from "./credential-objects";
+import { agentCredential, type CredentialRow } from "./credential-objects";
 import { actionsOf } from "./credentials";
 import { clickThenReadJs, credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
 import { blockLine, isAgentAuthor, listOrdinals } from "./surfaces";
-import { featuredEvents, matcherinoAccess, setFeatured } from "./matcherino";
+import { featuredEvents, matcherinoToken, setFeatured } from "./matcherino";
 import { readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor, typeDefs } from "./spacemap";
 import * as memory from "./memory";
@@ -516,13 +516,13 @@ async function credentialPage(ctx: ToolContext, service: string, url: string, ac
  * the public list is served from a short cache, so an id the API accepted
  * but the list doesn't show yet is reported as `notShownYet`, not as done.
  */
-async function matcherinoAction(action: string, rawIds: unknown, ctx: ToolContext): Promise<string> {
+async function matcherinoAction(action: string, rawIds: unknown, cred: CredentialRow): Promise<string> {
 	if (action !== "list_featured" && action !== "feature_events") return `error: ${action} is not a Matcherino action; Matcherino takes list_featured or feature_events`;
-	let access;
+	let token: string;
 	try {
-		access = await matcherinoAccess(ctx.agentId);
+		token = await matcherinoToken(cred.fields);
 	} catch (error) {
-		return `Credential unavailable: ${error instanceof Error ? error.message : String(error)} Tell the person; do not retry this turn.`;
+		return `Credential signed out: "${cred.name}" no longer signs in to Matcherino (${error instanceof Error ? error.message : String(error)}). Tell the person to press Reconnect on it; do not retry this turn.`;
 	}
 	try {
 		const before = await featuredEvents();
@@ -535,7 +535,7 @@ async function matcherinoAction(action: string, rawIds: unknown, ctx: ToolContex
 		const failed: Array<{ id: number; error: string }> = [];
 		for (const id of ids.filter((x) => !was.has(x))) {
 			try {
-				await setFeatured(access.token, id, true);
+				await setFeatured(token, id, true);
 				accepted.push(id);
 			} catch (error) {
 				failed.push({ id, error: error instanceof Error ? error.message : String(error) });
@@ -587,7 +587,7 @@ const WEB_TOOLS: RegisteredTool[] = [
 				const valid = actions.map((a) => a.key).join(", ");
 				return `error: "${cred.row.name}" does not allow action "${action}"${valid ? `; it allows ${valid}` : " - it allows none"}. Its Allowed actions property says what agents may do with it; a person changes it there. Don't retry with another name.`;
 			}
-			if (service === "matcherino") return matcherinoAction(action, input.ids, ctx);
+			if (service === "matcherino") return matcherinoAction(action, input.ids, cred.row);
 			if (service === "x") {
 				const url = action === "read_mentions" ? "https://x.com/notifications/mentions" : S(input.url).trim();
 				if (!/^https:\/\/(?:x|twitter)\.com\//i.test(url)) return "error: url must be an x.com or twitter.com URL";

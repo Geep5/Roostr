@@ -9,10 +9,11 @@
  * from sign-in (auth.RefreshTokenTTLMilliseconds). So the cookie's clock is
  * not the truth: exchanging the refresh token at /auth/token is. A
  * successful exchange re-stamps the cookie for another hour, exactly as a
- * browser visit would, so the credential's Status reads what is true.
+ * browser visit would - `renewMatcherinoSession` is that visit, and the
+ * credential refresh calls it before the cookie's hour runs out.
  */
-import { fetchObject, setField, str, sv } from "./api";
-import { agentCredentialIds } from "./credential-objects";
+import { str, type ValueJSON } from "./api";
+import type { SessionCookie } from "./browser";
 import { credentialSession } from "./credentials";
 
 const API = "https://api.matcherino.com/__api";
@@ -44,21 +45,10 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 	return json.body as T;
 }
 
-/**
- * An access token for the agent's Matcherino credential, or why not.
- * The exchange is the sign-in check; its outcome is written back onto the
- * credential (status, error, cookie stamp).
- */
-export async function matcherinoAccess(agentId: string): Promise<{ token: string; name: string }> {
-	const agent = await fetchObject(agentId);
-	const creds = (await Promise.all(agentCredentialIds(agent).map((id) => fetchObject(id).catch(() => null)))).filter(
-		(o) => o && !o.deleted && str(o.fields, "service") === "matcherino",
-	);
-	const cred = creds[0];
-	if (!cred) throw new Error("None of this agent's credentials is for \"matcherino\". Add one to its Credentials property.");
-	const name = str(cred.fields, "name") || "Matcherino";
-	const session = credentialSession(cred.fields);
-	const cookie = session.find((c) => c.name === SESSION_COOKIE);
+/** Exchange the credential's refresh token for an access token; throws when the sign-in is gone. */
+export async function matcherinoToken(fields: Record<string, ValueJSON>): Promise<string> {
+	const name = str(fields, "name") || "Matcherino";
+	const cookie = credentialSession(fields).find((c) => c.name === SESSION_COOKIE);
 	if (!cookie) throw new Error(`Credential "${name}" has no Matcherino sign-in. Press Connect on it.`);
 	let login: unknown;
 	try {
@@ -66,20 +56,23 @@ export async function matcherinoAccess(agentId: string): Promise<{ token: string
 	} catch {
 		throw new Error(`Credential "${name}" holds an unreadable Matcherino sign-in. Press Reconnect on it.`);
 	}
-	let token: string;
+	const token = (await call<{ accessToken: string }>("/auth/token", { method: "POST", body: JSON.stringify(login) })).accessToken;
+	if (!token) throw new Error("Matcherino /auth/token: no access token returned");
+	return token;
+}
+
+/**
+ * The browser visit: when the sign-in still works, its cookies with the
+ * session cookie good for another hour; null when it no longer works.
+ */
+export async function renewMatcherinoSession(fields: Record<string, ValueJSON>): Promise<SessionCookie[] | null> {
 	try {
-		token = (await call<{ accessToken: string }>("/auth/token", { method: "POST", body: JSON.stringify(login) })).accessToken;
-		if (!token) throw new Error("no access token returned");
-	} catch (error) {
-		const message = `The ${name} sign-in expired or was signed out - press Reconnect.`;
-		await setField(cred.id, "status", sv("needs_auth"));
-		await setField(cred.id, "error", sv(message));
-		throw new Error(`${message} (${error instanceof Error ? error.message : String(error)})`);
+		await matcherinoToken(fields);
+	} catch {
+		return null;
 	}
-	// Signed in: stamp the cookie as a visit would, and say so on the credential.
-	const stamped = session.map((c) => (c.name === SESSION_COOKIE ? { ...c, expires: Math.floor(Date.now() / 1000) + COOKIE_LIFE_S } : c));
-	await setField(cred.id, "session", sv(JSON.stringify(stamped)));
-	return { token, name };
+	const until = Math.floor(Date.now() / 1000) + COOKIE_LIFE_S;
+	return credentialSession(fields).map((c) => (c.name === SESSION_COOKIE ? { ...c, expires: until } : c));
 }
 
 /** What the homepage features now (public list; the API may serve it from a short cache). */
