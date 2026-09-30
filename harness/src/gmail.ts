@@ -140,10 +140,11 @@ export interface ImportResult {
 
 /**
  * Import the `max` newest inbox threads of `mailbox` into `space` as Email
- * objects, each naming `agentId` in its Agent property (a guest: it answers
- * that email's chat when tagged).
+ * objects, each naming `agentIds` in its Agent property, in order (guests:
+ * each answers that email's chat when tagged - the support agent, and the
+ * agent it asks for account data).
  */
-export async function importEmails(opts: { mailbox: string; space: string; agentId?: string; max: number; query?: string }): Promise<ImportResult> {
+export async function importEmails(opts: { mailbox: string; space: string; agentIds: string[]; max: number; query?: string }): Promise<ImportResult> {
 	await ensureEmailType(opts.space);
 	const list = (await gws(opts.mailbox, ["gmail", "users", "threads", "list", "--params", JSON.stringify({ userId: "me", maxResults: opts.max, q: opts.query ?? "in:inbox" })])) as { threads?: Array<{ id: string }> };
 	const existing = new Map(
@@ -180,7 +181,7 @@ export async function importEmails(opts: { mailbox: string; space: string; agent
 			email_status: { valuesValue: { items: [{ stringValue: "New" }] } },
 			gmail_thread_id: sv(threadId),
 			gmail_last_message_id: sv(last.id),
-			...(opts.agentId ? { agent: { valuesValue: { items: [{ linkValue: { relationKey: "agent", targetId: opts.agentId } }] } } } : {}),
+			...(opts.agentIds.length ? { agent: { valuesValue: { items: opts.agentIds.map((targetId) => ({ linkValue: { relationKey: "agent", targetId } })) } } } : {}),
 		};
 		const { id } = await createObject(header(first, "Subject") || "(no subject)", EMAIL_TYPE, fields);
 		await appendMessages(id, messages);
