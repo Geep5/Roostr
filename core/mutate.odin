@@ -675,7 +675,8 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		return plan, ""
 
 	case "run_record":
-		// Provenance of an agent run for the current occurrence: {at, machine, conversation, error?}.
+		// Provenance of a run for the current occurrence: {at, machine, conversation?, error?, result?}
+		// (`result`: what a run without a turn concluded, e.g. a check that found nothing new).
 		object_id := json_str(parsed, "object_id")
 		run_json, has_run := json_field(parsed, "run")
 		if object_id == "" || !has_run do return plan, "object_id and run required"
@@ -683,7 +684,7 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		if !recurring do return plan, "object does not repeat"
 		run := Value{kind = .Map}
 		run.entries = make([dynamic]Value_Entry, context.temp_allocator)
-		for key in ([]string{"machine", "conversation", "error"}) {
+		for key in ([]string{"machine", "conversation", "error", "result"}) {
 			if s := json_str(run_json, key); s != "" do append(&run.entries, Value_Entry{key = key, value = string_value(s)})
 		}
 		at, has_at := json_int(run_json, "at")
