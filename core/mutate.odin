@@ -1054,7 +1054,7 @@ relation_value_cascade :: proc(states: map[string]^Object_State, object_id: stri
 // Types that never have an agent of their own; an `agent` field on them
 // means something else (a chat's owner, an installation's requester).
 // Mirrors the harness's UNMINTABLE set (harness/src/index.ts).
-AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "type", "skill", "descriptor", "install", "credential", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
+AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "type", "skill", "tool", "descriptor", "install", "credential", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
 
 /** Agents on an object's guest list. `agent` was a single string before it became a link list; both shapes read. */
 object_agents :: proc(fields: [dynamic]Value_Entry, allocator := context.temp_allocator) -> [dynamic]string {
@@ -1137,6 +1137,15 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// key), so the work only runs on a computer that does.
 	{"served_by", "object", "Served by", "🖥️", false, false, 1, {}},
 	{"skills", "object", "Skills", "🛠️", false, false, 0, {}},
+	// Tools an agent can call: Tool objects (name = what the model calls,
+	// description, inputs, TypeScript in the body). Built-in tools are Tool
+	// objects too, written and kept current by the harness (`tool_builtin`).
+	{"tools", "object", "Tools", "🧰", false, false, 0, {}},
+	{"tool_inputs", "longtext", "Inputs", "📥", false, false, 1, {}},
+	{"tool_builtin", "checkbox", "Built-in", "🔒", false, true, 1, {}},
+	// A repeating object's pre-check: a Tool run (no AI) before each turn;
+	// an empty result ends the run there.
+	{"check_first", "object", "Check first", "🔎", false, false, 1, {}},
 	// An agent's checkout on the machine that serves it: the harness works
 	// in this folder.
 	{"repo_path", "shorttext", "Project folder", "📁", false, false, 1, {}},
@@ -1381,6 +1390,8 @@ BUNDLED_PICKER_TYPES := [?][2]string {
 	{"agent", "agent"},
 	{"install", "install"},
 	{"skills", "skill"},
+	{"tools", "tool"},
+	{"check_first", "tool"},
 	{"served_by", "machine"},
 	{"prompt", "system_prompt"},
 	{"credentials", "credential"},
@@ -1433,6 +1444,9 @@ BUNDLED_TYPES :: []Bundled_Type{
 	// Instructions an agent reads; the ones an agent (or object) lists in
 	// Skills. A skill with a `key` is catalog software computers install.
 	{"skill", "Skill", "🛠️", "page"},
+	// Something an agent can call: TypeScript in the body, run by the
+	// harness on the computer serving the agent.
+	{"tool", "Tool", "🧰", "page"},
 	// An agent's configuration: standing prompt and model.
 	// An agent links one with `prompt`; there is no hardcoded kind.
 	{"system_prompt", "System prompt", "🧠", "page"},

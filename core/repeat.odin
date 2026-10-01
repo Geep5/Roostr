@@ -5,14 +5,20 @@ package core
 // replica sees the same occurrence and the same "already fired" mark.
 //
 //   repeat: {
-//     freq: "day"|"week"|"month"|"year", interval: n,
-//     weekdays: [0..6] (week), monthly: "date"|"weekday" (month),
-//     time: minutes after local midnight, tz: IANA name (informational),
+//     freq: "minute"|"hour"|"day"|"week"|"month"|"year", interval: n,
+//     weekdays: [0..6] (week: which days; minute/hour: only these days, [] = every day),
+//     monthly: "date"|"weekday" (month),
+//     times: [minutes after local midnight] (day/week/month/year: every time on each day it runs),
+//     window: [from, until] minutes after local midnight (minute/hour: the grid
+//       runs from..until each day, restarting at `from`; absent = the whole day),
+//     tz: IANA name (informational),
 //     anchor: ms of the day the cadence counts from (start of local day),
 //     next: ms of the current occurrence,
 //     fired_for / fired_at / fired_by: idempotency mark for `next`,
 //     last_done, count, last_run: {at, machine, conversation, error}
 //   }
+//
+// Rules stored before `times` carry a single `time`; it reads as [time].
 //
 // A recurring object is never done: completing it advances `next`. Time
 // zones are the host's problem - it passes its current UTC offset and the
@@ -20,20 +26,28 @@ package core
 // every completion, so a DST change is off by an hour for one occurrence.
 
 import "core:encoding/json"
+import "core:slice"
 import "core:strings"
 
 REPEAT_KEY :: "repeat"
 REPEAT_DAY_MS :: 86_400_000
 REPEAT_MIN_MS :: 60_000
+REPEAT_DAY_MIN :: 1440
 
 Repeat_Rule :: struct {
-	freq:     string,
-	interval: i64,
-	weekdays: [dynamic]i64,
-	monthly:  string,
-	time:     i64,
-	tz:       string,
-	anchor:   i64, // local-day index (days since 1970-01-01 in the wall clock)
+	freq:       string,
+	interval:   i64,
+	weekdays:   [dynamic]i64,
+	monthly:    string,
+	times:      [dynamic]i64, // sorted, unique (day/week/month/year)
+	win_from:   i64, // minute/hour grid window, minutes after local midnight
+	win_until:  i64,
+	tz:         string,
+	anchor:     i64, // local-day index (days since 1970-01-01 in the wall clock)
+}
+
+repeat_sub_daily :: proc(rule: Repeat_Rule) -> bool {
+	return rule.freq == "minute" || rule.freq == "hour"
 }
 
 // ── Civil dates (proleptic Gregorian, Howard Hinnant's algorithms) ──
@@ -93,7 +107,9 @@ nth_weekday_day :: proc(y, m, weekday, ordinal: i64) -> i64 {
 // ── Rule stepping (all in local-day indices) ──
 
 repeat_day_fits :: proc(rule: Repeat_Rule, day: i64) -> bool {
-	if rule.freq != "week" do return true
+	if repeat_sub_daily(rule) {
+		if len(rule.weekdays) == 0 do return true
+	} else if rule.freq != "week" do return true
 	if len(rule.weekdays) == 0 do return weekday_of_day(day) == weekday_of_day(rule.anchor)
 	for wd in rule.weekdays do if wd == weekday_of_day(day) do return true
 	return false
@@ -103,6 +119,10 @@ repeat_day_fits :: proc(rule: Repeat_Rule, day: i64) -> bool {
 repeat_step :: proc(rule: Repeat_Rule, from: i64) -> i64 {
 	interval := max(rule.interval, 1)
 	switch rule.freq {
+	case "minute", "hour":
+		// The interval spaces times within a day; every allowed day runs.
+		for day := from + 1; day <= from + 7; day += 1 do if repeat_day_fits(rule, day) do return day
+		return from + 1
 	case "week":
 		week_start :: proc(day: i64) -> i64 { return day - weekday_of_day(day) }
 		w0 := week_start(rule.anchor)
@@ -112,13 +132,11 @@ repeat_step :: proc(rule: Repeat_Rule, from: i64) -> i64 {
 		}
 		return from + 7 * interval
 	case "month":
-		y, m, d := civil_from_days(from)
-		ay, _, ad := civil_from_days(rule.anchor)
-		_ = ay
+		y, m, _ := civil_from_days(from)
+		_, _, ad := civil_from_days(rule.anchor)
 		total := y * 12 + (m - 1) + interval
 		ny, nm := total / 12, total % 12 + 1
 		if rule.monthly == "weekday" do return nth_weekday_day(ny, nm, weekday_of_day(rule.anchor), ordinal_in_month(rule.anchor))
-		_ = d
 		return days_from_civil(ny, nm, min(ad, days_in_month(ny, nm)))
 	case "year":
 		y, _, _ := civil_from_days(from)
@@ -130,17 +148,39 @@ repeat_step :: proc(rule: Repeat_Rule, from: i64) -> i64 {
 	}
 }
 
-/** First occurrence: the anchor day itself when it fits and its time is still ahead of `now_local_ms`. */
-repeat_first :: proc(rule: Repeat_Rule, now_local_ms: i64) -> i64 {
-	if repeat_day_fits(rule, rule.anchor) && rule.anchor * REPEAT_DAY_MS + rule.time * REPEAT_MIN_MS > now_local_ms do return rule.anchor
-	return repeat_step(rule, rule.anchor)
+/** The occurrence times (minutes after local midnight, ascending) on a day the rule runs. */
+repeat_day_times :: proc(rule: Repeat_Rule) -> [dynamic]i64 {
+	if !repeat_sub_daily(rule) do return rule.times
+	out := make([dynamic]i64, context.temp_allocator)
+	period := max(rule.interval, 1) * (rule.freq == "hour" ? 60 : 1)
+	for t := rule.win_from; t <= rule.win_until; t += period do append(&out, t)
+	return out
 }
 
-/** Occurrence strictly after `from` whose time is still ahead of `now_local_ms` (skips missed ones). */
-repeat_advance :: proc(rule: Repeat_Rule, from: i64, now_local_ms: i64) -> i64 {
-	day := repeat_step(rule, from)
-	for i := 0; i < 5000 && day * REPEAT_DAY_MS + rule.time * REPEAT_MIN_MS <= now_local_ms; i += 1 do day = repeat_step(rule, day)
-	return day
+/**
+ * First occurrence (a local minute index) strictly after local minute
+ * `after`, walking occurrence days from `day` - which must itself be a day
+ * the rule runs.
+ */
+repeat_next_after :: proc(rule: Repeat_Rule, day: i64, after: i64) -> i64 {
+	times := repeat_day_times(rule)
+	d := day
+	for i := 0; i < 5000; i += 1 {
+		for t in times do if d * REPEAT_DAY_MIN + t > after do return d * REPEAT_DAY_MIN + t
+		d = repeat_step(rule, d)
+	}
+	return d * REPEAT_DAY_MIN + times[0]
+}
+
+/** First occurrence (local minute): on the anchor day when it fits and a time is still ahead of `now_local_ms`. */
+repeat_first :: proc(rule: Repeat_Rule, now_local_ms: i64) -> i64 {
+	day := repeat_day_fits(rule, rule.anchor) ? rule.anchor : repeat_step(rule, rule.anchor)
+	return repeat_next_after(rule, day, floor_div(now_local_ms, REPEAT_MIN_MS))
+}
+
+/** Occurrence (local minute) after `current` whose time is still ahead of `now_local_ms` (skips missed ones). */
+repeat_advance :: proc(rule: Repeat_Rule, current: i64, now_local_ms: i64) -> i64 {
+	return repeat_next_after(rule, floor_div(current, REPEAT_DAY_MIN), max(current, floor_div(now_local_ms, REPEAT_MIN_MS)))
 }
 
 // ── Value <-> rule ──
@@ -166,35 +206,59 @@ repeat_entry_str :: proc(v: Value, key: string) -> string {
 	return ""
 }
 
+/** Times as stored: sorted and de-duplicated, so the walk can stop at the first later one. */
+repeat_sorted_times :: proc(times: ^[dynamic]i64) {
+	slice.sort(times[:])
+	kept := 0
+	for t, i in times do if i == 0 || t != times[kept - 1] { times[kept] = t; kept += 1 }
+	resize(times, kept)
+}
+
 repeat_rule_from_value :: proc(v: Value) -> (rule: Repeat_Rule, ok: bool) {
 	if v.kind != .Map do return
 	rule.freq = repeat_entry_str(v, "freq")
 	rule.interval, _ = repeat_entry_int(v, "interval")
 	rule.monthly = repeat_entry_str(v, "monthly")
 	rule.tz = repeat_entry_str(v, "tz")
-	rule.time, _ = repeat_entry_int(v, "time")
 	rule.anchor, _ = repeat_entry_int(v, "anchor")
 	rule.weekdays = make([dynamic]i64, context.temp_allocator)
 	if wd, present := repeat_entry(v, "weekdays"); present && wd.kind == .List {
 		for item in wd.items do if item.kind == .Int do append(&rule.weekdays, item.i)
+	}
+	rule.times = make([dynamic]i64, context.temp_allocator)
+	if ts, present := repeat_entry(v, "times"); present && ts.kind == .List {
+		for item in ts.items do if item.kind == .Int do append(&rule.times, item.i)
+	} else if t, has_time := repeat_entry_int(v, "time"); has_time {
+		append(&rule.times, t)
+	}
+	repeat_sorted_times(&rule.times)
+	rule.win_from, rule.win_until = 0, REPEAT_DAY_MIN - 1
+	if w, present := repeat_entry(v, "window"); present && w.kind == .List && len(w.items) == 2 && w.items[0].kind == .Int && w.items[1].kind == .Int {
+		rule.win_from, rule.win_until = w.items[0].i, w.items[1].i
 	}
 	return rule, repeat_rule_valid(rule)
 }
 
 repeat_rule_valid :: proc(rule: Repeat_Rule) -> bool {
 	switch rule.freq {
-	case "day", "week", "month", "year":
+	case "minute", "hour", "day", "week", "month", "year":
 	case:
 		return false
 	}
 	if rule.interval < 1 || rule.interval > 999 do return false
-	if rule.time < 0 || rule.time >= 24 * 60 do return false
 	for wd in rule.weekdays do if wd < 0 || wd > 6 do return false
+	if repeat_sub_daily(rule) {
+		if rule.win_from < 0 || rule.win_until >= REPEAT_DAY_MIN || rule.win_from > rule.win_until do return false
+		if rule.freq == "hour" && rule.interval > 23 do return false
+		return true
+	}
+	if len(rule.times) == 0 do return false
+	for t in rule.times do if t < 0 || t >= REPEAT_DAY_MIN do return false
 	if rule.freq == "month" && rule.monthly != "date" && rule.monthly != "weekday" do return false
 	return true
 }
 
-/** The rule as a JSON `rule` object: {freq, interval, weekdays, monthly, time, tz, anchor_ms?}. */
+/** The rule as a JSON `rule` object: {freq, interval, weekdays, monthly, times, window, tz, anchor_ms?}. */
 repeat_rule_from_json :: proc(v: json.Value, tz_offset_min: i64, default_anchor_local_ms: i64) -> (rule: Repeat_Rule, ok: bool) {
 	rule.freq = json_str(v, "freq")
 	rule.interval, _ = json_int(v, "interval")
@@ -202,12 +266,19 @@ repeat_rule_from_json :: proc(v: json.Value, tz_offset_min: i64, default_anchor_
 	rule.monthly = json_str(v, "monthly")
 	if rule.monthly == "" do rule.monthly = "date"
 	rule.tz = json_str(v, "tz")
-	rule.time, _ = json_int(v, "time")
-	rule.weekdays = make([dynamic]i64, context.temp_allocator)
-	for item in json_array(v, "weekdays") {
-		if n, is_int := item.(i64); is_int do append(&rule.weekdays, n)
-		else if f, is_float := item.(json.Float); is_float do append(&rule.weekdays, i64(f))
+	json_ints :: proc(v: json.Value, key: string) -> [dynamic]i64 {
+		out := make([dynamic]i64, context.temp_allocator)
+		for item in json_array(v, key) {
+			if n, is_int := item.(i64); is_int do append(&out, n)
+			else if f, is_float := item.(json.Float); is_float do append(&out, i64(f))
+		}
+		return out
 	}
+	rule.weekdays = json_ints(v, "weekdays")
+	rule.times = json_ints(v, "times")
+	repeat_sorted_times(&rule.times)
+	rule.win_from, rule.win_until = 0, REPEAT_DAY_MIN - 1
+	if window := json_ints(v, "window"); len(window) == 2 do rule.win_from, rule.win_until = window[0], window[1]
 	anchor_local := default_anchor_local_ms
 	if anchor_ms, present := json_int(v, "anchor_ms"); present do anchor_local = anchor_ms + tz_offset_min * REPEAT_MIN_MS
 	rule.anchor = floor_div(anchor_local, REPEAT_DAY_MS)
@@ -221,21 +292,25 @@ floor_div :: proc(a, b: i64) -> i64 {
 	return q
 }
 
-/** Builds the stored map: the rule plus bookkeeping carried over from `previous` (or fresh). */
-repeat_value :: proc(rule: Repeat_Rule, next_day: i64, tz_offset_min: i64, previous: Value, has_previous: bool) -> Value {
+/** Builds the stored map: the rule plus bookkeeping carried over from `previous` (or fresh). `next_local` is a local minute index. */
+repeat_value :: proc(rule: Repeat_Rule, next_local: i64, tz_offset_min: i64, previous: Value, has_previous: bool) -> Value {
 	v := Value{kind = .Map}
 	v.entries = make([dynamic]Value_Entry, context.temp_allocator)
 	put :: proc(v: ^Value, key: string, value: Value) { append(&v.entries, Value_Entry{key = key, value = value}) }
+	ints :: proc(xs: []i64) -> Value {
+		out := make([dynamic]Value, context.temp_allocator)
+		for x in xs do append(&out, int_value(x))
+		return list_value(out[:])
+	}
 	put(&v, "freq", string_value(rule.freq))
 	put(&v, "interval", int_value(rule.interval))
-	weekdays := make([dynamic]Value, context.temp_allocator)
-	for wd in rule.weekdays do append(&weekdays, int_value(wd))
-	put(&v, "weekdays", list_value(weekdays[:]))
+	put(&v, "weekdays", ints(rule.weekdays[:]))
 	put(&v, "monthly", string_value(rule.monthly))
-	put(&v, "time", int_value(rule.time))
+	if repeat_sub_daily(rule) do put(&v, "window", ints([]i64{rule.win_from, rule.win_until}))
+	else do put(&v, "times", ints(rule.times[:]))
 	put(&v, "tz", string_value(rule.tz))
 	put(&v, "anchor", int_value(rule.anchor))
-	put(&v, "next", int_value(repeat_local_to_ms(next_day, rule.time, tz_offset_min)))
+	put(&v, "next", int_value(repeat_local_to_ms(next_local, tz_offset_min)))
 	if has_previous {
 		for key in ([]string{"last_done", "count", "last_run"}) {
 			if e, ok := repeat_entry(previous, key); ok do put(&v, key, mutation_clone_value(e))
@@ -244,8 +319,8 @@ repeat_value :: proc(rule: Repeat_Rule, next_day: i64, tz_offset_min: i64, previ
 	return v
 }
 
-repeat_local_to_ms :: proc(day: i64, time_min: i64, tz_offset_min: i64) -> i64 {
-	return day * REPEAT_DAY_MS + time_min * REPEAT_MIN_MS - tz_offset_min * REPEAT_MIN_MS
+repeat_local_to_ms :: proc(local_min: i64, tz_offset_min: i64) -> i64 {
+	return (local_min - tz_offset_min) * REPEAT_MIN_MS
 }
 
 /** Copy of `v` with `key` replaced (or added). */
@@ -287,9 +362,9 @@ repeat_advance_ops :: proc(current: Value, now_ms, tz_offset_min: i64) -> (Value
 	next_ms, has_next := repeat_entry_int(current, "next")
 	if !has_next do return {}, "repeat has no current occurrence"
 	now_local := now_ms + tz_offset_min * REPEAT_MIN_MS
-	current_day := floor_div(next_ms + tz_offset_min * REPEAT_MIN_MS, REPEAT_DAY_MS)
-	next_day := repeat_advance(rule, current_day, now_local)
-	out := repeat_with(current, "next", int_value(repeat_local_to_ms(next_day, rule.time, tz_offset_min)))
+	current_local := floor_div(next_ms, REPEAT_MIN_MS) + tz_offset_min
+	next_local := repeat_advance(rule, current_local, now_local)
+	out := repeat_with(current, "next", int_value(repeat_local_to_ms(next_local, tz_offset_min)))
 	out = repeat_with(out, "last_done", int_value(now_ms))
 	count, _ := repeat_entry_int(out, "count")
 	out = repeat_with(out, "count", int_value(count + 1))
