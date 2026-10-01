@@ -55,6 +55,15 @@ const typeRow = (key: string, name: string): ObjectJSON => ({
 });
 const TYPES = [typeRow("task", "Task"), typeRow("note", "Note"), typeRow("person", "Person"), typeRow("agent", "Agent")];
 
+/** The `rule` object_set_repeat sends with repeat_set. */
+interface RepeatRule {
+	freq: string;
+	interval: number;
+	weekdays: number[];
+	times?: number[];
+	window?: number[];
+}
+
 /** A daemon with one task and the space's properties; mutations apply to the task. */
 function daemon(task: ObjectJSON) {
 	const mutations: Array<Record<string, unknown>> = [];
@@ -72,14 +81,16 @@ function daemon(task: ObjectJSON) {
 			mutations.push(body);
 			if (body.action === "set_field") task.fields[String(body.key)] = body.value as ValueJSON;
 			if (body.action === "repeat_set") {
-				const rule = body.rule as { freq: string; interval: number; weekdays: number[]; time: number };
+				const rule = body.rule as RepeatRule;
+				const ints = (xs: number[]): ValueJSON => ({ valuesValue: { items: xs.map((n) => ({ intValue: n })) } });
 				task.fields.repeat = {
 					mapValue: {
 						entries: {
 							freq: { stringValue: rule.freq },
 							interval: { intValue: rule.interval },
-							weekdays: { valuesValue: { items: rule.weekdays.map((d) => ({ intValue: d })) } },
-							time: { intValue: rule.time },
+							weekdays: ints(rule.weekdays),
+							...(rule.times ? { times: ints(rule.times) } : {}),
+							...(rule.window ? { window: ints(rule.window) } : {}),
 						},
 					},
 				};
@@ -144,11 +155,20 @@ test("a valid write reports the value as the human now sees it", async () => {
 test("object_set_repeat writes the real rule and reads it back in the Repeat cell's words", async () => {
 	const t = task({ agent: { valuesValue: { items: [{ stringValue: "agent" }] } } });
 	const mutations = daemon(t);
-	const result = await dispatchTool("object_set_repeat", { every: 2, unit: "week", weekdays: ["wed"], time: "09:30" }, ctx());
+	const result = await dispatchTool("object_set_repeat", { every: 2, unit: "week", weekdays: ["wed"], times: ["09:30", "14:00"] }, ctx());
 	expect(result.content).toStartWith("Repeats every 2 weeks on Wed at 9:30");
+	expect(result.content).toContain("2:00");
 	const set = mutations.find((m) => m.action === "repeat_set");
 	expect(set?.object_id).toBe("task");
-	expect(set?.rule).toMatchObject({ freq: "week", interval: 2, weekdays: [3], time: 570 });
+	expect(set?.rule).toMatchObject({ freq: "week", interval: 2, weekdays: [3], times: [570, 840] });
+});
+
+test("object_set_repeat runs every few minutes inside a daily window, on chosen days", async () => {
+	const t = task({ agent: { valuesValue: { items: [{ stringValue: "agent" }] } } });
+	const mutations = daemon(t);
+	const result = await dispatchTool("object_set_repeat", { every: 5, unit: "minute", from: "09:00", until: "17:00", weekdays: ["mon", "tue"] }, ctx());
+	expect(result.content).toStartWith("Repeats every 5 minutes on Mon, Tue from 9:00");
+	expect(mutations.find((m) => m.action === "repeat_set")?.rule).toMatchObject({ freq: "minute", interval: 5, weekdays: [1, 2], window: [540, 1020] });
 });
 
 test("object_set_repeat says when nobody is on the guest list to run it", async () => {
@@ -159,7 +179,17 @@ test("object_set_repeat says when nobody is on the guest list to run it", async 
 
 test("object_set_repeat rejects a malformed rule without writing", async () => {
 	const mutations = daemon(task());
-	for (const input of [{ unit: "fortnight" }, { unit: "week", weekdays: ["someday"] }, { unit: "day", time: "25:00" }, { unit: "day", every: 0 }]) {
+	for (const input of [
+		{ unit: "fortnight" },
+		{ unit: "week", weekdays: ["someday"] },
+		{ unit: "day", times: ["25:00"] },
+		{ unit: "day", times: [] },
+		{ unit: "day", every: 0 },
+		{ unit: "hour", every: 24 },
+		{ unit: "minute", from: "17:00", until: "09:00" },
+		{ unit: "minute", times: ["09:00"] },
+		{ unit: "day", from: "09:00" },
+	]) {
 		expect((await dispatchTool("object_set_repeat", input, ctx())).content).toStartWith("error: nothing written");
 	}
 	expect(mutations).toEqual([]);

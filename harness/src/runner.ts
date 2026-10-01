@@ -17,9 +17,10 @@ import { objectContext } from "./spacemap";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
 import { callLLM, isContextOverflowError, modelProvider } from "./llm";
-import { channelInstructions, grantedTools, listSkills, skillsPromptSection } from "./skills";
+import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
 import { agentModelKey, credentialsPromptLine } from "./credential-objects";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
+import { agentToolset } from "./tool-objects";
 import { workspaceAt, workspacePromptSection } from "./workspace";
 import { genesisCalls, genesisFingerprint, lastGenesis } from "./genesis";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
@@ -117,7 +118,8 @@ export interface SystemPart {
 	text: string;
 }
 
-async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: ConversationView, opts: RunOptions): Promise<SystemPart[]> {
+/** `granted`: the gated built-ins the agent's Tools give it (machine skills are listed only with the shell). */
+async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: ConversationView, opts: RunOptions, granted: ReadonlySet<string>): Promise<SystemPart[]> {
 	// The object this transcript is about: the object naming this agent
 	// (`object.agent`) when the thread lives on it; nothing when the thread is
 	// the agent's own page or its space (those get the prompt's standing text).
@@ -155,7 +157,7 @@ async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: Conve
 	if (view.systemExtension) parts.push({ label: "Conversation summary", text: view.systemExtension });
 	// Slow parts: agent-scoped, expensive to assemble, change only when an
 	// input the fingerprint covers changes.
-	parts.push(...(await slowSystemParts(agent, spec, opts, objectId)));
+	parts.push(...(await slowSystemParts(agent, spec, opts, objectId, granted)));
 	return parts;
 }
 
@@ -182,7 +184,7 @@ const slowCache = new Map<string, SlowParts>();
 /** Max of a set of updatedAt stamps; 0 when the set is empty. */
 const maxUpdated = (rows: Array<{ updatedAt: number }>): number => rows.reduce((m, r) => Math.max(m, r.updatedAt ?? 0), 0);
 
-export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnType<typeof promptFor>>, opts: RunOptions, objectId: string): Promise<SystemPart[]> {
+export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnType<typeof promptFor>>, opts: RunOptions, objectId: string, granted?: ReadonlySet<string>): Promise<SystemPart[]> {
 	const agentId = agent.id;
 	const channelId = str(agent.fields, "channel");
 
@@ -193,7 +195,7 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	const [facts, milestones, skills] = await Promise.all([
 		flag(agent.fields, "memory_digest_enabled") ? listFacts(agentId) : Promise.resolve([]),
 		flag(agent.fields, "memory_digest_enabled") ? listMilestones(agentId) : Promise.resolve([]),
-		listSkills(agentId),
+		listSkills(agentId, granted),
 	]);
 	const credsLine = await credentialsPromptLine(agent);
 	const repo = str(agent.fields, "repo_path");
@@ -281,7 +283,7 @@ export async function publishSystemSnapshot(agentId: string, ref: ConvRef): Prom
 		const agent = await ensureAgentPrompt(await fetchObject(agentId));
 		const conv = ref.objectId === agentId ? agent : await fetchObject(ref.objectId);
 		const view = buildConversationView(conv, agentId, tokenRatio(agent), ref.threadId);
-		await publishSystemParts(agentId, await buildSystemParts(agent, conv, view, {}), tokenRatio(agent));
+		await publishSystemParts(agentId, await buildSystemParts(agent, conv, view, {}, (await agentToolset(agent)).granted), tokenRatio(agent));
 	} catch (err) {
 		console.error(`[harness] prompt snapshot failed for ${agentId.slice(0, 8)}:`, err);
 	}
@@ -330,17 +332,15 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		const model = choice(agent.fields, "model") || (await promptFor(agent)).model;
 		// Its login travels with it: a model credential it lists beats this computer's.
 		const apiKey = (await agentModelKey(agent, modelProvider(model))) ?? undefined;
-		// Re-read every iteration with everything else, so revoking the grant
-		// takes effect on the agent's next tool call rather than its next turn.
-		// Shell and web only where the agent's Skills grant them (skills.ts).
-		// A spawned helper has no Skills of its own: it carries its parent's.
-		const parentId = str(agent.fields, "spawn_parent");
-		const grantor = parentId ? await fetchObject(parentId).catch(() => null) : null;
-		ctx.granted = await grantedTools((grantor ?? agent).fields);
-		const tools = toolDefs(opts.template ?? "", ctx.depth, ctx.allowAsk, ctx.granted);
+		// Re-read every iteration with everything else, so editing the
+		// agent's Tools takes effect on its next tool call rather than its
+		// next turn: shell/web only where they're listed, plus its custom
+		// tools (a spawned helper carries its top-level agent's).
+		ctx.toolset = await agentToolset(agent);
+		const tools = toolDefs(opts.template ?? "", ctx.depth, ctx.allowAsk, ctx.toolset);
 
 		let view = buildConversationView(conv, agentId, ratio, ref.threadId);
-		const systemParts = await buildSystemParts(agent, conv, view, opts);
+		const systemParts = await buildSystemParts(agent, conv, view, opts, ctx.toolset.granted);
 		const system = systemParts.map((p) => p.text).join("\n\n");
 		// Subagent prompts are per-spawn and ephemeral; only a top-level
 		// served agent's prompt is worth publishing for remote inspection.

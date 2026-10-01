@@ -69,6 +69,14 @@ export interface ToolDef {
 	input_schema: Record<string, unknown>;
 }
 
+/** A Tool object an agent's Tools property links (tool-objects.ts): its def and its TypeScript body, run by tool-host.ts. */
+export interface CustomTool {
+	/** The Tool object's id. */
+	id: string;
+	def: ToolDef;
+	code: string;
+}
+
 export interface LLMResult {
 	text: string;
 	toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>;

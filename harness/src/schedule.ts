@@ -20,6 +20,18 @@
  * `origin: "schedule"`, which keeps them out of the watermark path
  * (`pendingMessages`) - the turn is driven explicitly, never by ingestion.
  *
+ * Check first: an object whose `check_first` links a Tool runs it before
+ * anything else, without a model, given `{object_id}`. Nothing found (an
+ * empty result) records the run as "nothing new" and completes the
+ * occurrence - no turn, no message; a finding goes into the turn's frame
+ * ahead of the instructions; a failing check is badged and the occurrence
+ * completed, so the next one tries again.
+ *
+ * An occurrence only moves on when something completes it. Day-and-longer
+ * repeats leave that to the run's instructions (or a person ticking Done);
+ * minute/hour repeats are completed by the scheduler after each run, or
+ * the first unfinished one would stop them for good.
+ *
  * No state beyond the timer: a restart re-arms from the DAG, and missed
  * occurrences (sleep, downtime) fire on the next arm, each once.
  */
@@ -29,6 +41,8 @@ import { addConvBlock, convKey, humanRef, type ConvRef } from "./conv";
 import { primeServing, servesHere } from "./machine";
 import { machineId } from "./roster";
 import { objectText } from "./skills";
+import { linkIds, runToolObject } from "./tool-objects";
+import { localClock } from "./tools";
 
 export interface ScheduleHost {
 	/** The agent's holistic transcript when this machine serves it; undefined otherwise. */
@@ -45,6 +59,43 @@ export interface ScheduleHost {
  */
 const TURN_SUFFIX =
 	"This turn was started by the scheduler, not a person. Follow the object's instructions exactly - they decide what to post and when the run is done. If they say to stop, end with no reply. Call occurrence_complete only when they say the run is done; if something blocks the run, say what, once, and do not call it.";
+
+/** How much of a check's finding goes into the frame. */
+const FINDING_CAP = 8000;
+
+/** A check's result that means "nothing new": nothing, "", [] or {} - also as JSON text. */
+export function isEmptyResult(value: unknown): boolean {
+	if (value === null || value === undefined) return true;
+	if (Array.isArray(value)) return value.length === 0;
+	if (typeof value === "object") return Object.keys(value).length === 0;
+	if (typeof value !== "string") return false;
+	const text = value.trim();
+	if (!text) return true;
+	try {
+		return isEmptyResult(JSON.parse(text));
+	} catch {
+		return false;
+	}
+}
+
+/** A minute/hour repeat: the scheduler completes its occurrences itself. */
+function subDaily(obj: ObjectJSON): boolean {
+	const freq = obj.fields["repeat"]?.mapValue?.entries?.["freq"]?.stringValue;
+	return freq === "minute" || freq === "hour";
+}
+
+/** Complete the occurrence that fired, unless the run already did (an agent's occurrence_complete). */
+async function completeOccurrence(d: Due): Promise<void> {
+	const now = await fetchObject(d.id);
+	if (now.fields["repeat"]?.mapValue?.entries?.["next"]?.intValue !== d.next) return;
+	await mutate("occurrence_complete", { object_id: d.id, ...localClock() });
+}
+
+/** Error badges a clean run clears: what a failed run or check wrote - never a human's or another writer's message. */
+async function clearRunBadge(obj: ObjectJSON, alsoNoAgent: boolean): Promise<void> {
+	const badge = str(obj.fields, "error");
+	if (badge.startsWith("run failed:") || badge.startsWith("check failed:") || (alsoNoAgent && badge.startsWith("recurring object has no agent"))) await deleteField(obj.id, "error");
+}
 
 /** setTimeout's ceiling; longer waits re-arm when it elapses. */
 const MAX_DELAY_MS = 2 ** 31 - 1;
@@ -124,7 +175,8 @@ export async function arm(): Promise<void> {
 			}
 			clearTimeout(timer);
 			timer = undefined;
-			if (soonest === Infinity) continue;
+			// Not started, or stopped (tests) while the query ran: nothing to point at.
+			if (soonest === Infinity || !host) continue;
 			const delay = Math.min(Math.max(0, soonest - Date.now()), MAX_DELAY_MS);
 			timer = setTimeout(() => void fire(), delay);
 			console.log(`[schedule] next occurrence at ${new Date(soonest).toISOString()} (in ${Math.round(delay / 1000)}s)`);
@@ -204,36 +256,68 @@ async function postScheduled(ref: ConvRef, text: string, d: Due, me: string): Pr
 	});
 }
 
-/** Tell the owner: an agent gets the instructions and a turn, a person gets a reminder. */
+/**
+ * Tell the owner: an agent gets the instructions and a turn, a person gets
+ * a reminder - unless the object's Check first finds nothing to do.
+ */
 async function dispatch(d: Due, me: string): Promise<void> {
-	try {
 	if (!host) return;
-	const obj = await fetchObject(d.id);
-	const name = str(obj.fields, "name") || "(untitled)";
-	const when = new Date(d.next).toLocaleString();
-	const owner = await ownerOf(obj);
-	if (!owner) {
-		await postScheduled(humanRef(obj.id), `\u21bb "${name}" is due (${when})`, d, me);
-		console.log(`[schedule] reminded "${name}" (${obj.id.slice(0, 8)}) - no served agent owns it`);
-		return;
-	}
-	const body = objectText(obj).slice(0, 4000);
-	const frame = [
-		`Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}. Its instructions follow; occurrence_complete on object ${obj.id} ends the run when they say it is done.`,
-		body || "(this object has no body text)",
-	].join("\n");
-	await postScheduled(owner.conv, frame, d, me);
-	console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) → agent ${owner.agentId.slice(0, 8)}`);
-	const error = await host.turn(owner.agentId, TURN_SUFFIX);
-	const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: convKey(owner.conv) };
-	if (error) run.error = error;
-	await mutate("run_record", { object_id: obj.id, run });
-	// The error badge: a failed run sets it; a clean run clears what a
-	// failed run wrote (or the no-agent badge, once the object names one) -
-	// never a human's or another writer's message.
-	const badge = str(obj.fields, "error");
-	if (error) await setField(obj.id, "error", sv(`run failed: ${error}`.slice(0, 300)));
-	else if (badge.startsWith("run failed:") || badge.startsWith("recurring object has no agent")) await deleteField(obj.id, "error");
+	try {
+		const obj = await fetchObject(d.id);
+		const name = str(obj.fields, "name") || "(untitled)";
+		const when = new Date(d.next).toLocaleString();
+		const owner = await ownerOf(obj);
+		const checkId = linkIds(obj.fields, "check_first")[0];
+		let finding = "";
+		if (checkId) {
+			let check: { name: string; value: unknown };
+			try {
+				check = await runToolObject(checkId, { object_id: obj.id }, { agentId: owner?.agentId ?? "", channelId: str(obj.fields, "channel"), boundObject: obj.id, depth: 0, touched: new Set() });
+			} catch (err) {
+				const failure = `check failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
+				await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, error: failure } });
+				await setField(obj.id, "error", sv(failure));
+				// Completed anyway: the next occurrence is the retry.
+				await completeOccurrence(d);
+				console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) ${failure}`);
+				return;
+			}
+			if (isEmptyResult(check.value)) {
+				await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, result: "nothing new" } });
+				await clearRunBadge(obj, false);
+				await completeOccurrence(d);
+				console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) - ${check.name} found nothing new; no turn`);
+				return;
+			}
+			const shown = typeof check.value === "string" ? check.value : JSON.stringify(check.value, null, 1);
+			finding = `Check first (${check.name}) found:\n${shown.length > FINDING_CAP ? `${shown.slice(0, FINDING_CAP)}\n… (cut at ${FINDING_CAP} characters)` : shown}`;
+		}
+		if (!owner) {
+			await postScheduled(humanRef(obj.id), `\u21bb "${name}" is due (${when})`, d, me);
+			if (subDaily(obj)) await completeOccurrence(d);
+			console.log(`[schedule] reminded "${name}" (${obj.id.slice(0, 8)}) - no served agent owns it`);
+			return;
+		}
+		const body = objectText(obj).slice(0, 4000);
+		const ending = subDaily(obj)
+			? "the scheduler completes this run when your turn ends - don't call occurrence_complete."
+			: `occurrence_complete on object ${obj.id} ends the run when they say it is done.`;
+		const frame = [
+			`Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}. ${finding ? "What its check found, then its instructions" : "Its instructions"} follow; ${ending}`,
+			...(finding ? [finding, "Instructions:"] : []),
+			body || "(this object has no body text)",
+		].join("\n");
+		await postScheduled(owner.conv, frame, d, me);
+		console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) → agent ${owner.agentId.slice(0, 8)}`);
+		const error = await host.turn(owner.agentId, TURN_SUFFIX);
+		const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: convKey(owner.conv) };
+		if (error) run.error = error;
+		await mutate("run_record", { object_id: obj.id, run });
+		// The error badge: a failed run sets it; a clean run clears what a
+		// failed run wrote (or the no-agent badge, once the object names one).
+		if (error) await setField(obj.id, "error", sv(`run failed: ${error}`.slice(0, 300)));
+		else await clearRunBadge(obj, true);
+		if (subDaily(obj)) await completeOccurrence(d);
 	} finally {
 		turnEnded?.();
 	}

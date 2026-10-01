@@ -40,12 +40,13 @@ import { featuredEvents, matcherinoToken, setFeatured } from "./matcherino";
 import { readSkill } from "./skills";
 import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor, typeDefs } from "./spacemap";
 import * as memory from "./memory";
-import { TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
+import { TOOL_RESULT_TRUNCATE, type CustomTool, type ToolDef } from "./types";
 import { HUMAN_THREAD, agentSubject, convBlocks, humanRef, postTo } from "./conv";
 import { sendMessage } from "./mailbox";
 import { fetchInstallations } from "./descriptors";
 import { fetchCapabilities, fullySetUp, linkValue } from "./capabilities";
-import { GATED_TOOLS, SKILLS_KEY, machineSkillKeys, skillForKey, skillIds } from "./skills";
+import { SKILLS_KEY, machineSkillKeys, skillForKey, skillIds } from "./skills";
+import { runToolCode } from "./tool-host";
 import { requestCapability, type CapabilityOperation } from "./capability-messages";
 import type { AgentEndpoint, AgentMessage } from "./api";
 
@@ -96,17 +97,32 @@ export interface ToolContext {
 	submitResult?: (content: string) => void;
 	/** Compaction carryover: object ids touched by tools this run. */
 	touched: Set<string>;
-	/** Gated tools (shell_exec, web_fetch) the agent's Skills grant; unset = no gating (tests, internal callers). */
-	granted?: ReadonlySet<string>;
+	/** What the agent's Tools property adds (shell/web, its custom tools); unset = every built-in, no custom tools (tests, internal callers). */
+	toolset?: Toolset;
 	/** The agent's Project folder (`repo_path`) on this machine - shell_exec's cwd when set. */
 	workspacePath?: string;
 }
 
 type Handler = (input: Record<string, unknown>, ctx: ToolContext) => Promise<string>;
 
-interface RegisteredTool {
+export interface RegisteredTool {
 	def: ToolDef;
 	handler: Handler;
+}
+
+/**
+ * Built-ins only an agent's Tools property unlocks: running commands on
+ * the serving computer and fetching the web are the two powers an agent
+ * could turn against that computer or use to send data out, so an agent
+ * has them only while its Tools list them (a support agent that reads mail
+ * from strangers simply doesn't). Everything else is always on.
+ */
+const GATED_TOOLS: Readonly<Record<string, true>> = { shell_exec: true, web_fetch: true };
+
+/** What an agent's Tools property adds to the core set (tool-objects.ts): the gated built-ins it lists and its custom tools by name. */
+export interface Toolset {
+	granted: ReadonlySet<string>;
+	custom: ReadonlyMap<string, CustomTool>;
 }
 
 const S = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -118,7 +134,7 @@ const A = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is strin
  * nesting depth and the line a human reads. Conversation subtrees are not
  * body and never appear; editing tools accept only these ids.
  */
-function bodyBlocks(obj: ObjectJSON): Array<{ id: string; depth: number; line: string; block: BlockJSON }> {
+export function bodyBlocks(obj: ObjectJSON): Array<{ id: string; depth: number; line: string; block: BlockJSON }> {
 	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
 	const ordinals = listOrdinals(obj);
 	const referenced = new Set<string>();
@@ -302,27 +318,49 @@ const FIXED_TYPES = new Set(["agent", "machine", "install", "capability", "chann
 
 const WEEKDAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
+/** Minutes after local midnight as a clock time: 570 -> "9:30 AM". */
+function clockTime(minutes: number): string {
+	return new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 /**
  * An object's repeat rule in the words the Repeat cell uses, with its next
- * occurrence: "every 2 weeks on Wed at 9:00 AM · next Wed, Oct 8, 9:00 AM".
+ * occurrence: "every 2 weeks on Wed at 9:00 AM, 1:00 PM · next Wed, Oct 8,
+ * 9:00 AM", "every 5 minutes on Mon, Tue from 9:00 AM to 5:00 PM · next ...".
  */
 function describeRepeat(v: ValueJSON | undefined): string {
 	const e = v?.mapValue?.entries;
 	if (!e) return "does not repeat";
+	const ints = (key: string): number[] => (e[key]?.valuesValue?.items ?? []).map((i) => i.intValue ?? 0);
 	const freq = e["freq"]?.stringValue ?? "";
 	const every = e["interval"]?.intValue ?? 1;
 	const unit = every === 1 ? freq : `${every} ${freq}s`;
-	const days = (e["weekdays"]?.valuesValue?.items ?? []).map((i) => WEEKDAY_NAMES[i.intValue ?? 0]).map((d) => d[0].toUpperCase() + d.slice(1));
-	const minutes = e["time"]?.intValue ?? 0;
-	const at = new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+	const days = ints("weekdays").map((i) => WEEKDAY_NAMES[i] ?? "").map((d) => d.charAt(0).toUpperCase() + d.slice(1));
+	const subDaily = freq === "minute" || freq === "hour";
+	let at: string;
+	if (subDaily) {
+		const [from = 0, until = 1439] = ints("window");
+		at = from === 0 && until === 1439 ? "" : ` from ${clockTime(from)} to ${clockTime(until)}`;
+	} else {
+		// Rules written before several times a day carry one `time`.
+		const times = e["times"] ? ints("times") : [e["time"]?.intValue ?? 0];
+		at = ` at ${times.map(clockTime).join(", ")}`;
+	}
 	const next = e["next"]?.intValue;
-	const on = freq === "week" && days.length ? ` on ${days.join(", ")}` : "";
+	const on = (freq === "week" || subDaily) && days.length ? ` on ${days.join(", ")}` : "";
 	const when = next ? ` · next ${new Date(next).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : "";
-	return `every ${unit}${on} at ${at}${when}`;
+	return `every ${unit}${on}${at}${when}`;
+}
+
+/** "HH:MM" (24h) as minutes after midnight, or null. */
+function minutesOf(hhmm: string): number | null {
+	const hm = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+	if (!hm || Number(hm[1]) > 23 || Number(hm[2]) > 59) return null;
+	return Number(hm[1]) * 60 + Number(hm[2]);
 }
 
 /** The occurrence planner's clock params: now, and this machine's UTC offset. */
-function localClock(): { now_ms: number; tz_offset_min: number } {
+export function localClock(): { now_ms: number; tz_offset_min: number } {
 	return { now_ms: Date.now(), tz_offset_min: -new Date().getTimezoneOffset() };
 }
 
@@ -839,15 +877,17 @@ const TOOLS: RegisteredTool[] = [
 		def: {
 			name: "object_set_repeat",
 			description:
-				"Make an object repeat, or change how it repeats - exactly what the Repeat cell on the object sets. Every `every` `unit`s (day, week, month, year); weekly rules may name weekdays; time is local HH:MM (default 09:00); start is the first day (ISO date, default today). Each occurrence runs through an agent on the object's guest list. The reply is the rule and next occurrence as the human sees them.",
+				"Make an object repeat, or change how it repeats - exactly what the Repeat cell on the object sets. Every `every` `unit`s. day/week/month/year: it runs at each of `times` (local HH:MM, default 09:00) on every day it runs - several times a day is one rule; weekly rules may name weekdays. minute/hour: it runs every `every` minutes/hours from `from` to `until` (local HH:MM, default the whole day), optionally only on `weekdays`. start is the first day (ISO date, default today). Each occurrence runs through an agent on the object's guest list. The reply is the rule and next occurrence as the human sees them.",
 			input_schema: {
 				type: "object",
 				properties: {
 					id: { type: "string", description: "object id; omit for the object of this conversation" },
-					every: { type: "number", description: "interval, default 1" },
-					unit: { type: "string", enum: ["day", "week", "month", "year"] },
-					weekdays: { type: "array", items: { type: "string" }, description: "weekly only: mon..sun; default the start day's weekday" },
-					time: { type: "string", description: "local HH:MM, 24h; default 09:00" },
+					every: { type: "number", description: "interval, default 1 (1-999; hours 1-23)" },
+					unit: { type: "string", enum: ["minute", "hour", "day", "week", "month", "year"] },
+					times: { type: "array", items: { type: "string" }, description: "day/week/month/year: local HH:MM times (24h) it runs on each day it runs; default [\"09:00\"]" },
+					from: { type: "string", description: "minute/hour: local HH:MM the day's runs start; default 00:00" },
+					until: { type: "string", description: "minute/hour: local HH:MM of the day's last possible run; default 23:59" },
+					weekdays: { type: "array", items: { type: "string" }, description: "mon..sun. week: which days (default the start day's weekday); minute/hour: only these days (default every day)" },
 					monthly: { type: "string", enum: ["date", "weekday"], description: "monthly only: same date (default) or same nth weekday" },
 					start: { type: "string", description: "first day, ISO date; default today" },
 				},
@@ -860,25 +900,38 @@ const TOOLS: RegisteredTool[] = [
 			const obj = await assertInSpace(await fetchObject(id), ctx);
 			ctx.touched.add(obj.id);
 			const unit = S(input.unit);
-			if (!["day", "week", "month", "year"].includes(unit)) return `error: nothing written. unit must be day, week, month or year, not "${unit}".`;
+			if (!["minute", "hour", "day", "week", "month", "year"].includes(unit)) return `error: nothing written. unit must be minute, hour, day, week, month or year, not "${unit}".`;
+			const subDaily = unit === "minute" || unit === "hour";
+			const most = unit === "hour" ? 23 : 999;
 			const every = input.every === undefined ? 1 : Number(input.every);
-			if (!Number.isInteger(every) || every < 1 || every > 99) return `error: nothing written. every must be a whole number from 1 to 99.`;
+			if (!Number.isInteger(every) || every < 1 || every > most) return `error: nothing written. every must be a whole number from 1 to ${most}.`;
 			const weekdays: number[] = [];
 			for (const w of A(input.weekdays)) {
 				const i = WEEKDAY_NAMES.indexOf(w.trim().toLowerCase().slice(0, 3));
 				if (i < 0) return `error: nothing written. "${w}" is not a weekday (mon..sun).`;
 				weekdays.push(i);
 			}
-			const hm = /^(\d{1,2}):(\d{2})$/.exec(S(input.time) || "09:00");
-			if (!hm || Number(hm[1]) > 23 || Number(hm[2]) > 59) return `error: nothing written. time must be HH:MM (24h), not "${S(input.time)}".`;
 			const rule: Record<string, unknown> = {
 				freq: unit,
 				interval: every,
-				weekdays: unit === "week" ? weekdays : [],
+				weekdays: unit === "week" || subDaily ? weekdays : [],
 				monthly: S(input.monthly) === "weekday" ? "weekday" : "date",
-				time: Number(hm[1]) * 60 + Number(hm[2]),
 				tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
 			};
+			if (subDaily) {
+				if (input.times !== undefined) return `error: nothing written. times is for day, week, month and year; a ${unit} rule runs from "from" to "until".`;
+				const from = minutesOf(S(input.from) || "00:00");
+				const until = minutesOf(S(input.until) || "23:59");
+				if (from === null || until === null || from > until) return `error: nothing written. from and until must be HH:MM (24h) with from before until, not "${S(input.from)}" - "${S(input.until)}".`;
+				rule.window = [from, until];
+			} else {
+				if (input.from !== undefined || input.until !== undefined) return `error: nothing written. from/until are for minute and hour rules; a ${unit} rule runs at its times.`;
+				const raw = input.times === undefined ? ["09:00"] : A(input.times);
+				const times = raw.map(minutesOf);
+				const bad = raw.find((_, i) => times[i] === null);
+				if (raw.length === 0 || bad !== undefined) return `error: nothing written. times must be one or more HH:MM (24h)${bad === undefined ? "" : `, not "${bad}"`}.`;
+				rule.times = times;
+			}
 			if (S(input.start)) {
 				const d = new Date(`${S(input.start).slice(0, 10)}T12:00:00`);
 				if (Number.isNaN(d.getTime())) return `error: nothing written. start must be an ISO date, not "${S(input.start)}".`;
@@ -1395,21 +1448,27 @@ const TOOLS: RegisteredTool[] = [
 			description: "Load a skill's full instructions by name. Call BEFORE starting any task that matches a listed skill.",
 			input_schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
 		},
-		handler: async (input, ctx) => readSkill(S(input.name), ctx.agentId),
+		handler: async (input, ctx) => readSkill(S(input.name), ctx.agentId, ctx.toolset?.granted),
 	},
 ];
 
-const SPAWN_TOOL: ToolDef = {
-	name: "spawn",
-	description:
-		"Delegate a self-contained task to a subagent. Templates: task (full tools), explore (read-only research), quick_task (fast, no delegation). Returns the subagent's submitted result.",
-	input_schema: {
-		type: "object",
-		properties: {
-			task: { type: "string", description: "complete, self-contained instructions" },
-			template: { type: "string", enum: ["task", "explore", "quick_task"] },
+const SPAWN_TOOL: RegisteredTool = {
+	def: {
+		name: "spawn",
+		description:
+			"Delegate a self-contained task to a subagent. Templates: task (full tools), explore (read-only research), quick_task (fast, no delegation). Returns the subagent's submitted result.",
+		input_schema: {
+			type: "object",
+			properties: {
+				task: { type: "string", description: "complete, self-contained instructions" },
+				template: { type: "string", enum: ["task", "explore", "quick_task"] },
+			},
+			required: ["task"],
 		},
-		required: ["task"],
+	},
+	handler: async (input, ctx) => {
+		if (!ctx.spawn) throw new Error("spawn unavailable at this depth");
+		return await ctx.spawn(S(input.task), S(input.template) || "task", ctx);
 	},
 };
 
@@ -1417,8 +1476,9 @@ const SHELL_TIMEOUT_MS = 5 * 60 * 1000;
 const SHELL_OUTPUT_CAP = 16_000;
 
 /**
- * shell_exec — installer-template only (not in TOOLS): install agents must
- * run brew/npm/etc. Principals and ordinary subagents never receive it.
+ * shell_exec: gated (GATED_TOOLS) - offered at depth 0 and to the
+ * installer template, and only while the agent's Tools (a helper's: its
+ * top-level agent's) list it. Spawned task helpers never get it.
  */
 const SHELL_TOOL: RegisteredTool = {
 	def: {
@@ -1444,21 +1504,19 @@ const SHELL_TOOL: RegisteredTool = {
 	},
 };
 
-const SUBMIT_TOOL: ToolDef = {
-	name: "submit_result",
-	description: "Submit your final result to the parent agent. Call exactly once when done.",
-	input_schema: { type: "object", properties: { content: { type: "string" } }, required: ["content"] },
+const SUBMIT_TOOL: RegisteredTool = {
+	def: {
+		name: "submit_result",
+		description: "Submit your final result to the parent agent. Call exactly once when done.",
+		input_schema: { type: "object", properties: { content: { type: "string" } }, required: ["content"] },
+	},
+	handler: async (input, ctx) => {
+		if (!ctx.submitResult) throw new Error("submit_result is subagent-only");
+		ctx.submitResult(S(input.content));
+		return "result submitted";
+	},
 };
 
-/**
- * Tool set for a template ("" = principal agent: everything).
- *
- * Principal agents always carry shell_exec - an agent that cannot run
- * commands on its serving machine is useless, and CLI-backed skills
- * (google's gws, browserless) depend on it. Subagents never inherit it:
- * a spawned child runs on its parent's instructions, not the owner's,
- * so the shell stops at depth 0 (installer template excepted).
- */
 // ── Evaluation toolkit: reads are free; query before you ever ask ──
 
 const EVAL_TOOLS: RegisteredTool[] = [
@@ -1612,17 +1670,28 @@ const A2A_TOOL: RegisteredTool = {
 	},
 };
 
+/** Every built-in tool, as this harness runs it - what the built-in Tool objects mirror (tool-objects.ts). */
+export const BUILTIN_TOOLS: readonly RegisteredTool[] = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL, A2A_TOOL, SPAWN_TOOL, SHELL_TOOL, SUBMIT_TOOL];
+
 /**
- * The tools an agent is offered. `granted`: the gated tools (shell_exec,
- * web_fetch) its Skills grant - a gated tool it wasn't granted is not
- * offered at all (skills.ts GRANT_SKILLS). Omitted = all, for callers that
- * only inspect the catalog.
+ * The tools an agent is offered for a template ("" = a top-level agent).
+ * `toolset`: what its Tools property adds - a gated built-in it doesn't
+ * list is not offered at all, and its custom tools follow the built-ins
+ * (not for explore, which is read-only, nor the installer). Omitted =
+ * every built-in, for callers that only inspect the catalog.
  */
-export function toolDefs(template: string, depth: number, allowAsk = false, granted: ReadonlySet<string> = GATED_TOOLS): ToolDef[] {
-	return toolDefsUngated(template, depth, allowAsk).filter((d) => !GATED_TOOLS.has(d.name) || granted.has(d.name));
+export function toolDefs(template: string, depth: number, allowAsk = false, toolset?: Toolset): ToolDef[] {
+	const builtins = builtinDefs(template, depth, allowAsk).filter((d) => !toolset || GATED_TOOLS[d.name] !== true || toolset.granted.has(d.name));
+	const custom = toolset && template !== "explore" && template !== "installer" ? [...toolset.custom.values()].map((t) => t.def) : [];
+	return [...builtins, ...custom];
 }
 
-function toolDefsUngated(template: string, depth: number, allowAsk: boolean): ToolDef[] {
+/**
+ * Subagents never get the shell: a spawned child runs on its parent's
+ * instructions, not the owner's, so it stops at depth 0 (installer
+ * template excepted).
+ */
+function builtinDefs(template: string, depth: number, allowAsk: boolean): ToolDef[] {
 	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read", "capability_list"]);
 	let defs = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL].map((t) => t.def);
 	if (template === "" && depth === 0) defs.push(A2A_TOOL.def);
@@ -1630,32 +1699,33 @@ function toolDefsUngated(template: string, depth: number, allowAsk: boolean): To
 	const out = [...defs];
 	if (template === "installer") {
 		// Least privilege: installs need only the shell and the result channel.
-		return [SHELL_TOOL.def, SUBMIT_TOOL];
+		return [SHELL_TOOL.def, SUBMIT_TOOL.def];
 	}
 	if (template === "") {
-		out.push(SPAWN_TOOL);
+		out.push(SPAWN_TOOL.def);
 		if (depth === 0) out.push(SHELL_TOOL.def);
-	} else out.push(SUBMIT_TOOL);
-	if (template === "task" && depth < 2) out.push(SPAWN_TOOL);
+	} else out.push(SUBMIT_TOOL.def);
+	if (template === "task" && depth < 2) out.push(SPAWN_TOOL.def);
 	return out;
+}
+
+/** A custom Tool, run in its own process (tool-host.ts); its result as the model reads it. */
+async function runCustomTool(tool: CustomTool, input: Record<string, unknown>, ctx: ToolContext): Promise<{ content: string; isError: boolean }> {
+	const run = await runToolCode(tool.code, input, { agentId: ctx.agentId, objectId: ctx.boundObject ?? "", channelId: ctx.channelId, machineId: await machineId() });
+	if (run.log.trim()) console.log(`[tool] ${tool.def.name}: ${run.log.trim().slice(-500)}`);
+	if (!run.ok) return { content: `error: ${tool.def.name} failed: ${run.error}`, isError: true };
+	const content = typeof run.value === "string" ? run.value : JSON.stringify(run.value);
+	return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };
 }
 
 export async function dispatchTool(name: string, input: Record<string, unknown>, ctx: ToolContext): Promise<{ content: string; isError: boolean }> {
 	try {
-		if (ctx.granted && GATED_TOOLS.has(name) && !ctx.granted.has(name)) {
-			return { content: `error: ${name} is not one of your tools - your Skills don't include it. Do the task without it, or tell the person what you'd need.`, isError: false };
+		if (ctx.toolset && GATED_TOOLS[name] === true && !ctx.toolset.granted.has(name)) {
+			return { content: `error: ${name} is not one of your tools - your Tools don't list it. Do the task without it, or tell the person what you'd need.`, isError: false };
 		}
-		if (name === "spawn") {
-			if (!ctx.spawn) throw new Error("spawn unavailable at this depth");
-			const content = await ctx.spawn(S(input.task), S(input.template) || "task", ctx);
-			return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };
-		}
-		if (name === "submit_result") {
-			if (!ctx.submitResult) throw new Error("submit_result is subagent-only");
-			ctx.submitResult(S(input.content));
-			return { content: "result submitted", isError: false };
-		}
-		const tool = name === SHELL_TOOL.def.name ? SHELL_TOOL : [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL, A2A_TOOL].find((t) => t.def.name === name);
+		const custom = ctx.toolset?.custom.get(name);
+		if (custom) return await runCustomTool(custom, input, ctx);
+		const tool = BUILTIN_TOOLS.find((t) => t.def.name === name);
 		if (!tool) return { content: `unknown tool: ${name}`, isError: true };
 		const content = await tool.handler(input, ctx);
 		return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };

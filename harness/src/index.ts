@@ -27,7 +27,9 @@ import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishMachine, serverOf, servesHere } from "./machine";
 import { publishDescriptors, INSTALL_TYPE } from "./descriptors";
 import { CAPABILITY_TYPE, linkValue } from "./capabilities";
-import { GRANTS_KEY, SKILLS_KEY, machineSkillKeys, seedGrantSkills, skillForKey } from "./skills";
+import { SKILLS_KEY, machineSkillKeys, skillForKey } from "./skills";
+import { TOOLS_KEY, ensureBuiltinTools, linkList } from "./tool-objects";
+import { migrateToolGrants } from "./migrate-tool-grants";
 import { migrateSkills } from "./migrate-skills";
 import { migrateCapabilities } from "./migrate-capabilities";
 import { migratePrompts } from "./migrate-prompts";
@@ -93,11 +95,15 @@ async function setup(): Promise<void> {
 	// The seed's skills, as links to the skill objects that exist so far (a
 	// machine creates a catalog skill's object on its first install).
 	const skills = (await Promise.all(seed.skills.map(skillForKey))).filter((x) => x !== null);
-	// A normal agent can run commands and fetch the web: list both grant skills.
-	await seedGrantSkills();
-	const grants = (await queryAll({ type: "skill" })).filter((r) => str(r.fields, GRANTS_KEY)).map((r) => ({ id: r.id }));
-	const listed = [...skills, ...grants];
-	if (listed.length > 0) fields[SKILLS_KEY] = { valuesValue: { items: listed.map((x) => linkValue(x.id)) } };
+	if (skills.length > 0) fields[SKILLS_KEY] = { valuesValue: { items: skills.map((x) => linkValue(x.id)) } };
+	// A normal agent can run commands and fetch the web: list both built-ins
+	// in its Tools (its space's Tool objects; no --channel = the default space,
+	// where serving binds it).
+	const space = channel || ((await (await apiFetch(`${API}/api/channels`)).json()) as Array<{ id: string }>)[0]?.id || "";
+	if (space) {
+		const builtins = await ensureBuiltinTools(space);
+		fields[TOOLS_KEY] = linkList(TOOLS_KEY, ["shell_exec", "web_fetch"].flatMap((name) => builtins.get(name) ?? []));
+	}
 	for (const f of seed.fields) {
 		if (f.secret) continue;
 		const value = argValue(`--${f.key}`) || seed.defaults[f.key];
@@ -165,6 +171,8 @@ async function buildServedOne(agentId: string, defaultChannel: string, forObject
 		channelId = defaultChannel;
 		if (channelId) await setField(agentId, "channel", sv(channelId));
 	}
+	// This computer now serves an agent of this space: its built-ins as Tool objects there (once per process).
+	if (channelId) void ensureBuiltinTools(channelId).catch((err) => console.error(`[tools] built-in Tool objects for ${channelId.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
 	const conv = await agentThread(agent);
 	return {
 		agentId,
@@ -311,8 +319,8 @@ async function serve(): Promise<void> {
 	// requires (capability links) and prompt skills -> each object's Skills;
 	// after the login migration so a required login becomes a Credential link.
 	console.log("[harness] skills migration:", JSON.stringify(await migrateSkills()));
-	// Shell and web as page items (skills.ts): created once, then listed on every agent.
-	console.log("[harness] grant skills:", JSON.stringify(await seedGrantSkills()));
+	// Shell and web moved from the 'shell'/'web' skills to each agent's Tools.
+	console.log("[harness] tool-grant migration:", JSON.stringify(await migrateToolGrants()));
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
 
@@ -961,15 +969,6 @@ if (cmd === "setup") await setup();
 else if (cmd === "serve") await serve();
 else if (cmd === "ask") await ask();
 else if (cmd === "vanish") await vanish();
-else if (cmd === "import-email") {
-	// import-email <mailbox> --space <id> [--agent <id>[,<id>...]] [--max 10]
-	const { importEmails } = await import("./gmail");
-	const mailbox = process.argv[3] ?? "";
-	if (!mailbox.includes("@") || !argValue("--space")) throw new Error("usage: import-email <mailbox> --space <spaceId> [--agent <agentId>[,<agentId>...]] [--max 10]");
-	const res = await importEmails({ mailbox, space: argValue("--space"), agentIds: argValue("--agent").split(",").map((s) => s.trim()).filter(Boolean), max: Number(argValue("--max") || 10) });
-	console.log(`[email] created ${res.created.length}, updated ${res.updated.length}, unchanged ${res.skipped}`);
-	process.exit(0);
-}
 else {
-	console.log("commands: setup --name X [--kind assistant|marco] [--model m] [--channel id] [--<kind field> v] | serve | ask <agentId> <msg> | vanish <objectId…>|--trash [--yes] | import-email <mailbox> --space <id> [--agent <id>] [--max 10]");
+	console.log("commands: setup --name X [--kind assistant|marco] [--model m] [--channel id] [--<kind field> v] | serve | ask <agentId> <msg> | vanish <objectId…>|--trash [--yes]");
 }

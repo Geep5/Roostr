@@ -14,76 +14,13 @@
  * same links (core/serving.odin).
  */
 
-import { createObject, fetchObject, mutate, query, queryAll, setField, str, sv, type ObjectJSON, type ValueJSON } from "./api";
+import { fetchObject, query, queryAll, str, type ObjectJSON, type ValueJSON } from "./api";
 import { machines, serverOf } from "./machine";
 import { machineId } from "./roster";
 import { blockLine, listOrdinals } from "./surfaces";
 
 export const SKILL_TYPE = "skill";
 export const SKILLS_KEY = "skills";
-
-/**
- * Tools a skill grants (`grants` = a tool name). Running commands on the
- * serving computer and fetching the web are the two powers an agent could
- * turn against that computer or use to send data out, so they are page
- * items like any other: an agent has them only while its Skills list the
- * skill - a normal agent lists both, a support agent that reads mail from
- * strangers simply doesn't. Grant skills count only when named: they never
- * narrow an agent's other skills, and "no skills listed" never grants them.
- */
-export const GRANTS_KEY = "grants";
-export const GRANT_SKILLS: Array<{ name: string; tool: string; description: string }> = [
-	{ name: "shell", tool: "shell_exec", description: "Run commands on the computer that serves you (shell_exec). Machine skills like google and browserless need it." },
-	{ name: "web", tool: "web_fetch", description: "Fetch public web pages (web_fetch)." },
-];
-/** Tools only a granting skill unlocks. */
-export const GATED_TOOLS = new Set(GRANT_SKILLS.map((g) => g.tool));
-
-/** The gated tools an agent's Skills grant it. */
-export async function grantedTools(fields: Record<string, ValueJSON>): Promise<Set<string>> {
-	const out = new Set<string>();
-	for (const id of skillIds(fields)) {
-		const skill = await fetchObject(id).catch(() => null);
-		const tool = skill && !skill.deleted && skill.typeKey === SKILL_TYPE ? str(skill.fields, GRANTS_KEY) : "";
-		if (tool) out.add(tool);
-	}
-	return out;
-}
-
-/**
- * Make the grant skills exist, once for the vault. The run that creates
- * them also lists them on every agent and every agent template there is,
- * so no existing agent loses a power it had; after that they are ordinary
- * page items - remove one and it stays removed.
- */
-export async function seedGrantSkills(): Promise<{ created: string[]; agents: number; templates: number }> {
-	const rows = await queryAll({ type: SKILL_TYPE });
-	const created: string[] = [];
-	const ids: string[] = [];
-	for (const g of GRANT_SKILLS) {
-		const hit = rows.find((r) => str(r.fields, GRANTS_KEY) === g.tool);
-		if (hit) {
-			ids.push(hit.id);
-			continue;
-		}
-		const { id } = await createObject(g.name, SKILL_TYPE, { name: sv(g.name), description: sv(g.description), [GRANTS_KEY]: sv(g.tool), scope: sv("global") });
-		created.push(g.name);
-		ids.push(id);
-	}
-	if (created.length === 0) return { created, agents: 0, templates: 0 };
-	const add = async (obj: { id: string; fields: Record<string, ValueJSON> }) => {
-		const have = skillIds(obj.fields);
-		const next = [...have, ...ids.filter((id) => !have.includes(id))];
-		if (next.length === have.length) return false;
-		await setField(obj.id, SKILLS_KEY, { valuesValue: { items: next.map((id) => ({ linkValue: { relationKey: SKILLS_KEY, targetId: id } })) } });
-		return true;
-	};
-	let agents = 0;
-	for (const a of await queryAll({ type: "agent" })) if (!str(a.fields, "spawn_parent") && (await add(a))) agents += 1;
-	let templates = 0;
-	for (const t of await queryAll({ type: "template" })) if (str(t.fields, "target_type").startsWith("bundled-type-agent-") && (await add(t))) templates += 1;
-	return { created, agents, templates };
-}
 
 /** Skill object ids an object lists in its Skills property. */
 export function skillIds(fields: Record<string, ValueJSON>): string[] {
@@ -160,9 +97,11 @@ export interface SkillListing {
  * so ownership is the finer grain and a global skill stays reachable
  * from anywhere. An agent's Skills property narrows the list to the skills
  * it names; empty means everything above. A machine skill (one with a
- * `key`) is listed only while this machine has it working.
+ * `key`) is listed only while this machine has it working, and only to an
+ * agent with the shell: `granted` = the gated built-ins its Tools give it
+ * (tool-objects.ts), omitted = no agent to ask about.
  */
-export async function listSkills(agentId?: string): Promise<SkillListing[]> {
+export async function listSkills(agentId?: string, granted?: ReadonlySet<string>): Promise<SkillListing[]> {
 	// Dynamic: skillmgr imports objectText from this module, so a static
 	// import here would be a module cycle.
 	const { capabilities } = await import("./skillmgr");
@@ -171,12 +110,9 @@ export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 	// skill stays invisible, however the toggle looks.
 	const ready = new Set(await capabilities());
 	const agent = agentId ? await fetchObject(agentId).catch(() => null) : null;
+	const only = new Set(agent ? skillIds(agent.fields) : []);
+	const shell = !granted || granted.has("shell_exec");
 	const rows = await queryAll({ type: SKILL_TYPE });
-	const grantIds = new Set(rows.filter((r) => str(r.fields, GRANTS_KEY)).map((r) => r.id));
-	const listed = agent ? skillIds(agent.fields) : [];
-	// Grant skills never narrow: "only these" is about the other skills.
-	const only = new Set(listed.filter((id) => !grantIds.has(id)));
-	const shell = !agent || listed.some((id) => rows.find((r) => r.id === id && str(r.fields, GRANTS_KEY) === "shell_exec"));
 	return rows
 		.map((r) => ({
 			id: r.id,
@@ -184,23 +120,20 @@ export async function listSkills(agentId?: string): Promise<SkillListing[]> {
 			description: str(r.fields, "description"),
 			owner: str(r.fields, "agent"),
 			key: str(r.fields, "key"),
-			grant: grantIds.has(r.id),
 		}))
 		.filter((s) => {
 			// Someone else's playbook: invisible, whoever is asking.
 			if (s.owner !== "" && s.owner !== agentId) return false;
-			// A grant skill is listed only where it is named.
-			if (s.grant) return !agent || listed.includes(s.id);
 			if (only.size > 0 && !only.has(s.id)) return false;
 			// Machine skills are shell tools: no shell, no use listing them.
 			if (s.key && !shell) return false;
 			return !s.key || ready.has(s.key);
 		})
-		.map(({ key: _key, grant: _grant, ...listing }) => listing);
+		.map(({ key: _key, ...listing }) => listing);
 }
 
-export async function readSkill(name: string, agentId?: string): Promise<string> {
-	const skills = await listSkills(agentId);
+export async function readSkill(name: string, agentId?: string, granted?: ReadonlySet<string>): Promise<string> {
+	const skills = await listSkills(agentId, granted);
 	const hit = skills.find((s) => s.name.toLowerCase() === name.toLowerCase());
 	if (!hit) return `No skill named "${name}". Available: ${skills.map((s) => s.name).join(", ") || "(none)"}`;
 	const obj = await fetchObject(hit.id);

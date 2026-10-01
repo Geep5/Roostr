@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resetScheduler, startScheduler, waitForTurnEnd } from "./schedule";
+import { isEmptyResult, resetScheduler, startScheduler, waitForTurnEnd } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -173,4 +173,109 @@ test("a scheduled object with no agent gets an error badge and no turn", async (
 	expect((badge?.body.value as { stringValue?: string })?.stringValue).toBe("recurring object has no agent; add one to its Agent property");
 	const reminders = calls.filter((c) => c.body.action === "block_add");
 	expect(reminders.some((c) => c.body.object_id === objectId && c.body.target_id === "__discussion__")).toBe(true);
+});
+
+test("a check result counts as nothing new only when it is empty", () => {
+	for (const empty of [null, undefined, "", "  ", [], {}, "[]", " {} ", "null"]) expect(isEmptyResult(empty)).toBe(true);
+	for (const found of [0, false, "no", [{}], { n: 0 }, "[1]", "nothing new"]) expect(isEmptyResult(found)).toBe(false);
+});
+
+/** The scheduler's message block (postScheduled). */
+interface FrameBlock {
+	content: { custom: { meta: { text: string } } };
+}
+
+/**
+ * A minute-repeat object whose Check first links a custom Tool running
+ * `code`, owned by a served agent. Returns the daemon calls and turns.
+ */
+async function checkFirstRun(code: string): Promise<{ calls: Array<{ path: string; body: Record<string, unknown> }>; turns: string[] }> {
+	const now = Date.now();
+	const objectId = "0b6c86a7-7063-4dcd-81d8-3c5707bbeb83";
+	const toolId = "7a1d0c3e-0000-4000-8000-000000000003";
+	const agentId = "856fcc37-9ad6-43e8-a1d8-5ee236699183";
+	const clock: Record<string, { stringValue?: string; intValue?: number }> = { freq: { stringValue: "minute" }, next: { intValue: now - 1000 } };
+	const repeat = { mapValue: { entries: clock } };
+	const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		calls.push({ path: url.pathname, body });
+		const filter = Array.isArray(body.filters) ? body.filters[0] : undefined;
+		if (url.pathname === "/api/query") {
+			if (filter?.key === "repeat") return respond({ records: [{ id: objectId, typeKey: "task", fields: { repeat } }], total: 1 });
+			return respond({ records: [], total: 0 });
+		}
+		if (url.pathname === "/api/serving") {
+			const ids = (body.objectIds as string[]) ?? [];
+			return respond(Object.fromEntries(ids.map((id) => [id, { machineId: "test-machine", reason: "agent", skills: [], candidates: ["test-machine"] }])));
+		}
+		if (url.pathname === `/api/objects/${objectId}`) {
+			return respond({
+				id: objectId,
+				typeKey: "task",
+				fields: { name: { stringValue: "Check support inbox" }, agent: { valuesValue: { items: [{ stringValue: agentId }] } }, check_first: { valuesValue: { items: [{ linkValue: { targetId: toolId } }] } }, repeat },
+				blocks: [{ id: "b", childrenIds: [], content: { text: { text: "Triage each new email.", style: 0 } } }],
+				deleted: false,
+				createdAt: now,
+				updatedAt: now,
+			});
+		}
+		if (url.pathname === `/api/objects/${toolId}`) {
+			return respond({
+				id: toolId,
+				typeKey: "tool",
+				fields: { name: { stringValue: "check_inbox" }, tool_inputs: { stringValue: "object_id: string" } },
+				blocks: [{ id: "code", childrenIds: [], content: { text: { text: code, style: 5 } } }],
+				deleted: false,
+				createdAt: now,
+				updatedAt: now,
+			});
+		}
+		if (url.pathname === "/api/mutate") {
+			// The engine's bookkeeping as the scheduler reads it: a fired occurrence doesn't fire again, a completed one moves on.
+			if (body.action === "occurrence_fire") {
+				if (clock.fired_for?.intValue === clock.next?.intValue) return respond({ ok: false, error: "occurrence already fired" }, 400);
+				clock.fired_for = { intValue: clock.next?.intValue };
+			}
+			if (body.action === "occurrence_complete") clock.next = { intValue: now + 60_000 };
+			return respond({ ok: true, id: "message" });
+		}
+		return respond({ error: `unexpected ${url.pathname}` }, 404);
+	}) as typeof fetch;
+	const turns: string[] = [];
+	const turnDone = waitForTurnEnd();
+	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
+	await startScheduler({
+		async served(id) {
+			return id === agentId ? { agentId, conv: { objectId: agentId, threadId: "thread" } } : undefined;
+		},
+		async turn(id) {
+			turns.push(id);
+			return "";
+		},
+	});
+	await turnDone;
+	return { calls, turns };
+}
+
+test("a check that finds nothing records the run, completes the occurrence and wakes no agent", async () => {
+	// The check gets the repeating object's id; [] means nothing new.
+	const { calls, turns } = await checkFirstRun('return input.object_id === "0b6c86a7-7063-4dcd-81d8-3c5707bbeb83" ? [] : ["wrong input"];');
+	expect(turns).toEqual([]);
+	const mutations = calls.filter((c) => c.path === "/api/mutate").map((c) => c.body);
+	expect(mutations.find((m) => m.action === "run_record")?.run).toMatchObject({ machine: "test-machine", result: "nothing new" });
+	expect(mutations.some((m) => m.action === "occurrence_complete")).toBe(true);
+	expect(mutations.some((m) => m.action === "block_add")).toBe(false);
+});
+
+test("a check that finds something puts it in the turn's frame ahead of the instructions", async () => {
+	const { calls, turns } = await checkFirstRun('return [{ subject: "Refund please" }];');
+	expect(turns).toEqual(["856fcc37-9ad6-43e8-a1d8-5ee236699183"]);
+	const frame = calls.find((c) => c.body.action === "block_add")?.body.block as FrameBlock;
+	const text = frame.content.custom.meta.text;
+	expect(text).toContain("Check first (check_inbox) found:");
+	expect(text.indexOf("Refund please")).toBeLessThan(text.indexOf("Triage each new email."));
+	// A minute repeat: the scheduler completes the run itself once the turn ends.
+	expect(calls.some((c) => c.body.action === "occurrence_complete")).toBe(true);
 });
