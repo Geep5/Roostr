@@ -22,6 +22,7 @@ import { renewMatcherinoSession } from "./matcherino";
 import { GOOGLE_SERVICE, syncGoogleCredentials } from "./google-credentials";
 import { machines } from "./machine";
 import { machineId } from "./roster";
+import { CREDENTIAL_BADGE, credentialBadge } from "./credential-issues";
 
 export const CREDENTIAL_TYPE = "credential";
 
@@ -145,12 +146,47 @@ export async function refreshCredentials(): Promise<CredentialRow[]> {
 	mine = await Promise.all(rows.filter((r) => r.servedBy === me).map(async (r) => publishState(await renewSession(r))));
 	// Google sign-ins travel on their Credentials: import local ones, write the listed ones here.
 	await syncGoogleCredentials().catch((err) => console.error("[google] sync failed:", err instanceof Error ? err.message : err));
+	const current = new Map(rows.map((r) => [r.id, r]));
+	for (const r of mine) current.set(r.id, r);
+	await badgeAgents(me, current).catch((err) => console.error("[harness] agent credential badges:", err instanceof Error ? err.message : err));
 	return mine;
+}
+
+/**
+ * An agent served here that lists a signed-out or disconnected Credential
+ * carries "credential signed out: <names>" on its Error, so the dead login
+ * shows on the agent and not only on the Credential; reconnecting clears it
+ * on the next check. Only this badge is ours - a run failure or a holdup
+ * already on the agent is left alone.
+ */
+async function badgeAgents(me: string, credentials: Map<string, CredentialRow>): Promise<void> {
+	for (const agent of await queryAll({ type: "agent" })) {
+		if (str(agent.fields, "served_by") !== me) continue;
+		const dead = agentCredentialIds(agent).map((id) => credentials.get(id)).filter((c): c is CredentialRow => !!c && c.status !== "active").map((c) => c.name);
+		const badge = str(agent.fields, "error");
+		const ours = badge.startsWith(CREDENTIAL_BADGE);
+		if (dead.length > 0) {
+			const next = credentialBadge(dead);
+			if ((!badge || ours) && badge !== next) await setField(agent.id, "error", sv(next));
+		} else if (ours) {
+			await deleteField(agent.id, "error");
+		}
+	}
 }
 
 export class CredentialError extends Error {
 	constructor(
 		readonly status: number,
+		message: string,
+	) {
+		super(message);
+	}
+}
+
+/** The agent's credential for a service exists but is signed out or disconnected (not a setup mistake). */
+export class CredentialNotConnected extends Error {
+	constructor(
+		readonly credentialName: string,
 		message: string,
 	) {
 		super(message);
@@ -244,7 +280,7 @@ export async function agentCredential(agent: ObjectJSON, service: string): Promi
 	const ofService = rows.filter((r): r is CredentialRow => !!r && r.service === service);
 	if (ofService.length === 0) throw new Error(`None of this agent's credentials is for "${service}".`);
 	const row = ofService.find((r) => r.status === "active") ?? ofService[0];
-	if (row.status !== "active") throw new Error(`Credential "${row.name}" is not connected (${row.status || "missing"}${row.error ? `: ${row.error}` : ""}).`);
+	if (row.status !== "active") throw new CredentialNotConnected(row.name, `Credential "${row.name}" is not connected (${row.status || "missing"}${row.error ? `: ${row.error}` : ""}).`);
 	return { row, cookies: credentialSession(row.fields), keys: credentialKeys(row.fields) };
 }
 
@@ -266,7 +302,7 @@ export async function agentModelKey(agent: ObjectJSON, provider: string): Promis
 }
 
 /** Credential ids an agent lists in its Credentials property. */
-export function agentCredentialIds(agent: ObjectJSON): string[] {
+export function agentCredentialIds(agent: { fields: Record<string, ValueJSON> }): string[] {
 	const v = agent.fields["credentials"];
 	if (!v) return [];
 	const items = v.valuesValue?.items ?? [v];

@@ -31,7 +31,8 @@ import { invalidateServing, machines, serverOf } from "./machine";
 import { machineId } from "./roster";
 import { CATALOG, fileHoldup, skillReady } from "./skillmgr";
 import { myInstallations, type InstallationRow } from "./descriptors";
-import { agentCredential, type CredentialRow } from "./credential-objects";
+import { agentCredential, CredentialNotConnected, type CredentialRow } from "./credential-objects";
+import { noteCredentialIssue } from "./credential-issues";
 import { actionsOf } from "./credentials";
 import { clickThenReadJs, credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
 import { blockLine, isAgentAuthor, listOrdinals } from "./surfaces";
@@ -512,12 +513,14 @@ async function credentialPage(ctx: ToolContext, service: string, url: string, ac
 	try {
 		cred = await agentCredential(await fetchObject(ctx.agentId), service);
 	} catch (error) {
+		if (error instanceof CredentialNotConnected) noteCredentialIssue(ctx.agentId, error.credentialName);
 		return `Credential unavailable: ${error instanceof Error ? error.message : String(error)} Tell the person; do not retry this turn.`;
 	}
 	if (cred.cookies.length === 0) return `Credential unavailable: "${cred.row.name}" has no browser sign-in. Tell the person to press Connect on it.`;
 	try {
 		const page = await credentialPageAction(cred.cookies, url, actionJs);
 		if (!page.arrived && /login|signin|sign-in|onboarding|checkpoint|authwall/i.test(page.url + page.title)) {
+			noteCredentialIssue(ctx.agentId, cred.row.name);
 			return `Credential signed out: ${url} showed a login page, so "${cred.row.name}" is no longer signed in. Tell the person to press Reconnect on it.`;
 		}
 		if (!page.arrived) return `Did not reach ${url}: the site sent the page to ${page.url}. Nothing was done there.\n${page.text}`.slice(0, WEB_FETCH_CAP);
@@ -536,12 +539,13 @@ async function credentialPage(ctx: ToolContext, service: string, url: string, ac
  * the public list is served from a short cache, so an id the API accepted
  * but the list doesn't show yet is reported as `notShownYet`, not as done.
  */
-async function matcherinoAction(action: string, rawIds: unknown, cred: CredentialRow): Promise<string> {
+async function matcherinoAction(ctx: ToolContext, action: string, rawIds: unknown, cred: CredentialRow): Promise<string> {
 	if (action !== "list_featured" && action !== "feature_events") return `error: ${action} is not a Matcherino action; Matcherino takes list_featured or feature_events`;
 	let token: string;
 	try {
 		token = await matcherinoToken(cred.fields);
 	} catch (error) {
+		noteCredentialIssue(ctx.agentId, cred.name);
 		return `Credential signed out: "${cred.name}" no longer signs in to Matcherino (${error instanceof Error ? error.message : String(error)}). Tell the person to press Reconnect on it; do not retry this turn.`;
 	}
 	try {
@@ -598,6 +602,7 @@ const WEB_TOOLS: RegisteredTool[] = [
 			try {
 				cred = await agentCredential(await fetchObject(ctx.agentId), service);
 			} catch (error) {
+				if (error instanceof CredentialNotConnected) noteCredentialIssue(ctx.agentId, error.credentialName);
 				return `Credential unavailable: ${error instanceof Error ? error.message : String(error)} Tell the person; do not retry this turn.`;
 			}
 			const actions = actionsOf(cred.row.fields);
@@ -605,7 +610,7 @@ const WEB_TOOLS: RegisteredTool[] = [
 				const valid = actions.map((a) => a.key).join(", ");
 				return `error: "${cred.row.name}" has no action "${action}"${valid ? `; its actions are ${valid}` : " - it has no actions"}. Don't retry with another name.`;
 			}
-			if (service === "matcherino") return matcherinoAction(action, input.ids, cred.row);
+			if (service === "matcherino") return matcherinoAction(ctx, action, input.ids, cred.row);
 			if (service === "x") {
 				const url = action === "read_mentions" ? "https://x.com/notifications/mentions" : S(input.url).trim();
 				if (!/^https:\/\/(?:x|twitter)\.com\//i.test(url)) return "error: url must be an x.com or twitter.com URL";

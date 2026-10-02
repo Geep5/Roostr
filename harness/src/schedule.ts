@@ -38,6 +38,7 @@
 
 import { deleteField, fetchObject, guestAgents, mutate, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { addConvBlock, convKey, humanRef, type ConvRef } from "./conv";
+import { CREDENTIAL_BADGE, credentialBadge, takeCredentialIssues } from "./credential-issues";
 import { primeServing, servesHere } from "./machine";
 import { machineId } from "./roster";
 import { objectText } from "./skills";
@@ -94,7 +95,7 @@ async function completeOccurrence(d: Due): Promise<void> {
 /** Error badges a clean run clears: what a failed run or check wrote - never a human's or another writer's message. */
 async function clearRunBadge(obj: ObjectJSON, alsoNoAgent: boolean): Promise<void> {
 	const badge = str(obj.fields, "error");
-	if (badge.startsWith("run failed:") || badge.startsWith("check failed:") || (alsoNoAgent && badge.startsWith("recurring object has no agent"))) await deleteField(obj.id, "error");
+	if (badge.startsWith("run failed:") || badge.startsWith("check failed:") || badge.startsWith(CREDENTIAL_BADGE) || (alsoNoAgent && badge.startsWith("recurring object has no agent"))) await deleteField(obj.id, "error");
 }
 
 /** setTimeout's ceiling; longer waits re-arm when it elapses. */
@@ -309,13 +310,19 @@ async function dispatch(d: Due, me: string): Promise<void> {
 		].join("\n");
 		await postScheduled(owner.conv, frame, d, me);
 		console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) → agent ${owner.agentId.slice(0, 8)}`);
+		takeCredentialIssues(owner.agentId); // a chat turn's leftovers are not this run's
 		const error = await host.turn(owner.agentId, TURN_SUFFIX);
+		const deadLogins = takeCredentialIssues(owner.agentId);
 		const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: convKey(owner.conv) };
 		if (error) run.error = error;
+		else if (deadLogins.length > 0) run.error = credentialBadge(deadLogins);
 		await mutate("run_record", { object_id: obj.id, run });
-		// The error badge: a failed run sets it; a clean run clears what a
-		// failed run wrote (or the no-agent badge, once the object names one).
+		// The error badge: a failed run sets it, and so does a run that hit a
+		// signed-out credential (the turn itself "succeeds" - the agent just
+		// says why it couldn't); a clean run clears what either wrote (or the
+		// no-agent badge, once the object names one).
 		if (error) await setField(obj.id, "error", sv(`run failed: ${error}`.slice(0, 300)));
+		else if (deadLogins.length > 0) await setField(obj.id, "error", sv(credentialBadge(deadLogins)));
 		else await clearRunBadge(obj, true);
 		if (subDaily(obj)) await completeOccurrence(d);
 	} finally {
