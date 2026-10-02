@@ -1169,7 +1169,7 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// Per-agent overrides, set like any property (blank = follow the prompt).
 	// One model per agent: a single-select status; the harness reads the
 	// chosen string, so a status option stays compatible with a plain value.
-	{"model", "status", "Model", "🧬", false, false, 1, {"kimi-k3", "claude-sonnet-4-5"}},
+	{"model", "status", "Model", "🧬", false, false, 1, {"kimi-k3", "claude-sonnet-4-5", "claude-opus-5-5"}},
 	// A "current problem" badge: the scheduler, a holdup, an agent, or a
 	// human sets it; visible and editable like any property so views can
 	// filter and sort by it. Automation prefixes its messages ("run failed:",

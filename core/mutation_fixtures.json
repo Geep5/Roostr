@@ -5028,6 +5028,36 @@
                           ]
                         ]
                       }
+                    },
+                    {
+                      "mapValue": {
+                        "entries": [
+                          [
+                            "id",
+                            {
+                              "stringValue": "opt-2"
+                            }
+                          ],
+                          [
+                            "text",
+                            {
+                              "stringValue": "claude-opus-5-5"
+                            }
+                          ],
+                          [
+                            "color",
+                            {
+                              "stringValue": ""
+                            }
+                          ],
+                          [
+                            "orderId",
+                            {
+                              "stringValue": "0002"
+                            }
+                          ]
+                        ]
+                      }
                     }
                   ]
                 }
@@ -9510,6 +9540,36 @@
                           ]
                         ]
                       }
+                    },
+                    {
+                      "mapValue": {
+                        "entries": [
+                          [
+                            "id",
+                            {
+                              "stringValue": "opt-2"
+                            }
+                          ],
+                          [
+                            "text",
+                            {
+                              "stringValue": "claude-opus-5-5"
+                            }
+                          ],
+                          [
+                            "color",
+                            {
+                              "stringValue": ""
+                            }
+                          ],
+                          [
+                            "orderId",
+                            {
+                              "stringValue": "0002"
+                            }
+                          ]
+                        ]
+                      }
                     }
                   ]
                 }
@@ -13055,6 +13115,36 @@
                             "orderId",
                             {
                               "stringValue": "0001"
+                            }
+                          ]
+                        ]
+                      }
+                    },
+                    {
+                      "mapValue": {
+                        "entries": [
+                          [
+                            "id",
+                            {
+                              "stringValue": "opt-2"
+                            }
+                          ],
+                          [
+                            "text",
+                            {
+                              "stringValue": "claude-opus-5-5"
+                            }
+                          ],
+                          [
+                            "color",
+                            {
+                              "stringValue": ""
+                            }
+                          ],
+                          [
+                            "orderId",
+                            {
+                              "stringValue": "0002"
                             }
                           ]
                         ]
