@@ -451,6 +451,38 @@ sync_session_outbox_order_backoff_and_sealing :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
+sync_session_outbox_wake_clears_backoff :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	open_session_with_secret(t)
+	defer sync_session_close()
+	change := base64.encode(wire_change(t, "note-1", 0), allocator = context.temp_allocator)
+	enqueue(t, "c1", "note-1", "c1", change)
+	outbox_next_at(t, 1_000)
+	outbox_report(t, "c1", false, true, 1_000)
+	outbox_next_at(t, 1_001)
+	outbox_report(t, "c1", false, true, 1_001)
+	r := outbox_next_at(t, 1_002)
+	_, has_item := json_field(r, "item")
+	wait, _ := json_int(r, "waitMs")
+	testing.expectf(t, !has_item && wait == 7_999, "two failures back off 8 s, wait %d", wait)
+
+	r = call(t, "outbox_wake", jobj())
+	pending, _ := json_int(r, "pending")
+	testing.expect(t, pending == 1)
+	r = outbox_next_at(t, 1_003)
+	item, woke := json_field(r, "item")
+	testing.expect(t, woke && json_str(item, "key") == "c1", "a woken item is ready at once")
+	attempts, _ := json_int(item, "attempts")
+	testing.expect(t, attempts == 2, "wake keeps the attempt count")
+	// Waking leaves an in-flight item alone; its failure backs off from attempt 2.
+	call(t, "outbox_wake", jobj())
+	outbox_report(t, "c1", false, true, 1_004)
+	r = outbox_next_at(t, 1_005)
+	wait, _ = json_int(r, "waitMs")
+	testing.expectf(t, wait == 15_999, "third failure backs off 16 s, wait %d", wait)
+}
+
+@(private = "file")
 open_session_with_secret :: proc(t: ^testing.T) {
 	spaces := make([dynamic]json.Value, context.temp_allocator)
 	space := jobj()
@@ -477,4 +509,5 @@ sync_session_contract :: proc(t: ^testing.T) {
 	sync_session_restores_replay_groups_and_rejects_without_session(t)
 	sync_session_retire_drops_only_checkpoint_groups(t)
 	sync_session_outbox_order_backoff_and_sealing(t)
+	sync_session_outbox_wake_clears_backoff(t)
 }

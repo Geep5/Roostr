@@ -373,6 +373,13 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		out := jobj()
 		out["pending"] = json.Integer(i64(outbox_pending()))
 		return json.Object(out), ""
+	case "outbox_wake":
+		// {} → {pending}: the host's transport is back; queued items skip their backoff.
+		if !sync_session.active do return nil, "no sync session"
+		outbox_wake()
+		out := jobj()
+		out["pending"] = json.Integer(i64(outbox_pending()))
+		return json.Object(out), ""
 	}
 	return nil, "unknown sync action"
 }

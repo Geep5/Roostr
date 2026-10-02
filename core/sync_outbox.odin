@@ -148,6 +148,13 @@ outbox_backoff :: proc(item: ^Outbox_Item, now_ms: i64) {
 	item.in_flight = false
 }
 
+// The host saw its transport come back (app resumed, network changed, socket
+// redialed): every queued item is ready now. Attempts keep counting, so a
+// relay that still refuses backs off from where it was.
+outbox_wake :: proc() {
+	for &item in sync_session.outbox do if !item.in_flight do item.not_before = 0
+}
+
 // ok: the relays accepted every part (or the store already knew it published).
 // sealed: the host signed and persisted this attempt's ciphertext, so retries reuse it.
 outbox_result :: proc(key: string, ok: bool, sealed: bool, now_ms: i64) -> string {
