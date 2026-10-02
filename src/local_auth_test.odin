@@ -18,35 +18,30 @@ local_auth_contract :: proc(t: ^testing.T) {
 	}
 	token := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	g_local_auth.service_token = token
-	origin := "https://roostr.example"
+	origin := "https://roostr.space"
 	now := i64(100_000)
 	testing.expect(t, local_host_valid("127.0.0.1:7333", 7333))
 	testing.expect(t, local_host_valid("localhost:7333", 7333))
 	testing.expect(t, !local_host_valid("evil.example:7333", 7333))
 	testing.expect(t, !local_host_valid("localhost:7334", 7333))
 	testing.expect(t, !local_host_valid("localhost:7333.evil.example", 7333))
-	testing.expect(t, local_origin_valid(origin))
-	testing.expect(t, local_origin_valid("http://localhost:5173"))
-	for invalid in ([]string{"null", "", "https://roostr.example/path", "https://x@roostr.example", "http://evil.example", "https://x\r\nX: y"}) {
+	// Sessions belong to loopback UIs and the exact app origins only.
+	for allowed in ([]string{origin, "https://www.roostr.space", "https://getroostr.fly.dev", "http://localhost:5173", "http://127.0.0.1:5190", "https://localhost:5173", "http://localhost"}) {
+		testing.expect(t, local_origin_valid(allowed))
+	}
+	for invalid in ([]string{
+		"null", "", "https://roostr.example", "https://roostr.space/path", "https://x@roostr.space", "http://evil.example", "https://x\r\nX: y",
+		"http://roostr.space", "https://roostr.space.evil.example", "https://getroostr.fly.dev.evil.example", "https://app.roostr.space",
+		"https://roostr.space:443", "http://localhost.evil.example", "http://localhost:", "http://localhost:0", "http://localhost:65536", "http://localhost:0x1f", "http://localhost:+80",
+	}) {
 		testing.expect(t, !local_origin_valid(invalid))
 	}
-	for allowed in ([]string{
-		"http://localhost:5173",
-		"http://127.0.0.1:5190",
-		"https://localhost:5173",
-		"https://roostr.space",
-		"https://www.roostr.space",
-		"https://getroostr.fly.dev",
-	}) {
-		testing.expect(t, local_origin_can_read_pair_code(allowed))
+	// Reading the pairing code is local approval: loopback UIs only, never the hosted app.
+	for loopback in ([]string{"http://localhost:5173", "http://127.0.0.1:5190", "https://localhost:5173"}) {
+		testing.expect(t, local_origin_loopback(loopback))
 	}
-	for denied in ([]string{
-		"https://evil.example",
-		"https://roostr.space.evil.example",
-		"http://roostr.space",
-		"https://getroostr.fly.dev.evil.example",
-	}) {
-		testing.expect(t, !local_origin_can_read_pair_code(denied))
+	for hosted in ([]string{origin, "https://getroostr.fly.dev", "https://evil.example", "http://localhost.evil.example"}) {
+		testing.expect(t, !local_origin_loopback(hosted))
 	}
 	testing.expect(t, local_role(token, "", now) == .Service)
 	testing.expect(t, local_role(token, origin, now) == .None)
@@ -88,6 +83,16 @@ local_auth_contract :: proc(t: ^testing.T) {
 	g_local_auth.code_expires = now + 10_000_000
 	_, _, full := local_pair(token, origin, now + 4_000_000)
 	testing.expect(t, full == "429 Too Many Requests")
+
+	// Owner-proof sessions (minted for the harness): same origin binding, no code consumed.
+	for &session in g_local_auth.sessions do session.expires = 0
+	_, _, refused := local_owner_session("https://evil.example", now)
+	testing.expect(t, refused == "403 Forbidden")
+	owner, owner_expires, owner_status := local_owner_session(origin, now)
+	testing.expect(t, owner_status == "200 OK" && len(owner) == 64 && owner_expires == now + LOCAL_SESSION_TTL)
+	testing.expect(t, local_role(owner, origin, now + 1) == .UI)
+	testing.expect(t, local_role(owner, "https://getroostr.fly.dev", now + 1) == .None)
+	testing.expect(t, local_role(owner, "", now + 1) == .None)
 }
 
 @(test)

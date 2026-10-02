@@ -14,8 +14,9 @@ import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, finishCapabilityLogin, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
 import { CredentialError, checkCredential, connectCredential, disconnectCredential, type CredentialRow } from "./credential-objects";
 import { ensureBlob, blobDir, mimeOf, storeUpload } from "./files";
-import { authorizeLocalRequest, localCors, localPreflight } from "./local-api-auth";
-import type { SpaceJoinLink } from "./nostrsync";
+import { apiFetch, authorizeLocalRequest, localCors, localPreflight, sessionOrigin, validLocalHost } from "./local-api-auth";
+import { loadIdentity, type SpaceJoinLink } from "./nostrsync";
+import { OwnerPairing } from "./owner-pairing";
 
 /** Public identity (npub + hex pubkey) derived from the local nostr key. */
 async function identity(): Promise<{ npub: string; pubkeyHex: string } | { error: string }> {
@@ -98,6 +99,40 @@ async function writeProfile(patch: NostrProfile): Promise<NostrProfile> {
 
 export const AUTH_PORT = Number(process.env.GLON_AUTH_PORT ?? 7334);
 
+const ownerPairing = new OwnerPairing();
+
+/**
+ * Owner-proof pairing for hosted tabs (owner-pairing.ts). The tab has no
+ * token yet, so this runs before authorization; it answers session origins
+ * only, and a session is minted only for a valid owner signature.
+ */
+async function pairRoute(req: Request, url: URL): Promise<Response> {
+	const origin = req.headers.get("Origin") ?? "";
+	if (!validLocalHost(req.headers.get("Host"), AUTH_PORT) || !sessionOrigin(origin)) return new Response("origin not allowed", { status: 403 });
+	const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
+		status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...localCors(origin) },
+	});
+	if (req.method === "GET" && url.pathname === "/pair/challenge") {
+		const issued = ownerPairing.issue(origin, Date.now());
+		return issued ? json(issued) : json({ error: "Too many pairing requests; try again in a minute." }, 429);
+	}
+	if (req.method !== "POST" || url.pathname !== "/pair/owner") return json({ error: "not found" }, 404);
+	const text = await req.text();
+	if (text.length > 16_384) return json({ error: "Pairing request too large." }, 413);
+	let body: unknown;
+	try {
+		body = JSON.parse(text);
+	} catch {
+		return json({ error: "invalid JSON" }, 400);
+	}
+	const event = typeof body === "object" && body !== null && "event" in body ? body.event : undefined;
+	const owner = await loadIdentity();
+	const refused = ownerPairing.verify(event, origin, `${url.origin}${url.pathname}`, owner?.pk ?? "", Date.now());
+	if (refused) return json({ error: refused }, 403);
+	const minted = await apiFetch("/api/local-auth/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ origin }) });
+	if (!minted.ok) return json({ error: `The Roostr daemon refused the session (${minted.status}).` }, 503);
+	return json(await minted.json());
+}
 
 /** @param served live set of currently-served agent ids (reported by /agents) */
 export function startAuthServer(served: Set<string>): void {
@@ -112,12 +147,17 @@ export function startAuthServer(served: Set<string>): void {
 			const url = new URL(req.url);
 			let authorization;
 			try {
-				if (req.method === "OPTIONS") return await localPreflight(req, AUTH_PORT);
+				if (req.method === "OPTIONS") return localPreflight(req, AUTH_PORT);
+				if (url.pathname.startsWith("/pair/")) return await pairRoute(req, url);
 				authorization = await authorizeLocalRequest(req, AUTH_PORT);
 			} catch {
 				return new Response("authentication unavailable", { status: 503 });
 			}
-			if (!authorization) return new Response("authentication required", { status: 401 });
+			// Readable to session origins: a tab whose pairing lapsed sees 401 and pairs again.
+			if (!authorization) {
+				const origin = req.headers.get("Origin") ?? "";
+				return new Response("authentication required", { status: 401, headers: sessionOrigin(origin) ? localCors(origin) : {} });
+			}
 			const cors = localCors(authorization.origin);
 			const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
 				status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...cors },

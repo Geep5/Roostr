@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { API, apiFetch, authorizeLocalRequest, localPreflight, serviceToken, validLocalHost } from "./local-api-auth";
+import { API, apiFetch, authorizeLocalRequest, localPreflight, serviceToken, sessionOrigin, validLocalHost } from "./local-api-auth";
 
 const token = "a".repeat(64);
 const uiToken = "b".repeat(64);
@@ -70,16 +70,23 @@ test("harness checks Host, bearer syntax and actual Origin before authority vali
 	expect(validLocalHost("localhost:7333", 7334)).toBe(false);
 });
 
-test("preflight only echoes an origin authorized by native paired sessions", async () => {
-	globalThis.fetch = (async (_input, init) => {
-		const origin = new Headers(init?.headers).get("Origin");
-		return origin === "https://roostr.example"
-			? new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": origin } })
-			: new Response(null, { status: 403 });
-	}) as typeof fetch;
-	const request = (origin: string) => new Request("http://127.0.0.1:7334/identity", { method: "OPTIONS", headers: { Host: "127.0.0.1:7334", Origin: origin, "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "authorization" } });
-	expect((await localPreflight(request("https://roostr.example"), 7334)).headers.get("Access-Control-Allow-Origin")).toBe("https://roostr.example");
-	const denied = await localPreflight(request("https://evil.example"), 7334);
-	expect(denied.status).toBe(403);
-	expect(denied.headers.has("Access-Control-Allow-Origin")).toBe(false);
+test("preflight answers session origins only, without consulting or granting authority", () => {
+	const request = (origin: string, host = "127.0.0.1:7334") => new Request("http://127.0.0.1:7334/identity", { method: "OPTIONS", headers: { Host: host, Origin: origin, "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "authorization" } });
+	for (const origin of ["https://roostr.space", "https://getroostr.fly.dev", "http://localhost:5190"]) {
+		const allowed = localPreflight(request(origin), 7334);
+		expect(allowed.status).toBe(204);
+		expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe(origin);
+		expect(allowed.headers.get("Access-Control-Allow-Private-Network")).toBe("true");
+	}
+	for (const denied of [localPreflight(request("https://evil.example"), 7334), localPreflight(request("https://roostr.space", "evil.example:7334"), 7334)]) {
+		expect(denied.status).toBe(403);
+		expect(denied.headers.has("Access-Control-Allow-Origin")).toBe(false);
+	}
+});
+
+test("session origins are loopback UIs and the exact app origins", () => {
+	for (const origin of ["https://roostr.space", "https://www.roostr.space", "https://getroostr.fly.dev", "http://localhost:5173", "http://127.0.0.1", "https://127.0.0.1:65535"]) expect(sessionOrigin(origin)).toBe(true);
+	for (const origin of ["", "null", "https://app.roostr.space", "http://roostr.space", "https://roostr.space.evil.example", "https://roostr.space/", "http://localhost.evil.example", "http://localhost:0", "http://localhost:65536", "http://localhost:80/x"]) {
+		expect(sessionOrigin(origin)).toBe(false);
+	}
 });

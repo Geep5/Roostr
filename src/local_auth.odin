@@ -140,44 +140,42 @@ local_host_valid :: proc(host: string, port: int) -> bool {
 	return host == fmt.tprintf("127.0.0.1:%d", port) || host == fmt.tprintf("localhost:%d", port) || host == fmt.tprintf("[::1]:%d", port)
 }
 
-// Accept serialized browser origins only, never null, credentials or URL paths.
-local_origin_valid :: proc(origin: string) -> bool {
+// The exact origins that serve the hosted Roostr app (the Caddyfile keeps
+// /app on www and the Fly host so older browser vaults stay reachable). They
+// never read the pairing code: a hosted tab pairs by proving it holds the
+// vault owner key, which the harness verifies before asking for a session
+// (harness/src/local-api-auth.ts keeps the same list as APP_ORIGINS).
+LOCAL_APP_ORIGINS :: [?]string{"https://roostr.space", "https://www.roostr.space", "https://getroostr.fly.dev"}
+
+// A UI served from this machine: http(s)://localhost or 127.0.0.1, any port.
+local_origin_loopback :: proc(origin: string) -> bool {
 	if len(origin) == 0 || len(origin) > 512 do return false
 	https := strings.has_prefix(origin, "https://")
 	if !https && !strings.has_prefix(origin, "http://") do return false
 	authority := origin[(https ? 8 : 7):]
-	if authority == "" do return false
-	for c in authority do if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '.' || c == '-' || c == ':') do return false
 	host := authority
 	if colon := strings.index_byte(authority, ':'); colon >= 0 {
 		host = authority[:colon]
-		port, ok := strconv.parse_int(authority[colon+1:])
-		if !ok || port < 1 || port > 65535 do return false
+		port := authority[colon+1:]
+		if len(port) == 0 || len(port) > 5 do return false
+		for c in port do if c < '0' || c > '9' do return false
+		value, _ := strconv.parse_int(port, 10)
+		if value < 1 || value > 65535 do return false
 	}
-	if host == "" do return false
-	return https || host == "localhost" || host == "127.0.0.1"
+	return host == "localhost" || host == "127.0.0.1"
+}
+
+// Serialized browser origins that may hold a UI session: loopback UIs and the
+// exact app origins. Never null, credentials, paths or arbitrary sites.
+local_origin_valid :: proc(origin: string) -> bool {
+	if local_origin_loopback(origin) do return true
+	for app in LOCAL_APP_ORIGINS do if origin == app do return true
+	return false
 }
 
 local_cors :: proc(origin: string) -> string {
 	if origin == "" do return ""
 	return fmt.tprintf("Access-Control-Allow-Origin: %s\r\nVary: Origin\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\nAccess-Control-Allow-Private-Network: true\r\n", origin)
-}
-
-// Reading the one-use code is equivalent to approving local access. Trust
-// loopback development UIs and the exact production origins we operate; never
-// grant it to arbitrary HTTPS pages merely because they can reach localhost.
-local_origin_can_read_pair_code :: proc(origin: string) -> bool {
-	https := strings.has_prefix(origin, "https://")
-	if !https && !strings.has_prefix(origin, "http://") do return false
-	authority := origin[(https ? 8 : 7):]
-	host := authority
-	if colon := strings.index_byte(authority, ':'); colon >= 0 do host = authority[:colon]
-	if host == "localhost" || host == "127.0.0.1" do return true
-	switch origin {
-	case "https://roostr.space", "https://www.roostr.space", "https://getroostr.fly.dev":
-		return true
-	}
-	return false
 }
 
 // localhost and 127.0.0.1 are the same machine: canonicalize so a pairing
@@ -232,6 +230,20 @@ local_origin_paired :: proc(origin: string, now: i64) -> bool {
 	return false
 }
 
+// Caller holds g_local_auth.mu. Reuses an expired (or never used) slot for a
+// fresh session bound to origin; "" when all slots hold live sessions.
+local_session_issue :: proc(origin: string, now: i64) -> (token: string, expires: i64) {
+	for &session in g_local_auth.sessions {
+		if session.expires > now do continue
+		delete(session.token)
+		delete(session.origin)
+		session = Local_Session{local_random_token(), strings.clone(local_origin_canon(origin)), now + LOCAL_SESSION_TTL}
+		local_sessions_save()
+		return session.token, session.expires
+	}
+	return "", 0
+}
+
 local_pair :: proc(code, origin: string, now: i64) -> (token: string, expires: i64, status: string) {
 	sync.lock(&g_local_auth.mu)
 	defer sync.unlock(&g_local_auth.mu)
@@ -243,18 +255,24 @@ local_pair :: proc(code, origin: string, now: i64) -> (token: string, expires: i
 	if g_local_auth.attempts >= 5 do return "", 0, "429 Too Many Requests"
 	g_local_auth.attempts += 1
 	if now >= g_local_auth.code_expires || !local_secret_equal(code, g_local_auth.code) do return "", 0, "401 Unauthorized"
-	for &session in g_local_auth.sessions {
-		if session.expires > now do continue
-		delete(session.token)
-		delete(session.origin)
-		session = Local_Session{local_random_token(), strings.clone(local_origin_canon(origin)), now + LOCAL_SESSION_TTL}
-		g_local_auth.code_expires = 0
-		delete(g_local_auth.code)
-		g_local_auth.code = ""
-		local_sessions_save()
-		return session.token, session.expires, "200 OK"
-	}
-	return "", 0, "429 Too Many Requests"
+	token, expires = local_session_issue(origin, now)
+	if token == "" do return "", 0, "429 Too Many Requests"
+	g_local_auth.code_expires = 0
+	delete(g_local_auth.code)
+	g_local_auth.code = ""
+	return token, expires, "200 OK"
+}
+
+// The harness has verified that a tab at `origin` holds the vault owner key
+// (it signed a one-use challenge bound to that origin): give the tab the same
+// origin-bound UI session a pairing code would.
+local_owner_session :: proc(origin: string, now: i64) -> (token: string, expires: i64, status: string) {
+	if !local_origin_valid(origin) do return "", 0, "403 Forbidden"
+	sync.lock(&g_local_auth.mu)
+	defer sync.unlock(&g_local_auth.mu)
+	token, expires = local_session_issue(origin, now)
+	if token == "" do return "", 0, "429 Too Many Requests"
+	return token, expires, "200 OK"
 }
 
 // Runs before every route (including SSE), and before any secret/store access.
@@ -268,7 +286,7 @@ local_authorize :: proc(sock: net.TCP_Socket, req: Request) -> bool {
 	pair := req.path == "/api/pair"
 	pair_code := req.path == "/api/pair/code"
 	if req.method == "OPTIONS" {
-		public_pairing := pair || req.path == "/api/pair/status" || pair_code && local_origin_can_read_pair_code(req.origin)
+		public_pairing := pair || req.path == "/api/pair/status" || pair_code && local_origin_loopback(req.origin)
 		if !local_origin_valid(req.origin) || (!public_pairing && !local_origin_paired(req.origin, now)) {
 			respond_error(sock, "origin not paired", "403 Forbidden")
 		} else {
@@ -282,8 +300,11 @@ local_authorize :: proc(sock: net.TCP_Socket, req: Request) -> bool {
 		respond(sock, "200 OK", "application/json", transmute([]byte)string("{\"needsPair\":true}"))
 		return false
 	}
+	// Reading the one-use code is equivalent to approving local access, so
+	// only a UI served from this machine may; hosted app origins prove
+	// ownership through the harness instead (/api/local-auth/session).
 	if req.method == "GET" && pair_code {
-		if !local_origin_can_read_pair_code(req.origin) { respond_error(sock, "origin not allowed", "403 Forbidden"); return false }
+		if !local_origin_loopback(req.origin) { respond_error(sock, "origin not allowed", "403 Forbidden"); return false }
 		g_response_cors = local_cors(req.origin)
 		sync.lock(&g_local_auth.mu)
 		if g_local_auth.code == "" || g_local_auth.code_expires <= now {
@@ -337,6 +358,20 @@ local_authorize :: proc(sock: net.TCP_Socket, req: Request) -> bool {
 		if role != .Service || req.method != "POST" { respond_error(sock, "service only", "403 Forbidden"); return false }
 		local_pair_start()
 		respond(sock, "200 OK", "application/json", transmute([]byte)string("{\"ok\":true}"))
+		return false
+	}
+	if req.path == "/api/local-auth/session" {
+		if role != .Service || req.method != "POST" { respond_error(sock, "service only", "403 Forbidden"); return false }
+		if !core.json_depth_ok(req.body) { respond_error(sock, "invalid JSON"); return false }
+		parsed, err := json.parse(req.body, allocator = context.temp_allocator)
+		if err != nil { respond_error(sock, "invalid JSON"); return false }
+		token, expires, status := local_owner_session(core.json_str(parsed, "origin"), now)
+		if token == "" { respond_error(sock, "session rejected", status); return false }
+		o := core.jobj()
+		o["token"] = json.String(token)
+		o["expiresAt"] = json.Float(f64(expires))
+		o["role"] = json.String("ui")
+		respond_json(sock, json.Object(o))
 		return false
 	}
 	if role == .UI {

@@ -21,7 +21,8 @@ import { fillCredential, seedCredentials } from "./credential-seeds";
 import { capabilities, convergeCatalogScope, publishCapabilityObjects, publishInstallationState } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tools";
 import { startAuthServer } from "./authserver";
-import { startFilePeer } from "./files";
+import { FILE_TYPE, startFilePeer } from "./files";
+import { KEEP_ALL_SWEEP_MS, keepAllFiles, seedKeepAllProperty } from "./keep-files";
 import { machineId, readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishMachine, serverOf, servesHere } from "./machine";
@@ -296,6 +297,8 @@ async function serve(): Promise<void> {
 	// own recipe - before the check below reads those recipes.
 	console.log("[harness] credential seeds:", JSON.stringify(await seedCredentials()));
 	await refreshCredentials();
+	// The Computer page's "Keep every file" checkbox, in every space with computers.
+	console.log("[harness] keep-every-file property:", JSON.stringify({ seeded: await seedKeepAllProperty() }));
 	// What this machine can DO, as one capability object per (skill/login ×
 	// this machine) linking its install row - after the installs exist, so
 	// every link lands. Invisible to agents and the resolver until active.
@@ -793,6 +796,9 @@ async function serve(): Promise<void> {
 			invalidateServing();
 			void armScheduler();
 		}
+		// A File appeared or gained a holder, or a computer's "Keep every
+		// file" flipped: a computer that keeps every file fetches what it lacks.
+		if (obj.typeKey === FILE_TYPE || obj.typeKey === MACHINE_TYPE) keepAllFiles();
 		if (obj.typeKey === CREDENTIAL_TYPE) {
 			// Service just set on a blank credential: take its template, then check it.
 			void fillCredential(obj)
@@ -839,7 +845,10 @@ async function serve(): Promise<void> {
 	}
 
 	startAuthServer(agents);
-	void startFilePeer().catch((err) => console.error("[files] peer failed to start:", err));
+	void startFilePeer()
+		.then(() => keepAllFiles())
+		.catch((err) => console.error("[files] peer failed to start:", err));
+	setInterval(() => keepAllFiles(), KEEP_ALL_SWEEP_MS);
 	console.log(`[harness] serving ${agents.size} agent(s): ${[...agents].map((a) => a.slice(0, 8)).join(", ") || "(none — set an agent's Served by to this computer)"}`);
 
 	// Catch up on chat messages that arrived while the harness was down.

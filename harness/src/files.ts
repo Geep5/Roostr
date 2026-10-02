@@ -204,7 +204,19 @@ async function sendBlob(dc: RTCDataChannel, hash: string): Promise<void> {
 
 // ── Fetching ─────────────────────────────────────────────────────
 
+/** No holder handed the bytes over; `tried` names the computers asked. */
+export class BlobUnavailable extends Error {
+	constructor(message: string, readonly tried: string[]) {
+		super(message);
+	}
+}
+
 const inflight = new Map<string, Promise<void>>();
+
+/** Whether this computer is listening for, and can make, peer introductions. */
+export function filePeerRunning(): boolean {
+	return peer !== null;
+}
 
 /** The requester's side: offer to one holder, receive and verify the bytes. */
 async function fetchFrom(holder: string, hash: string): Promise<void> {
@@ -259,45 +271,48 @@ async function fetchFrom(holder: string, hash: string): Promise<void> {
 	}
 }
 
+/** Ask each other holder in turn until one hands the bytes over. */
+async function fetchAny(hash: string): Promise<void> {
+	const me = await machineId();
+	const rows = await fileObjects(hash);
+	if (rows.length === 0) throw new Error("No File object names these bytes.");
+	const others = [...new Set(rows.flatMap(holders))].filter((m) => m !== me);
+	if (others.length === 0) throw new BlobUnavailable("No computer holds this file.", []);
+	const names = new Map((await machines()).map((m) => [m.machineId, m.name]));
+	const label = (m: string) => names.get(m) || m.slice(0, 8);
+	const failures: string[] = [];
+	for (const holder of others) {
+		try {
+			await fetchFrom(holder, hash);
+			await markHeld(hash);
+			console.log(`[files] fetched ${hash.slice(0, 12)} from ${label(holder)}`);
+			return;
+		} catch (err) {
+			failures.push(`${label(holder)} ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+	throw new BlobUnavailable(`No computer holding this file is online: ${failures.join("; ")}.`, others);
+}
+
 /**
  * Make sure this computer holds the bytes, fetching them from a computer in
- * `available_on` if not. Throws (and records the File's `error`) when no
- * holder answers.
+ * `available_on` if not. Throws when no holder answers, recording why as the
+ * File's `error` unless `record` is off (background fetches stay quiet).
  */
-export async function ensureBlob(hash: string): Promise<void> {
+export async function ensureBlob(hash: string, { record = true }: { record?: boolean } = {}): Promise<void> {
 	if (!HASH_RE.test(hash)) throw new Error("Not a file hash.");
 	if (await hasBlob(hash)) return;
-	const running = inflight.get(hash);
-	if (running) return running;
-	const job = (async () => {
-		const me = await machineId();
-		const rows = await fileObjects(hash);
-		if (rows.length === 0) throw new Error("No File object names these bytes.");
-		const others = [...new Set(rows.flatMap(holders))].filter((m) => m !== me);
-		const names = new Map((await machines()).map((m) => [m.machineId, m.name]));
-		const label = (m: string) => names.get(m) || m.slice(0, 8);
-		if (others.length === 0) {
-			const error = "No computer holds this file.";
-			await markError(hash, error);
-			throw new Error(error);
-		}
-		const failures: string[] = [];
-		for (const holder of others) {
-			try {
-				await fetchFrom(holder, hash);
-				await markHeld(hash);
-				console.log(`[files] fetched ${hash.slice(0, 12)} from ${label(holder)}`);
-				return;
-			} catch (err) {
-				failures.push(`${label(holder)} ${err instanceof Error ? err.message : String(err)}`);
-			}
-		}
-		const error = `No computer holding this file answered: ${failures.join("; ")}.`;
-		await markError(hash, error);
-		throw new Error(error);
-	})().finally(() => inflight.delete(hash));
-	inflight.set(hash, job);
-	return job;
+	let job = inflight.get(hash);
+	if (!job) {
+		job = fetchAny(hash).finally(() => inflight.delete(hash));
+		inflight.set(hash, job);
+	}
+	try {
+		await job;
+	} catch (err) {
+		if (record && err instanceof BlobUnavailable) await markError(hash, err.message);
+		throw err;
+	}
 }
 
 /** Listen for introductions from the owner's other computers. */

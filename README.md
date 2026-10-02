@@ -69,14 +69,24 @@ harness/       Bun services: independent Nostr sync; optional agent/tool harness
 
 All data APIs require `Authorization: Bearer …`. Local services read the
 mode-0600 `GLON_DATA/api-token`; never give that service token to a webpage.
-Browsers pair explicitly using a one-use five-minute key. The daemon prints it
-at startup and exposes it to loopback UIs plus the exact Roostr production
-origins, so **This machine** can surface it without granting arbitrary websites
-local access. Pairing creates an Origin-bound UI session that expires in 24
-hours and persists across daemon restarts. Public `/api/pair/status` never
-returns a pairing key. Authenticated fetch streaming carries SSE authorization;
-tokens are not URLs. Run `bun run pair` from `harness/` to rotate the key without
-restarting the daemon or disconnecting already-paired tabs.
+Browser UIs served from this machine (localhost/127.0.0.1, any port) pair
+using a one-use five-minute key. The daemon prints it at startup and exposes it
+to loopback UIs only. The hosted app origins (`https://roostr.space`,
+`https://www.roostr.space`, `https://getroostr.fly.dev`) never read it: they
+pair by proof of ownership. The harness hands out a one-use challenge bound to
+the tab's Origin (`GET :7334/pair/challenge`), the tab signs it with the vault
+owner key it already holds (a NIP-98-shaped kind 27235 event naming the
+endpoint, POST, the challenge and the origin), and `POST :7334/pair/owner` checks
+the signature, the pubkey (this computer's own identity), every tag and the
+challenge before asking the daemon (`POST /api/local-auth/session`,
+service-only) for the session. No other origin can hold a session. Either way
+the result is an Origin-bound UI session that expires in 24 hours and persists
+across daemon restarts; daemon and harness answer CORS preflights from those
+origins with `Access-Control-Allow-Private-Network: true`. Public
+`/api/pair/status` never returns a pairing key. Authenticated fetch streaming
+carries SSE authorization; tokens are not URLs. Run `bun run pair` from
+`harness/` to rotate the key without restarting the daemon or disconnecting
+already-paired tabs.
 UI sessions cannot export the native private key. An operator can explicitly run
 `./glon-odin key-export` in a private terminal for recovery; do not log/share it.
 
@@ -284,7 +294,12 @@ its loopback port (paired auth). A harness missing the bytes asks a holder over
 a WebRTC data channel (`harness/src/files.ts`, werift); the relay only carries
 the introduction, as owner-signed, self-encrypted ephemeral events (kind 21078).
 Received bytes are verified against the hash. With no holder online the
-File's `error` says so; there is no relay or server fallback.
+File's `error` says so; there is no relay or server fallback. A computer whose
+Computer object has **Keep every file** (`keep_all_files`, a checkbox the
+harness seeds in every space with computers) fetches every File's bytes it
+lacks - when a File appears or changes, on boot, and every ten minutes - one at
+a time, and lets files whose holders are all offline wait (10 minutes, doubling
+to 6 hours) instead of retrying them every pass (`harness/src/keep-files.ts`).
 
 ## Harness (`harness/`)
 
