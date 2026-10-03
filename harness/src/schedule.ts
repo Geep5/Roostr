@@ -36,7 +36,7 @@
  * occurrences (sleep, downtime) fire on the next arm, each once.
  */
 
-import { deleteField, fetchObject, guestAgents, mutate, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { deleteField, fetchObject, guestAgents, mutate, queryAll, setField, str, sv, wasDeleted, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { addConvBlock, convKey, humanRef, type ConvRef } from "./conv";
 import { CREDENTIAL_BADGE, credentialBadge, takeCredentialIssues } from "./credential-issues";
 import { primeServing, servesHere } from "./machine";
@@ -204,13 +204,19 @@ async function fire(): Promise<void> {
 				const msg = err instanceof Error ? err.message : String(err);
 				// Another writer won this occurrence (or advanced past it).
 				if (msg.includes("occurrence already fired") || msg.includes("stale occurrence")) continue;
-				console.error(`[schedule] fire ${d.id.slice(0, 8)} failed: ${msg}`);
+				// Deleted (or its space was) since the query: it has no next occurrence.
+				if (wasDeleted(err)) console.log(`[schedule] ${d.id.slice(0, 8)} skipped: ${msg}`);
+				else console.error(`[schedule] fire ${d.id.slice(0, 8)} failed: ${msg}`);
 				continue;
 			}
 			// Turns run for as long as the agent needs; the next due object
 			// must not wait on them. `fired_for` is already committed, so a
 			// re-arm mid-turn cannot fire this occurrence twice.
-			void dispatch(d, me).catch((err) => console.error(`[schedule] dispatch ${d.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
+			void dispatch(d, me).catch((err) => {
+				// Deleted mid-run: the run has nowhere left to be recorded.
+				if (wasDeleted(err)) console.log(`[schedule] dispatch ${d.id.slice(0, 8)} stopped: ${err.message}`);
+				else console.error(`[schedule] dispatch ${d.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err);
+			});
 		}
 	} catch (err) {
 		console.error("[schedule] fire failed:", err instanceof Error ? err.message : err);

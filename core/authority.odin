@@ -17,8 +17,16 @@ import "core:strings"
 VANISH_LOG_ID :: "__vanished__"
 VANISH_LOG_TYPE :: "vanish_log"
 // Entry keys are prefixed so the ledger's own metadata (name, …) can never
-// be mistaken for a vanished object id.
+// be mistaken for a vanished object id. `vanished:` is a real deletion,
+// chased off the relays; `left:` is a shared space this identity stopped
+// being a member of - gone from its replicas, untouched for everyone else.
 VANISH_KEY_PREFIX :: "vanished:"
+LEFT_KEY_PREFIX :: "left:"
+
+Vanish_Entry :: struct {
+	at:   i64,
+	left: bool,
+}
 
 Shared_Provenance :: struct {
 	space_id: string,
@@ -215,19 +223,67 @@ authorize_shared_checkpoint :: proc(cp: ^Checkpoint, p: Shared_Provenance, space
 	return true, ""
 }
 
-/** Vanished object ids → purge timestamp (ms) from the ledger state, if any. */
-vanished_from_ledger :: proc(ledger: ^Object_State, allocator := context.temp_allocator) -> map[string]i64 {
-	out := make(map[string]i64, allocator = allocator)
+/**
+ * Ledger entries → purge timestamp (ms) and kind, keyed by object or space
+ * id. Keys are copied into `allocator`: native callers read the ledger out of
+ * a store generation that a concurrent rebuild frees, and use the map after
+ * releasing the store lock.
+ */
+vanished_from_ledger :: proc(ledger: ^Object_State, allocator := context.temp_allocator) -> map[string]Vanish_Entry {
+	out := make(map[string]Vanish_Entry, allocator = allocator)
 	if ledger == nil do return out
 	for e in ledger.fields {
-		if !strings.has_prefix(e.key, VANISH_KEY_PREFIX) do continue
-		object_id := e.key[len(VANISH_KEY_PREFIX):]
+		left := strings.has_prefix(e.key, LEFT_KEY_PREFIX)
+		if !left && !strings.has_prefix(e.key, VANISH_KEY_PREFIX) do continue
+		object_id := e.key[len(LEFT_KEY_PREFIX if left else VANISH_KEY_PREFIX):]
 		if object_id == "" || object_id == VANISH_LOG_ID do continue
 		at: i64 = 0
 		if e.value.kind == .Int do at = e.value.i
-		out[object_id] = at
+		// A real deletion outranks leaving: the space is gone for everyone.
+		if previous, seen := out[object_id]; seen && !previous.left do continue
+		out[strings.clone(object_id, allocator)] = Vanish_Entry{at, left}
 	}
 	return out
+}
+
+/**
+ * The space rule: an object is gone when the ledger names it or the space
+ * it lives in, so a space's deletion takes objects no deleting device ever
+ * saw - created elsewhere, or arriving later. System objects (no channel)
+ * only ever go by id. Returns the entry that decided it.
+ */
+object_vanished :: proc(vanished: map[string]Vanish_Entry, object_id, channel: string) -> (Vanish_Entry, bool) {
+	if entry, ok := vanished[object_id]; ok do return entry, true
+	if channel == "" do return {}, false
+	entry, ok := vanished[channel]
+	return entry, ok
+}
+
+state_vanished :: proc(vanished: map[string]Vanish_Entry, state: ^Object_State) -> (Vanish_Entry, bool) {
+	return object_vanished(vanished, state.id, field_string(state.fields, "channel"))
+}
+
+/**
+ * The ledger id that makes a change unwritable, "" when it may land: the
+ * object is vanished, already lives in a vanished space, or the change (or
+ * its snapshot) places it into one. `existing` is the replica's state, nil
+ * when unknown.
+ */
+change_vanished_by :: proc(vanished: map[string]Vanish_Entry, c: ^Change, existing: ^Object_State) -> string {
+	if len(vanished) == 0 do return ""
+	if c.object_id in vanished do return c.object_id
+	if existing != nil {
+		channel := field_string(existing.fields, "channel")
+		if channel != "" && channel in vanished do return channel
+	}
+	if c.has_snapshot {
+		channel := field_string(c.snapshot.fields, "channel")
+		if channel != "" && channel in vanished do return channel
+	}
+	for op in c.ops {
+		if op.kind == .Field_Set && op.key == "channel" && op.value.kind == .String && op.value.str != "" && op.value.str in vanished do return op.value.str
+	}
+	return ""
 }
 
 sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
@@ -271,14 +327,26 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		out["reason"] = json.String(reason)
 		return json.Object(out), ""
 	case "vanished":
+		// {ledger, objects?: [{id, channel}]} → [{objectId, at, left?}]: every
+		// ledger entry plus each given object the space rule removes.
 		ledger, lok := optional_state(payload, "ledger")
 		if !lok do return nil, "invalid ledger state"
+		vanished := vanished_from_ledger(ledger)
 		items := make([dynamic]json.Value, context.temp_allocator)
-		for object_id, at in vanished_from_ledger(ledger) {
+		emit :: proc(items: ^[dynamic]json.Value, object_id: string, entry: Vanish_Entry) {
 			item := jobj()
 			item["objectId"] = json.String(object_id)
-			item["at"] = json.Integer(at)
-			append(&items, json.Object(item))
+			item["at"] = json.Integer(entry.at)
+			if entry.left do item["left"] = json.Boolean(true)
+			append(items, json.Object(item))
+		}
+		for object_id, entry in vanished do emit(&items, object_id, entry)
+		if len(vanished) > 0 {
+			for object in json_array(payload, "objects") {
+				object_id := json_str(object, "id")
+				if object_id == "" || object_id in vanished do continue
+				if entry, gone := object_vanished(vanished, object_id, json_str(object, "channel")); gone do emit(&items, object_id, entry)
+			}
 		}
 		return json.Array(items), ""
 	// ── Receive session (sync_session.odin) ──
@@ -294,7 +362,7 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		if err := sync_session_set_spaces(payload); err != "" do return nil, err
 		return sync_state_json(), ""
 	case "ingest":
-		// {event: {pubkey, created_at, kind, tags, content}, nowMs} → {cursor, item?, faultAt?, replayGroups?, decryptFailure?, decodeFailure?, hTag?}
+		// {event: {pubkey, created_at, kind, tags, content}, nowMs} → {cursor, item?, faultAt?, replayGroups?, decryptFailure?, decodeFailure?, hTag?, spaceVanished?}
 		// The host has already verified the event signature.
 		if !sync_session.active do return nil, "no sync session"
 		event, present := json_field(payload, "event")
@@ -310,6 +378,7 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		if r.decrypt_failure do out["decryptFailure"] = json.Boolean(true)
 		if r.decode_failure do out["decodeFailure"] = json.Boolean(true)
 		if r.h_tag != "" do out["hTag"] = json.String(r.h_tag)
+		if r.space_vanished != "" do out["spaceVanished"] = json.String(r.space_vanished)
 		return json.Object(out), ""
 	case "settle":
 		// {chunkKey, imported} → {replayGroups?}

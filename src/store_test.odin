@@ -100,6 +100,7 @@ store_durability_contract :: proc(t: ^testing.T) {
 	testing.expect_value(t, g_store.quarantined, 1)
 
 	checkpoint_replaces_history(t, root)
+	space_vanish_contract(t)
 }
 
 @(private = "file")

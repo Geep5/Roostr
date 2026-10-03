@@ -3195,6 +3195,124 @@
           "at": 0
         }
       ]
+    },
+    {
+      "name": "space rule: everything in a vanished or left space, never system objects",
+      "ledger": {
+        "id": "__vanished__",
+        "typeKey": "vanish_log",
+        "fields": {
+          "name": {
+            "stringValue": "Vanished objects"
+          },
+          "vanished:space-1": {
+            "intValue": 100
+          },
+          "left:space-3": {
+            "intValue": 300
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "objects": [
+        {
+          "id": "page-1",
+          "channel": "space-1"
+        },
+        {
+          "id": "page-2",
+          "channel": "space-2"
+        },
+        {
+          "id": "sys",
+          "channel": ""
+        },
+        {
+          "id": "page-3",
+          "channel": "space-3"
+        },
+        {
+          "id": "space-1",
+          "channel": ""
+        },
+        {
+          "id": "late-1",
+          "channel": "space-1"
+        }
+      ],
+      "expected": [
+        {
+          "objectId": "space-1",
+          "at": 100
+        },
+        {
+          "objectId": "space-3",
+          "at": 300,
+          "left": true
+        },
+        {
+          "objectId": "page-1",
+          "at": 100
+        },
+        {
+          "objectId": "late-1",
+          "at": 100
+        },
+        {
+          "objectId": "page-3",
+          "at": 300,
+          "left": true
+        }
+      ]
+    },
+    {
+      "name": "objects without a ledger stay",
+      "ledger": null,
+      "objects": [
+        {
+          "id": "page-1",
+          "channel": "space-1"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "a real deletion outranks leaving",
+      "ledger": {
+        "id": "__vanished__",
+        "typeKey": "vanish_log",
+        "fields": {
+          "left:space-1": {
+            "intValue": 300
+          },
+          "vanished:space-1": {
+            "intValue": 100
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "objects": [
+        {
+          "id": "page-1",
+          "channel": "space-1"
+        }
+      ],
+      "expected": [
+        {
+          "objectId": "space-1",
+          "at": 100
+        },
+        {
+          "objectId": "page-1",
+          "at": 100
+        }
+      ]
     }
   ]
 }

@@ -5,12 +5,12 @@
  * older harness's photo of its own handler becomes the shipped code; and a
  * Tool's version counts changes to its code alone.
  */
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BlockJSON, ObjectJSON, ValueJSON } from "./api";
-import { SHIPPED_NOTE, builtinSpecs, objectToolFrom, syncBuiltinTools, type BuiltinSpec } from "./tool-objects";
+import { SHIPPED_NOTE, builtinSpecs, ensureBuiltinTools, objectToolFrom, syncBuiltinTools, type BuiltinSpec } from "./tool-objects";
 import { parseToolInputs, renderToolInputs } from "./tool-runtime";
 
 test("inputs become a schema: types, choices, descriptions, and ? for optional", () => {
@@ -148,6 +148,46 @@ test("a missing built-in is created in the space, marked built-in, with its code
 		{ text: SHIPPED_NOTE, style: 0 },
 		{ text: spec.code, style: 5 },
 	]);
+});
+
+/** A daemon whose vanish ledger names `vanished` and whose mutations all answer `refusal` (a 400) when given. */
+function ledgerDaemon(vanished: string[], refusal = ""): Array<Record<string, unknown>> {
+	const mutations: Array<Record<string, unknown>> = [];
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		if (url.pathname === "/api/query") return Response.json({ records: [], total: 0 });
+		if (url.pathname === "/api/vanished") return Response.json({ vanished: vanished.map((objectId) => ({ objectId, at: 1 })), count: vanished.length });
+		if (url.pathname === "/api/mutate") {
+			mutations.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+			return refusal ? Response.json({ ok: false, error: refusal }, { status: 400 }) : Response.json({ ok: true, id: "new-tool" });
+		}
+		return Response.json({ error: "unexpected request" }, { status: 404 });
+	}) as typeof fetch;
+	return mutations;
+}
+
+test("a deleted space gets no built-ins, even one that was deleted while this computer waited to seed it", async () => {
+	const sleep = spyOn(Bun, "sleep").mockResolvedValue(undefined);
+	try {
+		const mutations = ledgerDaemon(["gone-space"]);
+		expect((await ensureBuiltinTools("gone-space")).size).toBe(0);
+		expect(mutations).toEqual([]);
+	} finally {
+		sleep.mockRestore();
+	}
+});
+
+test("a space deleted mid-seed is settled with one quiet skip, not retried", async () => {
+	const sleep = spyOn(Bun, "sleep").mockResolvedValue(undefined);
+	try {
+		const mutations = ledgerDaemon([], "space raced-space was deleted");
+		expect((await ensureBuiltinTools("raced-space")).size).toBe(0);
+		expect(mutations.length).toBe(1);
+		expect((await ensureBuiltinTools("raced-space")).size).toBe(0);
+		expect(mutations.length).toBe(1);
+	} finally {
+		sleep.mockRestore();
+	}
 });
 
 interface BlockLike {

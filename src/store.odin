@@ -43,6 +43,8 @@ Store :: struct {
 	valid:     bool,
 	/** Changes parked as damaged since boot - surfaced, never silent. */
 	quarantined: int,
+	/** Ids the space rule purged that the ledger does not name yet (heap keys). */
+	vanish_pending: map[string]core.Vanish_Entry,
 }
 
 g_store: Store
@@ -91,20 +93,14 @@ ensure_loaded :: proc() {
 		for k in g_store.dirty do delete(k)
 		clear(&g_store.dirty)
 		// A relay copy of a vanished object can race in ahead of the ledger,
-		// and a ledger reload can vanish objects that are already on disk.
-		// The ledger wins either way.
-		vanished := vanished_locked()
-		if len(vanished) > 0 {
-			ledger_reloaded := false
-			for id in touched do if id == VANISH_LOG_ID do ledger_reloaded = true
-			if ledger_reloaded {
-				enforce_vanished_locked()
-			} else {
-				for id in touched do if id in vanished {
-					purge_object_files(id)
-					delete_key(&g_store.states, id)
-				}
-			}
+		// a ledger reload can vanish objects that are already on disk, and an
+		// object can land in a space that is gone. The ledger wins either way.
+		ledger_reloaded := false
+		for id in touched do if id == VANISH_LOG_ID do ledger_reloaded = true
+		if ledger_reloaded {
+			enforce_vanished_locked()
+		} else {
+			enforce_vanished_touched_locked(touched[:])
 		}
 		return
 	}

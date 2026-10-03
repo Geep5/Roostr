@@ -18,7 +18,7 @@
 
 import { SimplePool, finalizeEvent, getPublicKey, nip19, nip44, verifyEvent, type Event, type Filter } from "nostr-tools";
 import { unwrapEvent, wrapEvent } from "nostr-tools/nip59";
-import { API, apiFetch, subscribe } from "./api";
+import { API, VANISH_LOG_ID, apiFetch, mutate, subscribe, vanishedEntries, type VanishedEntry } from "./api";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 
 const CHANGE_KIND = 1078;
@@ -41,8 +41,6 @@ const DELETE_KIND = 5;
  * along, so 254 victims per request is the largest batch it fully applies.
  */
 const DELETE_BATCH = 254;
-/** The synced vanish ledger (see src/vanish.odin); never published as data to delete. */
-const VANISH_LOG_ID = "__vanished__";
 
 export function dataRoot(): string {
 	return process.env.GLON_DATA ?? `${process.env.HOME}/.glon`;
@@ -268,6 +266,30 @@ interface SharedSpace {
 	owner?: string;
 }
 
+interface KeyringEntry {
+	key?: string;
+	keyId?: number;
+	createdAt?: number;
+	/** imported spaces: the administrator's hex pubkey. */
+	owner?: string;
+}
+
+/** channel-keys.json: every space key this identity holds, by space id. */
+interface Keyring {
+	version?: number;
+	localPubkey?: string;
+	localIdentityHash?: string;
+	channels?: Record<string, KeyringEntry>;
+}
+
+async function readKeyring(): Promise<Keyring | null> {
+	try {
+		return (await Bun.file(`${dataRoot()}/channel-keys.json`).json()) as Keyring;
+	} catch {
+		return null;
+	}
+}
+
 function blindShared(keyHex: string, id: string): string {
 	const h = new Bun.CryptoHasher("sha256");
 	h.update(keyHex);
@@ -286,15 +308,17 @@ function npubToHex(npub: string): string | null {
 	return /^[0-9a-f]{64}$/.test(t) ? t : null;
 }
 
-async function loadSharedSpaces(identity: Identity): Promise<Map<string, SharedSpace>> {
+/**
+ * Spaces syncing under their space key. `gone` (the vanish ledger) drops
+ * vanished and left spaces - no subscription, publishing, allowlist or
+ * invites - while their keyring entries stay: a vanished space's key still
+ * names its stream for the relay deletion (contract §5).
+ */
+async function loadSharedSpaces(identity: Identity, gone: ReadonlyMap<string, VanishedEntry>): Promise<Map<string, SharedSpace>> {
 	const myPk = identity.pk;
 	const out = new Map<string, SharedSpace>();
-	let keyring: { localPubkey?: string; localIdentityHash?: string; channels?: Record<string, { key?: string; keyId?: number; owner?: string }> } = {};
-	try {
-		keyring = (await Bun.file(`${dataRoot()}/channel-keys.json`).json()) as typeof keyring;
-	} catch {
-		return out;
-	}
+	const keyring = await readKeyring();
+	if (!keyring) return out;
 	if (keyring.localPubkey !== myPk || keyring.localIdentityHash !== identity.identityHash) {
 		keyring.localPubkey = myPk;
 		keyring.localIdentityHash = identity.identityHash;
@@ -303,6 +327,7 @@ async function loadSharedSpaces(identity: Identity): Promise<Map<string, SharedS
 		renameSync(`${path}.tmp`, path);
 	}
 	for (const [spaceId, entry] of Object.entries(keyring.channels ?? {})) {
+		if (gone.has(spaceId)) continue;
 		if (!entry.key || !/^[0-9a-f]{64}$/i.test(entry.key) || !Number.isSafeInteger(entry.keyId ?? 1) || (entry.keyId ?? 1) < 1) continue;
 		const writers = new Set<string>([entry.owner ?? myPk]);
 		let memberCount = 0;
@@ -421,14 +446,12 @@ async function localCheckpointImport(b64s: string[], provenance?: SharedProvenan
 	return (await res.json()) as { imported: number; rejected: number; items: ImportedCheckpoint[] };
 }
 
-/** Object ids the local ledger says are vanished (src/vanish.odin). */
-async function localVanished(): Promise<Set<string>> {
+/** The local ledger by id (src/vanish.odin): vanished and left ids, and every object of such a space. */
+async function localVanished(): Promise<Map<string, VanishedEntry>> {
 	try {
-		const res = await apiFetch(`${API}/api/vanished`);
-		const out = (await res.json()) as { vanished: Array<{ objectId: string }> };
-		return new Set(out.vanished.map((v) => v.objectId));
+		return new Map((await vanishedEntries()).map((entry) => [entry.objectId, entry]));
 	} catch {
-		return new Set();
+		return new Map();
 	}
 }
 
@@ -507,7 +530,8 @@ async function scanRelayHistory(pool: SimplePool, relays: string[], filters: Fil
 
 async function collectEventIds(pool: SimplePool, id: Identity, objectIds: string[]): Promise<{ eventIds: string[]; complete: boolean }> {
 	const found = new Set<string>();
-	const spaces = await loadSharedSpaces(id);
+	// Vanished spaces too: their objects' events ride their space key.
+	const spaces = await loadSharedSpaces(id, new Map());
 	const allTags = new Set<string>();
 	for (const objectId of objectIds) {
 		allTags.add(blindObjectId(id, objectId));
@@ -547,6 +571,26 @@ async function publishDeleteRequests(pool: SimplePool, id: Identity, eventIds: s
 	return { requests: sent, complete };
 }
 
+/**
+ * Contract §5: one kind-5 naming a space's stream tag. The relay drops every
+ * change and checkpoint of that stream signed by us or consenting to us
+ * (`owner` tag), now and on later arrival; members take an owner's request
+ * as the signal that the space is gone. True when every relay accepted it.
+ */
+async function publishSpaceDeletion(pool: SimplePool, id: Identity, keyHex: string, spaceId: string): Promise<boolean> {
+	const event = finalizeEvent(
+		{
+			kind: DELETE_KIND,
+			created_at: Math.floor(Date.now() / 1000),
+			tags: [["h", blindShared(keyHex, `space:${spaceId}`)], ["k", String(CHANGE_KIND)], ["k", String(CHECKPOINT_KIND)]],
+			content: "space deleted",
+		},
+		id.sk,
+	);
+	const results = await Promise.allSettled(pool.publish(id.relays, event));
+	return id.relays.length > 0 && results.length === id.relays.length && results.every((result) => result.status === "fulfilled");
+}
+
 // ── Sync engine ──────────────────────────────────────────────────
 
 export async function startNostrSync(): Promise<void> {
@@ -571,8 +615,9 @@ export async function startNostrSync(): Promise<void> {
 	setInterval(persist, 5000);
 
 	// Vanished objects (src/vanish.odin) are never published, and their
-	// relay copies are chased with NIP-09 requests. Refreshed whenever the
-	// ledger object commits.
+	// relay copies are chased with NIP-09 requests - except a left space's:
+	// those stay for its other members. Refreshed whenever the ledger
+	// object commits.
 	let vanished = await localVanished();
 
 	// ── Paced publish queue ────────────────────────────────────────
@@ -639,16 +684,28 @@ export async function startNostrSync(): Promise<void> {
 	let vanishBusy = false;
 	async function chaseVanished(): Promise<void> {
 		if (vanishBusy) return;
-		const pending = [...vanished].filter((objectId) => !state.vanishRequested[objectId]);
-		if (pending.length === 0) return;
 		vanishBusy = true;
 		try {
-			const scan = await collectEventIds(pool, id!, pending);
-			const deletion = await publishDeleteRequests(pool, id!, scan.eventIds, "object vanished by its owner");
-			console.log(`[sync] vanish: ${pending.length} object(s), ${scan.eventIds.length} relay event(s), ${deletion.requests} delete request(s)`);
-			if (scan.complete && deletion.complete) {
-				for (const objectId of pending) state.vanishRequested[objectId] = true;
+			const pending = [...vanished.values()].filter((entry) => !entry.left && !state.vanishRequested[entry.objectId]).map((entry) => entry.objectId);
+			if (pending.length > 0) {
+				const scan = await collectEventIds(pool, id!, pending);
+				const deletion = await publishDeleteRequests(pool, id!, scan.eventIds, "object vanished by its owner");
+				console.log(`[sync] vanish: ${pending.length} object(s), ${scan.eventIds.length} relay event(s), ${deletion.requests} delete request(s)`);
+				if (scan.complete && deletion.complete) {
+					for (const objectId of pending) state.vanishRequested[objectId] = true;
+					dirty = true;
+				}
+			}
+			// Each vanished space whose key is still held: one request for its whole stream.
+			const keyring = await readKeyring();
+			for (const entry of vanished.values()) {
+				const doneKey = `space:${entry.objectId}`;
+				const keyHex = keyring?.channels?.[entry.objectId]?.key;
+				if (entry.left || state.vanishRequested[doneKey] || !keyHex || !/^[0-9a-f]{64}$/i.test(keyHex)) continue;
+				if (!(await publishSpaceDeletion(pool, id!, keyHex, entry.objectId))) continue;
+				state.vanishRequested[doneKey] = true;
 				dirty = true;
+				console.log(`[sync] space ${entry.objectId.slice(0, 8)} deleted on the relays`);
 			}
 		} finally {
 			vanishBusy = false;
@@ -674,8 +731,9 @@ export async function startNostrSync(): Promise<void> {
 		const eventIds: string[] = [];
 		try {
 			for (let i = 0; i < parts.length; i++) {
+				// `owner`: consent for the space's owner to delete this event on the relay.
 				const tags: string[][] = item.space
-					? [["h", blindShared(item.space.keyHex, item.objectId)], ["h", item.space.spaceTag]]
+					? [["h", blindShared(item.space.keyHex, item.objectId)], ["h", item.space.spaceTag], ["owner", item.space.owner ?? id!.pk]]
 					: [["h", blindObjectId(id!, item.objectId)]];
 				if (gid) tags.push(["c", gid, String(i), String(parts.length)]);
 				const event = finalizeEvent(
@@ -880,7 +938,32 @@ export async function startNostrSync(): Promise<void> {
 		dirty = true;
 	}
 
+	/**
+	 * Contract §5 member signal: the owner's kind-5 over a shared space's
+	 * stream means the space was deleted for everyone, so it vanishes here
+	 * too - the ledger change then wipes this identity's own copies on the
+	 * relays. A space we own is the ledger's business, never a relay event's.
+	 */
+	async function onSpaceDeletion(event: Event): Promise<void> {
+		if (!verifyEvent(event)) return;
+		for (const space of sharedSpaces.values()) {
+			const owner = space.owner ?? id!.pk;
+			if (owner === id!.pk || event.pubkey !== owner || vanished.has(space.spaceId)) continue;
+			if (!event.tags.some((tag) => tag[0] === "h" && tag[1] === space.spaceTag)) continue;
+			// Claimed before the await: live, catchup and backfill may all deliver the signal.
+			vanished.set(space.spaceId, { objectId: space.spaceId, at: Date.now() });
+			try {
+				await mutate("vanish", { object_ids: [space.spaceId] });
+				console.log(`[sync] space ${space.spaceId.slice(0, 8)} deleted by its owner ${owner.slice(0, 8)} - vanished here`);
+			} catch (err) {
+				vanished.delete(space.spaceId);
+				console.error(`[sync] vanishing space ${space.spaceId.slice(0, 8)} failed:`, err instanceof Error ? err.message : err);
+			}
+		}
+	}
+
 	async function onRelayEvent(event: Event): Promise<void> {
+		if (event.kind === DELETE_KIND) return onSpaceDeletion(event);
 		let importing = false;
 		activeImports++;
 		try {
@@ -1024,7 +1107,7 @@ export async function startNostrSync(): Promise<void> {
 
 	async function refreshShared(): Promise<void> {
 		spaceMap = await loadSpaceMap();
-		sharedSpaces = await loadSharedSpaces(id!);
+		sharedSpaces = await loadSharedSpaces(id!, vanished);
 		// Channel objects are filtered out of /api/objects - map every
 		// shared space to itself so its own changes (name, members) ride
 		// the space stream too; a joiner needs them.
@@ -1104,7 +1187,7 @@ export async function startNostrSync(): Promise<void> {
 		if (tags.length === 0) return;
 		const events = new Map<string, Event>();
 		const scan = beginReplayScan(0);
-		const complete = await scanRelayHistory(pool, id!.relays, [{ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": tags }], (event) => events.set(event.id, event));
+		const complete = await scanRelayHistory(pool, id!.relays, [{ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": tags }, { kinds: [DELETE_KIND], "#h": tags }], (event) => events.set(event.id, event));
 		// Checkpoints first so each object renders from its cache while its originals stream in.
 		const sorted = [...events.values()].sort((a, b) => b.kind - a.kind || a.created_at - b.created_at);
 		for (const event of sorted) await onRelayEvent(event);
@@ -1118,13 +1201,13 @@ export async function startNostrSync(): Promise<void> {
 		const p = JSON.parse(rumor.content) as { t?: string; space?: string; name?: string; key?: string; keyId?: number };
 		if (p.t !== "space-invite" || !p.space || !/^[0-9a-f]{64}$/.test(p.key ?? "")) return;
 		if (p.keyId !== undefined && (!Number.isSafeInteger(p.keyId) || p.keyId < 1)) return;
-		const keyId = p.keyId ?? 1;
-		let keyring: { version?: number; localPubkey?: string; localIdentityHash?: string; channels?: Record<string, { key?: string; keyId?: number; createdAt?: number; owner?: string }> } = {};
-		try {
-			keyring = (await Bun.file(`${dataRoot()}/channel-keys.json`).json()) as typeof keyring;
-		} catch {
-			/* fresh */
+		// A vanished or left space never comes back through an old invite.
+		if (vanished.has(p.space)) {
+			console.log(`[sync] ignored a gift-wrapped key for deleted space ${p.space.slice(0, 8)}`);
+			return;
 		}
+		const keyId = p.keyId ?? 1;
+		const keyring: Keyring = (await readKeyring()) ?? {};
 		keyring.channels ??= {};
 		const existing = keyring.channels[p.space];
 		if (existing && rumor.pubkey !== id!.pk && rumor.pubkey !== (existing.owner ?? id!.pk)) return;
@@ -1157,19 +1240,14 @@ export async function startNostrSync(): Promise<void> {
 				await importInviteKey(rumor);
 			} else if (rumor.kind === JOINREQ_RUMOR_KIND) {
 				const p = JSON.parse(rumor.content) as { t?: string; space?: string };
-				if (p.t !== "join-request" || !p.space) return;
+				if (p.t !== "join-request" || !p.space || vanished.has(p.space)) return;
 				// Only the space's administrator collects requests.
 				const space = sharedSpaces.get(p.space);
 				const entryOwnerOk = !space?.owner || space.owner === id!.pk;
 				let holdsKey = !!space;
 				if (!holdsKey) {
-					try {
-						const keyring = (await Bun.file(`${dataRoot()}/channel-keys.json`).json()) as { channels?: Record<string, { key?: string; owner?: string }> };
-						const entry = keyring.channels?.[p.space];
-						holdsKey = !!entry?.key && (!entry.owner || entry.owner === id!.pk);
-					} catch {
-						/* no keyring */
-					}
+					const entry = (await readKeyring())?.channels?.[p.space];
+					holdsKey = !!entry?.key && (!entry.owner || entry.owner === id!.pk);
 				}
 				if (!holdsKey || !entryOwnerOk) return;
 				// The requester's public kind-0 profile, so the owner can put a
@@ -1329,7 +1407,8 @@ export async function startNostrSync(): Promise<void> {
 	const backfillById = new Map<string, Event>();
 	const spaceTags = [...sharedSpaces.values()].map((sp) => sp.spaceTag);
 	const backfillFilters: Filter[] = [{ kinds: [CHANGE_KIND, CHECKPOINT_KIND], authors: [id.pk] }];
-	if (spaceTags.length > 0) backfillFilters.push({ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": spaceTags });
+	// The space streams, and every kind 5 over them: an owner's space-deletion signal (they are few).
+	if (spaceTags.length > 0) backfillFilters.push({ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": spaceTags }, { kinds: [DELETE_KIND], "#h": spaceTags });
 	const backfillScan = beginReplayScan(0);
 	const backfillComplete = await scanRelayHistory(pool, id.relays, backfillFilters, (event) => backfillById.set(event.id, event));
 	const backfill = [...backfillById.values()];
@@ -1367,6 +1446,8 @@ export async function startNostrSync(): Promise<void> {
 	// The backfill may have carried new vanish records from another device;
 	// re-read the ledger before deciding what to publish or chase.
 	vanished = await localVanished();
+	// An owner's signal in the backfill may have vanished a shared space: stop syncing it.
+	if ([...sharedSpaces.keys()].some((spaceId) => vanished.has(spaceId))) await refreshShared();
 	await chaseVanished();
 
 	// Publish local changes the relays don't have (published set carries
@@ -1397,9 +1478,14 @@ export async function startNostrSync(): Promise<void> {
 	subscribe((objectId) => {
 		if (objectId === VANISH_LOG_ID) {
 			// A vanish happened here or arrived from a peer: re-read the ledger,
-			// publish the record itself, then chase the relay copies.
+			// stop syncing spaces it names, publish the record itself, then
+			// chase the relay copies.
 			void (async () => {
 				vanished = await localVanished();
+				if ([...sharedSpaces.keys()].some((spaceId) => vanished.has(spaceId))) {
+					await refreshShared();
+					subscribeLive();
+				}
 				await publishObject(objectId);
 				await chaseVanished();
 			})();
@@ -1467,6 +1553,11 @@ export async function startNostrSync(): Promise<void> {
 					onevent: (event) => void onRelayEvent(event),
 				}),
 			);
+			liveSubs.push(
+				pool.subscribeMany(id!.relays, { kinds: [DELETE_KIND], "#h": tags }, {
+					onevent: (event) => void onSpaceDeletion(event),
+				}),
+			);
 		}
 		liveSubs.push(
 			pool.subscribeMany(id!.relays, { kinds: [KEYRING_KIND], authors: [id!.pk], "#d": [KEYRING_D], since: Math.floor(Date.now() / 1000) }, {
@@ -1502,7 +1593,7 @@ export async function startNostrSync(): Promise<void> {
 		const since = Object.keys(state.pendingChunkGroups!).length > 0 ? 0 : Math.min(state.cursor, state.replaySince ?? state.cursor);
 		const byId = new Map<string, Event>();
 		const filters: Filter[] = [{ kinds: [CHANGE_KIND, CHECKPOINT_KIND], authors: [id!.pk], since }];
-		if (tags.length > 0) filters.push({ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": tags, since });
+		if (tags.length > 0) filters.push({ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": tags, since }, { kinds: [DELETE_KIND], "#h": tags });
 		const scan = beginReplayScan(since);
 		const complete = await scanRelayHistory(pool, id!.relays, filters, (event) => byId.set(event.id, event));
 		const events = [...byId.values()].sort((a, b) => b.kind - a.kind || a.created_at - b.created_at);
@@ -1569,10 +1660,13 @@ export async function vanishOnRelays(objectIds: string[]): Promise<{ events: num
 	}
 	const pool = new SimplePool();
 	const state = await readState();
+	// A left space's objects stay on the relays for its other members.
+	const ledger = await localVanished();
+	const chased = objectIds.filter((objectId) => !ledger.get(objectId)?.left);
 	try {
-		const scan = await collectEventIds(pool, id, objectIds);
+		const scan = await collectEventIds(pool, id, chased);
 		const deletion = await publishDeleteRequests(pool, id, scan.eventIds, "object vanished by its owner");
-		for (const objectId of objectIds) {
+		for (const objectId of chased) {
 			if (scan.complete && deletion.complete) state.vanishRequested[objectId] = true;
 			else delete state.vanishRequested[objectId];
 		}

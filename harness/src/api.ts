@@ -174,6 +174,28 @@ export async function mutate(action: string, params: Record<string, unknown>): P
 	return out;
 }
 
+/** The mutation guard's refusal: the object, or the space it lives in, was vanished or left (core mutation guard). */
+export function wasDeleted(err: unknown): err is Error {
+	return err instanceof Error && /^(space|object) .*was deleted/.test(err.message);
+}
+
+/** The synced vanish ledger object (src/vanish.odin); its commit means the vanished set changed. */
+export const VANISH_LOG_ID = "__vanished__";
+
+/** One id the local vanish ledger drops; `left`: this identity left that space, so nobody else is affected. */
+export interface VanishedEntry {
+	objectId: string;
+	at: number;
+	left?: true;
+}
+
+/** Every id the ledger drops: its own entries plus every object living in a vanished or left space. */
+export async function vanishedEntries(): Promise<VanishedEntry[]> {
+	const res = await apiFetch(`${API}/api/vanished`);
+	if (!res.ok) throw new Error(`vanished: ${res.status}`);
+	return ((await res.json()) as { vanished: VanishedEntry[] }).vanished;
+}
+
 // ── Field helpers ────────────────────────────────────────────────
 
 export const str = (fields: Record<string, ValueJSON>, key: string): string =>

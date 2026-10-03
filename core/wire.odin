@@ -9,6 +9,7 @@ package core
 import "core:encoding/hex"
 import "core:encoding/json"
 import "core:fmt"
+import "core:strings"
 
 // Keep full-sized 40k-character encrypted chunks inside the 8 MiB relay budget.
 WIRE_CHUNK_CHARS :: 40_000
@@ -129,8 +130,10 @@ blind_prefix :: proc(payload: json.Value) -> ([]byte, bool) {
 	return nil, false
 }
 
-// {change: base64, conversationKey: hex, secret?: hex | space?: {keyHex, spaceId}, objectId, nonce?}
+// {change: base64, conversationKey: hex, secret?: hex | space?: {keyHex, spaceId, owner?}, objectId, nonce?}
 // → {gid, parts: [{content, tags}]}. Hosts sign each part as a kind-1078 event.
+// A space owner (hex) rides as ["owner", hex]: the author's consent that the
+// owner may delete this event from the relay when the space is deleted.
 wire_seal :: proc(payload: json.Value) -> (json.Value, string) {
 	change := json_str(payload, "change")
 	if change == "" do return nil, "seal needs change base64"
@@ -147,6 +150,10 @@ wire_seal :: proc(payload: json.Value) -> (json.Value, string) {
 		if key_hex == "" || space_id == "" do return nil, "space needs keyHex and spaceId"
 		append(&tags, tag("h", wire_blind(transmute([]byte)key_hex, object_id, context.temp_allocator)))
 		append(&tags, tag("h", wire_blind(transmute([]byte)key_hex, fmt.tprintf("space:%s", space_id), context.temp_allocator)))
+		if owner := strings.to_lower(json_str(space, "owner"), context.temp_allocator); owner != "" {
+			if !is_hex_pubkey(owner) do return nil, "space owner must be a hex pubkey"
+			append(&tags, tag("owner", owner))
+		}
 	} else {
 		secret, sok := hex_bytes(json_str(payload, "secret"))
 		if !sok || len(secret) != 32 do return nil, "seal needs secret hex or space"

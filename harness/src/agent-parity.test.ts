@@ -58,6 +58,7 @@ const COVERAGE: Record<string, Coverage> = {
 	channel_member_add: { reason: MEMBERSHIP },
 	channel_member_remove: { reason: MEMBERSHIP },
 	channel_key_rotate: { reason: MEMBERSHIP },
+	space_leave: { reason: MEMBERSHIP },
 	// ── Engine upkeep ──
 	bootstrap_space_defaults: { reason: "engine start-up convergence of built-in types and properties" },
 	seed_space_defaults: { reason: "engine seeding of a new space's built-in types and properties" },

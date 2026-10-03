@@ -52,13 +52,13 @@ mutation_clone_value :: proc(value: Value) -> Value {
  return out
 }
 
-mutation_vanish_ops :: proc(ids: []string, timestamp: i64, ledger_exists: bool) -> [dynamic]Operation {
+mutation_vanish_ops :: proc(ids: []string, timestamp: i64, ledger_exists: bool, prefix := VANISH_KEY_PREFIX) -> [dynamic]Operation {
  ops := make([dynamic]Operation, context.temp_allocator)
  if !ledger_exists {
-  append(&ops, Operation{kind = .Object_Create, type_key = "vanish_log"})
+  append(&ops, Operation{kind = .Object_Create, type_key = VANISH_LOG_TYPE})
   append(&ops, Operation{kind = .Field_Set, key = "name", value = string_value("Vanished objects")})
  }
- for id in ids do append(&ops, Operation{kind = .Field_Set, key = fmt.tprintf("vanished:%s", id), value = int_value(timestamp)})
+ for id in ids do append(&ops, Operation{kind = .Field_Set, key = fmt.tprintf("%s%s", prefix, id), value = int_value(timestamp)})
  return ops
 }
 
@@ -82,7 +82,26 @@ list_value :: proc(items: []Value, allocator := context.temp_allocator) -> Value
 	return v
 }
 
+/**
+ * Plan one mutation, then hold it to the vanish ledger: nothing may be
+ * written into a vanished object or space, whichever host asks. A device
+ * that has not heard of a deletion yet can still write; the ledger and the
+ * space rule drop that write everywhere once it arrives.
+ */
 mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Plan, string) {
+ plan, err := mutation_plan_action(parsed, input)
+ if err != "" do return plan, err
+ vanished := vanished_from_ledger(input.states[VANISH_LOG_ID])
+ for &change in plan.changes {
+  gone := change_vanished_by(vanished, &change, input.states[change.object_id])
+  if gone == "" do continue
+  if gone == change.object_id do return plan, fmt.tprintf("object %q was deleted - nothing can be written to it", gone)
+  return plan, fmt.tprintf("space %q was deleted - nothing can be written into it", gone)
+ }
+ return plan, ""
+}
+
+mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Plan, string) {
  plan := Mutation_Plan{changes = make([dynamic]Change, context.temp_allocator), result = jobj(), vanish_ids = make([dynamic]string, context.temp_allocator)}
  if _, ok := parsed.(json.Object); !ok do return plan, "mutation params must be an object"
  action := json_str(parsed, "action")
@@ -935,6 +954,21 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
 		plan.result = extra
 		return plan, ""
 
+	// Leaving a shared space someone else owns: it goes from every replica of
+	// this identity (the ledger syncs to its other devices) and nothing is
+	// asked of the relays, so the owner and other members keep it. The host
+	// drops the space key; only hosts know who owns a space.
+	case "space_leave":
+		channel_id := json_str(parsed, "channel_id")
+		if channel_id == "" do return plan, "channel_id required"
+		space, known := input.states[channel_id]
+		if !known || space.type_key != "channel" do return plan, "unknown space"
+		_, ledger_exists := input.states[VANISH_LOG_ID]
+		ops := mutation_vanish_ops([]string{channel_id}, input.timestamp, ledger_exists, LEFT_KEY_PREFIX)
+		mutation_add(&plan, input, VANISH_LOG_ID, ops[:])
+		plan.result["left"] = json.String(strings.clone(channel_id, context.temp_allocator))
+		return plan, ""
+
 
  case "seed_space_defaults":
   channel_id := json_str(parsed, "channel_id")
@@ -1241,6 +1275,9 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 	// space converges on the SAME objects, so multi-device sync unions
 	// changes instead of duplicating definitions per install.
 	prefix := len(channel_id) >= 8 ? channel_id[:8] : channel_id
+	// A default someone vanished (a deleted property) stays gone: re-creating
+	// it would be refused, and would sink every other default with it.
+	vanished := vanished_from_ledger(input.states[VANISH_LOG_ID])
 
 
 	for r in BUNDLED_RELATIONS {
@@ -1275,6 +1312,7 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			continue
 		}
 		id := fmt.tprintf("bundled-rel-%s-%s", r.key, prefix)
+		if id in vanished do continue
 		ops := []Operation{
 			{kind = .Object_Create, type_key = "relation"},
 			{kind = .Field_Set, key = "channel", value = string_value(channel_id)},
@@ -1307,6 +1345,7 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			continue
 		}
 		id := fmt.tprintf("bundled-type-%s-%s", t.key, prefix)
+		if id in vanished do continue
 		ops := []Operation{
 			{kind = .Object_Create, type_key = "type"},
 			{kind = .Field_Set, key = "channel", value = string_value(channel_id)},

@@ -21,6 +21,7 @@ Outbox_Item :: struct {
 	change:     string, // base64 wire bytes
 	space_id:   string, // "" for the personal obligation
 	key_hex:    string, // space key captured at enqueue, as the browser did
+	owner:      string, // space owner captured with the key: the relay-deletion consent tag
 	key_id:     i64,
 	has_events: bool, // host holds signed ciphertext; never re-seal
 	attempts:   int,
@@ -36,6 +37,7 @@ outbox_item_free :: proc(item: ^Outbox_Item) {
 	delete(item.change, base)
 	delete(item.space_id, base)
 	delete(item.key_hex, base)
+	delete(item.owner, base)
 }
 
 outbox_clear :: proc() {
@@ -71,9 +73,9 @@ outbox_enqueue :: proc(pending: json.Value) -> (Outbox_Enqueue, string) {
 	has_events, _ := json_bool(pending, "hasEvents")
 	space_id := json_str(pending, "spaceId")
 	key_id, _ := json_int(pending, "keyId")
-	key_hex := ""
+	key_hex, owner := "", ""
 	if space_id != "" {
-		for space in sync_session.spaces do if space.space_id == space_id && space.key_id == key_id { key_hex = space.key_hex; break }
+		for space in sync_session.spaces do if space.space_id == space_id && space.key_id == key_id { key_hex, owner = space.key_hex, space.owner; break }
 		if key_hex == "" && !has_events do return .Rotated_Key, ""
 	}
 	base := runtime.default_allocator()
@@ -84,6 +86,7 @@ outbox_enqueue :: proc(pending: json.Value) -> (Outbox_Enqueue, string) {
 		change = strings.clone(change, base),
 		space_id = strings.clone(space_id, base),
 		key_hex = strings.clone(key_hex, base),
+		owner = strings.clone(owner, base),
 		key_id = key_id,
 		has_events = has_events,
 	})
@@ -120,6 +123,7 @@ outbox_next :: proc(now_ms: i64) -> (item: json.Value, wait_ms: i64, err: string
 				space := jobj()
 				space["keyHex"] = json.String(candidate.key_hex)
 				space["spaceId"] = json.String(candidate.space_id)
+				space["owner"] = json.String(candidate.owner)
 				seal["space"] = json.Object(space)
 			} else {
 				if sync_session.secret == "" do return nil, 0, "session has no secret to seal personal changes"

@@ -10,6 +10,7 @@ import "core:path/filepath"
 import "core:encoding/json"
 import "core:encoding/hex"
 import "core:crypto"
+import "core:strings"
 
 // The store lock protects each snapshot, not the whole read/plan/write
 // transaction. Serialize local mutations so two HTTP claims cannot both
@@ -87,6 +88,11 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
  }
  sync.lock(&g_mutation_mu)
  defer sync.unlock(&g_mutation_mu)
+ // Leaving is for spaces someone else administers; an owner deletes.
+ if action == "space_leave" && channel_foreign_owner(channel_keys_snapshot(), core.json_str(parsed, "channel_id")) == "" {
+  respond_error(sock, "you own this space - delete it for everyone instead of leaving")
+  return
+ }
  key_id: i64
  rotating := action == "channel_member_remove" || action == "channel_key_rotate"
  if rotating {
@@ -104,6 +110,7 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
   respond_error(sock, "write failed", "500 Internal Server Error")
   return
  }
+ if action == "space_leave" do channel_key_remove(core.json_str(parsed, "channel_id"))
  if len(plan.vanish_ids) > 0 {
   count := vanish_objects(plan.vanish_ids[:])
   if count == 0 && action == "vanish" {
@@ -209,4 +216,35 @@ channel_key_rotate :: proc(channel_id: string) -> i64 {
 	next := found ? key_id + 1 : 1
 	channel_key_set(channel_id, next)
 	return next
+}
+
+/** Drop a space's key: this identity left it, so nothing of it may decrypt or sync here. */
+channel_key_remove :: proc(channel_id: string) {
+	sync.lock(&g_keys_mu)
+	defer sync.unlock(&g_keys_mu)
+	file, ok := channel_keys_read().(json.Object)
+	if !ok do return
+	channels, cok := file["channels"].(json.Object)
+	if !cok || channel_id not_in channels do return
+	delete_key(&channels, channel_id)
+	file["channels"] = channels
+	_ = os.write_entire_file(channel_keys_path(), core.marshal(file), perm = {.Read_User, .Write_User})
+}
+
+/**
+ * The hex pubkey administering a space when it is someone else, "" when this
+ * identity owns it (no installed owner, or the installed owner is us).
+ */
+channel_foreign_owner :: proc(keyring: json.Value, channel_id: string) -> string {
+	channels, _ := core.json_field(keyring, "channels")
+	entry, _ := core.json_field(channels, channel_id)
+	owner := strings.to_lower(core.json_str(entry, "owner"), context.temp_allocator)
+	if owner == "" || owner == strings.to_lower(core.json_str(keyring, "localPubkey"), context.temp_allocator) do return ""
+	return owner
+}
+
+channel_keys_snapshot :: proc() -> json.Value {
+	sync.lock(&g_keys_mu)
+	defer sync.unlock(&g_keys_mu)
+	return channel_keys_read()
 }

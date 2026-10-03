@@ -29,6 +29,12 @@ let buildCheckpoint: (objectId: string) => Promise<Response>;
 let published: Event[];
 let timeoutMock: Mock<typeof setTimeout>;
 let restore: Array<() => void>;
+/** GET /api/vanished rows, /api/objects rows, space objects by id, and every POST /api/mutate body. */
+let vanishedRows: Array<{ objectId: string; at: number; left?: true }>;
+let objectRows: Array<{ id: string; typeKey?: string; channelId?: string }>;
+let spaceObjects: Record<string, unknown>;
+let mutations: Array<Record<string, unknown>>;
+let liveDelete: ((event: Event) => void) | undefined;
 
 function event(part: string, created_at: number, chunk?: [string, number, number], kind = 1078): Event {
 	return finalizeEvent({ kind, created_at, tags: chunk ? [["c", chunk[0], String(chunk[1]), String(chunk[2])]] : [], content: nip44.encrypt(part, conversationKey) }, sk);
@@ -45,7 +51,21 @@ function chunks(createdAt = 10): Event[] {
 }
 async function state() {
 	intervals.find((timer) => timer.ms === 5000)!.callback();
-	return await Bun.file(join(root, "sync-state.json")).json() as { cursor: number; replaySince?: number; checkpoints: Record<string, { hash: string; heads: string[]; eventIds: string[] }> };
+	return await Bun.file(join(root, "sync-state.json")).json() as { cursor: number; replaySince?: number; vanishRequested: Record<string, true>; checkpoints: Record<string, { hash: string; heads: string[]; eventIds: string[] }> };
+}
+/** The contract's blinding: sha256(key || id), 16 hex. */
+function blind(key: string, id: string): string {
+	const hasher = new Bun.CryptoHasher("sha256");
+	hasher.update(key);
+	hasher.update(id);
+	return hasher.digest("hex").slice(0, 16);
+}
+async function keyring(channels: Record<string, { key: string; keyId?: number; owner?: string }>) {
+	await writeFile(join(root, "channel-keys.json"), JSON.stringify({ version: 1, channels }));
+}
+/** A space object listing these member pubkeys (hex). */
+function spaceWithMembers(id: string, members: string[]) {
+	return { id, typeKey: "channel", fields: { members: { valuesValue: { items: members.map((hex) => ({ mapValue: { entries: { npub: { stringValue: hex }, role: { stringValue: "writer" } } } })) } } } };
 }
 async function until(predicate: () => boolean) {
 	for (let i = 0; i < 100; i++) {
@@ -89,6 +109,11 @@ beforeEach(async () => {
 	buildCheckpoint = async () => new Response("not found", { status: 404 });
 	published = [];
 	restore = [];
+	vanishedRows = [];
+	objectRows = [];
+	spaceObjects = {};
+	mutations = [];
+	liveDelete = undefined;
 	const interval = spyOn(globalThis, "setInterval").mockImplementation(((callback: () => void, ms: number) => {
 		intervals.push({ callback, ms });
 		return 1;
@@ -104,8 +129,14 @@ beforeEach(async () => {
 		if (perObject) return Response.json({ changes: localChangeRows[perObject[1]] ?? [] });
 		if (url.endsWith("/api/checkpoints") && init?.method === "POST") return importCheckpoint(JSON.parse(String(init.body)));
 		if (url.endsWith("/api/checkpoints/build")) return buildCheckpoint(JSON.parse(String(init?.body)).objectId);
-		if (url.endsWith("/api/objects")) return Response.json([]);
-		if (url.endsWith("/api/vanished")) return Response.json({ vanished: [] });
+		if (url.endsWith("/api/mutate")) {
+			mutations.push(JSON.parse(String(init?.body)));
+			return Response.json({ ok: true });
+		}
+		const space = url.match(/\/api\/objects\/([^/]+)$/);
+		if (space) return spaceObjects[space[1]] ? Response.json(spaceObjects[space[1]]) : new Response("not found", { status: 404 });
+		if (url.endsWith("/api/objects")) return Response.json(objectRows);
+		if (url.endsWith("/api/vanished")) return Response.json({ vanished: vanishedRows, count: vanishedRows.length });
 		if (url.endsWith("/api/checkpoints")) return Response.json(checkpointRows);
 		if (url.endsWith("/api/changes")) return Response.json(Object.fromEntries(Object.entries(localChangeRows).map(([objectId, rows]) => [objectId, rows.map((row) => row.id)])));
 		throw new Error(`Unexpected local request: ${url}`);
@@ -136,6 +167,7 @@ beforeEach(async () => {
 	const live = spyOn(SimplePool.prototype, "subscribeMany").mockImplementation((_relays, filter, callbacks) => {
 		liveSubscriptions++;
 		if (filter.kinds?.includes(1078)) liveEvent = (item) => callbacks.onevent?.(item);
+		if (filter.kinds?.includes(5)) liveDelete = (item) => callbacks.onevent?.(item);
 		return { close() {} };
 	});
 	restore.push(() => live.mockRestore());
@@ -383,4 +415,51 @@ test("a build the daemon refuses (incomplete history) leaves the object syncing 
 	await settle();
 	expect(published.some((item) => item.kind === 1079)).toBe(false);
 	expect((await state()).checkpoints.obj).toBeUndefined();
+});
+
+const KEY_A = "11".repeat(32);
+const KEY_B = "22".repeat(32);
+const KEY_C = "33".repeat(32);
+const adminSk = new Uint8Array(32).fill(2);
+const admin = getPublicKey(adminSk);
+/** A space-deletion request (contract §5) over `spaceId`'s stream, signed by `signer`. */
+function spaceDeletion(signer: Uint8Array, key: string, spaceId: string, created_at: number): Event {
+	return finalizeEvent({ kind: 5, created_at, tags: [["h", blind(key, `space:${spaceId}`)], ["k", "1078"], ["k", "1079"]], content: "space deleted" }, signer);
+}
+
+test("a shared-space event names who may delete it on the relay: the admin of a joined space, us in our own", async () => {
+	await keyring({ joined: { key: KEY_A, owner: admin }, mine: { key: KEY_B } });
+	spaceObjects = { mine: spaceWithMembers("mine", [admin]) };
+	objectRows = [{ id: "a", channelId: "joined" }, { id: "b", channelId: "mine" }];
+	localChangeRows = { a: [{ id: "ca", b64: "YWJj" }], b: [{ id: "cb", b64: "ZGVm" }] };
+	timeoutMock.mockImplementation(((callback: () => void) => realSetTimeout(callback, 0)) as unknown as typeof setTimeout);
+	await startNostrSync();
+	const tagsOf = (key: string, objectId: string) => published.find((item) => item.kind === 1078 && item.tags.some((tag) => tag[0] === "h" && tag[1] === blind(key, objectId)))?.tags;
+	await until(() => !!tagsOf(KEY_A, "a") && !!tagsOf(KEY_B, "b"));
+	expect(tagsOf(KEY_A, "a")).toEqual([["h", blind(KEY_A, "a")], ["h", blind(KEY_A, "space:joined")], ["owner", admin]]);
+	expect(tagsOf(KEY_B, "b")).toEqual([["h", blind(KEY_B, "b")], ["h", blind(KEY_B, "space:mine")], ["owner", pk]]);
+});
+
+test("only the owner deleting a joined space's stream vanishes it here, once; a stranger's request and our own spaces are ignored", async () => {
+	await keyring({ heard: { key: KEY_A, owner: admin }, forged: { key: KEY_B, owner: admin }, mine: { key: KEY_C } });
+	spaceObjects = { mine: spaceWithMembers("mine", [admin]) };
+	history = [spaceDeletion(new Uint8Array(32).fill(3), KEY_B, "forged", 50), spaceDeletion(sk, KEY_C, "mine", 51)];
+	await startNostrSync();
+	expect(mutations).toEqual([]);
+	const signal = spaceDeletion(adminSk, KEY_A, "heard", 60);
+	liveDelete!(signal);
+	await until(() => mutations.length > 0);
+	liveDelete!(signal);
+	await settle();
+	expect(mutations).toEqual([{ action: "vanish", object_ids: ["heard"] }]);
+});
+
+test("a vanished space is deleted on the relays by its stream tag; a left space is neither synced nor chased", async () => {
+	await keyring({ gone: { key: KEY_A }, left: { key: KEY_B, owner: admin } });
+	vanishedRows = [{ objectId: "gone", at: 1 }, { objectId: "left", at: 2, left: true }];
+	await startNostrSync();
+	const deletions = published.filter((item) => item.kind === 5).map((item) => ({ pubkey: item.pubkey, tags: item.tags, content: item.content }));
+	expect(deletions).toEqual([{ pubkey: pk, tags: [["h", blind(KEY_A, "space:gone")], ["k", "1078"], ["k", "1079"]], content: "space deleted" }]);
+	expect((await state()).vanishRequested).toEqual({ gone: true, "space:gone": true });
+	expect(filters.some((filter) => filter["#h"]?.includes(blind(KEY_B, "space:left")))).toBe(false);
 });

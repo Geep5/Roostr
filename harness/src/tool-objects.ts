@@ -32,7 +32,7 @@
  */
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { createObject, deleteField, fetchObject, mutate, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { createObject, deleteField, fetchObject, mutate, queryAll, setField, str, sv, vanishedEntries, wasDeleted, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { bodyBlocks } from "./surfaces";
 import { TOOL_TYPE } from "./tool-sdk";
 import { CODE_STYLE, INPUTS_KEY, NOT_LOADED, SHIPPED_TOOLS, automatedError, compileProblem, contentHash, fallbackVersion, numberVersion, parseToolInputs, renderToolInputs, toolCode, type ObjectTool } from "./tool-runtime";
@@ -232,7 +232,8 @@ const FRESH_SPACE_SETTLE_MS = 12_000;
  * This harness's built-ins as Tool objects in `space`, synced once per
  * process. Every space gets them - at boot and when a new space appears -
  * so its agents can be given tools and people can read and edit them.
- * Resolves to the Tool object id per built-in name.
+ * Resolves to the Tool object id per built-in name; none in a space that
+ * was deleted (vanished or left), which is never written to.
  */
 export function ensureBuiltinTools(space: string): Promise<Map<string, string>> {
 	const known = synced.get(space);
@@ -240,10 +241,19 @@ export function ensureBuiltinTools(space: string): Promise<Map<string, string>> 
 	const run = (async () => {
 		const before = await queryAll({ type: TOOL_TYPE, filters: [{ key: "channel", condition: "equal", value: space }] });
 		if (!before.some((r) => isBuiltin(r.fields))) await Bun.sleep(Math.floor(Math.random() * FRESH_SPACE_SETTLE_MS));
-		const res = await syncBuiltinTools(space, builtinSpecs(), await builtinSourceAt());
-		if (res.created.length || res.rewritten.length) console.log(`[tools] built-in Tool objects in ${space.slice(0, 8)}: ${res.created.length} created, ${res.rewritten.length} updated`);
-		if (res.kept.length) console.log(`[tools] edited built-ins kept in ${space.slice(0, 8)} (a newer version ships): ${res.kept.join(", ")}`);
-		return res.ids;
+		// Checked after the settle: the space may have been deleted while this computer waited.
+		if ((await vanishedEntries()).some((entry) => entry.objectId === space)) return new Map<string, string>();
+		try {
+			const res = await syncBuiltinTools(space, builtinSpecs(), await builtinSourceAt());
+			if (res.created.length || res.rewritten.length) console.log(`[tools] built-in Tool objects in ${space.slice(0, 8)}: ${res.created.length} created, ${res.rewritten.length} updated`);
+			if (res.kept.length) console.log(`[tools] edited built-ins kept in ${space.slice(0, 8)} (a newer version ships): ${res.kept.join(", ")}`);
+			return res.ids;
+		} catch (err) {
+			if (!wasDeleted(err)) throw err;
+			// Deleted mid-sync: settled for good, so this stays the cached answer.
+			console.log(`[tools] space ${space.slice(0, 8)} was deleted while its built-ins were written; skipped`);
+			return new Map<string, string>();
+		}
 	})();
 	synced.set(space, run);
 	// A failed sync is retried by the next caller.

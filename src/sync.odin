@@ -24,6 +24,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:slice"
+import "core:sync"
 
 handle_changes_manifest :: proc(sock: net.TCP_Socket) {
 	out := core.jobj()
@@ -181,7 +182,8 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 	rejected := 0
 	dropped := 0
 	// The ledger is authoritative: a vanished object never comes back, no
-	// matter how many relays or peers still hold its changes.
+	// matter how many relays or peers still hold its changes - nor does
+	// anything placed into a vanished space, by a device that had not heard.
 	vanished := vanished_ids()
 	touched := make(map[string]bool, context.temp_allocator)
 	ids := make([dynamic]json.Value, context.temp_allocator)
@@ -229,7 +231,18 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 			rejected += 1
 			continue
 		}
-		if c.object_id in vanished {
+		// An object already purged is refused by id. A change that places an
+		// object into a vanished space is refused by the space, and its id
+		// joins the ledger: its later changes need not repeat the channel.
+		if gone := core.change_vanished_by(vanished, &c, nil); gone != "" {
+			entry := vanished[gone]
+			if gone != c.object_id {
+				object_id := strings.clone(c.object_id, context.temp_allocator)
+				vanished[object_id] = entry
+				sync.lock(&g_store.mu)
+				note_space_vanished_locked(object_id, entry)
+				sync.unlock(&g_store.mu)
+			}
 			// Never write it back. Reporting the id keeps the sync daemon from
 			// echoing the change at the relay that just handed it to us.
 			dropped += 1

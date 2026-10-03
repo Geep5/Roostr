@@ -121,6 +121,73 @@ wire_change :: proc(t: ^testing.T, object_id: string, size: int) -> []byte {
 	return bytes
 }
 
+
+// A kind-5 on a space's stream tag is that space's deletion only when its
+// owner signed it: a member wiping its own events, or anyone else replaying
+// the public tag, must not delete the space from other members' replicas.
+@(private = "file")
+sync_session_space_deletion_signal :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	owner := "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+	member := "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+	spaces := make([dynamic]json.Value, context.temp_allocator)
+	space := jobj()
+	space["spaceId"] = json.String("space-1")
+	space["keyHex"] = json.String(SPACE_KEY)
+	space["keyId"] = json.Integer(1)
+	space["owner"] = json.String(strings.to_upper(owner, context.temp_allocator))
+	append(&spaces, json.Object(space))
+	fields := jobj()
+	fields["pk"] = json.String(PK)
+	fields["conversationKey"] = json.String(CONV)
+	fields["cursor"] = json.Integer(10)
+	fields["spaces"] = json.Array(spaces)
+	call(t, "session", fields)
+	defer sync_session_close()
+
+	space_tag := wire_blind(transmute([]byte)string(SPACE_KEY), "space:space-1")
+	deletion :: proc(pubkey, h: string) -> json.Value {
+		event := jobj()
+		event["pubkey"] = json.String(pubkey)
+		event["created_at"] = json.Integer(500)
+		event["kind"] = json.Integer(SYNC_DELETE_KIND)
+		tags := make([dynamic]json.Value, context.temp_allocator)
+		append(&tags, tag("h", h), tag("k", "1078"))
+		event["tags"] = json.Array(tags)
+		event["content"] = json.String("space deleted")
+		return json.Object(event)
+	}
+	r := ingest(t, deletion(owner, space_tag), 1_000)
+	testing.expect(t, json_str(r, "spaceVanished") == "space-1", "the owner's deletion of the stream deletes the space")
+	_, has_item := json_field(r, "item")
+	testing.expect(t, !has_item)
+	cursor, _ := json_int(r, "cursor")
+	testing.expect(t, cursor == 10, "a deletion never moves the replay cursor")
+	r = ingest(t, deletion(member, space_tag), 1_000)
+	testing.expect(t, json_str(r, "spaceVanished") == "", "a member's own wipe is not the space's deletion")
+	r = ingest(t, deletion(PK, space_tag), 1_000)
+	testing.expect(t, json_str(r, "spaceVanished") == "", "the installed owner, not this identity, administers an imported space")
+	r = ingest(t, deletion(owner, "0000000000000000"), 1_000)
+	testing.expect(t, json_str(r, "spaceVanished") == "", "the owner's deletion of anything else")
+
+	// The installed owner is also who consents in every shared seal.
+	enqueue := jobj()
+	pending := jobj()
+	pending["key"] = json.String("space-1/1/c1")
+	pending["objectId"] = json.String("note-1")
+	pending["changeId"] = json.String("c1")
+	pending["bytes"] = json.String(base64.encode(wire_change(t, "note-1", 0), allocator = context.temp_allocator))
+	pending["spaceId"] = json.String("space-1")
+	pending["keyId"] = json.Integer(1)
+	enqueue["pending"] = json.Object(pending)
+	call(t, "outbox_enqueue", enqueue)
+	next := jobj()
+	next["nowMs"] = json.Integer(1)
+	item, _ := json_field(call(t, "outbox_next", next), "item")
+	sealed, _ := json_field(item, "sealed")
+	owner_tag := event_tag(json_array(json_array(sealed, "parts")[0], "tags"), "owner") or_else nil
+	testing.expect(t, tag_string(owner_tag, 1) == owner)
+}
 @(private = "file")
 sync_session_single_part_and_pubkey_rule :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
@@ -416,7 +483,9 @@ sync_session_outbox_order_backoff_and_sealing :: proc(t: ^testing.T) {
 	sealed, has_sealed = json_field(item, "sealed")
 	testing.expect(t, has_sealed)
 	tags := json_array(json_array(sealed, "parts")[0], "tags")
-	testing.expect(t, len(tags) == 2, "shared seal carries object and space tags")
+	testing.expect(t, len(tags) == 3, "shared seal carries object, space and owner-consent tags")
+	owner_tag := event_tag(tags, "owner") or_else nil
+	testing.expect(t, tag_string(owner_tag, 1) == PK, "a space without an installed owner is this identity's")
 	outbox_report(t, "space-1/1/c1", true, true, 1_002)
 	r = outbox_next_at(t, 1_003)
 	item, _ = json_field(r, "item")
@@ -503,6 +572,7 @@ open_session_with_secret :: proc(t: ^testing.T) {
 // run sequentially inside one test rather than on the runner's threads.
 @(test)
 sync_session_contract :: proc(t: ^testing.T) {
+	sync_session_space_deletion_signal(t)
 	sync_session_single_part_and_pubkey_rule(t)
 	sync_session_reassembles_out_of_order_chunks(t)
 	sync_session_faults_on_conflict_expiry_and_limits(t)

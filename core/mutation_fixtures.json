@@ -17412,5 +17412,1485 @@
     "expected_result": {},
     "expected_vanish_changes": [],
     "expected_vanish_ids": []
+  },
+  {
+    "name": "vanished space refuses a create into it",
+    "payload": {
+      "action": "create",
+      "params": {
+        "type_key": "note",
+        "name": "x",
+        "fields": {
+          "channel": {
+            "stringValue": "s1"
+          }
+        }
+      },
+      "objects": [
+        {
+          "id": "__vanished__",
+          "typeKey": "vanish_log",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Vanished objects"
+              }
+            ],
+            [
+              "vanished:s1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "vanished:gone-1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "left:s3",
+              {
+                "intValue": 300
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "s2",
+          "typeKey": "channel",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "sys",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "System"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "n2",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live note"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s2"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "stale",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Not yet purged"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s1"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "error": true,
+    "expected_error": "space \"s1\" was deleted - nothing can be written into it"
+  },
+  {
+    "name": "vanished space refuses writes to an object still in it",
+    "payload": {
+      "action": "set_field",
+      "params": {
+        "object_id": "stale",
+        "key": "name",
+        "value": {
+          "stringValue": "x"
+        }
+      },
+      "objects": [
+        {
+          "id": "__vanished__",
+          "typeKey": "vanish_log",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Vanished objects"
+              }
+            ],
+            [
+              "vanished:s1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "vanished:gone-1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "left:s3",
+              {
+                "intValue": 300
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "s2",
+          "typeKey": "channel",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "sys",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "System"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "n2",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live note"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s2"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "stale",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Not yet purged"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s1"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "error": true,
+    "expected_error": "space \"s1\" was deleted - nothing can be written into it"
+  },
+  {
+    "name": "vanished space refuses moving an object into it",
+    "payload": {
+      "action": "set_field",
+      "params": {
+        "object_id": "n2",
+        "key": "channel",
+        "value": {
+          "stringValue": "s1"
+        }
+      },
+      "objects": [
+        {
+          "id": "__vanished__",
+          "typeKey": "vanish_log",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Vanished objects"
+              }
+            ],
+            [
+              "vanished:s1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "vanished:gone-1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "left:s3",
+              {
+                "intValue": 300
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "s2",
+          "typeKey": "channel",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "sys",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "System"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "n2",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live note"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s2"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "stale",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Not yet purged"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s1"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "error": true,
+    "expected_error": "space \"s1\" was deleted - nothing can be written into it"
+  },
+  {
+    "name": "vanished space refuses seeding defaults",
+    "payload": {
+      "action": "seed_space_defaults",
+      "params": {
+        "channel_id": "s1"
+      },
+      "objects": [
+        {
+          "id": "__vanished__",
+          "typeKey": "vanish_log",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Vanished objects"
+              }
+            ],
+            [
+              "vanished:s1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "vanished:gone-1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "left:s3",
+              {
+                "intValue": 300
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "s2",
+          "typeKey": "channel",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "sys",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "System"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "n2",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live note"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s2"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "stale",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Not yet purged"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s1"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "error": true,
+    "expected_error": "space \"s1\" was deleted - nothing can be written into it"
+  },
+  {
+    "name": "vanished object refuses writes by id",
+    "payload": {
+      "action": "delete_field",
+      "params": {
+        "object_id": "gone-1",
+        "key": "name"
+      },
+      "objects": [
+        {
+          "id": "__vanished__",
+          "typeKey": "vanish_log",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Vanished objects"
+              }
+            ],
+            [
+              "vanished:s1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "vanished:gone-1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "left:s3",
+              {
+                "intValue": 300
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "s2",
+          "typeKey": "channel",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "sys",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "System"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "n2",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live note"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s2"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "stale",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Not yet purged"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s1"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "error": true,
+    "expected_error": "object \"gone-1\" was deleted - nothing can be written to it"
+  },
+  {
+    "name": "left space refuses writes into it",
+    "payload": {
+      "action": "create",
+      "params": {
+        "type_key": "note",
+        "name": "x",
+        "fields": {
+          "channel": {
+            "stringValue": "s3"
+          }
+        }
+      },
+      "objects": [
+        {
+          "id": "__vanished__",
+          "typeKey": "vanish_log",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Vanished objects"
+              }
+            ],
+            [
+              "vanished:s1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "vanished:gone-1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "left:s3",
+              {
+                "intValue": 300
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "s2",
+          "typeKey": "channel",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "sys",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "System"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "n2",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live note"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s2"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "stale",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Not yet purged"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s1"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "error": true,
+    "expected_error": "space \"s3\" was deleted - nothing can be written into it"
+  },
+  {
+    "name": "system objects stay writable beside the vanish ledger",
+    "payload": {
+      "action": "set_field",
+      "params": {
+        "object_id": "sys",
+        "key": "name",
+        "value": {
+          "stringValue": "Renamed"
+        }
+      },
+      "objects": [
+        {
+          "id": "__vanished__",
+          "typeKey": "vanish_log",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Vanished objects"
+              }
+            ],
+            [
+              "vanished:s1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "vanished:gone-1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "left:s3",
+              {
+                "intValue": 300
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "s2",
+          "typeKey": "channel",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "sys",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "System"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "n2",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live note"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s2"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "stale",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Not yet purged"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s1"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "sys",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Renamed"
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      }
+    ],
+    "expected_result": {},
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "objects in live spaces stay writable",
+    "payload": {
+      "action": "set_field",
+      "params": {
+        "object_id": "n2",
+        "key": "name",
+        "value": {
+          "stringValue": "Renamed"
+        }
+      },
+      "objects": [
+        {
+          "id": "__vanished__",
+          "typeKey": "vanish_log",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Vanished objects"
+              }
+            ],
+            [
+              "vanished:s1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "vanished:gone-1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "left:s3",
+              {
+                "intValue": 300
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "s2",
+          "typeKey": "channel",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "sys",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "System"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "n2",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live note"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s2"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "stale",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Not yet purged"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s1"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "n2",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Renamed"
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      }
+    ],
+    "expected_result": {},
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "space_leave records the space as left",
+    "payload": {
+      "action": "space_leave",
+      "params": {
+        "channel_id": "s2"
+      },
+      "objects": [
+        {
+          "id": "__vanished__",
+          "typeKey": "vanish_log",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Vanished objects"
+              }
+            ],
+            [
+              "vanished:s1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "vanished:gone-1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "left:s3",
+              {
+                "intValue": 300
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "s2",
+          "typeKey": "channel",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "sys",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "System"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "n2",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live note"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s2"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "stale",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Not yet purged"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s1"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "__vanished__",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "left:s2",
+              "value": {
+                "intValue": 1234
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      }
+    ],
+    "expected_result": {
+      "left": "s2"
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "space_leave creates the ledger",
+    "payload": {
+      "action": "space_leave",
+      "params": {
+        "channel_id": "s2"
+      },
+      "objects": [
+        {
+          "id": "s2",
+          "typeKey": "channel",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "expected_changes": [
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "__vanished__",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "vanish_log"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Vanished objects"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "left:s2",
+              "value": {
+                "intValue": 1234
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      }
+    ],
+    "expected_result": {
+      "left": "s2"
+    },
+    "expected_vanish_changes": [],
+    "expected_vanish_ids": []
+  },
+  {
+    "name": "space_leave rejects an unknown space",
+    "payload": {
+      "action": "space_leave",
+      "params": {
+        "channel_id": "nope"
+      },
+      "objects": [
+        {
+          "id": "__vanished__",
+          "typeKey": "vanish_log",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Vanished objects"
+              }
+            ],
+            [
+              "vanished:s1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "vanished:gone-1",
+              {
+                "intValue": 100
+              }
+            ],
+            [
+              "left:s3",
+              {
+                "intValue": 300
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "s2",
+          "typeKey": "channel",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "sys",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "System"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "n2",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Live note"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s2"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        },
+        {
+          "id": "stale",
+          "typeKey": "note",
+          "fields": [
+            [
+              "name",
+              {
+                "stringValue": "Not yet purged"
+              }
+            ],
+            [
+              "channel",
+              {
+                "stringValue": "s1"
+              }
+            ]
+          ],
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1,
+          "heads": []
+        }
+      ],
+      "timestamp": 1234,
+      "author": "alice",
+      "id_seed": "new-id",
+      "key_id": 0
+    },
+    "error": true,
+    "expected_error": "unknown space"
   }
 ]

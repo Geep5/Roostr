@@ -127,6 +127,8 @@ serve :: proc(port: int) {
 
 	pinger := thread.create_and_start(sse_ping_loop)
 	_ = pinger
+	recorder := thread.create_and_start(vanish_recorder_loop)
+	_ = recorder
 
 	for {
 		client, _, aerr := net.accept_tcp(sock)
@@ -469,13 +471,14 @@ handle_relations :: proc(sock: net.TCP_Socket) {
 
 handle_channels :: proc(sock: net.TCP_Socket) {
 	Ctx :: struct {
-		sock: net.TCP_Socket,
+		sock:    net.TCP_Socket,
+		keyring: json.Value,
 	}
-	ctx := Ctx{sock}
+	// Ownership lives in the keyring, not the DAG: "" is this identity.
+	ctx := Ctx{sock, channel_keys_snapshot()}
 	with_states(proc(states: map[string]^core.Object_State, user: rawptr) {
-		sock := (cast(^struct {
-				sock: net.TCP_Socket,
-			})user).sock
+		c := cast(^Ctx)user
+		sock := c.sock
 		arr := make([dynamic]json.Value, context.temp_allocator)
 		keys := make([dynamic]i64, context.temp_allocator)
 		for _, s in states {
@@ -511,6 +514,7 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 			key_id: i64 = 0
 			if v, ok := core.fields_get(s.fields, "keyId"); ok && v.kind == .Int do key_id = v.i
 			o["keyId"] = json.Integer(key_id)
+			o["owner"] = json.String(channel_foreign_owner(c.keyring, s.id))
 			o["createdAt"] = json.Integer(s.created_at)
 			// Display order for the space rail, set by drag-reorder. Absent
 			// means "use createdAt", so the two live in one number space and

@@ -272,6 +272,19 @@ Startup reconciles local history with relay history; merely wiping the relay
 does not reset the dataset. Permanent deletion uses the synced `__vanished__`
 ledger plus acknowledged NIP-09 cleanup, not manual file removal.
 
+Deleting a space vanishes everything in it, not a list: every replica treats
+an object whose `channel` names a ledger entry as vanished (`core.object_vanished`),
+so objects another computer created, or that arrive later, go too. The daemon
+purges them on load, drops imports into the space, records their ids in the
+ledger (so their relay copies are chased by id) and the core refuses any
+mutation that writes into the space. Only the space's owner deletes it for
+everyone: the sync publishes a kind-5 carrying the space stream tag
+(`["h", blind(key, "space:"+id)]`), which RoostrRelay applies to the owner's
+events and to every event consenting with `["owner", <owner>]` (all shared
+seals carry it), and which members' replicas take as the space's deletion. A
+member deleting a space only leaves it (`space_leave`: a `left:<id>` ledger
+entry, purged on that identity's devices, never chased on relays).
+
 Shared imports carry verified outer signer, source space and key version to the
 native importer. Both engines check target scope and owner-only operations;
 knowing one shared-space key is not authority over another space or its members.

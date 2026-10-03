@@ -313,7 +313,15 @@ handle_checkpoints_import :: proc(sock: net.TCP_Socket, body: []byte) {
 			rejected += 1
 			continue
 		}
-		if cp.object_id in vanished {
+		// A checkpoint is a whole state: the space rule reads its channel.
+		if entry, gone := core.object_vanished(vanished, cp.object_id, core.field_string(cp.state.fields, "channel")); gone {
+			if cp.object_id not_in vanished {
+				object_id := strings.clone(cp.object_id, context.temp_allocator)
+				vanished[object_id] = entry
+				sync.lock(&g_store.mu)
+				note_space_vanished_locked(object_id, entry)
+				sync.unlock(&g_store.mu)
+			}
 			dropped += 1
 			continue
 		}

@@ -21,6 +21,7 @@ mutation_fixture_parity :: proc(t: ^testing.T) {
 		want_error, _ := json_bool(fixture, "error")
 		if want_error {
 			testing.expect(t, err != "", name)
+			if expected := json_str(fixture, "expected_error"); expected != "" do testing.expectf(t, err == expected, "%s: error %q", name, err)
 			continue
 		}
 		testing.expect(t, err == "", name)
@@ -43,4 +44,33 @@ mutation_fixture_parity :: proc(t: ^testing.T) {
 			testing.expect(t, string(marshal(got)) == string(marshal(expected)), fmt.tprintf("%s: %s", name, key))
 		}
 	}
+}
+
+// A bundled default the user vanished (a deleted property) is not seeded
+// back - the guard would refuse it and take every other default with it -
+// while the rest of the catalog still lands.
+@(test)
+mutation_seed_skips_vanished_defaults :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	payload, err := json.parse(transmute([]byte)string(`{
+		"action": "seed_space_defaults",
+		"params": {"channel_id": "space-aa"},
+		"objects": [
+			{"id": "space-aa", "typeKey": "channel", "fields": [], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []},
+			{"id": "__vanished__", "typeKey": "vanish_log", "fields": [["vanished:bundled-rel-modifiedDate-space-aa", {"intValue": 5}]], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []}
+		],
+		"timestamp": 1234, "author": "alice", "id_seed": "seed", "key_id": 0
+	}`), parse_integers = true)
+	testing.expect(t, err == nil)
+	result, derr := mutation_dispatch(payload)
+	testing.expect_value(t, derr, "")
+	seeded, skipped := 0, 0
+	for change in json_array(result, "changes") {
+		switch json_str(change, "objectId") {
+		case "bundled-rel-modifiedDate-space-aa": skipped += 1
+		case: seeded += 1
+		}
+	}
+	testing.expect_value(t, skipped, 0)
+	testing.expect(t, seeded > 0, "the rest of the catalog is seeded")
 }

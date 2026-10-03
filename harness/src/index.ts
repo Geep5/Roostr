@@ -10,7 +10,7 @@
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
-import { API, apiFetch, chatPost, deleteField, fetchObject, guestAgents, mutate, query, setField, str, subscribe, sv, createObject, queryAll } from "./api";
+import { API, VANISH_LOG_ID, apiFetch, chatPost, deleteField, fetchObject, guestAgents, mutate, query, setField, str, subscribe, sv, createObject, queryAll, vanishedEntries, wasDeleted } from "./api";
 import { PROMPT_SEEDS, ensureSystemPrompt } from "./prompts";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
@@ -637,7 +637,10 @@ async function serve(): Promise<void> {
 				await markRunError(s.agentId, "");
 			}
 		} catch (err) {
-			console.error(`[harness] turn failed for ${s.agentId.slice(0, 8)}:`, err);
+			// Its object or space was deleted mid-turn: one quiet line, and no badge on an agent that may be gone.
+			const deleted = wasDeleted(err);
+			if (deleted) console.log(`[harness] turn for ${s.agentId.slice(0, 8)} stopped: ${err.message}`);
+			else console.error(`[harness] turn failed for ${s.agentId.slice(0, 8)}:`, err);
 			let msg = (err instanceof Error ? err.message : String(err)).split("\n")[0];
 			// API errors carry a JSON body - surface the human message, not the payload.
 			const jsonStart = msg.indexOf("{");
@@ -651,7 +654,7 @@ async function serve(): Promise<void> {
 			}
 			failure = msg.slice(0, 200);
 			report("error", failure);
-			await markRunError(s.agentId, failure);
+			if (!deleted) await markRunError(s.agentId, failure);
 		} finally {
 			busy.delete(s.agentId);
 			active.delete(s.agentId);
@@ -719,8 +722,34 @@ async function serve(): Promise<void> {
 		return withTurn(s, s.conv, () => runTurn(s.agentId, s.conv, { spawn: spawnSubagent, systemSuffix, a2aTurn: true }));
 	}
 
+	/**
+	 * The vanish ledger changed: an agent that was deleted, lives in a
+	 * deleted (vanished or left) space or holds its transcript on a deleted
+	 * object stops being served here, and a deleted default space is
+	 * replaced, so nothing this harness does writes into one.
+	 */
+	async function releaseVanished(): Promise<void> {
+		const gone = new Set((await vanishedEntries()).map((entry) => entry.objectId));
+		for (const s of [...served.values()]) {
+			if (!gone.has(s.agentId) && !gone.has(s.channelId) && !gone.has(s.conv.objectId)) continue;
+			served.delete(s.agentId);
+			agents.delete(s.agentId);
+			heldUp.delete(s.agentId);
+			await setEnabled(s.agentId, false);
+			console.log(`[harness] released ${s.name} (${s.agentId.slice(0, 8)}) - deleted with its space`);
+		}
+		if (gone.has(defaultChannelId)) {
+			const channels = (await (await apiFetch(`${API}/api/channels`)).json()) as Array<{ id: string }>;
+			defaultChannelId = channels[0]?.id ?? "";
+		}
+	}
+
 	/** Route an SSE object event to the agent whose surface it is. */
 	async function route(objectId: string): Promise<void> {
+		if (objectId === VANISH_LOG_ID) {
+			await releaseVanished().catch((err) => console.error("[harness] releasing deleted agents:", err instanceof Error ? err.message : err));
+			return;
+		}
 		await pumpMailbox(objectId);
 		// An event on the object that holds an agent's transcript: the human
 		// may have written in its discussion.

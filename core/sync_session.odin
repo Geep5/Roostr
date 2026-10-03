@@ -19,6 +19,10 @@ import "core:strings"
 
 SYNC_CHANGE_KIND :: 1078
 SYNC_CHECKPOINT_KIND :: 1079
+// NIP-09 deletion. One carrying a space's stream tag, signed by the space's
+// owner, is that space's deletion: the relay drops the stream and every
+// member's replicas vanish the space.
+SYNC_DELETE_KIND :: 5
 SYNC_GROUP_TTL_MS :: 300_000
 SYNC_MAX_GROUPS :: 128
 SYNC_MAX_GROUP_BYTES :: 16 * 1024 * 1024
@@ -28,6 +32,9 @@ Sync_Space :: struct {
 	key_hex:   string,
 	key_id:    i64,
 	space_tag: string,
+	// Hex pubkey administering the space: the installed owner, else this
+	// session's own identity (a space this device created).
+	owner:     string,
 }
 
 Sync_Group :: struct {
@@ -141,11 +148,15 @@ sync_session_set_spaces :: proc(payload: json.Value) -> string {
 		space_id, key_hex := json_str(entry, "spaceId"), json_str(entry, "keyHex")
 		key_id, _ := json_int(entry, "keyId")
 		if space_id == "" || len(key_hex) != 64 do return "spaces need spaceId and keyHex"
+		owner := strings.to_lower(json_str(entry, "owner"), context.temp_allocator)
+		if owner == "" do owner = sync_session.pk
+		if !is_hex_pubkey(owner) do return "space owner must be a hex pubkey"
 		append(&sync_session.spaces, Sync_Space{
 			space_id = sync_keep(space_id),
 			key_hex = sync_keep(key_hex),
 			key_id = key_id,
 			space_tag = wire_blind(transmute([]byte)key_hex, fmt.tprintf("space:%s", space_id), sync_session_allocator()),
+			owner = sync_keep(owner),
 		})
 	}
 	return ""
@@ -170,6 +181,8 @@ Sync_Ingest :: struct {
 	decrypt_failure: bool,
 	decode_failure:  bool,
 	h_tag:           string,
+	// The owner deleted this installed space (a kind-5 on its stream tag).
+	space_vanished:  string,
 }
 
 sync_fault :: proc(r: ^Sync_Ingest, at: i64) {
@@ -206,9 +219,14 @@ digits :: proc(s: string) -> (int, bool) {
 // former RelaySync.eventToChange step for step; see the ingest response
 // contract in sync_dispatch. A checkpoint item carries `checkpoint` instead
 // of `change`; the HOST decides whether its signer may checkpoint the object
-// (self for personal objects, the space owner for shared ones).
+// (self for personal objects, the space owner for shared ones). A verified
+// kind-5 only ever reports a space its owner deleted.
 sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 	kind, _ := json_int(event, "kind")
+	if kind == SYNC_DELETE_KIND {
+		r.space_vanished = sync_space_deleted(event)
+		return
+	}
 	if kind != SYNC_CHANGE_KIND && kind != SYNC_CHECKPOINT_KIND do return
 	tags := json_array(event, "tags")
 	if h, ok := event_tag(tags, "h"); ok do r.h_tag = tag_string(h, 1)
@@ -352,6 +370,20 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 	}
 	r.item = json.Object(item)
 	return
+}
+
+// The installed space a verified kind-5 deletes, "" for any other deletion:
+// the event must carry the space's stream tag and be signed by its owner.
+// Nobody else's deletion of the stream is a deletion of the space.
+sync_space_deleted :: proc(event: json.Value) -> string {
+	pubkey := strings.to_lower(json_str(event, "pubkey"), context.temp_allocator)
+	for space in sync_session.spaces {
+		if space.owner != pubkey do continue
+		for tag in json_array(event, "tags") {
+			if arr, ok := tag.(json.Array); ok && tag_string(arr, 0) == "h" && tag_string(arr, 1) == space.space_tag do return space.space_id
+		}
+	}
+	return ""
 }
 
 sync_open :: proc(content, conversation_key: string) -> (string, bool) {
