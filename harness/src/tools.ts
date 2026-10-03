@@ -27,6 +27,7 @@ import { machineId } from "./roster";
 import { CATALOG, fileHoldup, skillReady } from "./skillmgr";
 import { myInstallations, type InstallationRow } from "./descriptors";
 import { agentCredential, CredentialNotConnected, type CredentialRow } from "./credential-objects";
+import { coerceToolInput } from "./tool-input";
 import { noteCredentialIssue } from "./credential-issues";
 import { actionsOf } from "./credentials";
 import { clickThenReadJs, credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
@@ -868,14 +869,14 @@ export async function dispatchTool(name: string, input: Record<string, unknown>,
 		// A space without its Tool object for a built-in (none synced yet): the built-in's shipped code.
 		const fromObject = ctx.toolset?.objects.get(name) ?? SHIPPED_TOOLS.get(name);
 		if (fromObject) {
-			const run = await runObjectToolFor(fromObject, input, ctx);
+			const run = await runObjectToolFor(fromObject, coerceToolInput(fromObject.def, input), ctx);
 			if (!run.ok) return { content: `error: ${fromObject.builtin ? run.error : `${name} failed: ${run.error}`}`, isError: true };
 			const content = typeof run.value === "string" ? run.value : JSON.stringify(run.value);
 			return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };
 		}
 		const tool = BUILTIN_TOOLS.find((t) => t.def.name === name);
 		if (!tool) return { content: `unknown tool: ${name}`, isError: true };
-		const content = await tool.handler(input, ctx);
+		const content = await tool.handler(coerceToolInput(tool.def, input), ctx);
 		return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };
 	} catch (err) {
 		return { content: `error: ${err instanceof Error ? err.message : String(err)}`, isError: true };
