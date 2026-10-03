@@ -8,8 +8,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { contentHash, type ObjectTool } from "./tool-runtime";
 import { dispatchTool, toolDefs, type Toolset } from "./tools";
-import type { CustomTool } from "./types";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -26,13 +26,20 @@ afterEach(async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
-const toolset = (granted: string[], custom: CustomTool[] = []): Toolset => ({ granted: new Set(granted), custom: new Map(custom.map((t) => [t.def.name, t])) });
+const toolset = (granted: string[], custom: ObjectTool[] = []): Toolset => ({ granted: new Set(granted), objects: new Map(custom.map((t) => [t.def.name, t])) });
 const names = (t: Toolset, template = "") => new Set(toolDefs(template, 0, true, t).map((d) => d.name));
 
-const echo: CustomTool = {
-	id: "tool-1",
+const code = "return { got: input.word, on: roostr.context.objectId };";
+// Not a Tool object (no id): just its code, with nothing to fall back to.
+const echo: ObjectTool = {
+	id: "",
 	def: { name: "echo_input", description: "echo", input_schema: { type: "object", properties: { word: { type: "string" } }, required: ["word"] } },
-	code: "return { got: input.word, on: roostr.context.objectId };",
+	builtin: false,
+	code,
+	hash: contentHash(code),
+	version: 1,
+	broken: "",
+	error: "",
 };
 
 test("an agent whose Tools list neither is offered neither shell nor web", () => {

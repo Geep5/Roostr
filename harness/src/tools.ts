@@ -14,7 +14,7 @@ import {
 	lv,
 	deleteField,
 	mutate,
-	query,
+	plainValue,
 	queryAll,
 	setField,
 	str,
@@ -22,9 +22,6 @@ import {
 	type ObjectJSON,
 	type QueryRow,
 	type ValueJSON,
-	type BlockJSON,
-	API,
-	apiFetch,
 	guestAgents,
 } from "./api";
 import { invalidateServing, machines, serverOf } from "./machine";
@@ -35,19 +32,21 @@ import { agentCredential, CredentialNotConnected, type CredentialRow } from "./c
 import { noteCredentialIssue } from "./credential-issues";
 import { actionsOf } from "./credentials";
 import { clickThenReadJs, credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
-import { blockLine, isAgentAuthor, listOrdinals } from "./surfaces";
+import { bodyBlocks, isAgentAuthor, type BodyLine } from "./surfaces";
 import { inlineMarks, mdToTree, STYLE, type MdBlock } from "./markdown";
 import { featuredEvents, matcherinoToken, setFeatured } from "./matcherino";
 import { readSkill } from "./skills";
-import { buildNeighborhood, buildSpaceMap, relationDefs, savedViewBody, spaceFilterFor, typeDefs } from "./spacemap";
+import { assertInSpace, defaultSpaceId, relationDefs, spaceFilterFor, typeDefs } from "./spacemap";
 import * as memory from "./memory";
-import { TOOL_RESULT_TRUNCATE, type CustomTool, type ToolDef } from "./types";
+import { TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
 import { HUMAN_THREAD, agentSubject, convBlocks, humanRef, postTo } from "./conv";
 import { sendMessage } from "./mailbox";
 import { fetchInstallations } from "./descriptors";
 import { fetchCapabilities, fullySetUp, linkValue } from "./capabilities";
 import { SKILLS_KEY, machineSkillKeys, skillForKey, skillIds } from "./skills";
-import { runToolCode } from "./tool-host";
+import type { ToolRun } from "./tool-host";
+import { SHIPPED_TOOLS, runObjectTool, type ObjectTool } from "./tool-runtime";
+import { TOOL_EDIT_REFUSAL, TOOL_TYPE } from "./tool-sdk";
 import { requestCapability, type CapabilityOperation } from "./capability-messages";
 import type { AgentEndpoint, AgentMessage } from "./api";
 
@@ -98,7 +97,7 @@ export interface ToolContext {
 	submitResult?: (content: string) => void;
 	/** Compaction carryover: object ids touched by tools this run. */
 	touched: Set<string>;
-	/** What the agent's Tools property adds (shell/web, its custom tools); unset = every built-in, no custom tools (tests, internal callers). */
+	/** What the agent runs from Tool objects and what its Tools property unlocks (tool-objects.ts); unset = every built-in, built-ins in objects running their shipped code, no custom tools (tests, internal callers). */
 	toolset?: Toolset;
 	/** The agent's Project folder (`repo_path`) on this machine - shell_exec's cwd when set. */
 	workspacePath?: string;
@@ -120,10 +119,10 @@ export interface RegisteredTool {
  */
 const GATED_TOOLS: Readonly<Record<string, true>> = { shell_exec: true, web_fetch: true };
 
-/** What an agent's Tools property adds to the core set (tool-objects.ts): the gated built-ins it lists and its custom tools by name. */
+/** What an agent runs from Tool objects (tool-objects.ts): the gated built-ins its Tools list, and every tool whose code is a Tool object's - its space's code-in-object built-ins and its custom tools - by name. */
 export interface Toolset {
 	granted: ReadonlySet<string>;
-	custom: ReadonlyMap<string, CustomTool>;
+	objects: ReadonlyMap<string, ObjectTool>;
 }
 
 const S = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -131,83 +130,14 @@ const N = (v: unknown): number | undefined => (typeof v === "number" ? v : undef
 const A = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
 /**
- * The body as addressable lines, in reading order: each block's id, its
- * nesting depth and the line a human reads. Conversation subtrees are not
- * body and never appear; editing tools accept only these ids.
- */
-export function bodyBlocks(obj: ObjectJSON): Array<{ id: string; depth: number; line: string; block: BlockJSON }> {
-	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
-	const ordinals = listOrdinals(obj);
-	const referenced = new Set<string>();
-	for (const b of obj.blocks) for (const c of b.childrenIds) referenced.add(c);
-	const out: Array<{ id: string; depth: number; line: string; block: BlockJSON }> = [];
-	const walk = (id: string, depth: number) => {
-		const b = byId.get(id);
-		if (!b) return;
-		const kind = b.content.custom?.contentType;
-		if (kind === "chat" || kind === "discussion" || kind === "agent_message") return;
-		out.push({ id, depth, line: blockLine(b, ordinals.get(b.id)), block: b });
-		for (const c of b.childrenIds) walk(c, depth + 1);
-	};
-	for (const b of obj.blocks) if (!referenced.has(b.id) && b.id !== "__discussion__") walk(b.id, 0);
-	return out;
-}
-
-/**
- * A stored value as plain JSON for the agent: links as their target ids,
- * maps as objects, lists of either. Only strings used to survive - a
- * query's filters, an agent's credentials, a task's agent all read as
- * null, and an agent guessed at a view it could not see.
- */
-function plainValue(v: ValueJSON | undefined): unknown {
-	if (!v) return null;
-	if (v.stringValue !== undefined) return v.stringValue;
-	if (v.intValue !== undefined) return v.intValue;
-	if (v.floatValue !== undefined) return v.floatValue;
-	if (v.boolValue !== undefined) return v.boolValue;
-	if (v.linkValue) return v.linkValue.targetId ?? null;
-	if (v.valuesValue) return v.valuesValue.items.map(plainValue);
-	if (v.mapValue) return Object.fromEntries(Object.entries(v.mapValue.entries ?? {}).map(([k, x]) => [k, plainValue(x)]));
-	return null;
-}
-
-async function summarizeObject(obj: ObjectJSON): Promise<string> {
-	const fields: Record<string, unknown> = {};
-	for (const [k, v] of Object.entries(obj.fields)) fields[k] = plainValue(v);
-	const blocks = bodyBlocks(obj).slice(0, 400);
-	// A link card reads as the linked object's name on the page, so the agent sees that too (plus the id to open it).
-	const lines = await Promise.all(
-		blocks.map(async (b) => {
-			const target = b.block.content.custom?.contentType === "link" ? (b.block.content.custom.meta?.["target"] ?? "") : "";
-			if (!target) return b.line;
-			const o = await fetchObject(target).catch(() => null);
-			return o && !o.deleted ? `[link] "${str(o.fields, "name") || "Untitled"}" (${o.typeKey}, object ${target})` : `[link to a deleted object ${target}]`;
-		}),
-	);
-	const total = bodyBlocks(obj).length;
-	return JSON.stringify(
-		{
-			id: obj.id,
-			typeKey: obj.typeKey,
-			fields,
-			// Body, one entry per block: pass `block` to the object_*_block tools to change it.
-			body: blocks.map((b, i) => ({ block: b.id, depth: b.depth, line: lines[i].slice(0, 300) })),
-			...(total > 400 ? { bodyTruncated: total - 400 } : {}),
-		},
-		null,
-		1,
-	);
-}
-
-/**
  * The object and body line a block tool acts on (`id`, else this turn's
  * object; `block` must be a line of that body - never conversation), or
  * the refusal to return instead.
  */
-async function bodyTarget(input: Record<string, unknown>, ctx: ToolContext): Promise<{ obj: ObjectJSON; entry: ReturnType<typeof bodyBlocks>[number] } | string> {
+async function bodyTarget(input: Record<string, unknown>, ctx: ToolContext): Promise<{ obj: ObjectJSON; entry: BodyLine } | string> {
 	const id = S(input.id) || ctx.boundObject || "";
 	if (!id) return "error: nothing written. No object id and this turn is not running on an object.";
-	const obj = await assertInSpace(await fetchObject(id), ctx);
+	const obj = await writable(id, ctx);
 	ctx.touched.add(obj.id);
 	const entry = bodyBlocks(obj).find((e) => e.id === S(input.block));
 	if (!entry) return `error: nothing written. "${S(input.block)}" is not a line of this object's body. Read object_get's body for the ids.`;
@@ -223,39 +153,24 @@ async function lineNow(objectId: string, blockId: string): Promise<string> {
 // ── Space containment ────────────────────────────────────────────
 //
 // Agents are citizens of exactly one space. Reads list/search only that
-// space; every id-taking tool verifies the target lives there. Bundled
-// definitions (relations/types with no space stamp) are global
-// infrastructure and stay readable. Objects with no stamp belong to the
-// default space (the display fallback), so the default space includes
-// them.
-
-
-let defaultSpaceCache: string | null = null;
-async function defaultSpaceId(): Promise<string> {
-	if (defaultSpaceCache !== null) return defaultSpaceCache;
-	const res = await apiFetch(`${API}/api/channels`);
-	const chans = (await res.json()) as Array<{ id: string }>;
-	defaultSpaceCache = chans[0]?.id ?? "";
-	return defaultSpaceCache;
-}
+// space; every id-taking tool verifies the target lives there (spacemap.ts
+// assertInSpace). Bundled definitions (relations/types with no space stamp)
+// are global infrastructure and stay readable. Objects with no stamp belong
+// to the default space (the display fallback), so the default space
+// includes them.
 
 async function agentSpace(ctx: ToolContext): Promise<string> {
 	return ctx.channelId || (await defaultSpaceId());
 }
 
-async function spaceFilter(ctx: ToolContext): Promise<Record<string, unknown>> {
-	const own = await agentSpace(ctx);
-	return own === (await defaultSpaceId())
-		? { key: "channel", condition: "in", value: [own, ""] }
-		: { key: "channel", condition: "equal", value: own };
-}
-
-/** Throws unless the object belongs to the agent's space. */
-async function assertInSpace(obj: ObjectJSON, ctx: ToolContext): Promise<ObjectJSON> {
-	const stamp = str(obj.fields, "channel");
-	const own = await agentSpace(ctx);
-	const objSpace = stamp || (await defaultSpaceId());
-	if (objSpace !== own) throw new Error(`object ${obj.id.slice(0, 8)} is outside this agent's space`);
+/**
+ * The object a write acts on: in the agent's space, and never a Tool -
+ * people edit tools, agents only call them (the SDK refuses the same for
+ * tools whose code is a Tool object's, tool-sdk.ts).
+ */
+async function writable(id: string, ctx: ToolContext): Promise<ObjectJSON> {
+	const obj = await assertInSpace(await fetchObject(id), ctx.channelId);
+	if (obj.typeKey === TOOL_TYPE) throw new Error(TOOL_EDIT_REFUSAL);
 	return obj;
 }
 
@@ -315,7 +230,7 @@ const PROPERTY_FORMATS = ["shorttext", "longtext", "number", "status", "tag", "d
 const propertyKey = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || `prop_${Date.now()}`;
 
 /** Infrastructure types: never retyped, and nothing is retyped into them. */
-const FIXED_TYPES = new Set(["agent", "machine", "install", "capability", "channel", "relation", "type", "template", "query", "collection", "set", "chat", "skill"]);
+const FIXED_TYPES = new Set(["agent", "machine", "install", "capability", "channel", "relation", "type", "template", "query", "collection", "set", "chat", "skill", "tool"]);
 
 const WEEKDAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
@@ -694,7 +609,7 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			const limit = Math.min(N(input.limit) ?? 12, 25);
-			const rows = (await queryAll({ filters: [await spaceFilter(ctx)] })).filter((r: QueryRow) => !["agent", "machine", "relation", "type", "template", "skill", "channel"].includes(r.typeKey));
+			const rows = (await queryAll({ filters: [await spaceFilterFor(ctx.channelId)] })).filter((r: QueryRow) => !["agent", "machine", "relation", "type", "template", "skill", "channel"].includes(r.typeKey));
 			const out: string[] = ["RECENTLY EDITED (newest first):"];
 			for (const r of [...rows].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)) {
 				out.push(`- ${r.typeKey} "${str(r.fields, "name") || r.id.slice(0, 8)}" ${new Date(r.updatedAt).toLocaleString()}`);
@@ -738,39 +653,6 @@ const TOOLS: RegisteredTool[] = [
 	},
 	{
 		def: {
-			name: "object_search",
-			description: "Full-text search over this space's objects (names, fields, block content). Returns id/type/name rows.",
-			input_schema: { type: "object", properties: { query: { type: "string" }, type: { type: "string" } }, required: ["query"] },
-		},
-		handler: async (input, ctx) => {
-			const rows = await query({ textQuery: S(input.query), type: S(input.type) || undefined, filters: [await spaceFilter(ctx)], limit: 20 });
-			return JSON.stringify(rows.map((r) => ({ id: r.id, type: r.typeKey, name: r.name ?? str(r.fields, "name") })));
-		},
-	},
-	{
-		def: {
-			name: "object_list",
-			description: "List this space's recent objects, optionally by type (note, task, query, collection, skill, …).",
-			input_schema: { type: "object", properties: { type: { type: "string" }, limit: { type: "number" } } },
-		},
-		handler: async (input, ctx) => {
-			const rows = await query({ type: S(input.type) || undefined, filters: [await spaceFilter(ctx)], limit: N(input.limit) ?? 20 });
-			return JSON.stringify(rows.map((r) => ({ id: r.id, type: r.typeKey, name: r.name ?? str(r.fields, "name") })));
-		},
-	},
-	{
-		def: {
-			name: "object_get",
-			description: "Read one object: fields plus full text content. Protected from output pruning — reads stay in context.",
-			input_schema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
-		},
-		handler: async (input, ctx) => {
-			ctx.touched.add(S(input.id));
-			return await summarizeObject(await assertInSpace(await fetchObject(S(input.id)), ctx));
-		},
-	},
-	{
-		def: {
 			name: "discussion_read",
 			description:
 				"Read one conversation on an object (object_get shows only the body). Returns the last messages oldest-first with author names and timestamps. Use it when the current message refers to earlier conversation on that object.",
@@ -785,7 +667,7 @@ const TOOLS: RegisteredTool[] = [
 			},
 		},
 		handler: async (input, ctx) => {
-			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx);
+			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx.channelId);
 			ctx.touched.add(obj.id);
 			const msgs: Array<{ author: string; text: string; ts: number }> = [];
 			for (const { block } of convBlocks(obj, S(input.thread_id) || HUMAN_THREAD)) {
@@ -828,6 +710,7 @@ const TOOLS: RegisteredTool[] = [
 			},
 		},
 		handler: async (input, ctx) => {
+			if (S(input.type_key) === TOOL_TYPE) throw new Error(TOOL_EDIT_REFUSAL);
 			const { id } = await createObject(S(input.name), S(input.type_key) || "note", ctx.channelId ? { channel: sv(ctx.channelId) } : undefined);
 			ctx.touched.add(id);
 			if (S(input.text)) {
@@ -845,7 +728,7 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
-			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx);
+			const obj = await writable(S(input.id), ctx);
 			const key = S(input.key);
 			if (SCHEDULE_KEYS.has(key.toLowerCase())) {
 				return `error: nothing written. "${key}" does not make an object repeat - call object_set_repeat (every N days/weeks/months/years, weekdays, time).`;
@@ -902,7 +785,7 @@ const TOOLS: RegisteredTool[] = [
 		handler: async (input, ctx) => {
 			const id = S(input.id) || ctx.boundObject || "";
 			if (!id) return "error: nothing written. No object id and this turn is not running on an object.";
-			const obj = await assertInSpace(await fetchObject(id), ctx);
+			const obj = await writable(id, ctx);
 			ctx.touched.add(obj.id);
 			const unit = S(input.unit);
 			if (!["minute", "hour", "day", "week", "month", "year"].includes(unit)) return `error: nothing written. unit must be minute, hour, day, week, month or year, not "${unit}".`;
@@ -959,7 +842,7 @@ const TOOLS: RegisteredTool[] = [
 		handler: async (input, ctx) => {
 			const id = S(input.id) || ctx.boundObject || "";
 			if (!id) return "error: nothing written. No object id and this turn is not running on an object.";
-			const obj = await assertInSpace(await fetchObject(id), ctx);
+			const obj = await writable(id, ctx);
 			ctx.touched.add(obj.id);
 			if (!obj.fields["repeat"]) return "error: nothing written. This object does not repeat.";
 			await mutate("repeat_clear", { object_id: obj.id });
@@ -1028,7 +911,7 @@ const TOOLS: RegisteredTool[] = [
 		handler: async (input, ctx) => {
 			const id = S(input.id) || ctx.boundObject || "";
 			if (!id) return "error: nothing cleared. No object id and this turn is not running on an object.";
-			const obj = await assertInSpace(await fetchObject(id), ctx);
+			const obj = await writable(id, ctx);
 			ctx.touched.add(obj.id);
 			const key = S(input.key);
 			if (key === "repeat") return "error: nothing cleared. Stop a repeat with object_clear_repeat.";
@@ -1058,7 +941,7 @@ const TOOLS: RegisteredTool[] = [
 		handler: async (input, ctx) => {
 			const id = S(input.id) || ctx.boundObject || "";
 			if (!id) return "error: nothing changed. No object id and this turn is not running on an object.";
-			const obj = await assertInSpace(await fetchObject(id), ctx);
+			const obj = await writable(id, ctx);
 			ctx.touched.add(obj.id);
 			const key = S(input.type);
 			if (FIXED_TYPES.has(obj.typeKey)) return `error: nothing changed. A ${obj.typeKey} object keeps its type.`;
@@ -1083,7 +966,7 @@ const TOOLS: RegisteredTool[] = [
 			input_schema: { type: "object", properties: { object_id: { type: "string" } }, required: ["object_id"] },
 		},
 		handler: async (input, ctx) => {
-			const obj = await assertInSpace(await fetchObject(S(input.object_id)), ctx);
+			const obj = await writable(S(input.object_id), ctx);
 			ctx.touched.add(obj.id);
 			const { next } = await mutate("occurrence_complete", { object_id: obj.id, ...localClock() });
 			return typeof next === "number" ? `ok; next occurrence ${new Date(next).toLocaleString()}` : "ok";
@@ -1106,7 +989,7 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
-			await assertInSpace(await fetchObject(S(input.id)), ctx);
+			await writable(S(input.id), ctx);
 			return await appendBody(S(input.id), S(input.text), S(input.under));
 		},
 	},
@@ -1193,7 +1076,7 @@ const TOOLS: RegisteredTool[] = [
 			if (ids.length === 0) return "error: nothing removed. Pass the block ids to remove.";
 			const id = S(input.id) || ctx.boundObject || "";
 			if (!id) return "error: nothing removed. No object id and this turn is not running on an object.";
-			const obj = await assertInSpace(await fetchObject(id), ctx);
+			const obj = await writable(id, ctx);
 			ctx.touched.add(obj.id);
 			const body = bodyBlocks(obj);
 			const missing = ids.filter((b) => !body.some((e) => e.id === b));
@@ -1260,11 +1143,11 @@ const TOOLS: RegisteredTool[] = [
 		handler: async (input, ctx) => {
 			const id = S(input.id) || ctx.boundObject || "";
 			if (!id) return "error: nothing added. No object id and this turn is not running on an object.";
-			const obj = await assertInSpace(await fetchObject(id), ctx);
+			const obj = await writable(id, ctx);
 			ctx.touched.add(obj.id);
 			const target = await fetchObject(S(input.target)).catch(() => null);
 			if (!target || target.deleted) return `error: nothing added. No object "${S(input.target)}" - find it with object_search first.`;
-			await assertInSpace(target, ctx);
+			await assertInSpace(target, ctx.channelId);
 			const body = bodyBlocks(obj);
 			const anchor = S(input.under) || S(input.after);
 			if (anchor && !body.some((e) => e.id === anchor)) return `error: nothing added. "${anchor}" is not a line of this object's body.`;
@@ -1284,7 +1167,7 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
-			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx);
+			const obj = await writable(S(input.id), ctx);
 			if (obj.deleted) return `Nothing deleted: "${str(obj.fields, "name") || "Untitled"}" is already in the bin.`;
 			await mutate("delete", { object_id: obj.id });
 			return `Moved "${str(obj.fields, "name") || "Untitled"}" (${obj.typeKey}) to the bin; object_restore brings it back.`;
@@ -1298,7 +1181,7 @@ const TOOLS: RegisteredTool[] = [
 		},
 		handler: async (input, ctx) => {
 			ctx.touched.add(S(input.id));
-			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx);
+			const obj = await writable(S(input.id), ctx);
 			if (!obj.deleted) return `error: nothing restored. "${str(obj.fields, "name") || "Untitled"}" is not in the bin.`;
 			await mutate("restore", { object_id: obj.id });
 			const after = await fetchObject(obj.id);
@@ -1312,7 +1195,7 @@ const TOOLS: RegisteredTool[] = [
 			input_schema: { type: "object", properties: { object_id: { type: "string" }, text: { type: "string" } }, required: ["object_id", "text"] },
 		},
 		handler: async (input, ctx) => {
-			await assertInSpace(await fetchObject(S(input.object_id)), ctx);
+			await assertInSpace(await fetchObject(S(input.object_id)), ctx.channelId);
 			// An object id alone addresses its human discussion; agent-to-agent
 			// talk has its own thread (agent_ask) and never lands here.
 			await postTo(humanRef(S(input.object_id)), S(input.text), ctx.agentId);
@@ -1522,75 +1405,51 @@ const SUBMIT_TOOL: RegisteredTool = {
 	},
 };
 
-// ── Evaluation toolkit: reads are free; query before you ever ask ──
+// ── Recovery core ────────────────────────────────────────────────
 
-const EVAL_TOOLS: RegisteredTool[] = [
-	{
-		def: {
-			name: "space_map",
-			description: "The space census: every type (with the human's definition and count), every saved view, every agent alive. Free - use it to orient.",
-			input_schema: { type: "object", properties: {} },
+/** object_get as the harness keeps it, frozen: what object_get's Tool object falls back to (RECOVERY_CORE). */
+const objectGetCopy: Handler = async (input, ctx) => {
+	ctx.touched.add(S(input.id));
+	const obj = await assertInSpace(await fetchObject(S(input.id)), ctx.channelId);
+	const fields: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(obj.fields)) fields[k] = plainValue(v);
+	const body = bodyBlocks(obj);
+	const shown = body.slice(0, 400);
+	// A link card reads as the linked object's name on the page, so the agent sees that too (plus the id to open it).
+	const lines = await Promise.all(
+		shown.map(async (b) => {
+			const target = b.block.content.custom?.contentType === "link" ? (b.block.content.custom.meta?.["target"] ?? "") : "";
+			if (!target) return b.line;
+			const o = await fetchObject(target).catch(() => null);
+			return o && !o.deleted ? `[link] "${str(o.fields, "name") || "Untitled"}" (${o.typeKey}, object ${target})` : `[link to a deleted object ${target}]`;
+		}),
+	);
+	return JSON.stringify(
+		{
+			id: obj.id,
+			typeKey: obj.typeKey,
+			fields,
+			// Body, one entry per block: pass `block` to the object_*_block tools to change it.
+			body: shown.map((b, i) => ({ block: b.id, depth: b.depth, line: lines[i].slice(0, 300) })),
+			...(body.length > shown.length ? { bodyTruncated: body.length - shown.length } : {}),
 		},
-		handler: async (_input, ctx) => await buildSpaceMap(ctx.channelId),
-	},
-	{
-		def: {
-			name: "neighborhood",
-			description: "Typed connections of an object - links in/out with property names, collection memberships, saved views matching it, and which neighbors have agents. Defaults to your own object. Free - hop the graph with this instead of waking anyone.",
-			input_schema: { type: "object", properties: { id: { type: "string", description: "object id; omit for the object of this conversation" } } },
-		},
-		handler: async (input, ctx) => {
-			const id = S(input.id) || ctx.boundObject || "";
-			if (!id) throw new Error("no id given and this turn is not running on an object");
-			await assertInSpace(await fetchObject(id), ctx);
-			return await buildNeighborhood(id, ctx.channelId);
-		},
-	},
-	{
-		def: {
-			name: "find",
-			description: "Structured query over this space - the same engine the human's views run on. filters: [{key, condition, value}], conditions equal/notEqual/in/notIn/greater/less/empty/notEmpty. Free and unlimited: query until you know who to ask and what to ask.",
-			input_schema: {
-				type: "object",
-				properties: {
-					type: { type: "string", description: "type key (person, task, ...)" },
-					text: { type: "string", description: "full-text query" },
-					filters: { type: "array", description: "engine filters", items: { type: "object" } },
-					limit: { type: "number" },
-				},
-			},
-		},
-		handler: async (input, ctx) => {
-			const sf = await spaceFilterFor(ctx.channelId);
-			const extra = Array.isArray(input.filters)
-				? (input.filters as Array<Record<string, unknown>>).filter((f) => typeof f?.key === "string" && f.key !== "channel")
-				: [];
-			const rows = await query({
-				type: S(input.type) || undefined,
-				textQuery: S(input.text) || undefined,
-				filters: [...extra, sf],
-				limit: Math.min(100, N(input.limit) ?? 25),
-			});
-			return JSON.stringify(rows.map((r) => ({ id: r.id, type: r.typeKey, name: r.name ?? str(r.fields, "name") })));
-		},
-	},
-	{
-		def: {
-			name: "query_run",
-			description: "Run one of the human's saved views (a query or collection) exactly as their UI runs it - the views are the human's own semantic map of the space. Free.",
-			input_schema: { type: "object", properties: { query_id: { type: "string" } }, required: ["query_id"] },
-		},
-		handler: async (input, ctx) => {
-			const view = await assertInSpace(await fetchObject(S(input.query_id)), ctx);
-			if (!["query", "set", "collection"].includes(view.typeKey)) throw new Error(`${view.id.slice(0, 8)} is a ${view.typeKey}, not a saved view`);
-			const rels = await relationDefs(ctx.channelId);
-			const body = await savedViewBody(view, ctx.channelId, rels);
-			if (!body) return "[] (empty view)";
-			const rows = await query({ ...body, limit: 100 });
-			return JSON.stringify(rows.map((r) => ({ id: r.id, type: r.typeKey, name: r.name ?? str(r.fields, "name") })));
-		},
-	},
-];
+		null,
+		1,
+	);
+};
+
+/**
+ * The recovery core: the harness's own frozen copies of what anyone needs
+ * to repair things from anywhere - read an object, set a property, write
+ * and edit its text, reply in its chat. A built-in whose code is its Tool
+ * object's falls back to its copy here only when that code is broken and
+ * this computer has no earlier version of it that worked (tool-runtime.ts);
+ * the ones still harness-run simply run from here.
+ */
+const RECOVERY_CORE: Readonly<Record<string, Handler>> = {
+	object_get: objectGetCopy,
+	...Object.fromEntries(TOOLS.filter((t) => ["object_set_field", "object_add_text", "object_edit_block", "chat_reply_on"].includes(t.def.name)).map((t) => [t.def.name, t.handler])),
+};
 
 // A request commits to the sender's DAG before any delivery or recipient turn.
 // Only human-rooted turns initiate agent requests; replies cannot fan out
@@ -1630,7 +1489,7 @@ const A2A_TOOL: RegisteredTool = {
 		const names: string[] = [];
 		for (const id of ids) {
 			const target = await fetchObject(id);
-			if (target.typeKey !== "channel" || target.id !== (await agentSpace(ctx))) await assertInSpace(target, ctx);
+			if (target.typeKey !== "channel" || target.id !== (await agentSpace(ctx))) await assertInSpace(target, ctx.channelId);
 			let holder: Pick<ObjectJSON, "id" | "typeKey" | "fields"> | undefined;
 			let endpointObjectId: string;
 			if (target.typeKey === "agent") {
@@ -1675,8 +1534,8 @@ const A2A_TOOL: RegisteredTool = {
 	},
 };
 
-/** Every built-in tool, as this harness runs it - what the built-in Tool objects mirror (tool-objects.ts). */
-export const BUILTIN_TOOLS: readonly RegisteredTool[] = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL, A2A_TOOL, SPAWN_TOOL, SHELL_TOOL, SUBMIT_TOOL];
+/** Every built-in the harness runs itself - what the harness-run built-in Tool objects mirror (tool-objects.ts). The others run from their Tool objects (tool-code.ts). */
+export const BUILTIN_TOOLS: readonly RegisteredTool[] = [...TOOLS, ...WEB_TOOLS, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL, A2A_TOOL, SPAWN_TOOL, SHELL_TOOL, SUBMIT_TOOL];
 
 /**
  * The tools an agent is offered for a template ("" = a top-level agent).
@@ -1686,8 +1545,11 @@ export const BUILTIN_TOOLS: readonly RegisteredTool[] = [...TOOLS, ...EVAL_TOOLS
  * every built-in, for callers that only inspect the catalog.
  */
 export function toolDefs(template: string, depth: number, allowAsk = false, toolset?: Toolset): ToolDef[] {
-	const builtins = builtinDefs(template, depth, allowAsk).filter((d) => !toolset || GATED_TOOLS[d.name] !== true || toolset.granted.has(d.name));
-	const custom = toolset && template !== "explore" && template !== "installer" ? [...toolset.custom.values()].map((t) => t.def) : [];
+	const builtins = builtinDefs(template, depth, allowAsk)
+		.filter((d) => !toolset || GATED_TOOLS[d.name] !== true || toolset.granted.has(d.name))
+		// A built-in whose code is its Tool object's is offered as that object describes it.
+		.map((d) => toolset?.objects.get(d.name)?.def ?? d);
+	const custom = toolset && template !== "explore" && template !== "installer" ? [...toolset.objects.values()].filter((t) => !t.builtin).map((t) => t.def) : [];
 	return [...builtins, ...custom];
 }
 
@@ -1698,7 +1560,7 @@ export function toolDefs(template: string, depth: number, allowAsk = false, tool
  */
 function builtinDefs(template: string, depth: number, allowAsk: boolean): ToolDef[] {
 	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read", "capability_list"]);
-	let defs = [...TOOLS, ...EVAL_TOOLS, ...WEB_TOOLS, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL].map((t) => t.def);
+	let defs = [...[...SHIPPED_TOOLS.values()].map((t) => t.def), ...[...TOOLS, ...WEB_TOOLS, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL].map((t) => t.def)];
 	if (template === "" && depth === 0) defs.push(A2A_TOOL.def);
 	if (template === "explore") defs = defs.filter((d) => READ_ONLY.has(d.name));
 	const out = [...defs];
@@ -1714,13 +1576,17 @@ function builtinDefs(template: string, depth: number, allowAsk: boolean): ToolDe
 	return out;
 }
 
-/** A custom Tool, run in its own process (tool-host.ts); its result as the model reads it. */
-async function runCustomTool(tool: CustomTool, input: Record<string, unknown>, ctx: ToolContext): Promise<{ content: string; isError: boolean }> {
-	const run = await runToolCode(tool.code, input, { agentId: ctx.agentId, objectId: ctx.boundObject ?? "", channelId: ctx.channelId, machineId: await machineId() });
+/**
+ * Run a tool whose code is a Tool object's (tool-runtime.ts) for this turn:
+ * a built-in in the recovery core falls back to its frozen copy.
+ */
+export async function runObjectToolFor(tool: ObjectTool, input: Record<string, unknown>, ctx: ToolContext): Promise<ToolRun> {
+	const copy = tool.builtin && Object.hasOwn(RECOVERY_CORE, tool.def.name) ? RECOVERY_CORE[tool.def.name] : undefined;
+	const context = { agentId: ctx.agentId, objectId: ctx.boundObject ?? "", channelId: ctx.channelId, machineId: await machineId() };
+	const run = await runObjectTool(tool, input, context, copy && (() => copy(input, ctx)));
+	for (const id of run.touched) ctx.touched.add(id);
 	if (run.log.trim()) console.log(`[tool] ${tool.def.name}: ${run.log.trim().slice(-500)}`);
-	if (!run.ok) return { content: `error: ${tool.def.name} failed: ${run.error}`, isError: true };
-	const content = typeof run.value === "string" ? run.value : JSON.stringify(run.value);
-	return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };
+	return run;
 }
 
 export async function dispatchTool(name: string, input: Record<string, unknown>, ctx: ToolContext): Promise<{ content: string; isError: boolean }> {
@@ -1728,8 +1594,14 @@ export async function dispatchTool(name: string, input: Record<string, unknown>,
 		if (ctx.toolset && GATED_TOOLS[name] === true && !ctx.toolset.granted.has(name)) {
 			return { content: `error: ${name} is not one of your tools - your Tools don't list it. Do the task without it, or tell the person what you'd need.`, isError: false };
 		}
-		const custom = ctx.toolset?.custom.get(name);
-		if (custom) return await runCustomTool(custom, input, ctx);
+		// A space without its Tool object for a built-in (none synced yet): the built-in's shipped code.
+		const fromObject = ctx.toolset?.objects.get(name) ?? SHIPPED_TOOLS.get(name);
+		if (fromObject) {
+			const run = await runObjectToolFor(fromObject, input, ctx);
+			if (!run.ok) return { content: `error: ${fromObject.builtin ? run.error : `${name} failed: ${run.error}`}`, isError: true };
+			const content = typeof run.value === "string" ? run.value : JSON.stringify(run.value);
+			return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };
+		}
 		const tool = BUILTIN_TOOLS.find((t) => t.def.name === name);
 		if (!tool) return { content: `unknown tool: ${name}`, isError: true };
 		const content = await tool.handler(input, ctx);

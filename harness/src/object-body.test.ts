@@ -10,6 +10,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BlockJSON, ObjectJSON } from "./api";
+import objectGet from "./tool-code/object_get";
+import { TOOL_EDIT_REFUSAL, createRoostr } from "./tool-sdk";
 import { dispatchTool } from "./tools";
 
 const originalFetch = globalThis.fetch;
@@ -67,9 +69,11 @@ function daemon(obj: ObjectJSON) {
 
 const ctx = () => ({ agentId: "agent", channelId: "space", boundObject: "page", depth: 0, allowAsk: false, touched: new Set<string>() });
 
-test("object_get lists body lines with their ids and never the conversation", async () => {
+test("object_get (its shipped code) lists body lines with their ids and never the conversation", async () => {
 	daemon(page());
-	const got = JSON.parse((await dispatchTool("object_get", { id: "page" }, ctx())).content);
+	const touched = new Set<string>();
+	const got = JSON.parse(await objectGet({ id: "page" }, createRoostr({ agentId: "agent", objectId: "page", channelId: "space", machineId: "m" }, touched)));
+	expect(touched).toEqual(new Set(["page"]));
 	expect(got.body).toEqual([
 		{ block: "plan", depth: 0, line: "# Plan" },
 		{ block: "todo", depth: 1, line: "- [ ] Review with Brian" },
@@ -114,4 +118,22 @@ test("editing a line keeps its style and says when inline formatting is cleared"
 	const reply = (await dispatchTool("object_edit_block", { block: "todo", text: "Review with Brian and Lou" }, ctx())).content;
 	expect(mutations[0]).toMatchObject({ action: "block_update", block_id: "todo", content: { text: { text: "Review with Brian and Lou", style: 8, marks: [] } } });
 	expect(reply).toContain("formatting");
+});
+
+test("agents can't change a Tool object - its fields, its code lines, or by deleting it - and tools written as objects can't either", async () => {
+	const tool = { ...page(), typeKey: "tool" };
+	const mutations = daemon(tool);
+	for (const [name, input] of [
+		["object_set_field", { id: "page", key: "description", value: "rewritten" }],
+		["object_edit_block", { block: "note", text: "return 1;" }],
+		["object_add_text", { id: "page", text: "return 2;" }],
+		["object_delete", { id: "page" }],
+	] as const) {
+		expect((await dispatchTool(name, input, ctx())).content).toStartWith(`error: ${TOOL_EDIT_REFUSAL}`);
+	}
+	const roostr = createRoostr({ agentId: "agent", objectId: "", channelId: "space", machineId: "m" }, new Set());
+	await expect(roostr.setField("page", "description", { stringValue: "rewritten" })).rejects.toThrow(TOOL_EDIT_REFUSAL);
+	await expect(roostr.mutate("block_add", { object_id: "page", block: {} })).rejects.toThrow(TOOL_EDIT_REFUSAL);
+	await expect(roostr.create("sneaky", "tool")).rejects.toThrow(TOOL_EDIT_REFUSAL);
+	expect(mutations).toEqual([]);
 });

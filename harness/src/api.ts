@@ -207,6 +207,24 @@ export const guestAgents = (fields: Record<string, ValueJSON>): string[] => {
 	return (v.valuesValue?.items ?? []).flatMap((i) => (i.stringValue ? [i.stringValue] : i.linkValue?.targetId ? [i.linkValue.targetId] : []));
 };
 
+/**
+ * A stored value as plain JSON for an agent: links as their target ids,
+ * maps as objects, lists of either. Only strings used to survive - a
+ * query's filters, an agent's credentials, a task's agent all read as
+ * null, and an agent guessed at a view it could not see.
+ */
+export function plainValue(v: ValueJSON | undefined): unknown {
+	if (!v) return null;
+	if (v.stringValue !== undefined) return v.stringValue;
+	if (v.intValue !== undefined) return v.intValue;
+	if (v.floatValue !== undefined) return v.floatValue;
+	if (v.boolValue !== undefined) return v.boolValue;
+	if (v.linkValue) return v.linkValue.targetId ?? null;
+	if (v.valuesValue) return v.valuesValue.items.map(plainValue);
+	if (v.mapValue) return Object.fromEntries(Object.entries(v.mapValue.entries ?? {}).map(([k, x]) => [k, plainValue(x)]));
+	return null;
+}
+
 export const sv = (s: string): ValueJSON => ({ stringValue: s });
 export const iv = (n: number): ValueJSON => ({ intValue: Math.round(n) });
 export const fv = (n: number): ValueJSON => ({ floatValue: n });

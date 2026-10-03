@@ -13,13 +13,15 @@ const context = { agentId: "agent", objectId: "object", channelId: "space", mach
 
 test("a tool's result is what it returns; what it prints is only its log", async () => {
 	const run = await runToolCode('console.log("checking", input.n); return [input.n, roostr.context.channelId];', { n: 3 }, context);
-	expect(run).toEqual({ ok: true, value: [3, "space"], log: "checking 3\n" });
+	expect(run).toEqual({ ok: true, value: [3, "space"], log: "checking 3\n", touched: [] });
 });
 
-test("a tool that throws reports why", async () => {
-	const run = await runToolCode('throw new Error("mailbox not set");', {}, context);
-	expect(run.ok).toBe(false);
-	expect(run.ok ? "" : run.error).toBe("mailbox not set");
+test("a tool that throws reports why: an error it throws on purpose is ordinary, a JavaScript error of its own code is a crash", async () => {
+	const refused = await runToolCode('throw new Error("mailbox not set");', {}, context);
+	expect(refused).toMatchObject({ ok: false, error: "mailbox not set", crashed: false });
+	const broken = await runToolCode("return input.missing.field;", {}, context);
+	expect(broken).toMatchObject({ ok: false, crashed: true });
+	expect(broken.ok ? "" : broken.error).toStartWith("TypeError: ");
 });
 
 // Real time on purpose: the limit is enforced on a separate process, which

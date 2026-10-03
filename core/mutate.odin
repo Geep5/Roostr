@@ -1140,10 +1140,12 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	{"skills", "object", "Skills", "🛠️", false, false, 0, {}},
 	// Tools an agent can call: Tool objects (name = what the model calls,
 	// description, inputs, TypeScript in the body). Built-in tools are Tool
-	// objects too, written and kept current by the harness (`tool_builtin`).
+	// objects too, written by the harness (`tool_builtin`). The harness
+	// numbers each new version of a Tool's code as it loads it (`tool_version`).
 	{"tools", "object", "Tools", "🧰", false, false, 0, {}},
 	{"tool_inputs", "longtext", "Inputs", "📥", false, false, 1, {}},
 	{"tool_builtin", "checkbox", "Built-in", "🔒", false, true, 1, {}},
+	{"tool_version", "number", "Version", "🔢", false, true, 1, {}},
 	// A repeating object's pre-check: a Tool run (no AI) before each turn;
 	// an empty result ends the run there.
 	{"check_first", "object", "Check first", "🔎", false, false, 1, {}},

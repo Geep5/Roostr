@@ -260,6 +260,37 @@ export function blockLine(b: BlockJSON, ordinal?: number): string {
 	}
 }
 
+/** One line of an object's body: its block id, nesting depth and the line a human reads. */
+export interface BodyLine {
+	id: string;
+	depth: number;
+	line: string;
+	block: BlockJSON;
+}
+
+/**
+ * The body as addressable lines, in reading order: each block's id, its
+ * nesting depth and the line a human reads. Conversation subtrees are not
+ * body and never appear; editing tools accept only these ids.
+ */
+export function bodyBlocks(obj: ObjectJSON): BodyLine[] {
+	const byId = new Map(obj.blocks.map((b) => [b.id, b]));
+	const ordinals = listOrdinals(obj);
+	const referenced = new Set<string>();
+	for (const b of obj.blocks) for (const c of b.childrenIds) referenced.add(c);
+	const out: BodyLine[] = [];
+	const walk = (id: string, depth: number) => {
+		const b = byId.get(id);
+		if (!b) return;
+		const kind = b.content.custom?.contentType;
+		if (kind === "chat" || kind === "discussion" || kind === "agent_message") return;
+		out.push({ id, depth, line: blockLine(b, ordinals.get(b.id)), block: b });
+		for (const c of b.childrenIds) walk(c, depth + 1);
+	};
+	for (const b of obj.blocks) if (!referenced.has(b.id) && b.id !== "__discussion__") walk(b.id, 0);
+	return out;
+}
+
 /** Serialize an object's blocks to markdown-ish, line-boundary capped. */
 export function serializeBody(obj: ObjectJSON): { body: string; truncated: boolean } {
 	const byId = new Map(obj.blocks.map((b) => [b.id, b]));

@@ -30,6 +30,13 @@ export async function spaceFilterFor(spaceId: string): Promise<Record<string, un
 		: { key: "channel", condition: "equal", value: own };
 }
 
+/** The object, unless it lives outside `spaceId` (then this throws): what every id-taking agent tool checks. */
+export async function assertInSpace(obj: ObjectJSON, spaceId: string): Promise<ObjectJSON> {
+	const dflt = await defaultSpaceId();
+	if ((str(obj.fields, "channel") || dflt) !== (spaceId || dflt)) throw new Error(`object ${obj.id.slice(0, 8)} is outside this agent's space`);
+	return obj;
+}
+
 async function queryTotal(body: Record<string, unknown>): Promise<number> {
 	const res = await apiFetch(`${API}/api/query`, {
 		method: "POST",
