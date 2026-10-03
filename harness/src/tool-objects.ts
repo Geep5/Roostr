@@ -12,16 +12,14 @@
  * is left out until fixed.
  *
  * Every built-in tool is a Tool object too (`tool_builtin`), one per space
- * this computer serves an agent in, marked shipped-with-Roostr. Two kinds:
- *
- * - Code in the object (`tool_runtime: "object"`, tool-code.ts): the
- *   object's code is what runs, so a person may edit it. The harness seeds
- *   it and replaces it with a newer shipped version only while it is
- *   exactly what was seeded (`tool_seeded_hash`); an edited one is kept,
- *   and `tool_update_available` (the newer harness's time) says Roostr now
- *   ships something else.
- * - Harness-run (the rest, tools.ts): the object shows the handler's source
- *   in a Code block; editing it changes nothing.
+ * this computer serves an agent in, marked shipped-with-Roostr, and its
+ * object's code is what runs (`tool_runtime: "object"`, tool-code.ts), so a
+ * person may edit it. The harness seeds it and replaces it with a newer
+ * shipped version only while it is exactly what was seeded
+ * (`tool_seeded_hash`); an edited one is kept, and `tool_update_available`
+ * (the newer harness's time) says Roostr now ships something else. A
+ * built-in an older harness wrote as a photo of its own handler (no
+ * `tool_runtime`) is rewritten to the shipped code: nobody could edit it.
  *
  * Several computers on different harness versions share those objects, so
  * each carries the commit time of the harness that last wrote it
@@ -38,19 +36,18 @@ import { createObject, deleteField, fetchObject, mutate, queryAll, setField, str
 import { bodyBlocks } from "./surfaces";
 import { TOOL_TYPE } from "./tool-sdk";
 import { CODE_STYLE, INPUTS_KEY, NOT_LOADED, SHIPPED_TOOLS, automatedError, compileProblem, contentHash, fallbackVersion, numberVersion, parseToolInputs, renderToolInputs, toolCode, type ObjectTool } from "./tool-runtime";
-import { BUILTIN_TOOLS, dispatchTool, runObjectToolFor, type ToolContext, type Toolset } from "./tools";
+import { dispatchTool, runObjectToolFor, type ToolContext, type Toolset } from "./tools";
 
 export const TOOLS_KEY = "tools";
 const BUILTIN_KEY = "tool_builtin";
 const SOURCE_AT_KEY = "tool_source_at";
-/** "object": a built-in whose object's code is what runs; absent: a harness-run built-in's photo. */
+/** "object": a built-in whose object's code is what runs (every built-in a current harness writes). */
 const RUNTIME_KEY = "tool_runtime";
-/** The hash of the description, inputs and code the harness last seeded a code-in-object built-in with. */
+/** The hash of the description, inputs and code the harness last seeded a built-in with. */
 const SEEDED_KEY = "tool_seeded_hash";
-/** On an edited code-in-object built-in: the time of a harness that ships a different version. */
+/** On an edited built-in: the time of a harness that ships a different version. */
 const UPDATE_KEY = "tool_update_available";
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
-export const BUILTIN_NOTE = "Built-in: runs the harness's own code (harness/src/tools.ts). Edits here don't change what runs.";
 export const SHIPPED_NOTE = "Built-in, shipped with Roostr: the code below is what runs, so editing it changes this tool for every agent in the space. A newer Roostr replaces it only while it is unedited.";
 
 /** Object ids a link property lists: one link, a list of links, or plain id strings. */
@@ -75,20 +72,16 @@ function runsObjectCode(fields: Record<string, ValueJSON>): boolean {
 
 // ── Built-ins ───────────────────────────────────────────────────
 
-/** A built-in tool as its Tool object shows it: `code` is what runs ("object") or the handler's source, shown only ("harness"). */
+/** A built-in tool as its Tool object starts out: `code` is what runs. */
 export interface BuiltinSpec {
 	name: string;
 	description: string;
 	inputs: string;
-	runtime: "object" | "harness";
 	code: string;
 }
 
 export function builtinSpecs(): BuiltinSpec[] {
-	return [
-		...[...SHIPPED_TOOLS.values()].map((t): BuiltinSpec => ({ name: t.def.name, description: t.def.description, inputs: renderToolInputs(t.def.input_schema), runtime: "object", code: t.code })),
-		...BUILTIN_TOOLS.map((t): BuiltinSpec => ({ name: t.def.name, description: t.def.description, inputs: renderToolInputs(t.def.input_schema), runtime: "harness", code: t.handler.toString() })),
-	];
+	return [...SHIPPED_TOOLS.values()].map((t) => ({ name: t.def.name, description: t.def.description, inputs: renderToolInputs(t.def.input_schema), code: t.code }));
 }
 
 const BUILTIN_NAMES: ReadonlySet<string> = new Set(builtinSpecs().map((s) => s.name));
@@ -102,7 +95,7 @@ let sourceAt: Promise<number> | undefined;
  */
 function builtinSourceAt(): Promise<number> {
 	sourceAt ??= (async () => {
-		const files = [join(import.meta.dir, "tools.ts"), join(import.meta.dir, "tool-objects.ts"), ...[...SHIPPED_TOOLS.keys()].map((name) => join(import.meta.dir, "tool-code", `${name}.ts`))];
+		const files = [join(import.meta.dir, "tool-objects.ts"), join(import.meta.dir, "tool-runtime.ts"), ...[...SHIPPED_TOOLS.keys()].map((name) => join(import.meta.dir, "tool-code", `${name}.ts`))];
 		const proc = Bun.spawn(["git", "log", "-1", "--format=%ct", "--", ...files], { cwd: import.meta.dir, stdout: "pipe", stderr: "ignore" });
 		const out = (await new Response(proc.stdout).text()).trim();
 		if ((await proc.exited) === 0 && /^\d+$/.test(out)) return Number(out) * 1000;
@@ -114,19 +107,6 @@ function builtinSourceAt(): Promise<number> {
 /** What a built-in's object holds that a person may change, as one hash. */
 const specHash = (description: string, inputs: string, code: string): string => contentHash(JSON.stringify([description, inputs, code]));
 
-/** Does the harness-run Tool object already show `spec` exactly? */
-function showsSpec(obj: ObjectJSON, spec: BuiltinSpec): boolean {
-	const body = bodyBlocks(obj);
-	return (
-		str(obj.fields, "description") === spec.description &&
-		str(obj.fields, INPUTS_KEY) === spec.inputs &&
-		body.length === 2 &&
-		body[0].block.content.text?.text === BUILTIN_NOTE &&
-		body[1].block.content.text?.style === CODE_STYLE &&
-		body[1].block.content.text.text === spec.code
-	);
-}
-
 /** Make the object hold `spec`: its description, inputs, and a body of the note and the code. */
 async function writeSpec(obj: ObjectJSON, spec: BuiltinSpec): Promise<void> {
 	if (str(obj.fields, "description") !== spec.description) await setField(obj.id, "description", sv(spec.description));
@@ -136,16 +116,16 @@ async function writeSpec(obj: ObjectJSON, spec: BuiltinSpec): Promise<void> {
 }
 
 async function writeBody(id: string, spec: BuiltinSpec): Promise<void> {
-	for (const [text, style] of [[spec.runtime === "object" ? SHIPPED_NOTE : BUILTIN_NOTE, 0], [spec.code, CODE_STYLE]] as const) {
+	for (const [text, style] of [[SHIPPED_NOTE, 0], [spec.code, CODE_STYLE]] as const) {
 		await mutate("block_add", { object_id: id, block: { id: crypto.randomUUID(), childrenIds: [], content: { text: { text, style } } } });
 	}
 }
 
 /**
- * Bring a code-in-object built-in to `spec` (a newer harness's), unless a
- * person edited it: what the harness seeded (or a harness-run photo, which
- * nobody could edit) is replaced; an edit is kept, flagged when Roostr now
- * ships something else. Returns what happened, null for nothing.
+ * Bring a built-in to `spec` (a newer harness's), unless a person edited
+ * it: what the harness seeded (or an older harness's photo of its handler,
+ * which nobody could edit) is replaced; an edit is kept, flagged when
+ * Roostr now ships something else. Returns what happened, null for nothing.
  */
 async function syncShippedCode(obj: ObjectJSON, spec: BuiltinSpec, at: number): Promise<"rewritten" | "kept" | null> {
 	const shipped = specHash(spec.description, spec.inputs, spec.code);
@@ -201,7 +181,8 @@ export async function syncBuiltinTools(space: string, specs: BuiltinSpec[], at: 
 				description: sv(spec.description),
 				...(spec.inputs ? { [INPUTS_KEY]: sv(spec.inputs) } : {}),
 				[BUILTIN_KEY]: { boolValue: true },
-				...(spec.runtime === "object" ? { [RUNTIME_KEY]: sv("object"), [SEEDED_KEY]: sv(specHash(spec.description, spec.inputs, spec.code)) } : {}),
+				[RUNTIME_KEY]: sv("object"),
+				[SEEDED_KEY]: sv(specHash(spec.description, spec.inputs, spec.code)),
 				[SOURCE_AT_KEY]: { intValue: at },
 			});
 			await writeBody(id, spec);
@@ -211,17 +192,9 @@ export async function syncBuiltinTools(space: string, specs: BuiltinSpec[], at: 
 		}
 		ids.set(spec.name, row.id);
 		if ((row.fields[SOURCE_AT_KEY]?.intValue ?? 0) >= at) continue;
-		const obj = await fetchObject(row.id);
-		if (spec.runtime === "object") {
-			const done = await syncShippedCode(obj, spec, at);
-			if (done === "rewritten") rewritten.push(spec.name);
-			if (done === "kept") kept.push(spec.name);
-			continue;
-		}
-		if (showsSpec(obj, spec)) continue;
-		await writeSpec(obj, spec);
-		await setField(obj.id, SOURCE_AT_KEY, { intValue: at });
-		rewritten.push(spec.name);
+		const done = await syncShippedCode(await fetchObject(row.id), spec, at);
+		if (done === "rewritten") rewritten.push(spec.name);
+		if (done === "kept") kept.push(spec.name);
 	}
 	return { ids, created, rewritten, kept };
 }
@@ -326,7 +299,7 @@ async function topAgent(agent: ObjectJSON): Promise<ObjectJSON> {
 
 /**
  * What an agent runs from Tool objects (a helper: its top-level agent's),
- * read fresh each call: its space's code-in-object built-ins, and what its
+ * read fresh each call: its space's built-ins, and what its
  * Tools property lists - gated built-ins and custom tools.
  */
 export async function agentToolset(agent: ObjectJSON): Promise<Toolset> {
@@ -363,9 +336,10 @@ export async function agentToolset(agent: ObjectJSON): Promise<Toolset> {
 }
 
 /**
- * Run one Tool object without a model (a repeating object's Check first): a
- * harness-run built-in through dispatchTool, anything else from its code.
- * Throws when it can't run or fails.
+ * Run one Tool object without a model (a repeating object's Check first):
+ * from its code; a built-in whose object an older harness wrote as a photo
+ * of its handler runs this harness's shipped code by name. Throws when it
+ * can't run or fails.
  */
 export async function runToolObject(id: string, input: Record<string, unknown>, ctx: ToolContext): Promise<{ name: string; value: unknown }> {
 	const obj = await fetchObject(id);

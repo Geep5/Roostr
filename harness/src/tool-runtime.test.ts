@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { HarnessServe } from "./tool-host";
 import { compileProblem, contentHash, runObjectTool, type ObjectTool } from "./tool-runtime";
 
 const originalFetch = globalThis.fetch;
@@ -57,6 +58,10 @@ const tool = (version: number, code: string, error = ""): ObjectTool => ({
 	error,
 });
 const context = { agentId: "agent", objectId: "", channelId: "space", machineId: "mac-1" };
+/** These tools never ask the harness anything. */
+const noHarness: HarnessServe = async (method) => {
+	throw new Error(`unexpected harness call ${method}`);
+};
 
 /** The Error texts written to the Tool, in order (null: cleared). */
 function notes(mutations: Array<Record<string, unknown>>): Array<string | null> {
@@ -70,40 +75,40 @@ function notes(mutations: Array<Record<string, unknown>>): Array<string | null> 
 
 test("a version that crashes or won't compile runs the last one that worked here, and the Tool says so", async () => {
 	const mutations = daemon();
-	expect(await runObjectTool(tool(1, 'return "v1";'), {}, context)).toMatchObject({ ok: true, value: "v1" });
+	expect(await runObjectTool(tool(1, 'return "v1";'), {}, context, noHarness)).toMatchObject({ ok: true, value: "v1" });
 	expect(notes(mutations)).toEqual([]);
-	expect(await runObjectTool(tool(2, "return input.missing.field;"), {}, context)).toMatchObject({ ok: true, value: "v1" });
+	expect(await runObjectTool(tool(2, "return input.missing.field;"), {}, context, noHarness)).toMatchObject({ ok: true, value: "v1" });
 	expect(notes(mutations)).toEqual([expect.stringMatching(/^Version 2 failed on Test Mac: TypeError: .+ - running version 1$/)]);
 	const unparsable = tool(3, "return {");
 	expect(unparsable.broken).toContain("doesn't compile");
-	expect(await runObjectTool(unparsable, {}, context)).toMatchObject({ ok: true, value: "v1" });
+	expect(await runObjectTool(unparsable, {}, context, noHarness)).toMatchObject({ ok: true, value: "v1" });
 	expect(notes(mutations).at(-1)).toMatch(/^Version 3 failed on Test Mac: its code doesn't compile: .+ - running version 1$/);
 });
 
 test("an error a tool reports on purpose is its answer, not a broken version", async () => {
 	const mutations = daemon();
-	await runObjectTool(tool(1, 'return "v1";'), {}, context);
-	expect(await runObjectTool(tool(2, 'throw new Error("no such mailbox");'), {}, context)).toMatchObject({ ok: false, error: "no such mailbox", crashed: false });
+	await runObjectTool(tool(1, 'return "v1";'), {}, context, noHarness);
+	expect(await runObjectTool(tool(2, 'throw new Error("no such mailbox");'), {}, context, noHarness)).toMatchObject({ ok: false, error: "no such mailbox", crashed: false });
 	expect(notes(mutations)).toEqual([]);
 });
 
 test("once the current version works the computer takes back its own note, and never writes over a human's", async () => {
 	const mutations = daemon();
-	await runObjectTool(tool(1, 'return "v1";'), {}, context);
-	expect(await runObjectTool(tool(3, 'return "v3";', "Version 2 failed on Test Mac: TypeError: x - running version 1"), {}, context)).toMatchObject({ ok: true, value: "v3" });
+	await runObjectTool(tool(1, 'return "v1";'), {}, context, noHarness);
+	expect(await runObjectTool(tool(3, 'return "v3";', "Version 2 failed on Test Mac: TypeError: x - running version 1"), {}, context, noHarness)).toMatchObject({ ok: true, value: "v3" });
 	expect(notes(mutations)).toEqual([null]);
 	// Another computer's note is that computer's to take back.
-	await runObjectTool(tool(3, 'return "v3";', "Version 2 failed on Lou's PC: TypeError: x - running version 1"), {}, context);
+	await runObjectTool(tool(3, 'return "v3";', "Version 2 failed on Lou's PC: TypeError: x - running version 1"), {}, context, noHarness);
 	expect(notes(mutations)).toEqual([null]);
-	expect(await runObjectTool(tool(4, "return input.missing.field;", "Waiting on Lou's API key"), {}, context)).toMatchObject({ ok: true, value: "v3" });
+	expect(await runObjectTool(tool(4, "return input.missing.field;", "Waiting on Lou's API key"), {}, context, noHarness)).toMatchObject({ ok: true, value: "v3" });
 	expect(notes(mutations)).toEqual([null]);
 });
 
 test("with no version that worked here, a recovery copy answers when the harness keeps one; else the crash is the answer", async () => {
 	const mutations = daemon();
-	expect(await runObjectTool(tool(1, "return input.missing.field;"), {}, context, async () => "the frozen copy")).toMatchObject({ ok: true, value: "the frozen copy" });
+	expect(await runObjectTool(tool(1, "return input.missing.field;"), {}, context, noHarness, async () => "the frozen copy")).toMatchObject({ ok: true, value: "the frozen copy" });
 	expect(notes(mutations).at(-1)).toMatch(/ - running the harness's recovery copy$/);
-	const run = await runObjectTool(tool(1, "return input.missing.field;", String(notes(mutations).at(-1))), {}, context);
+	const run = await runObjectTool(tool(1, "return input.missing.field;", String(notes(mutations).at(-1))), {}, context, noHarness);
 	expect(run.ok).toBe(false);
 	expect(notes(mutations).at(-1)).toMatch(/ - no working version on this computer$/);
 });

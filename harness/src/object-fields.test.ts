@@ -17,7 +17,12 @@ import objectClearRepeat from "./tool-code/object_clear_repeat";
 import objectSetField from "./tool-code/object_set_field";
 import objectSetRepeat from "./tool-code/object_set_repeat";
 import objectSetType from "./tool-code/object_set_type";
-import { createRoostr, type Roostr } from "./tool-sdk";
+import { createRoostr, harnessCalls, type Roostr } from "./tool-sdk";
+
+/** These tools never ask the harness anything. */
+const noHarness = harnessCalls(async (method) => {
+	throw new Error(`unexpected harness call ${method}`);
+});
 
 const originalFetch = globalThis.fetch;
 let previousRoot: string | undefined;
@@ -135,7 +140,7 @@ const SHIPPED: Record<string, (input: Record<string, unknown>, roostr: Roostr) =
 /** One call of a shipped tool in a turn on "task", its refusal read as the agent reads it. */
 async function call(name: string, input: Record<string, unknown>): Promise<string> {
 	try {
-		return await SHIPPED[name](input, createRoostr({ agentId: "agent", objectId: "task", channelId: "space", machineId: "m" }, new Set()));
+		return await SHIPPED[name](input, createRoostr({ agentId: "agent", objectId: "task", channelId: "space", machineId: "m" }, new Set(), noHarness));
 	} catch (err) {
 		return `error: ${err instanceof Error ? err.message : String(err)}`;
 	}

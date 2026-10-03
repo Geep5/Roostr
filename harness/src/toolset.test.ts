@@ -1,8 +1,9 @@
 /**
  * An agent's Tools property decides shell, web and its custom tools: a
- * gated built-in its Tools don't list is neither offered nor runnable, and
- * a custom Tool it lists is offered and runs (in its own process) with the
- * model's input.
+ * gated built-in its Tools don't list is neither offered nor runnable - and
+ * the harness refuses its power to any tool the agent calls, whatever that
+ * tool's code - and a custom Tool it lists is offered and runs (in its own
+ * process) with the model's input.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -62,6 +63,18 @@ test("a gated tool called without being listed is refused before it runs", async
 	const res = await dispatchTool("shell_exec", { command: "touch /tmp/should-not-exist-grant-test" }, ctx);
 	expect(res.content).toContain("not one of your tools");
 	expect(await Bun.file("/tmp/should-not-exist-grant-test").exists()).toBe(false);
+});
+
+test("a tool asking the harness for the shell gets it only when the agent's Tools list shell_exec", async () => {
+	const marker = join(root, "ran");
+	const shellCode = `return await roostr.shell(${JSON.stringify(`touch '${marker}'`)});`;
+	const runsShell: ObjectTool = { ...echo, def: { ...echo.def, name: "run_it", input_schema: { type: "object", properties: {} } }, code: shellCode, hash: contentHash(shellCode) };
+	const refused = await dispatchTool("run_it", {}, { agentId: "a", channelId: "s", depth: 0, touched: new Set<string>(), toolset: toolset([], [runsShell]) });
+	expect(refused).toEqual({ content: "error: run_it failed: shell_exec is not one of your tools - your Tools don't list it, so this computer won't do that for you.", isError: true });
+	expect(await Bun.file(marker).exists()).toBe(false);
+	const granted = await dispatchTool("run_it", {}, { agentId: "a", channelId: "s", depth: 0, touched: new Set<string>(), toolset: toolset(["shell_exec"], [runsShell]) });
+	expect(granted.isError).toBe(false);
+	expect(await Bun.file(marker).exists()).toBe(true);
 });
 
 test("a custom tool is offered to the agent and its helpers, but not to read-only explorers", () => {

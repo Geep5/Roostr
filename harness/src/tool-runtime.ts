@@ -26,7 +26,7 @@ import { machines } from "./machine";
 import { machineId } from "./roster";
 import { bodyBlocks } from "./surfaces";
 import { SHIPPED_CODE } from "./tool-code";
-import { runToolCode, toolModule, type ToolRun } from "./tool-host";
+import { runToolCode, toolModule, type HarnessServe, type ToolRun } from "./tool-host";
 import type { ToolRunContext } from "./tool-sdk";
 import type { ToolDef } from "./types";
 
@@ -48,6 +48,7 @@ const INPUT_TYPES: Record<string, Record<string, unknown>> = {
 	number: { type: "number" },
 	boolean: { type: "boolean" },
 	"string[]": { type: "array", items: { type: "string" } },
+	"number[]": { type: "array", items: { type: "number" } },
 	"object[]": { type: "array", items: { type: "object" } },
 	object: { type: "object" },
 };
@@ -92,13 +93,13 @@ interface SchemaProperty {
 
 /** A built-in's input schema in the `tool_inputs` line format. */
 export function renderToolInputs(schema: Record<string, unknown>): string {
-	// Built-in schemas are this harness's own literals (tools.ts).
+	// Built-in schemas are this harness's own (its shipped Inputs, parsed: tool-code.ts).
 	const properties = (schema.properties ?? {}) as Record<string, SchemaProperty>;
 	const required = Array.isArray(schema.required) ? schema.required : [];
 	return Object.entries(properties)
 		.map(([name, p]) => {
 			const list = p.type === "array";
-			const listOf = p.items?.type === "string" || p.items?.type === "object" ? `${p.items.type}[]` : "object";
+			const listOf = p.items?.type === "string" || p.items?.type === "number" || p.items?.type === "object" ? `${p.items.type}[]` : "object";
 			const choices = p.type === "string" && p.enum && p.enum.length > 1 && p.enum.every((c) => CHOICE.test(c)) ? p.enum.join("|") : "";
 			const type = choices || (p.type === "integer" ? "number" : list ? listOf : p.type && Object.hasOwn(INPUT_TYPES, p.type) ? p.type : "object");
 			const notes = [p.description?.replace(/\s+/g, " ").trim() ?? "", list && type === "object" ? "(a JSON list)" : "", p.enum && !choices ? `(one of: ${p.enum.join(", ")})` : ""].filter(Boolean).join(" ");
@@ -258,12 +259,13 @@ export async function fallbackVersion(tool: ObjectTool): Promise<GoodVersion | n
 /**
  * Run an object-defined tool: its current code; else - it won't compile or
  * it crashed - the last version that worked on this computer; else the
- * harness's `recovery` copy, when it keeps one. Never throws.
+ * harness's `recovery` copy, when it keeps one. `serve` answers its calls
+ * to the harness. Never throws.
  */
-export async function runObjectTool(tool: ObjectTool, input: Record<string, unknown>, context: ToolRunContext, recovery?: () => Promise<string>): Promise<ToolRun> {
+export async function runObjectTool(tool: ObjectTool, input: Record<string, unknown>, context: ToolRunContext, serve: HarnessServe, recovery?: () => Promise<string>): Promise<ToolRun> {
 	let why = tool.broken;
 	if (!why) {
-		const run = await runToolCode(tool.code, input, context);
+		const run = await runToolCode(tool.code, input, context, serve);
 		if (run.ok || !run.crashed) {
 			if (tool.id) await worked(tool);
 			return run;
@@ -274,7 +276,7 @@ export async function runObjectTool(tool: ObjectTool, input: Record<string, unkn
 	console.log(`[tool] ${tool.def.name} v${tool.version} can't run here: ${why.slice(0, 300)}`);
 	const good = await fallbackVersion(tool);
 	if (good) {
-		const run = await runToolCode(good.code, input, context);
+		const run = await runToolCode(good.code, input, context, serve);
 		if (run.ok || !run.crashed) {
 			await noteFailure(tool, why, `running version ${good.version}`);
 			return run;

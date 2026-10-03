@@ -1,16 +1,16 @@
 /**
- * Tool objects: the Inputs property becomes the schema the model gets; the
- * harness-run built-in mirrors are rewritten only by a newer harness with
- * something new to show, so computers on different versions never take
- * turns; a built-in whose code is its object's is replaced only while
- * nobody edited it; and a Tool's version counts changes to its code alone.
+ * Tool objects: the Inputs property becomes the schema the model gets; a
+ * built-in's object is rewritten only by a newer harness, so computers on
+ * different versions never take turns, and only while nobody edited it - an
+ * older harness's photo of its own handler becomes the shipped code; and a
+ * Tool's version counts changes to its code alone.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BlockJSON, ObjectJSON, ValueJSON } from "./api";
-import { BUILTIN_NOTE, SHIPPED_NOTE, builtinSpecs, objectToolFrom, syncBuiltinTools, type BuiltinSpec } from "./tool-objects";
+import { SHIPPED_NOTE, builtinSpecs, objectToolFrom, syncBuiltinTools, type BuiltinSpec } from "./tool-objects";
 import { parseToolInputs, renderToolInputs } from "./tool-runtime";
 
 test("inputs become a schema: types, choices, descriptions, and ? for optional", () => {
@@ -56,10 +56,10 @@ test("every built-in's inputs render in the Inputs format and read back to the s
 		if (!("schema" in parsed)) throw new Error(`${spec.name}: ${parsed.error}`);
 		expect(Object.keys(parsed.schema.properties as Record<string, unknown>).length).toBe(spec.inputs ? spec.inputs.split("\n").length : 0);
 	}
-	expect(renderToolInputs({ type: "object", properties: { id: { type: "string", description: "object id" }, unit: { type: "string", enum: ["day", "week"] }, ids: { type: "array", items: { type: "string" } }, filters: { type: "array", items: { type: "object" } } }, required: ["unit"] })).toBe(
-		"id?: string - object id\nunit: day|week\nids?: string[]\nfilters?: object[]",
+	expect(renderToolInputs({ type: "object", properties: { id: { type: "string", description: "object id" }, unit: { type: "string", enum: ["day", "week"] }, ids: { type: "array", items: { type: "string" } }, bounties: { type: "array", items: { type: "number" } }, filters: { type: "array", items: { type: "object" } } }, required: ["unit"] })).toBe(
+		"id?: string - object id\nunit: day|week\nids?: string[]\nbounties?: number[]\nfilters?: object[]",
 	);
-	expect(parseToolInputs("filters?: object[]")).toEqual({ schema: { type: "object", properties: { filters: { type: "array", items: { type: "object" } } } } });
+	expect(parseToolInputs("filters?: object[]\nbounties: number[]")).toEqual({ schema: { type: "object", properties: { filters: { type: "array", items: { type: "object" } }, bounties: { type: "array", items: { type: "number" } } }, required: ["bounties"] } });
 });
 
 // ── Built-in sync against a fake daemon ──
@@ -82,10 +82,10 @@ afterEach(async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
-const spec: BuiltinSpec = { name: "space_activity", description: "Recent life of this space.", inputs: "limit?: number", runtime: "harness", code: "async (input) => input.limit" };
+const spec: BuiltinSpec = { name: "space_activity", description: "Recent life of this space.", inputs: "limit?: number", code: "return input.limit;" };
 
-/** A harness-run built-in Tool object as some harness wrote it: `shows` = what its fields and body hold, `at` its source time. */
-function toolObject(shows: BuiltinSpec, at: number): ObjectJSON {
+/** A built-in Tool object as an older harness wrote it, showing its own handler's source (no `tool_runtime`): `shows` = what its fields and body hold, `at` its source time. */
+function handlerPhoto(shows: BuiltinSpec, at: number): ObjectJSON {
 	const fields: Record<string, ValueJSON> = {
 		channel: { stringValue: "space" },
 		name: { stringValue: shows.name },
@@ -95,8 +95,8 @@ function toolObject(shows: BuiltinSpec, at: number): ObjectJSON {
 		tool_source_at: { intValue: at },
 	};
 	const blocks = [
-		{ id: "note", childrenIds: [], content: { text: { text: BUILTIN_NOTE, style: 0 } } },
-		{ id: "code", childrenIds: [], content: { text: { text: shows.code, style: 5 } } },
+		{ id: "note", childrenIds: [], content: { text: { text: "Built-in: runs the harness's own code (harness/src/tools.ts). Edits here don't change what runs.", style: 0 } } },
+		{ id: "code", childrenIds: [], content: { text: { text: "async (input) => input.limit", style: 5 } } },
 	];
 	return { id: "tool-object", typeKey: "tool", fields, blocks, deleted: false, createdAt: 1, updatedAt: 1 };
 }
@@ -118,27 +118,20 @@ function daemon(objects: ObjectJSON[]): Array<Record<string, unknown>> {
 	return mutations;
 }
 
-test("a built-in that already shows this source is left alone, even by a newer harness", async () => {
-	const mutations = daemon([toolObject(spec, 1000)]);
+test("an older harness never rewrites what a newer one wrote", async () => {
+	const mutations = daemon([handlerPhoto(spec, 3000)]);
 	const res = await syncBuiltinTools("space", [spec], 2000);
 	expect(mutations).toEqual([]);
 	expect(res.ids.get("space_activity")).toBe("tool-object");
 });
 
-test("an older harness never rewrites what a newer one wrote", async () => {
-	const newer = { ...spec, description: "Recent life, newer words.", code: "async (input) => input.limit ?? 12" };
-	const mutations = daemon([toolObject(newer, 3000)]);
-	await syncBuiltinTools("space", [spec], 2000);
-	expect(mutations).toEqual([]);
-});
-
-test("a newer harness with different source rewrites it and stamps its time", async () => {
-	const older = { ...spec, code: "async () => ''" };
-	const mutations = daemon([toolObject(older, 1000)]);
+test("a newer harness turns an older one's photo of its handler into the shipped code, which is then what runs", async () => {
+	const mutations = daemon([handlerPhoto(spec, 1000)]);
 	const res = await syncBuiltinTools("space", [spec], 2000);
 	expect(res.rewritten).toEqual(["space_activity"]);
 	expect(mutations.filter((m) => m.action === "block_remove").map((m) => m.block_id)).toEqual(["note", "code"]);
-	expect(mutations.filter((m) => m.action === "block_add").map((m) => (m.block as BlockLike).content.text.text)).toEqual([BUILTIN_NOTE, spec.code]);
+	expect(mutations.filter((m) => m.action === "block_add").map((m) => (m.block as BlockLike).content.text.text)).toEqual([SHIPPED_NOTE, spec.code]);
+	expect(mutations).toContainEqual(expect.objectContaining({ action: "set_field", key: "tool_runtime", value: { stringValue: "object" } }));
 	expect(mutations.at(-1)).toMatchObject({ action: "set_field", key: "tool_source_at", value: { intValue: 2000 } });
 });
 
@@ -149,9 +142,12 @@ test("a missing built-in is created in the space, marked built-in, with its code
 	expect(mutations[0]).toMatchObject({
 		action: "create",
 		type_key: "tool",
-		fields: { channel: { stringValue: "space" }, name: { stringValue: "space_activity" }, tool_builtin: { boolValue: true }, tool_source_at: { intValue: 2000 } },
+		fields: { channel: { stringValue: "space" }, name: { stringValue: "space_activity" }, tool_builtin: { boolValue: true }, tool_runtime: { stringValue: "object" }, tool_source_at: { intValue: 2000 } },
 	});
-	expect(mutations.filter((m) => m.action === "block_add").map((m) => (m.block as BlockLike).content.text.style)).toEqual([0, 5]);
+	expect(mutations.filter((m) => m.action === "block_add").map((m) => (m.block as BlockLike).content.text)).toEqual([
+		{ text: SHIPPED_NOTE, style: 0 },
+		{ text: spec.code, style: 5 },
+	]);
 });
 
 interface BlockLike {
@@ -160,7 +156,7 @@ interface BlockLike {
 
 // ── Built-ins whose code is their object's ──
 
-const shipped: BuiltinSpec = { name: "object_get", description: "Read one object.", inputs: "id: string", runtime: "object", code: "return await roostr.get(String(input.id));" };
+const shipped: BuiltinSpec = { name: "object_get", description: "Read one object.", inputs: "id: string", code: "return await roostr.get(String(input.id));" };
 
 /** The Tool object a harness at `at` creates for `spec`, as the daemon then holds it. */
 async function seededObject(spec: BuiltinSpec, at: number): Promise<ObjectJSON> {
@@ -170,6 +166,13 @@ async function seededObject(spec: BuiltinSpec, at: number): Promise<ObjectJSON> 
 	const blocks = mutations.filter((m) => m.action === "block_add").map((m) => m.block as BlockJSON);
 	return { id: "tool-object", typeKey: "tool", fields: (create?.fields ?? {}) as Record<string, ValueJSON>, blocks, deleted: false, createdAt: 1, updatedAt: 1 };
 }
+
+test("a built-in still holding the code it was seeded with is left alone by a newer harness shipping the same", async () => {
+	const mutations = daemon([await seededObject(shipped, 1000)]);
+	const res = await syncBuiltinTools("space", [shipped], 2000);
+	expect(mutations).toEqual([]);
+	expect(res.rewritten).toEqual([]);
+});
 
 test("a newer harness replaces the shipped code it seeded while nobody edited it", async () => {
 	const obj = await seededObject(shipped, 1000);

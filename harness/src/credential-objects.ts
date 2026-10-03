@@ -268,12 +268,19 @@ export async function disconnectCredential(id: string): Promise<CredentialRow> {
 	return { ...row, status: "missing", auth: "", error: "" };
 }
 
+/** A credential an agent may act with, its secrets read off the object: session cookies and pasted keys. */
+export interface AgentCredential {
+	row: CredentialRow;
+	cookies: SessionCookie[];
+	keys: Record<string, string> | null;
+}
+
 /**
  * The credential an agent may act with: one it lists in its Credentials
  * property, of the service asked for, that is active. Any computer can use
  * it - the secret rides on the object.
  */
-export async function agentCredential(agent: ObjectJSON, service: string): Promise<{ row: CredentialRow; cookies: SessionCookie[]; keys: Record<string, string> | null }> {
+export async function agentCredential(agent: ObjectJSON, service: string): Promise<AgentCredential> {
 	const linked = agentCredentialIds(agent);
 	if (linked.length === 0) throw new Error("This agent lists no credentials. Add one to its Credentials property.");
 	const rows = await Promise.all(linked.map((id) => credentialObject(id).catch(() => null)));

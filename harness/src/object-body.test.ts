@@ -19,7 +19,12 @@ import objectGet from "./tool-code/object_get";
 import objectMoveBlock from "./tool-code/object_move_block";
 import objectRemoveBlocks from "./tool-code/object_remove_blocks";
 import objectSetField from "./tool-code/object_set_field";
-import { TOOL_EDIT_REFUSAL, createRoostr, type Roostr } from "./tool-sdk";
+import { TOOL_EDIT_REFUSAL, createRoostr, harnessCalls, type Roostr } from "./tool-sdk";
+
+/** These tools never ask the harness anything. */
+const noHarness = harnessCalls(async (method) => {
+	throw new Error(`unexpected harness call ${method}`);
+});
 
 const originalFetch = globalThis.fetch;
 let previousRoot: string | undefined;
@@ -87,7 +92,7 @@ const SHIPPED: Record<string, (input: Record<string, unknown>, roostr: Roostr) =
 /** One call of a shipped tool in a turn on "page", its refusal read as the agent reads it. */
 async function call(name: string, input: Record<string, unknown>): Promise<string> {
 	try {
-		return await SHIPPED[name](input, createRoostr({ agentId: "agent", objectId: "page", channelId: "space", machineId: "m" }, new Set()));
+		return await SHIPPED[name](input, createRoostr({ agentId: "agent", objectId: "page", channelId: "space", machineId: "m" }, new Set(), noHarness));
 	} catch (err) {
 		return `error: ${err instanceof Error ? err.message : String(err)}`;
 	}
@@ -96,7 +101,7 @@ async function call(name: string, input: Record<string, unknown>): Promise<strin
 test("object_get (its shipped code) lists body lines with their ids and never the conversation", async () => {
 	daemon(page());
 	const touched = new Set<string>();
-	const got = JSON.parse(await objectGet({ id: "page" }, createRoostr({ agentId: "agent", objectId: "page", channelId: "space", machineId: "m" }, touched)));
+	const got = JSON.parse(await objectGet({ id: "page" }, createRoostr({ agentId: "agent", objectId: "page", channelId: "space", machineId: "m" }, touched, noHarness)));
 	expect(touched).toEqual(new Set(["page"]));
 	expect(got.body).toEqual([
 		{ block: "plan", depth: 0, line: "# Plan" },
@@ -155,7 +160,7 @@ test("agents can't change a Tool object - its fields, its code lines, or by dele
 	] as const) {
 		expect(await call(name, input)).toStartWith(`error: ${TOOL_EDIT_REFUSAL}`);
 	}
-	const roostr = createRoostr({ agentId: "agent", objectId: "", channelId: "space", machineId: "m" }, new Set());
+	const roostr = createRoostr({ agentId: "agent", objectId: "", channelId: "space", machineId: "m" }, new Set(), noHarness);
 	await expect(roostr.setField("page", "description", { stringValue: "rewritten" })).rejects.toThrow(TOOL_EDIT_REFUSAL);
 	await expect(roostr.mutate("block_add", { object_id: "page", block: {} })).rejects.toThrow(TOOL_EDIT_REFUSAL);
 	await expect(roostr.create("sneaky", "tool")).rejects.toThrow(TOOL_EDIT_REFUSAL);

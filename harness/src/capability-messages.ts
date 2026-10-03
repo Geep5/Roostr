@@ -6,7 +6,6 @@ import { addGoogleAccount, googleAccountStatus, removeGoogleAccount } from "./go
 import { INSTALL_TYPE, type InstallationState } from "./descriptors";
 
 // Installations are skills and Google accounts; service logins are Credential objects (credential-objects.ts).
-export type CapabilityOperation = "skill.install" | "skill.enable" | "skill.disable" | "skill.uninstall" | "auth.login" | "auth.check" | "auth.revoke";
 const OPERATIONS: Record<string, true> = { "skill.install": true, "skill.enable": true, "skill.disable": true, "skill.uninstall": true, "auth.login": true, "auth.check": true, "auth.revoke": true };
 const INTERRUPTED = "Operation interrupted. Its effects are unknown; inspect this machine before explicitly retrying.";
 const WAITING_LOGIN = "Finish signing in on this machine, then confirm login completion.";
@@ -248,8 +247,8 @@ export async function rejectCapabilityRequest(objectId: string, messageId: strin
 	});
 }
 
-/** Commit an intent to the requester's own object before attempting delivery. */
-export async function requestCapability(input: { sender: AgentEndpoint; installationObjectId: string; operation: CapabilityOperation; author?: string; text?: string }): Promise<{ id: string; exchangeId: string; threadId: string }> {
+/** Commit an intent to the requester's own object before attempting delivery. `operation` is refused unless the installation takes it (capabilityTarget). */
+export async function requestCapability(input: { sender: AgentEndpoint; installationObjectId: string; operation: string; author?: string; text?: string }): Promise<{ id: string; exchangeId: string; threadId: string }> {
 	const target = await fetchObject(input.installationObjectId);
 	capabilityTarget(target, input.operation, str(target.fields, "machine_id"));
 	if (!str(target.fields, "machine_id")) throw new Error("Installation has no owning machine.");

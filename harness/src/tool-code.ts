@@ -1,15 +1,20 @@
 /**
- * The built-in tools whose code lives in their Tool objects, as this
- * harness ships them. Each `tool-code/<name>.ts` is one tool: its
- * description, its inputs (the `tool_inputs` line format) and its code - a
- * default-exported function whose body is exactly what the Tool object
- * holds (tool-objects.ts seeds it; tool-runtime.ts runs the object's code).
+ * Every built-in tool as this harness ships it: its code lives in its Tool
+ * object. Each `tool-code/<name>.ts` is one tool: its description, its
+ * inputs (the `tool_inputs` line format) and its code - a default-exported
+ * function whose body is exactly what the Tool object holds
+ * (tool-objects.ts seeds it; tool-runtime.ts runs the object's code).
  * Being source files, they are type-checked like the rest of the harness.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { TOOL_HEADER } from "./tool-host";
+import * as agent_ask from "./tool-code/agent_ask";
+import * as capability_list from "./tool-code/capability_list";
+import * as capability_request from "./tool-code/capability_request";
 import * as chat_reply_on from "./tool-code/chat_reply_on";
+import * as credential_action from "./tool-code/credential_action";
+import * as credential_fetch from "./tool-code/credential_fetch";
 import * as discussion_read from "./tool-code/discussion_read";
 import * as find from "./tool-code/find";
 import * as memory_amend_milestone from "./tool-code/memory_amend_milestone";
@@ -41,7 +46,13 @@ import * as object_set_repeat from "./tool-code/object_set_repeat";
 import * as object_set_type from "./tool-code/object_set_type";
 import * as occurrence_complete from "./tool-code/occurrence_complete";
 import * as query_run from "./tool-code/query_run";
+import * as shell_exec from "./tool-code/shell_exec";
+import * as skill_read from "./tool-code/skill_read";
+import * as space_activity from "./tool-code/space_activity";
 import * as space_map from "./tool-code/space_map";
+import * as spawn from "./tool-code/spawn";
+import * as submit_result from "./tool-code/submit_result";
+import * as web_fetch from "./tool-code/web_fetch";
 
 /** One shipped tool as its Tool object starts out. */
 export interface ShippedCode {
@@ -103,6 +114,17 @@ const FILES: ReadonlyArray<[string, { description: string; inputs: string }]> = 
 	["memory_list_milestones", memory_list_milestones],
 	["memory_recall", memory_recall],
 	["object_flag_error", object_flag_error],
+	["space_activity", space_activity],
+	["skill_read", skill_read],
+	["credential_action", credential_action],
+	["credential_fetch", credential_fetch],
+	["web_fetch", web_fetch],
+	["capability_list", capability_list],
+	["capability_request", capability_request],
+	["agent_ask", agent_ask],
+	["spawn", spawn],
+	["shell_exec", shell_exec],
+	["submit_result", submit_result],
 ];
 
 export const SHIPPED_CODE: readonly ShippedCode[] = FILES.map(([name, file]) => ({

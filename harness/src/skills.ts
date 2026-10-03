@@ -132,14 +132,6 @@ export async function listSkills(agentId?: string, granted?: ReadonlySet<string>
 		.map(({ key: _key, ...listing }) => listing);
 }
 
-export async function readSkill(name: string, agentId?: string, granted?: ReadonlySet<string>): Promise<string> {
-	const skills = await listSkills(agentId, granted);
-	const hit = skills.find((s) => s.name.toLowerCase() === name.toLowerCase());
-	if (!hit) return `No skill named "${name}". Available: ${skills.map((s) => s.name).join(", ") || "(none)"}`;
-	const obj = await fetchObject(hit.id);
-	return objectText(obj) || hit.description || "(skill has no body)";
-}
-
 /** Prompt section: descriptions only (OMP system-prompt.md:88-93). */
 export function skillsPromptSection(skills: SkillListing[]): string {
 	if (skills.length === 0) return "";

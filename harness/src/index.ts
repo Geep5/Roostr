@@ -19,7 +19,7 @@ import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./cre
 import { installGwsAs } from "./google-credentials";
 import { fillCredential, seedCredentials } from "./credential-seeds";
 import { capabilities, convergeCatalogScope, publishCapabilityObjects, publishInstallationState } from "./skillmgr";
-import { fileCapabilityHoldup } from "./tools";
+import { fileCapabilityHoldup } from "./tool-harness";
 import { startAuthServer } from "./authserver";
 import { FILE_TYPE, startFilePeer } from "./files";
 import { KEEP_ALL_SWEEP_MS, keepAllFiles, seedKeepAllProperty } from "./keep-files";

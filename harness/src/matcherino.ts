@@ -1,7 +1,9 @@
 /**
- * Matcherino actions through a Matcherino credential, over Matcherino's own
- * API - the calls its admin "Featured Events" table makes
- * (apiserver changelog v5.25.6; server/models/events.go SetFeaturedEvents).
+ * Matcherino through a Matcherino credential, over Matcherino's own API -
+ * the calls its admin "Featured Events" table makes (apiserver changelog
+ * v5.25.6; server/models/events.go SetFeaturedEvents) are credential_action's
+ * (tool-code/credential_action.ts); the harness only signs them in
+ * (`matcherinoApi`), so the token never leaves it.
  *
  * Sign-in: the `credentials` cookie holds {appName, refreshToken}. The web
  * app gives the cookie a 60-minute browser life and re-sets it on every
@@ -19,11 +21,6 @@ import { credentialSession } from "./credentials";
 const API = "https://api.matcherino.com/__api";
 const SESSION_COOKIE = "credentials";
 const COOKIE_LIFE_S = 60 * 60;
-
-export interface FeaturedEvent {
-	id: number;
-	title: string;
-}
 
 interface Envelope<T> {
 	status?: number;
@@ -75,17 +72,8 @@ export async function renewMatcherinoSession(fields: Record<string, ValueJSON>):
 	return credentialSession(fields).map((c) => (c.name === SESSION_COOKIE ? { ...c, expires: until } : c));
 }
 
-/** What the homepage features now (public list; the API may serve it from a short cache). */
-export async function featuredEvents(): Promise<FeaturedEvent[]> {
-	const page = await call<{ contents?: Array<{ id: number; title: string }> }>("/events/featured?page=0&pageSize=100");
-	return (page.contents ?? []).map((e) => ({ id: e.id, title: e.title }));
-}
-
-/** Feature (or unfeature) one event as the signed-in admin. */
-export async function setFeatured(token: string, bountyId: number, feature: boolean): Promise<void> {
-	await call("/users/admin/events/setFeatured", {
-		method: "POST",
-		headers: { "x-mno-auth": `Bearer ${token}` },
-		body: JSON.stringify({ bountyId, feature }),
-	});
+/** One request to Matcherino's API (`path` on it, e.g. "/events/featured?page=0"), signed in with `token`: the envelope's body. */
+export async function matcherinoApi(token: string, path: string, method: string, body: unknown): Promise<unknown> {
+	if (!path.startsWith("/") || path.startsWith("//")) throw new Error(`"${path}" is not a path on Matcherino's API`);
+	return call<unknown>(path, { method, headers: { "x-mno-auth": `Bearer ${token}` }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
