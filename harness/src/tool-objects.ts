@@ -168,6 +168,7 @@ export async function syncBuiltinTools(space: string, specs: BuiltinSpec[], at: 
 		const have = existing.get(str(r.fields, "name"));
 		if (!have || r.createdAt < have.createdAt) existing.set(str(r.fields, "name"), r);
 	}
+	await dropRacedCopies(space, rows.filter((r) => isBuiltin(r.fields) && existing.get(str(r.fields, "name"))?.id !== r.id));
 	const ids = new Map<string, string>();
 	const created: string[] = [];
 	const rewritten: string[] = [];
@@ -199,17 +200,46 @@ export async function syncBuiltinTools(space: string, specs: BuiltinSpec[], at: 
 	return { ids, created, rewritten, kept };
 }
 
+/**
+ * Built-in copies a second computer created while seeding the same space
+ * (the oldest is the one kept). Only a copy nobody edited and nothing links
+ * - no agent's Tools, no repeat's Check first - is deleted; anything else
+ * stays rather than break a link or lose an edit.
+ */
+async function dropRacedCopies(space: string, copies: QueryRow[]): Promise<void> {
+	if (copies.length === 0) return;
+	const linking = [
+		...(await queryAll({ type: "agent", filters: [{ key: "channel", condition: "equal", value: space }] })).flatMap((r) => linkIds(r.fields, TOOLS_KEY)),
+		...(await queryAll({ filters: [{ key: "check_first", condition: "notEmpty" }, { key: "channel", condition: "equal", value: space }] })).flatMap((r) => linkIds(r.fields, "check_first")),
+	];
+	const linked = new Set(linking);
+	for (const copy of copies) {
+		if (linked.has(copy.id)) continue;
+		const obj = await fetchObject(copy.id);
+		const current = specHash(str(obj.fields, "description"), str(obj.fields, INPUTS_KEY), toolCode(obj));
+		if (current !== str(obj.fields, SEEDED_KEY)) continue;
+		await mutate("delete", { object_id: copy.id });
+		console.log(`[tools] removed a duplicate built-in ${str(obj.fields, "name")} in ${space.slice(0, 8)}`);
+	}
+}
+
 const synced = new Map<string, Promise<Map<string, string>>>();
+
+/** Up to this long, a computer finding a space with no built-ins yet waits before creating them, so two computers seeing a new space at once rarely both do. */
+const FRESH_SPACE_SETTLE_MS = 12_000;
 
 /**
  * This harness's built-ins as Tool objects in `space`, synced once per
- * process (boot, and the first time an agent of a newly served space is
- * taken in). Resolves to the Tool object id per built-in name.
+ * process. Every space gets them - at boot and when a new space appears -
+ * so its agents can be given tools and people can read and edit them.
+ * Resolves to the Tool object id per built-in name.
  */
 export function ensureBuiltinTools(space: string): Promise<Map<string, string>> {
 	const known = synced.get(space);
 	if (known) return known;
 	const run = (async () => {
+		const before = await queryAll({ type: TOOL_TYPE, filters: [{ key: "channel", condition: "equal", value: space }] });
+		if (!before.some((r) => isBuiltin(r.fields))) await Bun.sleep(Math.floor(Math.random() * FRESH_SPACE_SETTLE_MS));
 		const res = await syncBuiltinTools(space, builtinSpecs(), await builtinSourceAt());
 		if (res.created.length || res.rewritten.length) console.log(`[tools] built-in Tool objects in ${space.slice(0, 8)}: ${res.created.length} created, ${res.rewritten.length} updated`);
 		if (res.kept.length) console.log(`[tools] edited built-ins kept in ${space.slice(0, 8)} (a newer version ships): ${res.kept.join(", ")}`);
@@ -219,6 +249,13 @@ export function ensureBuiltinTools(space: string): Promise<Map<string, string>> 
 	// A failed sync is retried by the next caller.
 	run.catch(() => synced.delete(space));
 	return run;
+}
+
+/** Every space's built-in Tool objects (boot): one space at a time, a failure logged and the rest still done. */
+export async function ensureBuiltinToolsEverywhere(): Promise<void> {
+	for (const space of await queryAll({ type: "channel" })) {
+		await ensureBuiltinTools(space.id).catch((err) => console.error(`[tools] built-in Tool objects for ${space.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
+	}
 }
 
 // ── Loading Tool objects ────────────────────────────────────────

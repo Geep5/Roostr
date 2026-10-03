@@ -29,7 +29,7 @@ import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishM
 import { publishDescriptors, INSTALL_TYPE } from "./descriptors";
 import { CAPABILITY_TYPE, linkValue } from "./capabilities";
 import { SKILLS_KEY, machineSkillKeys, skillForKey } from "./skills";
-import { TOOLS_KEY, ensureBuiltinTools, linkList } from "./tool-objects";
+import { TOOLS_KEY, ensureBuiltinTools, ensureBuiltinToolsEverywhere, linkList } from "./tool-objects";
 import { migrateToolGrants } from "./migrate-tool-grants";
 import { migrateSkills } from "./migrate-skills";
 import { migrateCapabilities } from "./migrate-capabilities";
@@ -324,6 +324,7 @@ async function serve(): Promise<void> {
 	console.log("[harness] skills migration:", JSON.stringify(await migrateSkills()));
 	// Shell and web moved from the 'shell'/'web' skills to each agent's Tools.
 	console.log("[harness] tool-grant migration:", JSON.stringify(await migrateToolGrants()));
+	void ensureBuiltinToolsEverywhere();
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
 
@@ -785,6 +786,8 @@ async function serve(): Promise<void> {
 		} catch {
 			return;
 		}
+		// A space (a new one included) holds the built-ins as Tool objects.
+		if (obj.typeKey === "channel" && !obj.deleted) void ensureBuiltinTools(obj.id).catch((err) => console.error(`[tools] built-in Tool objects for ${obj.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
 		// A rule edit (repeat_set/clear, an occurrence completed or fired)
 		// may move the earliest occurrence.
 		if (obj.fields["repeat"]) void armScheduler();
