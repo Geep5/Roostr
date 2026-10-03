@@ -3,8 +3,9 @@
  *
  * A Tool object's `name` is what the model calls, `description` what it is
  * told, `tool_inputs` its inputs - one per line, `name: type - description`,
- * `name?` optional - and its body's Code blocks are the code: TypeScript, an
- * async function body given `input` and `roostr` (tool-sdk.ts), run in its
+ * `name?` optional, a type of choices written `day|week|month` - and its
+ * body's Code blocks are the code: TypeScript, an async function body
+ * given `input` and `roostr` (tool-sdk.ts), run in its
  * own process (tool-host.ts), versioned and with a fallback to the last
  * version that worked on this computer (tool-runtime.ts). A Tool that can't
  * be read at all (a bad name or inputs) says so on its Error property and

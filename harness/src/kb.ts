@@ -22,7 +22,7 @@ import { basename, join } from "node:path";
 import type { ObjectJSON, QueryRow } from "./api";
 import { createObject, fetchObject, queryAll, str, sv } from "./api";
 import { serializeBody } from "./surfaces";
-import { appendBody } from "./tools";
+import { appendMarkdown } from "./markdown";
 
 export const KB_TYPE = "kb_entry";
 export const KB_CATEGORIES = ["global", "account", "payment", "tax", "pin", "tournament", "partnership", "bug", "other"] as const;
@@ -114,7 +114,7 @@ export async function importKb(opts: { dir: string; space: string }): Promise<Im
 			const { id } = await createObject(entry.title, KB_TYPE, {
 				kb_category: sv(entry.category), kb_audience: sv(entry.audience), kb_status: sv(entry.status), kb_source: sv(entry.source), channel: sv(opts.space),
 			});
-			await appendBody(id, entry.markdown);
+			await appendMarkdown(id, entry.markdown);
 			result.created.push(id);
 		}
 	}

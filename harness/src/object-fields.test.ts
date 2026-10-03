@@ -2,7 +2,8 @@
  * An agent's object writes must land where a human can see them: a write
  * the app cannot display is refused (never "ok"), and a schedule goes
  * through the real repeat rule. An agent once "made a task recurring" by
- * writing recurrence="every 2 weeks" - stored, invisible, inert.
+ * writing recurrence="every 2 weeks" - stored, invisible, inert. The tools
+ * run their shipped code (tool-code/) in-process against a fake daemon.
  */
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
@@ -10,7 +11,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ObjectJSON, ValueJSON } from "./api";
-import { dispatchTool } from "./tools";
+import objectAddProperty from "./tool-code/object_add_property";
+import objectClearField from "./tool-code/object_clear_field";
+import objectClearRepeat from "./tool-code/object_clear_repeat";
+import objectSetField from "./tool-code/object_set_field";
+import objectSetRepeat from "./tool-code/object_set_repeat";
+import objectSetType from "./tool-code/object_set_type";
+import { createRoostr, type Roostr } from "./tool-sdk";
 
 const originalFetch = globalThis.fetch;
 let previousRoot: string | undefined;
@@ -116,48 +123,64 @@ const task = (fields: Record<string, ValueJSON> = {}): ObjectJSON => ({
 	mailbox: [],
 });
 
-const ctx = () => ({ agentId: "agent", channelId: "space", boundObject: "task", depth: 0, allowAsk: false, touched: new Set<string>() });
+const SHIPPED: Record<string, (input: Record<string, unknown>, roostr: Roostr) => Promise<string>> = {
+	object_add_property: objectAddProperty,
+	object_clear_field: objectClearField,
+	object_clear_repeat: objectClearRepeat,
+	object_set_field: objectSetField,
+	object_set_repeat: objectSetRepeat,
+	object_set_type: objectSetType,
+};
+
+/** One call of a shipped tool in a turn on "task", its refusal read as the agent reads it. */
+async function call(name: string, input: Record<string, unknown>): Promise<string> {
+	try {
+		return await SHIPPED[name](input, createRoostr({ agentId: "agent", objectId: "task", channelId: "space", machineId: "m" }, new Set()));
+	} catch (err) {
+		return `error: ${err instanceof Error ? err.message : String(err)}`;
+	}
+}
 
 test("a schedule written as a field is refused and points at the repeat tool", async () => {
 	const mutations = daemon(task());
-	const result = await dispatchTool("object_set_field", { id: "task", key: "recurrence", value: "every 2 weeks" }, ctx());
-	expect(result.content).toStartWith("error: nothing written");
-	expect(result.content).toContain("object_set_repeat");
+	const result = await call("object_set_field", { id: "task", key: "recurrence", value: "every 2 weeks" });
+	expect(result).toStartWith("error: nothing written");
+	expect(result).toContain("object_set_repeat");
 	expect(mutations).toEqual([]);
 });
 
 test("a key with no property in the space is refused, naming the ones that exist", async () => {
 	const mutations = daemon(task());
-	const result = await dispatchTool("object_set_field", { id: "task", key: "priority", value: "high" }, ctx());
-	expect(result.content).toStartWith("error: nothing written");
-	expect(result.content).toContain('no "priority" property');
-	expect(result.content).toContain("dueDate (Due date, date)");
-	expect(result.content).not.toContain("createdDate");
+	const result = await call("object_set_field", { id: "task", key: "priority", value: "high" });
+	expect(result).toStartWith("error: nothing written");
+	expect(result).toContain('no "priority" property');
+	expect(result).toContain("dueDate (Due date, date)");
+	expect(result).not.toContain("createdDate");
 	expect(mutations).toEqual([]);
 });
 
 test("a value the property's type cannot hold is refused instead of stored as text", async () => {
 	const mutations = daemon(task());
-	expect((await dispatchTool("object_set_field", { id: "task", key: "done", value: "yes" }, ctx())).content).toStartWith("error: nothing written");
-	expect((await dispatchTool("object_set_field", { id: "task", key: "dueDate", value: "next week-ish" }, ctx())).content).toStartWith("error: nothing written");
-	expect((await dispatchTool("object_set_field", { id: "task", key: "createdDate", value: "2026-01-01" }, ctx())).content).toStartWith("error: nothing written");
+	expect((await call("object_set_field", { id: "task", key: "done", value: "yes" }))).toStartWith("error: nothing written");
+	expect((await call("object_set_field", { id: "task", key: "dueDate", value: "next week-ish" }))).toStartWith("error: nothing written");
+	expect((await call("object_set_field", { id: "task", key: "createdDate", value: "2026-01-01" }))).toStartWith("error: nothing written");
 	expect(mutations).toEqual([]);
 });
 
 test("a valid write reports the value as the human now sees it", async () => {
 	const t = task();
 	daemon(t);
-	const result = await dispatchTool("object_set_field", { id: "task", key: "done", value: "true" }, ctx());
-	expect(result.content).toBe("Done is now: checked");
+	const result = await call("object_set_field", { id: "task", key: "done", value: "true" });
+	expect(result).toBe("Done is now: checked");
 	expect(t.fields.done).toEqual({ boolValue: true });
 });
 
 test("object_set_repeat writes the real rule and reads it back in the Repeat cell's words", async () => {
 	const t = task({ agent: { valuesValue: { items: [{ stringValue: "agent" }] } } });
 	const mutations = daemon(t);
-	const result = await dispatchTool("object_set_repeat", { every: 2, unit: "week", weekdays: ["wed"], times: ["09:30", "14:00"] }, ctx());
-	expect(result.content).toStartWith("Repeats every 2 weeks on Wed at 9:30");
-	expect(result.content).toContain("2:00");
+	const result = await call("object_set_repeat", { every: 2, unit: "week", weekdays: ["wed"], times: ["09:30", "14:00"] });
+	expect(result).toStartWith("Repeats every 2 weeks on Wed at 9:30");
+	expect(result).toContain("2:00");
 	const set = mutations.find((m) => m.action === "repeat_set");
 	expect(set?.object_id).toBe("task");
 	expect(set?.rule).toMatchObject({ freq: "week", interval: 2, weekdays: [3], times: [570, 840] });
@@ -166,15 +189,15 @@ test("object_set_repeat writes the real rule and reads it back in the Repeat cel
 test("object_set_repeat runs every few minutes inside a daily window, on chosen days", async () => {
 	const t = task({ agent: { valuesValue: { items: [{ stringValue: "agent" }] } } });
 	const mutations = daemon(t);
-	const result = await dispatchTool("object_set_repeat", { every: 5, unit: "minute", from: "09:00", until: "17:00", weekdays: ["mon", "tue"] }, ctx());
-	expect(result.content).toStartWith("Repeats every 5 minutes on Mon, Tue from 9:00");
+	const result = await call("object_set_repeat", { every: 5, unit: "minute", from: "09:00", until: "17:00", weekdays: ["mon", "tue"] });
+	expect(result).toStartWith("Repeats every 5 minutes on Mon, Tue from 9:00");
 	expect(mutations.find((m) => m.action === "repeat_set")?.rule).toMatchObject({ freq: "minute", interval: 5, weekdays: [1, 2], window: [540, 1020] });
 });
 
 test("object_set_repeat says when nobody is on the guest list to run it", async () => {
 	daemon(task());
-	const result = await dispatchTool("object_set_repeat", { unit: "day" }, ctx());
-	expect(result.content).toContain("No agent is on its guest list");
+	const result = await call("object_set_repeat", { unit: "day" });
+	expect(result).toContain("No agent is on its guest list");
 });
 
 test("object_set_repeat rejects a malformed rule without writing", async () => {
@@ -190,7 +213,7 @@ test("object_set_repeat rejects a malformed rule without writing", async () => {
 		{ unit: "minute", times: ["09:00"] },
 		{ unit: "day", from: "09:00" },
 	]) {
-		expect((await dispatchTool("object_set_repeat", input, ctx())).content).toStartWith("error: nothing written");
+		expect((await call("object_set_repeat", input))).toStartWith("error: nothing written");
 	}
 	expect(mutations).toEqual([]);
 });
@@ -198,26 +221,26 @@ test("object_set_repeat rejects a malformed rule without writing", async () => {
 test("object_clear_repeat turns repeating off, and refuses on an object that does not repeat", async () => {
 	const t = task();
 	const mutations = daemon(t);
-	expect((await dispatchTool("object_clear_repeat", {}, ctx())).content).toStartWith("error: nothing written");
+	expect((await call("object_clear_repeat", {}))).toStartWith("error: nothing written");
 	expect(mutations).toEqual([]);
-	await dispatchTool("object_set_repeat", { unit: "month" }, ctx());
-	expect((await dispatchTool("object_clear_repeat", {}, ctx())).content).toBe("This object no longer repeats.");
+	await call("object_set_repeat", { unit: "month" });
+	expect((await call("object_clear_repeat", {}))).toBe("This object no longer repeats.");
 	expect(t.fields.repeat).toBeUndefined();
 });
 
 test("object_add_property creates a visible property keyed like the app's, once", async () => {
 	const mutations = daemon(task());
-	const reply = (await dispatchTool("object_add_property", { name: "Mockup Status", format: "status" }, ctx())).content;
+	const reply = (await call("object_add_property", { name: "Mockup Status", format: "status" }));
 	expect(reply).toContain("key mockup_status");
 	const create = mutations.find((m) => m.action === "create");
 	expect(create).toMatchObject({ type_key: "relation", fields: { key: { stringValue: "mockup_status" }, format: { stringValue: "status" }, channel: { stringValue: "space" }, hidden: { boolValue: false }, maxCount: { intValue: 1 } } });
 	// An existing key creates nothing.
 	const again = daemon(task());
-	expect((await dispatchTool("object_add_property", { name: "Due date", format: "text" }, ctx())).content).toStartWith("error: nothing created");
+	expect((await call("object_add_property", { name: "Due date", format: "text" }))).toStartWith("error: nothing created");
 	for (const name of ["Due date", "due_date", "dueDate", "DUE DATE"]) {
-		expect((await dispatchTool("object_add_property", { name, format: "date" }, ctx())).content).toContain("already has Due date (key dueDate");
+		expect((await call("object_add_property", { name, format: "date" }))).toContain("already has Due date (key dueDate");
 	}
-	expect((await dispatchTool("object_add_property", { name: "Recurrence", format: "shorttext" }, ctx())).content).toContain("object_set_repeat");
+	expect((await call("object_add_property", { name: "Recurrence", format: "shorttext" }))).toContain("object_set_repeat");
 	expect(again).toEqual([]);
 });
 
@@ -225,23 +248,23 @@ test("object_clear_field empties a property and refuses the ones with their own 
 	const t = task({ dueDate: { intValue: 1 } });
 	const mutations = daemon(t);
 	for (const key of ["agent", "repeat", "createdDate", "priority"]) {
-		expect((await dispatchTool("object_clear_field", { key }, ctx())).content).toStartWith("error: nothing cleared");
+		expect((await call("object_clear_field", { key }))).toStartWith("error: nothing cleared");
 	}
 	expect(mutations).toEqual([]);
-	expect((await dispatchTool("object_clear_field", { key: "dueDate" }, ctx())).content).toBe("Due date is now empty.");
+	expect((await call("object_clear_field", { key: "dueDate" }))).toBe("Due date is now empty.");
 	expect(t.fields.dueDate).toBeUndefined();
 });
 
 test("object_set_type retypes to a space type and never into or out of infrastructure", async () => {
 	const t = task();
 	const mutations = daemon(t);
-	expect((await dispatchTool("object_set_type", { type: "agent" }, ctx())).content).toStartWith("error: nothing changed");
-	expect((await dispatchTool("object_set_type", { type: "spaceship" }, ctx())).content).toContain("types here: task (Task), note (Note), person (Person)");
+	expect((await call("object_set_type", { type: "agent" }))).toStartWith("error: nothing changed");
+	expect((await call("object_set_type", { type: "spaceship" }))).toContain("types here: task (Task), note (Note), person (Person)");
 	expect(mutations).toEqual([]);
-	expect((await dispatchTool("object_set_type", { type: "person" }, ctx())).content).toBe("It is now a Person.");
+	expect((await call("object_set_type", { type: "person" }))).toBe("It is now a Person.");
 	expect(t.typeKey).toBe("person");
 	const agentObj = task();
 	agentObj.typeKey = "agent";
 	daemon(agentObj);
-	expect((await dispatchTool("object_set_type", { type: "task" }, ctx())).content).toStartWith("error: nothing changed");
+	expect((await call("object_set_type", { type: "task" }))).toStartWith("error: nothing changed");
 });

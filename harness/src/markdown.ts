@@ -10,6 +10,8 @@
  * "1.") and `**` showed as literal asterisks.
  */
 
+import { mutate } from "./api";
+
 /** proto TextStyle values the editor renders. */
 export const STYLE = { paragraph: 0, h1: 1, h2: 2, h3: 3, quote: 4, bullet: 6, numbered: 7, checkbox: 8 } as const;
 /** glon.MarkType values. */
@@ -113,4 +115,27 @@ export function mdToTree(markdown: string): MdBlock[] {
 		stack.push({ indent, block });
 	}
 	return roots;
+}
+
+/** glon.Position.Inner: a block added as the target's last child. */
+const POSITION_INNER = 5;
+
+/**
+ * Markdown appended to an object's body as the blocks the editor renders,
+ * at the page root or inside `parentId` (as its last children). Parents are
+ * written before their children. Returns how many blocks were added.
+ */
+export async function appendMarkdown(objectId: string, markdown: string, parentId = ""): Promise<number> {
+	let added = 0;
+	const add = async (blocks: MdBlock[], parent: string): Promise<void> => {
+		for (const b of blocks) {
+			const id = crypto.randomUUID();
+			const content = { text: { text: b.text, style: b.style, ...(b.marks.length ? { marks: b.marks } : {}), ...(b.style === STYLE.checkbox ? { checked: b.checked === true } : {}) } };
+			await mutate("block_add", { object_id: objectId, block: { id, childrenIds: [], content }, ...(parent ? { target_id: parent, position: POSITION_INNER } : {}) });
+			added += 1;
+			await add(b.children, id);
+		}
+	};
+	await add(mdToTree(markdown), parentId);
+	return added;
 }

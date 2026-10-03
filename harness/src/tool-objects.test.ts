@@ -13,8 +13,8 @@ import type { BlockJSON, ObjectJSON, ValueJSON } from "./api";
 import { BUILTIN_NOTE, SHIPPED_NOTE, builtinSpecs, objectToolFrom, syncBuiltinTools, type BuiltinSpec } from "./tool-objects";
 import { parseToolInputs, renderToolInputs } from "./tool-runtime";
 
-test("inputs become a schema: types, descriptions, and ? for optional", () => {
-	const parsed = parseToolInputs("mailbox: string - the inbox address\n\nmax?: number - how many threads\nlabels?: string[]\nraw: object - anything\nforce?: boolean");
+test("inputs become a schema: types, choices, descriptions, and ? for optional", () => {
+	const parsed = parseToolInputs("mailbox: string - the inbox address\n\nmax?: number - how many threads\nlabels?: string[]\nraw: object - anything\nforce?: boolean\nunit?: day|week|skill.install - how often");
 	expect(parsed).toEqual({
 		schema: {
 			type: "object",
@@ -24,6 +24,7 @@ test("inputs become a schema: types, descriptions, and ? for optional", () => {
 				labels: { type: "array", items: { type: "string" } },
 				raw: { type: "object", description: "anything" },
 				force: { type: "boolean" },
+				unit: { type: "string", enum: ["day", "week", "skill.install"], description: "how often" },
 			},
 			required: ["mailbox", "raw"],
 		},
@@ -37,6 +38,7 @@ test("a malformed or unknown-type line, or an input listed twice, is an error na
 		["when: date - a day", '"when: date - a day"'],
 		["toString: string", ""],
 		["a: string\na?: number", 'input "a" is listed twice'],
+		["unit: day|", '"unit: day|"'],
 	] as const) {
 		const parsed = parseToolInputs(text);
 		if (!needle) {
@@ -55,7 +57,7 @@ test("every built-in's inputs render in the Inputs format and read back to the s
 		expect(Object.keys(parsed.schema.properties as Record<string, unknown>).length).toBe(spec.inputs ? spec.inputs.split("\n").length : 0);
 	}
 	expect(renderToolInputs({ type: "object", properties: { id: { type: "string", description: "object id" }, unit: { type: "string", enum: ["day", "week"] }, ids: { type: "array", items: { type: "string" } }, filters: { type: "array", items: { type: "object" } } }, required: ["unit"] })).toBe(
-		"id?: string - object id\nunit: string - (one of: day, week)\nids?: string[]\nfilters?: object[]",
+		"id?: string - object id\nunit: day|week\nids?: string[]\nfilters?: object[]",
 	);
 	expect(parseToolInputs("filters?: object[]")).toEqual({ schema: { type: "object", properties: { filters: { type: "array", items: { type: "object" } } } } });
 });

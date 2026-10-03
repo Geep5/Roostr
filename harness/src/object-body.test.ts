@@ -2,7 +2,8 @@
  * Body editing tools act only on lines a human reads on the page, and
  * refuse (writing nothing) when the request can't land as asked: a
  * conversation message is not a body line, a paragraph is not a checkbox,
- * and a line can't move into its own nested lines.
+ * and a line can't move into its own nested lines. The tools run their
+ * shipped code (tool-code/) in-process against a fake daemon.
  */
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
@@ -10,9 +11,15 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BlockJSON, ObjectJSON } from "./api";
+import objectAddText from "./tool-code/object_add_text";
+import objectCheck from "./tool-code/object_check";
+import objectDelete from "./tool-code/object_delete";
+import objectEditBlock from "./tool-code/object_edit_block";
 import objectGet from "./tool-code/object_get";
-import { TOOL_EDIT_REFUSAL, createRoostr } from "./tool-sdk";
-import { dispatchTool } from "./tools";
+import objectMoveBlock from "./tool-code/object_move_block";
+import objectRemoveBlocks from "./tool-code/object_remove_blocks";
+import objectSetField from "./tool-code/object_set_field";
+import { TOOL_EDIT_REFUSAL, createRoostr, type Roostr } from "./tool-sdk";
 
 const originalFetch = globalThis.fetch;
 let previousRoot: string | undefined;
@@ -67,7 +74,24 @@ function daemon(obj: ObjectJSON) {
 	return mutations;
 }
 
-const ctx = () => ({ agentId: "agent", channelId: "space", boundObject: "page", depth: 0, allowAsk: false, touched: new Set<string>() });
+const SHIPPED: Record<string, (input: Record<string, unknown>, roostr: Roostr) => Promise<string>> = {
+	object_add_text: objectAddText,
+	object_check: objectCheck,
+	object_delete: objectDelete,
+	object_edit_block: objectEditBlock,
+	object_move_block: objectMoveBlock,
+	object_remove_blocks: objectRemoveBlocks,
+	object_set_field: objectSetField,
+};
+
+/** One call of a shipped tool in a turn on "page", its refusal read as the agent reads it. */
+async function call(name: string, input: Record<string, unknown>): Promise<string> {
+	try {
+		return await SHIPPED[name](input, createRoostr({ agentId: "agent", objectId: "page", channelId: "space", machineId: "m" }, new Set()));
+	} catch (err) {
+		return `error: ${err instanceof Error ? err.message : String(err)}`;
+	}
+}
 
 test("object_get (its shipped code) lists body lines with their ids and never the conversation", async () => {
 	daemon(page());
@@ -88,26 +112,26 @@ test("a conversation message is not a body line: editing it is refused", async (
 		["object_remove_blocks", { blocks: ["msg"] }],
 		["object_move_block", { block: "msg", to: "note", where: "after" }],
 	] as const) {
-		expect((await dispatchTool(tool, input, ctx())).content).toStartWith("error: nothing");
+		expect(await call(tool, input)).toStartWith("error: nothing");
 	}
 	expect(mutations).toEqual([]);
 });
 
 test("only a checkbox line can be ticked", async () => {
 	const mutations = daemon(page());
-	expect((await dispatchTool("object_check", { block: "note", checked: true }, ctx())).content).toStartWith("error: nothing written");
+	expect(await call("object_check", { block: "note", checked: true })).toStartWith("error: nothing written");
 	expect(mutations).toEqual([]);
 });
 
 test("a line cannot move into its own nested lines", async () => {
 	const mutations = daemon(page());
-	expect((await dispatchTool("object_move_block", { block: "plan", to: "todo", where: "after" }, ctx())).content).toStartWith("error: nothing moved");
+	expect(await call("object_move_block", { block: "plan", to: "todo", where: "after" })).toStartWith("error: nothing moved");
 	expect(mutations).toEqual([]);
 });
 
 test("removing a mix of real and unknown ids removes nothing", async () => {
 	const mutations = daemon(page());
-	expect((await dispatchTool("object_remove_blocks", { blocks: ["note", "nope"] }, ctx())).content).toStartWith("error: nothing removed");
+	expect(await call("object_remove_blocks", { blocks: ["note", "nope"] })).toStartWith("error: nothing removed");
 	expect(mutations).toEqual([]);
 });
 
@@ -115,7 +139,7 @@ test("editing a line keeps its style and says when inline formatting is cleared"
 	const obj = page();
 	(obj.blocks[1].content.text as NonNullable<BlockJSON["content"]["text"]>).marks = [{ from: 0, to: 6, type: 1 }];
 	const mutations = daemon(obj);
-	const reply = (await dispatchTool("object_edit_block", { block: "todo", text: "Review with Brian and Lou" }, ctx())).content;
+	const reply = await call("object_edit_block", { block: "todo", text: "Review with Brian and Lou" });
 	expect(mutations[0]).toMatchObject({ action: "block_update", block_id: "todo", content: { text: { text: "Review with Brian and Lou", style: 8, marks: [] } } });
 	expect(reply).toContain("formatting");
 });
@@ -129,7 +153,7 @@ test("agents can't change a Tool object - its fields, its code lines, or by dele
 		["object_add_text", { id: "page", text: "return 2;" }],
 		["object_delete", { id: "page" }],
 	] as const) {
-		expect((await dispatchTool(name, input, ctx())).content).toStartWith(`error: ${TOOL_EDIT_REFUSAL}`);
+		expect(await call(name, input)).toStartWith(`error: ${TOOL_EDIT_REFUSAL}`);
 	}
 	const roostr = createRoostr({ agentId: "agent", objectId: "", channelId: "space", machineId: "m" }, new Set());
 	await expect(roostr.setField("page", "description", { stringValue: "rewritten" })).rejects.toThrow(TOOL_EDIT_REFUSAL);

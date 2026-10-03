@@ -7,12 +7,10 @@
 
 import {
 	bv,
-	createObject,
 	fetchObject,
 	fv,
 	iv,
 	lv,
-	deleteField,
 	mutate,
 	plainValue,
 	queryAll,
@@ -32,12 +30,12 @@ import { agentCredential, CredentialNotConnected, type CredentialRow } from "./c
 import { noteCredentialIssue } from "./credential-issues";
 import { actionsOf } from "./credentials";
 import { clickThenReadJs, credentialPageAction, X_RETWEET_JS, X_TIMELINE_JS } from "./browser";
-import { bodyBlocks, isAgentAuthor, type BodyLine } from "./surfaces";
-import { inlineMarks, mdToTree, STYLE, type MdBlock } from "./markdown";
+import { bodyBlocks, isAgentAuthor } from "./surfaces";
+import { appendMarkdown, inlineMarks } from "./markdown";
 import { featuredEvents, matcherinoToken, setFeatured } from "./matcherino";
 import { readSkill } from "./skills";
-import { assertInSpace, defaultSpaceId, relationDefs, spaceFilterFor, typeDefs } from "./spacemap";
-import * as memory from "./memory";
+import { assertInSpace, defaultSpaceId, relationDefs, spaceFilterFor } from "./spacemap";
+import { describeRepeat, localClock } from "./repeat";
 import { TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
 import { HUMAN_THREAD, agentSubject, convBlocks, humanRef, postTo } from "./conv";
 import { sendMessage } from "./mailbox";
@@ -49,39 +47,6 @@ import { SHIPPED_TOOLS, runObjectTool, type ObjectTool } from "./tool-runtime";
 import { TOOL_EDIT_REFUSAL, TOOL_TYPE } from "./tool-sdk";
 import { requestCapability, type CapabilityOperation } from "./capability-messages";
 import type { AgentEndpoint, AgentMessage } from "./api";
-
-const POSITION_INNER = 5; // glon.Position.Inner - append as the target's last child
-
-/**
- * Append markdown as blocks (markdown.ts: one block per line, indentation
- * nests, inline marks), optionally nested under an existing block matched
- * by its text (case-insensitive). "under" is how the model joins an
- * existing list (e.g. under: "Walmart") instead of dumping new blocks
- * at the page root. Parents are written before their children.
- */
-export async function appendBody(objectId: string, text: string, under = ""): Promise<string> {
-	let targetId = "";
-	if (under.trim()) {
-		const obj = await fetchObject(objectId);
-		const needle = under.trim().toLowerCase();
-		const hit = obj.blocks.find((b) => (b.content.text?.text ?? "").trim().toLowerCase() === needle)
-			?? obj.blocks.find((b) => (b.content.text?.text ?? "").trim().toLowerCase().startsWith(needle));
-		if (!hit) return `error: no block matching "${under.trim()}" - blocks were NOT added; re-check the text or omit "under"`;
-		targetId = hit.id;
-	}
-	let added = 0;
-	const add = async (blocks: MdBlock[], parent: string): Promise<void> => {
-		for (const b of blocks) {
-			const id = crypto.randomUUID();
-			const content = { text: { text: b.text, style: b.style, ...(b.marks.length ? { marks: b.marks } : {}), ...(b.style === STYLE.checkbox ? { checked: b.checked === true } : {}) } };
-			await mutate("block_add", { object_id: objectId, block: { id, childrenIds: [], content }, ...(parent ? { target_id: parent, position: POSITION_INNER } : {}) });
-			added += 1;
-			await add(b.children, id);
-		}
-	};
-	await add(mdToTree(text), targetId);
-	return `ok: ${added} block(s) added${targetId ? ` under "${under.trim()}"` : ""}`;
-}
 
 export interface ToolContext {
 	agentId: string;
@@ -129,27 +94,6 @@ const S = (v: unknown): string => (typeof v === "string" ? v : "");
 const N = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
 const A = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
-/**
- * The object and body line a block tool acts on (`id`, else this turn's
- * object; `block` must be a line of that body - never conversation), or
- * the refusal to return instead.
- */
-async function bodyTarget(input: Record<string, unknown>, ctx: ToolContext): Promise<{ obj: ObjectJSON; entry: BodyLine } | string> {
-	const id = S(input.id) || ctx.boundObject || "";
-	if (!id) return "error: nothing written. No object id and this turn is not running on an object.";
-	const obj = await writable(id, ctx);
-	ctx.touched.add(obj.id);
-	const entry = bodyBlocks(obj).find((e) => e.id === S(input.block));
-	if (!entry) return `error: nothing written. "${S(input.block)}" is not a line of this object's body. Read object_get's body for the ids.`;
-	return { obj, entry };
-}
-
-/** One body line as the human now reads it, after a write. */
-async function lineNow(objectId: string, blockId: string): Promise<string> {
-	const entry = bodyBlocks(await fetchObject(objectId)).find((e) => e.id === blockId);
-	return entry ? `Line is now: ${entry.line}` : "The line is no longer in the body.";
-}
-
 // ── Space containment ────────────────────────────────────────────
 //
 // Agents are citizens of exactly one space. Reads list/search only that
@@ -161,123 +105,6 @@ async function lineNow(objectId: string, blockId: string): Promise<string> {
 
 async function agentSpace(ctx: ToolContext): Promise<string> {
 	return ctx.channelId || (await defaultSpaceId());
-}
-
-/**
- * The object a write acts on: in the agent's space, and never a Tool -
- * people edit tools, agents only call them (the SDK refuses the same for
- * tools whose code is a Tool object's, tool-sdk.ts).
- */
-async function writable(id: string, ctx: ToolContext): Promise<ObjectJSON> {
-	const obj = await assertInSpace(await fetchObject(id), ctx.channelId);
-	if (obj.typeKey === TOOL_TYPE) throw new Error(TOOL_EDIT_REFUSAL);
-	return obj;
-}
-
-/**
- * A field value in the relation's own type, or why the input can't be one.
- * Agents speak strings; the store does not - a checkbox written as "true"
- * text is unchecked, a date as text never sorts. A value that would not
- * read back as what was meant is refused, never stored as text.
- */
-function typedValue(format: string, raw: string): ValueJSON | { error: string } {
-	const t = raw.trim();
-	const n = t === "" ? NaN : Number(t);
-	switch (format) {
-		case "checkbox":
-			if (t.toLowerCase() === "true") return bv(true);
-			if (t.toLowerCase() === "false") return bv(false);
-			return { error: `a checkbox takes true or false, not "${raw}"` };
-		case "number":
-			if (!Number.isFinite(n)) return { error: `a number property takes a number, not "${raw}"` };
-			return Number.isInteger(n) ? iv(n) : fv(n);
-		case "date": {
-			if (Number.isFinite(n)) return iv(n);
-			const parsed = Date.parse(t);
-			return Number.isNaN(parsed) ? { error: `a date property takes an ISO date or epoch milliseconds, not "${raw}"` } : iv(parsed);
-		}
-		case "status":
-			return lv(t ? [t] : []);
-		// Tag and object relations are lists in the store (and in the UI):
-		// a bare string here would render as an empty cell.
-		case "tag":
-		case "object":
-			return lv(t.split(",").map((s) => s.trim()).filter(Boolean));
-		default:
-			return sv(raw);
-	}
-}
-
-/** A stored value as the Properties pane shows it - what the human now sees. */
-function renderValue(format: string, v: ValueJSON | undefined): string {
-	if (!v) return "(empty)";
-	if (v.boolValue !== undefined) return v.boolValue ? "checked" : "unchecked";
-	const ms = v.intValue ?? v.floatValue;
-	if (format === "date" && ms !== undefined) return new Date(ms).toLocaleString();
-	if (ms !== undefined) return String(ms);
-	const items = v.valuesValue?.items ?? [];
-	if (v.valuesValue) return items.length ? items.map((i) => i.stringValue ?? i.linkValue?.targetId ?? "").join(", ") : "(empty)";
-	return v.stringValue || "(empty)";
-}
-
-/** Field keys agents reach for when they mean a schedule: only object_set_repeat makes an object recur. */
-const SCHEDULE_KEYS = new Set(["repeat", "repeats", "recurrence", "recurring", "recurs", "schedule", "frequency", "cadence"]);
-
-/** Formats a person can create in the app (the website's CREATABLE_FORMATS). */
-const PROPERTY_FORMATS = ["shorttext", "longtext", "number", "status", "tag", "date", "checkbox", "url", "email", "phone", "object"] as const;
-
-/** A property's key from its name, as the app derives it (relations.ts slugKey). */
-const propertyKey = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || `prop_${Date.now()}`;
-
-/** Infrastructure types: never retyped, and nothing is retyped into them. */
-const FIXED_TYPES = new Set(["agent", "machine", "install", "capability", "channel", "relation", "type", "template", "query", "collection", "set", "chat", "skill", "tool"]);
-
-const WEEKDAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-
-/** Minutes after local midnight as a clock time: 570 -> "9:30 AM". */
-function clockTime(minutes: number): string {
-	return new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-/**
- * An object's repeat rule in the words the Repeat cell uses, with its next
- * occurrence: "every 2 weeks on Wed at 9:00 AM, 1:00 PM · next Wed, Oct 8,
- * 9:00 AM", "every 5 minutes on Mon, Tue from 9:00 AM to 5:00 PM · next ...".
- */
-function describeRepeat(v: ValueJSON | undefined): string {
-	const e = v?.mapValue?.entries;
-	if (!e) return "does not repeat";
-	const ints = (key: string): number[] => (e[key]?.valuesValue?.items ?? []).map((i) => i.intValue ?? 0);
-	const freq = e["freq"]?.stringValue ?? "";
-	const every = e["interval"]?.intValue ?? 1;
-	const unit = every === 1 ? freq : `${every} ${freq}s`;
-	const days = ints("weekdays").map((i) => WEEKDAY_NAMES[i] ?? "").map((d) => d.charAt(0).toUpperCase() + d.slice(1));
-	const subDaily = freq === "minute" || freq === "hour";
-	let at: string;
-	if (subDaily) {
-		const [from = 0, until = 1439] = ints("window");
-		at = from === 0 && until === 1439 ? "" : ` from ${clockTime(from)} to ${clockTime(until)}`;
-	} else {
-		// Rules written before several times a day carry one `time`.
-		const times = e["times"] ? ints("times") : [e["time"]?.intValue ?? 0];
-		at = ` at ${times.map(clockTime).join(", ")}`;
-	}
-	const next = e["next"]?.intValue;
-	const on = (freq === "week" || subDaily) && days.length ? ` on ${days.join(", ")}` : "";
-	const when = next ? ` · next ${new Date(next).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : "";
-	return `every ${unit}${on}${at}${when}`;
-}
-
-/** "HH:MM" (24h) as minutes after midnight, or null. */
-function minutesOf(hhmm: string): number | null {
-	const hm = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
-	if (!hm || Number(hm[1]) > 23 || Number(hm[2]) > 59) return null;
-	return Number(hm[1]) * 60 + Number(hm[2]);
-}
-
-/** The occurrence planner's clock params: now, and this machine's UTC offset. */
-export function localClock(): { now_ms: number; tz_offset_min: number } {
-	return { now_ms: Date.now(), tz_offset_min: -new Date().getTimezoneOffset() };
 }
 
 // ── Machine capabilities, brokered ────────────────────────────────
@@ -357,26 +184,6 @@ export async function fileCapabilityHoldup(capability: string, error: string, ct
 		}
 	}
 }
-
-const FLAG_ERROR_TOOL: RegisteredTool = {
-	def: {
-		name: "object_flag_error",
-		description:
-			"Flag the object of this conversation as broken: set its Error property so the human sees it in their views (they can sort and filter by it). Pass a short reason. Call again with an empty message once the problem is resolved to clear it. Only turns running on an object can call this.",
-		input_schema: { type: "object", properties: { message: { type: "string", description: "short reason; empty clears the flag" } } },
-	},
-	handler: async (input, ctx) => {
-		if (!ctx.boundObject) return "error: this turn is not running on an object, so there is nothing to flag";
-		const message = S(input.message).trim().slice(0, 300);
-		ctx.touched.add(ctx.boundObject);
-		if (!message) {
-			await deleteField(ctx.boundObject, "error");
-			return "ok: error flag cleared";
-		}
-		await setField(ctx.boundObject, "error", sv(message));
-		return `ok: error flagged ("${message}") - it shows in the human's views until cleared. Tell them plainly.`;
-	},
-};
 
 const CAPABILITY_LIST_TOOL: RegisteredTool = {
 	def: {
@@ -651,684 +458,6 @@ const TOOLS: RegisteredTool[] = [
 			return out.join("\n");
 		},
 	},
-	{
-		def: {
-			name: "discussion_read",
-			description:
-				"Read one conversation on an object (object_get shows only the body). Returns the last messages oldest-first with author names and timestamps. Use it when the current message refers to earlier conversation on that object.",
-			input_schema: {
-				type: "object",
-				properties: {
-					id: { type: "string" },
-					thread_id: { type: "string", description: "a conversation on that object; omit for the human discussion" },
-					limit: { type: "number", description: "max messages, default 30" },
-				},
-				required: ["id"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const obj = await assertInSpace(await fetchObject(S(input.id)), ctx.channelId);
-			ctx.touched.add(obj.id);
-			const msgs: Array<{ author: string; text: string; ts: number }> = [];
-			for (const { block } of convBlocks(obj, S(input.thread_id) || HUMAN_THREAD)) {
-				const c = block.content.custom;
-				if (c?.contentType !== "chat") continue;
-				const meta = c.meta ?? {};
-				if (!(meta["text"] ?? "").trim()) continue;
-				msgs.push({ author: meta["author"] ?? "", text: meta["text"] ?? "", ts: Number(meta["ts"] ?? 0) });
-			}
-			for (const entry of obj.mailbox ?? []) {
-				if (entry.threadId !== S(input.thread_id)) continue;
-				const message = entry.message;
-				msgs.push({ author: message.sender.agentId || message.author || message.sender.objectId, text: message.text, ts: message.sentAt });
-			}
-			msgs.sort((a, b) => a.ts - b.ts);
-			if (msgs.length === 0) return S(input.thread_id) ? "(no messages in that conversation)" : "(no discussion on this object)";
-			const limit = Math.max(1, Math.min(200, Number(input.limit) || 30));
-			const tail = msgs.slice(-limit);
-			const names = new Map<string, string>();
-			for (const m of tail) {
-				if (names.has(m.author)) continue;
-				if (m.author === ctx.agentId) names.set(m.author, "you");
-				else if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(m.author)) {
-					const o = await fetchObject(m.author).catch(() => null);
-					names.set(m.author, (o && str(o.fields, "name")) || m.author.slice(0, 8));
-				} else names.set(m.author, "user");
-			}
-			const lines = tail.map((m) => `${names.get(m.author)} \u00b7 ${new Date(m.ts).toISOString().slice(0, 16)}: ${m.text}`);
-			return `${msgs.length} message(s) total, last ${tail.length}:\n${lines.join("\n")}`;
-		},
-	},
-	{
-		def: {
-			name: "object_create",
-			description: "Create an object (default type note). Returns its id.",
-			input_schema: {
-				type: "object",
-				properties: { name: { type: "string" }, type_key: { type: "string" }, text: { type: "string", description: "optional body text" } },
-				required: ["name"],
-			},
-		},
-		handler: async (input, ctx) => {
-			if (S(input.type_key) === TOOL_TYPE) throw new Error(TOOL_EDIT_REFUSAL);
-			const { id } = await createObject(S(input.name), S(input.type_key) || "note", ctx.channelId ? { channel: sv(ctx.channelId) } : undefined);
-			ctx.touched.add(id);
-			if (S(input.text)) {
-				await appendBody(id, S(input.text));
-			}
-			return JSON.stringify({ id });
-		},
-	},
-	{
-		def: {
-			name: "object_set_field",
-			description:
-				"Set one of the object's properties - only a property that exists in this space (the reply lists them if the key is unknown); a value nothing can display is refused, never stored. The value is written in the property's own type: checkbox true/false, number a number, date epoch milliseconds or an ISO date, tag/object comma-separated; anything else is text. The reply is the value as the human now sees it. Setting done=true on a recurring object completes its current occurrence. key=agent ADDS the given agent id(s) to the guest list (who may be @-asked here); it never removes anyone. To make an object repeat, use object_set_repeat.",
-			input_schema: { type: "object", properties: { id: { type: "string" }, key: { type: "string" }, value: { type: "string" } }, required: ["id", "key", "value"] },
-		},
-		handler: async (input, ctx) => {
-			ctx.touched.add(S(input.id));
-			const obj = await writable(S(input.id), ctx);
-			const key = S(input.key);
-			if (SCHEDULE_KEYS.has(key.toLowerCase())) {
-				return `error: nothing written. "${key}" does not make an object repeat - call object_set_repeat (every N days/weeks/months/years, weekdays, time).`;
-			}
-			const defs = await relationDefs(await agentSpace(ctx));
-			const def = defs.get(key);
-			if (!def) {
-				const known = [...defs.values()].filter((d) => !d.readOnly).map((d) => `${d.key} (${d.name}, ${d.format})`).join(", ");
-				return `error: nothing written. This space has no "${key}" property, so a value there would be invisible to everyone. Properties here: ${known}. If none fits, create one with object_add_property (it shows in everyone's Properties list), then set it - never report it as done before that.`;
-			}
-			if (def.readOnly) return `error: nothing written. ${def.name} is computed by the store and cannot be set.`;
-			let value: ValueJSON;
-			if (key === "agent") {
-				const adding = S(input.value).split(",").map((s) => s.trim()).filter(Boolean);
-				for (const aid of adding) {
-					const agent = await fetchObject(aid).catch(() => null);
-					if (agent?.typeKey !== "agent") return `error: nothing written. "${aid}" is not an agent object.`;
-				}
-				value = lv([...new Set([...guestAgents(obj.fields), ...adding])]);
-			} else {
-				const typed = typedValue(def.format, S(input.value));
-				if ("error" in typed) return `error: nothing written. ${def.name}: ${typed.error}.`;
-				value = typed;
-			}
-			// The clock rides along for the one case the engine needs it: done
-			// on a recurring object advances the occurrence in local time.
-			await mutate("set_field", { object_id: obj.id, key, value, ...localClock() });
-			const after = await fetchObject(obj.id);
-			if (key === "done" && after.fields["repeat"]) return `This object repeats, so the current occurrence was completed instead: ${describeRepeat(after.fields["repeat"])}.`;
-			return `${def.name} is now: ${renderValue(def.format, after.fields[key])}`;
-		},
-	},
-	{
-		def: {
-			name: "object_set_repeat",
-			description:
-				"Make an object repeat, or change how it repeats - exactly what the Repeat cell on the object sets. Every `every` `unit`s. day/week/month/year: it runs at each of `times` (local HH:MM, default 09:00) on every day it runs - several times a day is one rule; weekly rules may name weekdays. minute/hour: it runs every `every` minutes/hours from `from` to `until` (local HH:MM, default the whole day), optionally only on `weekdays`. start is the first day (ISO date, default today). Each occurrence runs through an agent on the object's guest list. The reply is the rule and next occurrence as the human sees them.",
-			input_schema: {
-				type: "object",
-				properties: {
-					id: { type: "string", description: "object id; omit for the object of this conversation" },
-					every: { type: "number", description: "interval, default 1 (1-999; hours 1-23)" },
-					unit: { type: "string", enum: ["minute", "hour", "day", "week", "month", "year"] },
-					times: { type: "array", items: { type: "string" }, description: "day/week/month/year: local HH:MM times (24h) it runs on each day it runs; default [\"09:00\"]" },
-					from: { type: "string", description: "minute/hour: local HH:MM the day's runs start; default 00:00" },
-					until: { type: "string", description: "minute/hour: local HH:MM of the day's last possible run; default 23:59" },
-					weekdays: { type: "array", items: { type: "string" }, description: "mon..sun. week: which days (default the start day's weekday); minute/hour: only these days (default every day)" },
-					monthly: { type: "string", enum: ["date", "weekday"], description: "monthly only: same date (default) or same nth weekday" },
-					start: { type: "string", description: "first day, ISO date; default today" },
-				},
-				required: ["unit"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const id = S(input.id) || ctx.boundObject || "";
-			if (!id) return "error: nothing written. No object id and this turn is not running on an object.";
-			const obj = await writable(id, ctx);
-			ctx.touched.add(obj.id);
-			const unit = S(input.unit);
-			if (!["minute", "hour", "day", "week", "month", "year"].includes(unit)) return `error: nothing written. unit must be minute, hour, day, week, month or year, not "${unit}".`;
-			const subDaily = unit === "minute" || unit === "hour";
-			const most = unit === "hour" ? 23 : 999;
-			const every = input.every === undefined ? 1 : Number(input.every);
-			if (!Number.isInteger(every) || every < 1 || every > most) return `error: nothing written. every must be a whole number from 1 to ${most}.`;
-			const weekdays: number[] = [];
-			for (const w of A(input.weekdays)) {
-				const i = WEEKDAY_NAMES.indexOf(w.trim().toLowerCase().slice(0, 3));
-				if (i < 0) return `error: nothing written. "${w}" is not a weekday (mon..sun).`;
-				weekdays.push(i);
-			}
-			const rule: Record<string, unknown> = {
-				freq: unit,
-				interval: every,
-				weekdays: unit === "week" || subDaily ? weekdays : [],
-				monthly: S(input.monthly) === "weekday" ? "weekday" : "date",
-				tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-			};
-			if (subDaily) {
-				if (input.times !== undefined) return `error: nothing written. times is for day, week, month and year; a ${unit} rule runs from "from" to "until".`;
-				const from = minutesOf(S(input.from) || "00:00");
-				const until = minutesOf(S(input.until) || "23:59");
-				if (from === null || until === null || from > until) return `error: nothing written. from and until must be HH:MM (24h) with from before until, not "${S(input.from)}" - "${S(input.until)}".`;
-				rule.window = [from, until];
-			} else {
-				if (input.from !== undefined || input.until !== undefined) return `error: nothing written. from/until are for minute and hour rules; a ${unit} rule runs at its times.`;
-				const raw = input.times === undefined ? ["09:00"] : A(input.times);
-				const times = raw.map(minutesOf);
-				const bad = raw.find((_, i) => times[i] === null);
-				if (raw.length === 0 || bad !== undefined) return `error: nothing written. times must be one or more HH:MM (24h)${bad === undefined ? "" : `, not "${bad}"`}.`;
-				rule.times = times;
-			}
-			if (S(input.start)) {
-				const d = new Date(`${S(input.start).slice(0, 10)}T12:00:00`);
-				if (Number.isNaN(d.getTime())) return `error: nothing written. start must be an ISO date, not "${S(input.start)}".`;
-				// Noon, like the Repeat editor: the anchor lands on that local day whatever the UTC offset.
-				rule.anchor_ms = d.getTime();
-			}
-			await mutate("repeat_set", { object_id: obj.id, rule, ...localClock() });
-			const after = await fetchObject(obj.id);
-			const guests = guestAgents(after.fields);
-			const who = guests.length ? "" : " No agent is on its guest list, so nothing runs each occurrence until one is added (object_set_field key=agent).";
-			return `Repeats ${describeRepeat(after.fields["repeat"])}.${who}`;
-		},
-	},
-	{
-		def: {
-			name: "object_clear_repeat",
-			description: "Stop an object repeating - the Repeat cell's \"Turn off repeating\". Its history stays in the DAG.",
-			input_schema: { type: "object", properties: { id: { type: "string", description: "object id; omit for the object of this conversation" } } },
-		},
-		handler: async (input, ctx) => {
-			const id = S(input.id) || ctx.boundObject || "";
-			if (!id) return "error: nothing written. No object id and this turn is not running on an object.";
-			const obj = await writable(id, ctx);
-			ctx.touched.add(obj.id);
-			if (!obj.fields["repeat"]) return "error: nothing written. This object does not repeat.";
-			await mutate("repeat_clear", { object_id: obj.id });
-			return "This object no longer repeats.";
-		},
-	},
-	{
-		def: {
-			name: "object_add_property",
-			description:
-				"Create a new property in this space - on purpose, visible to everyone in the Properties list - when none of the existing ones fits (object_set_field lists them). Then set values with object_set_field. `object` properties may be limited to some types (type keys). Creating a key that already exists changes nothing and says so.",
-			input_schema: {
-				type: "object",
-				properties: {
-					name: { type: "string", description: "human name, e.g. 'Mockup status'" },
-					format: { type: "string", enum: [...PROPERTY_FORMATS] },
-					object_types: { type: "array", items: { type: "string" }, description: "object format only: type keys the value may link to" },
-				},
-				required: ["name", "format"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const name = S(input.name).trim();
-			if (!name) return "error: nothing created. A property needs a name.";
-			const format = S(input.format);
-			if (!(PROPERTY_FORMATS as readonly string[]).includes(format)) return `error: nothing created. format must be one of ${PROPERTY_FORMATS.join(", ")}.`;
-			const key = propertyKey(name);
-			if (SCHEDULE_KEYS.has(key)) return `error: nothing created. A "${name}" property would not make anything repeat - use object_set_repeat.`;
-			const space = await agentSpace(ctx);
-			// Same property whatever the spelling: "Due date", "due_date" and the bundled "dueDate" are one.
-			const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-			const existing = [...(await relationDefs(space)).values()].find((d) => norm(d.key) === norm(name) || norm(d.name) === norm(name));
-			if (existing) return `Nothing created: this space already has ${existing.name} (key ${existing.key}, ${existing.format}). Set it with object_set_field key=${existing.key}.`;
-			const types = await typeDefs(space);
-			const limits: string[] = [];
-			for (const k of format === "object" ? A(input.object_types) : []) {
-				const t = types.get(k);
-				if (!t) return `error: nothing created. No type "${k}" in this space; types here: ${[...types.keys()].join(", ")}.`;
-				limits.push(t.id);
-			}
-			await createObject(name, "relation", {
-				channel: sv(space),
-				key: sv(key),
-				name: sv(name),
-				format: sv(format),
-				hidden: bv(false),
-				readOnly: bv(false),
-				maxCount: iv(format === "status" ? 1 : 0),
-				options: lv([]),
-				bundled: bv(false),
-				...(limits.length ? { object_types: lv(limits) } : {}),
-			});
-			return `Created the property ${name} (key ${key}, ${format}) in this space; it now shows in the Properties list. Set it with object_set_field key=${key}.`;
-		},
-	},
-	{
-		def: {
-			name: "object_clear_field",
-			description: "Empty one of an object's properties (the Properties pane's Remove). The guest list (agent) and the repeat rule have their own tools; computed dates can't be cleared.",
-			input_schema: {
-				type: "object",
-				properties: { id: { type: "string", description: "object id; omit for the object of this conversation" }, key: { type: "string" } },
-				required: ["key"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const id = S(input.id) || ctx.boundObject || "";
-			if (!id) return "error: nothing cleared. No object id and this turn is not running on an object.";
-			const obj = await writable(id, ctx);
-			ctx.touched.add(obj.id);
-			const key = S(input.key);
-			if (key === "repeat") return "error: nothing cleared. Stop a repeat with object_clear_repeat.";
-			if (key === "agent") return "error: nothing cleared. Agents are not removed from a guest list by agents - ask the human.";
-			const def = (await relationDefs(await agentSpace(ctx))).get(key);
-			if (!def) return `error: nothing cleared. This space has no "${key}" property.`;
-			if (def.readOnly) return `error: nothing cleared. ${def.name} is computed by the store.`;
-			if (!(key in obj.fields)) return `Nothing cleared: ${def.name} is already empty.`;
-			await mutate("delete_field", { object_id: obj.id, key });
-			const after = await fetchObject(obj.id);
-			// The engine may answer a cleared pin with its own error (an agent with no Served by): say so.
-			const error = str(after.fields, "error");
-			return `${def.name} is now empty.${error && error !== str(obj.fields, "error") ? ` The object now shows: ${error}` : ""}`;
-		},
-	},
-	{
-		def: {
-			name: "object_set_type",
-			description:
-				"Change an object's type (e.g. note -> task) to one of this space's types; its text, properties and history stay. Infrastructure (agents, computers, spaces, properties, types, templates, queries, collections) is never retyped.",
-			input_schema: {
-				type: "object",
-				properties: { id: { type: "string", description: "object id; omit for the object of this conversation" }, type: { type: "string", description: "type key, e.g. task" } },
-				required: ["type"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const id = S(input.id) || ctx.boundObject || "";
-			if (!id) return "error: nothing changed. No object id and this turn is not running on an object.";
-			const obj = await writable(id, ctx);
-			ctx.touched.add(obj.id);
-			const key = S(input.type);
-			if (FIXED_TYPES.has(obj.typeKey)) return `error: nothing changed. A ${obj.typeKey} object keeps its type.`;
-			if (FIXED_TYPES.has(key)) return `error: nothing changed. Objects are not turned into ${key} objects this way.`;
-			const types = await typeDefs(await agentSpace(ctx));
-			const t = types.get(key);
-			if (!t) {
-				const offered = [...types.values()].filter((d) => !FIXED_TYPES.has(d.key)).map((d) => `${d.key} (${d.name})`).join(", ");
-				return `error: nothing changed. No type "${key}" in this space; types here: ${offered}.`;
-			}
-			if (obj.typeKey === key) return `Nothing changed: it is already a ${t.name}.`;
-			await mutate("set_type", { object_id: obj.id, type_key: key });
-			const after = await fetchObject(obj.id);
-			return `It is now a ${types.get(after.typeKey)?.name ?? after.typeKey}.`;
-		},
-	},
-	{
-		def: {
-			name: "occurrence_complete",
-			description:
-				"Mark the current occurrence of a recurring object done; its schedule advances to the next occurrence. Call it once, after the scheduled work is actually finished. Notes belong in your reply, not on the object.",
-			input_schema: { type: "object", properties: { object_id: { type: "string" } }, required: ["object_id"] },
-		},
-		handler: async (input, ctx) => {
-			const obj = await writable(S(input.object_id), ctx);
-			ctx.touched.add(obj.id);
-			const { next } = await mutate("occurrence_complete", { object_id: obj.id, ...localClock() });
-			return typeof next === "number" ? `ok; next occurrence ${new Date(next).toLocaleString()}` : "ok";
-		},
-	},
-	{
-		def: {
-			name: "object_add_text",
-			description:
-				"Append NEW text to an object's body. Markdown lines become real blocks: '- [ ] x' checkboxes, '- x' bullets, '1. x' numbered, '# x' headings, '> x' quotes; plain lines become paragraphs. Indent a line to nest it under the one above; **bold**, *italic*, `code` and [text](url) become formatting. When the object already has a matching list or section, pass 'under' with that block's text (e.g. under: \"Walmart\") so new items join it as children instead of landing at the page root. To change what is already there, use object_edit_block / object_check / object_set_block_style / object_move_block / object_remove_blocks; to link another object, object_add_link (never write '🔗 Name' text).",
-			input_schema: {
-				type: "object",
-				properties: {
-					id: { type: "string" },
-					text: { type: "string" },
-					under: { type: "string", description: "text of an existing block to nest the new blocks under" },
-				},
-				required: ["id", "text"],
-			},
-		},
-		handler: async (input, ctx) => {
-			ctx.touched.add(S(input.id));
-			await writable(S(input.id), ctx);
-			return await appendBody(S(input.id), S(input.text), S(input.under));
-		},
-	},
-	{
-		def: {
-			name: "object_edit_block",
-			description:
-				"Replace the text of one line in an object's body, keeping its style (heading, bullet, checkbox...). `block` is the id from object_get's body. The reply is the line as the human now reads it.",
-			input_schema: {
-				type: "object",
-				properties: { id: { type: "string", description: "object id; omit for the object of this conversation" }, block: { type: "string" }, text: { type: "string" } },
-				required: ["block", "text"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const hit = await bodyTarget(input, ctx);
-			if (typeof hit === "string") return hit;
-			const t = hit.entry.block.content.text;
-			if (!t) return `error: nothing written. That line is a ${hit.entry.block.content.custom?.contentType ?? "non-text"} block, not text.`;
-			// Inline markdown in the new text (**bold**, [link](url), `code`) becomes real formatting.
-			const { text, marks } = inlineMarks(S(input.text));
-			const cleared = (t.marks ?? []).length > 0 && marks.length === 0;
-			await mutate("block_update", { object_id: hit.obj.id, block_id: hit.entry.id, content: { ...hit.entry.block.content, text: { ...t, text, marks } } });
-			return `${await lineNow(hit.obj.id, hit.entry.id)}${cleared ? "\n(Its inline formatting - bold, links, mentions - was cleared with the old text.)" : ""}`;
-		},
-	},
-	{
-		def: {
-			name: "object_set_block_style",
-			description: "Change what one body line is: paragraph, h1, h2, h3, quote, bullet, numbered or checkbox. `block` is the id from object_get's body.",
-			input_schema: {
-				type: "object",
-				properties: {
-					id: { type: "string", description: "object id; omit for the object of this conversation" },
-					block: { type: "string" },
-					style: { type: "string", enum: Object.keys(STYLE) },
-				},
-				required: ["block", "style"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const hit = await bodyTarget(input, ctx);
-			if (typeof hit === "string") return hit;
-			const t = hit.entry.block.content.text;
-			if (!t) return `error: nothing written. That line is a ${hit.entry.block.content.custom?.contentType ?? "non-text"} block, not text.`;
-			const name = S(input.style) as keyof typeof STYLE;
-			if (!(name in STYLE)) return `error: nothing written. style must be one of ${Object.keys(STYLE).join(", ")}.`;
-			const style = STYLE[name];
-			await mutate("block_update", { object_id: hit.obj.id, block_id: hit.entry.id, content: { ...hit.entry.block.content, text: { ...t, style, checked: style === STYLE.checkbox ? t.checked === true : false } } });
-			return await lineNow(hit.obj.id, hit.entry.id);
-		},
-	},
-	{
-		def: {
-			name: "object_check",
-			description: "Tick or untick one checkbox line in an object's body. `block` is the id from object_get's body (a line starting '- [ ]' or '- [x]').",
-			input_schema: {
-				type: "object",
-				properties: { id: { type: "string", description: "object id; omit for the object of this conversation" }, block: { type: "string" }, checked: { type: "boolean" } },
-				required: ["block", "checked"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const hit = await bodyTarget(input, ctx);
-			if (typeof hit === "string") return hit;
-			const t = hit.entry.block.content.text;
-			if (!t || t.style !== STYLE.checkbox) return `error: nothing written. That line is not a checkbox (${hit.entry.line.slice(0, 80)}).`;
-			await mutate("block_update", { object_id: hit.obj.id, block_id: hit.entry.id, content: { ...hit.entry.block.content, text: { ...t, checked: input.checked === true } } });
-			return await lineNow(hit.obj.id, hit.entry.id);
-		},
-	},
-	{
-		def: {
-			name: "object_remove_blocks",
-			description: "Delete lines from an object's body - each block and everything nested under it. `blocks` are ids from object_get's body. The reply lists what was removed.",
-			input_schema: {
-				type: "object",
-				properties: { id: { type: "string", description: "object id; omit for the object of this conversation" }, blocks: { type: "array", items: { type: "string" } } },
-				required: ["blocks"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const ids = A(input.blocks);
-			if (ids.length === 0) return "error: nothing removed. Pass the block ids to remove.";
-			const id = S(input.id) || ctx.boundObject || "";
-			if (!id) return "error: nothing removed. No object id and this turn is not running on an object.";
-			const obj = await writable(id, ctx);
-			ctx.touched.add(obj.id);
-			const body = bodyBlocks(obj);
-			const missing = ids.filter((b) => !body.some((e) => e.id === b));
-			if (missing.length) return `error: nothing removed. Not lines of this object's body: ${missing.join(", ")}. Read object_get's body for the ids.`;
-			const removed = body.filter((e) => ids.includes(e.id));
-			for (const e of removed) await mutate("block_remove", { object_id: obj.id, block_id: e.id });
-			const after = new Set(bodyBlocks(await fetchObject(obj.id)).map((e) => e.id));
-			const gone = body.filter((e) => !after.has(e.id));
-			return `Removed ${gone.length} line(s):\n${gone.map((e) => `${"  ".repeat(e.depth)}${e.line}`).join("\n")}`;
-		},
-	},
-	{
-		def: {
-			name: "object_move_block",
-			description: "Move one body line (with what's nested under it) before or after another line, or inside it as its last child. Ids come from object_get's body.",
-			input_schema: {
-				type: "object",
-				properties: {
-					id: { type: "string", description: "object id; omit for the object of this conversation" },
-					block: { type: "string" },
-					to: { type: "string", description: "the line to move next to" },
-					where: { type: "string", enum: ["before", "after", "inside"] },
-				},
-				required: ["block", "to", "where"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const hit = await bodyTarget(input, ctx);
-			if (typeof hit === "string") return hit;
-			const body = bodyBlocks(hit.obj);
-			const to = body.find((e) => e.id === S(input.to));
-			if (!to) return `error: nothing moved. "${S(input.to)}" is not a line of this object's body.`;
-			// The moved line's own subtree, in reading order right after it.
-			const at = body.findIndex((e) => e.id === hit.entry.id);
-			let end = at + 1;
-			while (end < body.length && body[end].depth > hit.entry.depth) end++;
-			if (body.slice(at, end).includes(to)) return "error: nothing moved. A line cannot move next to or into itself or its own nested lines.";
-			const where = S(input.where);
-			const position = where === "before" ? 1 : where === "after" ? 2 : where === "inside" ? 5 : 0;
-			if (!position) return "error: nothing moved. where must be before, after or inside.";
-			await mutate("block_move", { object_id: hit.obj.id, block_id: hit.entry.id, target_id: to.id, position });
-			const now = bodyBlocks(await fetchObject(hit.obj.id));
-			const i = now.findIndex((e) => e.id === hit.entry.id);
-			const prev = now.slice(0, i).reverse().find((e) => e.depth <= now[i].depth);
-			return `${now[i].line}\n${prev ? `now ${prev.depth < now[i].depth ? "inside" : "after"}: ${prev.line}` : "now first in the body"}`;
-		},
-	},
-	{
-		def: {
-			name: "object_add_link",
-			description:
-				"Add a link to another object in this object's body - a real, clickable link card, never text that merely looks like one. Place it at the end of the body, inside a line (`under`) or right after one (`after`); those ids come from object_get's body.",
-			input_schema: {
-				type: "object",
-				properties: {
-					id: { type: "string", description: "object id; omit for the object of this conversation" },
-					target: { type: "string", description: "id of the object to link to" },
-					under: { type: "string", description: "body line to nest the link inside" },
-					after: { type: "string", description: "body line to place the link after" },
-				},
-				required: ["target"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const id = S(input.id) || ctx.boundObject || "";
-			if (!id) return "error: nothing added. No object id and this turn is not running on an object.";
-			const obj = await writable(id, ctx);
-			ctx.touched.add(obj.id);
-			const target = await fetchObject(S(input.target)).catch(() => null);
-			if (!target || target.deleted) return `error: nothing added. No object "${S(input.target)}" - find it with object_search first.`;
-			await assertInSpace(target, ctx.channelId);
-			const body = bodyBlocks(obj);
-			const anchor = S(input.under) || S(input.after);
-			if (anchor && !body.some((e) => e.id === anchor)) return `error: nothing added. "${anchor}" is not a line of this object's body.`;
-			await mutate("block_add", {
-				object_id: obj.id,
-				block: { id: crypto.randomUUID(), childrenIds: [], content: { custom: { contentType: "link", meta: { target: target.id, style: "text" } } } },
-				...(anchor ? { target_id: anchor, position: S(input.under) ? POSITION_INNER : 2 } : {}),
-			});
-			return `Linked to "${str(target.fields, "name") || "Untitled"}" (${target.typeKey}) - a clickable link in the body.`;
-		},
-	},
-	{
-		def: {
-			name: "object_delete",
-			description: "Move an object to the space's bin (recoverable: object_restore brings it back, with its text, properties and history).",
-			input_schema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
-		},
-		handler: async (input, ctx) => {
-			ctx.touched.add(S(input.id));
-			const obj = await writable(S(input.id), ctx);
-			if (obj.deleted) return `Nothing deleted: "${str(obj.fields, "name") || "Untitled"}" is already in the bin.`;
-			await mutate("delete", { object_id: obj.id });
-			return `Moved "${str(obj.fields, "name") || "Untitled"}" (${obj.typeKey}) to the bin; object_restore brings it back.`;
-		},
-	},
-	{
-		def: {
-			name: "object_restore",
-			description: "Bring an object back from the space's bin (the bin's Restore): its text, properties and history return with it.",
-			input_schema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
-		},
-		handler: async (input, ctx) => {
-			ctx.touched.add(S(input.id));
-			const obj = await writable(S(input.id), ctx);
-			if (!obj.deleted) return `error: nothing restored. "${str(obj.fields, "name") || "Untitled"}" is not in the bin.`;
-			await mutate("restore", { object_id: obj.id });
-			const after = await fetchObject(obj.id);
-			return after.deleted ? "error: the restore did not take - it is still in the bin." : `Restored "${str(after.fields, "name") || "Untitled"}" (${after.typeKey}) from the bin.`;
-		},
-	},
-	{
-		def: {
-			name: "chat_reply_on",
-			description: "Post an UNPROMPTED chat message on some object's discussion. NEVER use this to answer the message you are currently replying to — your final reply text is delivered to the asking surface automatically.",
-			input_schema: { type: "object", properties: { object_id: { type: "string" }, text: { type: "string" } }, required: ["object_id", "text"] },
-		},
-		handler: async (input, ctx) => {
-			await assertInSpace(await fetchObject(S(input.object_id)), ctx.channelId);
-			// An object id alone addresses its human discussion; agent-to-agent
-			// talk has its own thread (agent_ask) and never lands here.
-			await postTo(humanRef(S(input.object_id)), S(input.text), ctx.agentId);
-			return "ok";
-		},
-	},
-	// ── Memory (owner bound server-side equivalent: bound here) ──
-	{
-		def: {
-			name: "memory_upsert_fact",
-			description: "Pin a durable atomic fact. One row per `key` — upsert replaces by key.",
-			input_schema: {
-				type: "object",
-				properties: {
-					key: { type: "string" },
-					value: { type: "string" },
-					confidence: { type: "string", enum: ["low", "med", "high"] },
-					sourced_from_block_id: { type: "string" },
-				},
-				required: ["key", "value"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const id = await memory.upsertFact(ctx.agentId, S(input.key), S(input.value), S(input.confidence) || "med", S(input.sourced_from_block_id));
-			return JSON.stringify({ id });
-		},
-	},
-	{
-		def: {
-			name: "memory_upsert_milestone",
-			description: "Record a narrative arc. Pass supersedes=[id,...] to replace older milestones.",
-			input_schema: {
-				type: "object",
-				properties: {
-					title: { type: "string" },
-					narrative: { type: "string" },
-					topics: { type: "array", items: { type: "string" } },
-					supersedes: { type: "array", items: { type: "string" } },
-					status: { type: "string", enum: ["active", "completed", "superseded"] },
-					confidence: { type: "string", enum: ["low", "med", "high"] },
-				},
-				required: ["title", "narrative"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const id = await memory.upsertMilestone(ctx.agentId, {
-				title: S(input.title),
-				narrative: S(input.narrative),
-				topics: A(input.topics),
-				supersedes: A(input.supersedes),
-				status: S(input.status) || "active",
-				confidence: S(input.confidence) || "med",
-			});
-			return JSON.stringify({ id });
-		},
-	},
-	{
-		def: {
-			name: "memory_amend_milestone",
-			description: "Correct an existing milestone in place — prefer over supersedes for small changes.",
-			input_schema: {
-				type: "object",
-				properties: {
-					id: { type: "string" },
-					title: { type: "string" },
-					narrative: { type: "string" },
-					topics: { type: "array", items: { type: "string" } },
-					status: { type: "string", enum: ["active", "completed", "superseded"] },
-				},
-				required: ["id"],
-			},
-		},
-		handler: async (input, ctx) => {
-			const ok = await memory.amendMilestone(ctx.agentId, S(input.id), {
-				title: input.title === undefined ? undefined : S(input.title),
-				narrative: input.narrative === undefined ? undefined : S(input.narrative),
-				topics: input.topics === undefined ? undefined : A(input.topics),
-				status: input.status === undefined ? undefined : S(input.status),
-			});
-			return ok ? "ok" : "milestone not found (or not yours)";
-		},
-	},
-	{
-		def: {
-			name: "memory_list_facts",
-			description: "List pinned facts. Inspect before writing to avoid duplicates.",
-			input_schema: { type: "object", properties: { key: { type: "string" } } },
-		},
-		handler: async (input, ctx) => {
-			const rows = await memory.listFacts(ctx.agentId, S(input.key) || undefined);
-			return JSON.stringify(rows.map((r) => ({ id: r.id, key: str(r.fields, "key"), value: str(r.fields, "value"), confidence: str(r.fields, "confidence") })));
-		},
-	},
-	{
-		def: {
-			name: "memory_list_milestones",
-			description: "List milestones, optionally by status.",
-			input_schema: { type: "object", properties: { status: { type: "string", enum: ["active", "completed", "superseded"] } } },
-		},
-		handler: async (input, ctx) => {
-			const rows = await memory.listMilestones(ctx.agentId, S(input.status) || undefined);
-			return JSON.stringify(rows.map((r) => ({ id: r.id, title: str(r.fields, "title"), status: str(r.fields, "status"), narrative: str(r.fields, "narrative").slice(0, 200) })));
-		},
-	},
-	{
-		def: {
-			name: "memory_recall",
-			description: "Search facts + milestones by substring query and/or topics.",
-			input_schema: {
-				type: "object",
-				properties: {
-					query: { type: "string" },
-					topics: { type: "array", items: { type: "string" } },
-					limit_facts: { type: "number" },
-					limit_milestones: { type: "number" },
-					include_superseded: { type: "boolean" },
-				},
-			},
-		},
-		handler: async (input, ctx) => {
-			const out = await memory.recall(ctx.agentId, {
-				query: S(input.query),
-				topics: A(input.topics),
-				limit_facts: N(input.limit_facts),
-				limit_milestones: N(input.limit_milestones),
-				include_superseded: input.include_superseded === true,
-			});
-			return JSON.stringify({
-				facts: out.facts.map((r) => ({ key: str(r.fields, "key"), value: str(r.fields, "value") })),
-				milestones: out.milestones.map((r) => ({ id: r.id, title: str(r.fields, "title"), narrative: str(r.fields, "narrative").slice(0, 300) })),
-			});
-		},
-	},
 	// ── Skills (progressive disclosure read path) ──
 	{
 		def: {
@@ -1407,6 +536,66 @@ const SUBMIT_TOOL: RegisteredTool = {
 
 // ── Recovery core ────────────────────────────────────────────────
 
+/**
+ * The object a write acts on: in the agent's space, and never a Tool -
+ * people edit tools, agents only call them (the SDK refuses the same,
+ * tool-sdk.ts).
+ */
+async function writable(id: string, ctx: ToolContext): Promise<ObjectJSON> {
+	const obj = await assertInSpace(await fetchObject(id), ctx.channelId);
+	if (obj.typeKey === TOOL_TYPE) throw new Error(TOOL_EDIT_REFUSAL);
+	return obj;
+}
+
+/**
+ * A field value in the relation's own type, or why the input can't be one.
+ * Agents speak strings; the store does not - a checkbox written as "true"
+ * text is unchecked, a date as text never sorts. A value that would not
+ * read back as what was meant is refused, never stored as text.
+ */
+function typedValue(format: string, raw: string): ValueJSON | { error: string } {
+	const t = raw.trim();
+	const n = t === "" ? NaN : Number(t);
+	switch (format) {
+		case "checkbox":
+			if (t.toLowerCase() === "true") return bv(true);
+			if (t.toLowerCase() === "false") return bv(false);
+			return { error: `a checkbox takes true or false, not "${raw}"` };
+		case "number":
+			if (!Number.isFinite(n)) return { error: `a number property takes a number, not "${raw}"` };
+			return Number.isInteger(n) ? iv(n) : fv(n);
+		case "date": {
+			if (Number.isFinite(n)) return iv(n);
+			const parsed = Date.parse(t);
+			return Number.isNaN(parsed) ? { error: `a date property takes an ISO date or epoch milliseconds, not "${raw}"` } : iv(parsed);
+		}
+		case "status":
+			return lv(t ? [t] : []);
+		// Tag and object relations are lists in the store (and in the UI):
+		// a bare string here would render as an empty cell.
+		case "tag":
+		case "object":
+			return lv(t.split(",").map((s) => s.trim()).filter(Boolean));
+		default:
+			return sv(raw);
+	}
+}
+
+/** A stored value as the Properties pane shows it - what the human now sees. */
+function renderValue(format: string, v: ValueJSON | undefined): string {
+	if (!v) return "(empty)";
+	if (v.boolValue !== undefined) return v.boolValue ? "checked" : "unchecked";
+	const ms = v.intValue ?? v.floatValue;
+	if (format === "date" && ms !== undefined) return new Date(ms).toLocaleString();
+	if (ms !== undefined) return String(ms);
+	const items = v.valuesValue?.items ?? [];
+	if (v.valuesValue) return items.length ? items.map((i) => i.stringValue ?? i.linkValue?.targetId ?? "").join(", ") : "(empty)";
+	return v.stringValue || "(empty)";
+}
+
+/** Field keys agents reach for when they mean a schedule: only object_set_repeat makes an object recur. */
+const SCHEDULE_KEYS = new Set(["repeat", "repeats", "recurrence", "recurring", "recurs", "schedule", "frequency", "cadence"]);
+
 /** object_get as the harness keeps it, frozen: what object_get's Tool object falls back to (RECOVERY_CORE). */
 const objectGetCopy: Handler = async (input, ctx) => {
 	ctx.touched.add(S(input.id));
@@ -1438,17 +627,99 @@ const objectGetCopy: Handler = async (input, ctx) => {
 	);
 };
 
+const objectSetFieldCopy: Handler = async (input, ctx) => {
+	ctx.touched.add(S(input.id));
+	const obj = await writable(S(input.id), ctx);
+	const key = S(input.key);
+	if (SCHEDULE_KEYS.has(key.toLowerCase())) {
+		return `error: nothing written. "${key}" does not make an object repeat - call object_set_repeat (every N days/weeks/months/years, weekdays, time).`;
+	}
+	const defs = await relationDefs(await agentSpace(ctx));
+	const def = defs.get(key);
+	if (!def) {
+		const known = [...defs.values()].filter((d) => !d.readOnly).map((d) => `${d.key} (${d.name}, ${d.format})`).join(", ");
+		return `error: nothing written. This space has no "${key}" property, so a value there would be invisible to everyone. Properties here: ${known}. If none fits, create one with object_add_property (it shows in everyone's Properties list), then set it - never report it as done before that.`;
+	}
+	if (def.readOnly) return `error: nothing written. ${def.name} is computed by the store and cannot be set.`;
+	let value: ValueJSON;
+	if (key === "agent") {
+		const adding = S(input.value).split(",").map((s) => s.trim()).filter(Boolean);
+		for (const aid of adding) {
+			const agent = await fetchObject(aid).catch(() => null);
+			if (agent?.typeKey !== "agent") return `error: nothing written. "${aid}" is not an agent object.`;
+		}
+		value = lv([...new Set([...guestAgents(obj.fields), ...adding])]);
+	} else {
+		const typed = typedValue(def.format, S(input.value));
+		if ("error" in typed) return `error: nothing written. ${def.name}: ${typed.error}.`;
+		value = typed;
+	}
+	// The clock rides along for the one case the engine needs it: done
+	// on a recurring object advances the occurrence in local time.
+	await mutate("set_field", { object_id: obj.id, key, value, ...localClock() });
+	const after = await fetchObject(obj.id);
+	if (key === "done" && after.fields["repeat"]) return `This object repeats, so the current occurrence was completed instead: ${describeRepeat(after.fields["repeat"])}.`;
+	return `${def.name} is now: ${renderValue(def.format, after.fields[key])}`;
+};
+
+const objectAddTextCopy: Handler = async (input, ctx) => {
+	const id = S(input.id);
+	const under = S(input.under).trim();
+	ctx.touched.add(id);
+	const obj = await writable(id, ctx);
+	// "under" nests the new lines in an existing block, matched by its text (case-insensitive).
+	let parent = "";
+	if (under) {
+		const needle = under.toLowerCase();
+		const hit =
+			obj.blocks.find((b) => (b.content.text?.text ?? "").trim().toLowerCase() === needle) ??
+			obj.blocks.find((b) => (b.content.text?.text ?? "").trim().toLowerCase().startsWith(needle));
+		if (!hit) return `error: no block matching "${under}" - blocks were NOT added; re-check the text or omit "under"`;
+		parent = hit.id;
+	}
+	const added = await appendMarkdown(obj.id, S(input.text), parent);
+	return `ok: ${added} block(s) added${parent ? ` under "${under}"` : ""}`;
+};
+
+const objectEditBlockCopy: Handler = async (input, ctx) => {
+	const id = S(input.id) || ctx.boundObject || "";
+	if (!id) return "error: nothing written. No object id and this turn is not running on an object.";
+	const obj = await writable(id, ctx);
+	ctx.touched.add(obj.id);
+	const entry = bodyBlocks(obj).find((e) => e.id === S(input.block));
+	if (!entry) return `error: nothing written. "${S(input.block)}" is not a line of this object's body. Read object_get's body for the ids.`;
+	const t = entry.block.content.text;
+	if (!t) return `error: nothing written. That line is a ${entry.block.content.custom?.contentType ?? "non-text"} block, not text.`;
+	// Inline markdown in the new text (**bold**, [link](url), `code`) becomes real formatting.
+	const { text, marks } = inlineMarks(S(input.text));
+	const cleared = (t.marks ?? []).length > 0 && marks.length === 0;
+	await mutate("block_update", { object_id: obj.id, block_id: entry.id, content: { ...entry.block.content, text: { ...t, text, marks } } });
+	const now = bodyBlocks(await fetchObject(obj.id)).find((e) => e.id === entry.id);
+	return `${now ? `Line is now: ${now.line}` : "The line is no longer in the body."}${cleared ? "\n(Its inline formatting - bold, links, mentions - was cleared with the old text.)" : ""}`;
+};
+
+const chatReplyOnCopy: Handler = async (input, ctx) => {
+	await assertInSpace(await fetchObject(S(input.object_id)), ctx.channelId);
+	// An object id alone addresses its human discussion; agent-to-agent
+	// talk has its own thread (agent_ask) and never lands here.
+	await postTo(humanRef(S(input.object_id)), S(input.text), ctx.agentId);
+	return "ok";
+};
+
 /**
  * The recovery core: the harness's own frozen copies of what anyone needs
  * to repair things from anywhere - read an object, set a property, write
- * and edit its text, reply in its chat. A built-in whose code is its Tool
- * object's falls back to its copy here only when that code is broken and
- * this computer has no earlier version of it that worked (tool-runtime.ts);
- * the ones still harness-run simply run from here.
+ * and edit its text, reply in its chat. Each of these tools' code is its
+ * Tool object's; it falls back to its copy here only when that code is
+ * broken and this computer has no earlier version of it that worked
+ * (tool-runtime.ts).
  */
 const RECOVERY_CORE: Readonly<Record<string, Handler>> = {
 	object_get: objectGetCopy,
-	...Object.fromEntries(TOOLS.filter((t) => ["object_set_field", "object_add_text", "object_edit_block", "chat_reply_on"].includes(t.def.name)).map((t) => [t.def.name, t.handler])),
+	object_set_field: objectSetFieldCopy,
+	object_add_text: objectAddTextCopy,
+	object_edit_block: objectEditBlockCopy,
+	chat_reply_on: chatReplyOnCopy,
 };
 
 // A request commits to the sender's DAG before any delivery or recipient turn.
@@ -1535,7 +806,7 @@ const A2A_TOOL: RegisteredTool = {
 };
 
 /** Every built-in the harness runs itself - what the harness-run built-in Tool objects mirror (tool-objects.ts). The others run from their Tool objects (tool-code.ts). */
-export const BUILTIN_TOOLS: readonly RegisteredTool[] = [...TOOLS, ...WEB_TOOLS, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL, A2A_TOOL, SPAWN_TOOL, SHELL_TOOL, SUBMIT_TOOL];
+export const BUILTIN_TOOLS: readonly RegisteredTool[] = [...TOOLS, ...WEB_TOOLS, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL, A2A_TOOL, SPAWN_TOOL, SHELL_TOOL, SUBMIT_TOOL];
 
 /**
  * The tools an agent is offered for a template ("" = a top-level agent).
@@ -1560,7 +831,7 @@ export function toolDefs(template: string, depth: number, allowAsk = false, tool
  */
 function builtinDefs(template: string, depth: number, allowAsk: boolean): ToolDef[] {
 	const READ_ONLY = new Set(["object_search", "object_list", "object_get", "memory_recall", "memory_list_facts", "memory_list_milestones", "skill_read", "capability_list"]);
-	let defs = [...[...SHIPPED_TOOLS.values()].map((t) => t.def), ...[...TOOLS, ...WEB_TOOLS, FLAG_ERROR_TOOL, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL].map((t) => t.def)];
+	let defs = [...[...SHIPPED_TOOLS.values()].map((t) => t.def), ...[...TOOLS, ...WEB_TOOLS, CAPABILITY_LIST_TOOL, CAPABILITY_TOOL].map((t) => t.def)];
 	if (template === "" && depth === 0) defs.push(A2A_TOOL.def);
 	if (template === "explore") defs = defs.filter((d) => READ_ONLY.has(d.name));
 	const out = [...defs];

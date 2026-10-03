@@ -52,6 +52,15 @@ const INPUT_TYPES: Record<string, Record<string, unknown>> = {
 	object: { type: "object" },
 };
 const INPUT_LINE = /^([A-Za-z_][A-Za-z0-9_]*)(\?)?\s*:\s*(\S+)\s*(?:-\s*(.*))?$/;
+/** A string input that takes one of a few words, written as its choices: `unit: day|week|month`. */
+const CHOICE = /^[A-Za-z0-9_.-]+$/;
+
+/** An input line's type as JSON schema, or null when it names none. */
+function inputType(type: string): Record<string, unknown> | null {
+	if (Object.hasOwn(INPUT_TYPES, type)) return INPUT_TYPES[type];
+	const choices = type.split("|");
+	return choices.length > 1 && choices.every((c) => CHOICE.test(c)) ? { type: "string", enum: choices } : null;
+}
 
 /** `tool_inputs` text as the JSON schema the model gets, or what is wrong with it. */
 export function parseToolInputs(text: string): { schema: Record<string, unknown> } | { error: string } {
@@ -61,12 +70,13 @@ export function parseToolInputs(text: string): { schema: Record<string, unknown>
 		const line = raw.trim();
 		if (!line) continue;
 		const m = INPUT_LINE.exec(line);
-		if (!m || !Object.hasOwn(INPUT_TYPES, m[3])) {
-			return { error: `the input line "${line}" isn't "name: type - description" with a type of ${Object.keys(INPUT_TYPES).join(", ")}` };
+		const type = m ? inputType(m[3]) : null;
+		if (!m || !type) {
+			return { error: `the input line "${line}" isn't "name: type - description" with a type of ${Object.keys(INPUT_TYPES).join(", ")} or choices like day|week` };
 		}
-		const [, name, optional, type, description] = m;
+		const [, name, optional, , description] = m;
 		if (Object.hasOwn(properties, name)) return { error: `the input "${name}" is listed twice` };
-		properties[name] = { ...INPUT_TYPES[type], ...(description?.trim() ? { description: description.trim() } : {}) };
+		properties[name] = { ...type, ...(description?.trim() ? { description: description.trim() } : {}) };
 		if (!optional) required.push(name);
 	}
 	return { schema: { type: "object", properties, ...(required.length ? { required } : {}) } };
@@ -89,8 +99,9 @@ export function renderToolInputs(schema: Record<string, unknown>): string {
 		.map(([name, p]) => {
 			const list = p.type === "array";
 			const listOf = p.items?.type === "string" || p.items?.type === "object" ? `${p.items.type}[]` : "object";
-			const type = p.type === "integer" ? "number" : list ? listOf : p.type && Object.hasOwn(INPUT_TYPES, p.type) ? p.type : "object";
-			const notes = [p.description?.replace(/\s+/g, " ").trim() ?? "", list && type === "object" ? "(a JSON list)" : "", p.enum ? `(one of: ${p.enum.join(", ")})` : ""].filter(Boolean).join(" ");
+			const choices = p.type === "string" && p.enum && p.enum.length > 1 && p.enum.every((c) => CHOICE.test(c)) ? p.enum.join("|") : "";
+			const type = choices || (p.type === "integer" ? "number" : list ? listOf : p.type && Object.hasOwn(INPUT_TYPES, p.type) ? p.type : "object");
+			const notes = [p.description?.replace(/\s+/g, " ").trim() ?? "", list && type === "object" ? "(a JSON list)" : "", p.enum && !choices ? `(one of: ${p.enum.join(", ")})` : ""].filter(Boolean).join(" ");
 			return `${name}${required.includes(name) ? "" : "?"}: ${type}${notes ? ` - ${notes}` : ""}`;
 		})
 		.join("\n");

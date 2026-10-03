@@ -43,7 +43,7 @@ import { primeServing, servesHere } from "./machine";
 import { machineId } from "./roster";
 import { objectText } from "./skills";
 import { linkIds, runToolObject } from "./tool-objects";
-import { localClock } from "./tools";
+import { localClock } from "./repeat";
 
 export interface ScheduleHost {
 	/** The agent's holistic transcript when this machine serves it; undefined otherwise. */
