@@ -464,13 +464,6 @@
      "fields": {
       "machine_id": {
        "stringValue": "laptop"
-      },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
-       }
       }
      }
     },
@@ -493,27 +486,6 @@
        "stringValue": "browserless"
       },
       "served_by": {
-       "linkValue": {
-        "targetId": "studio",
-        "relationKey": "served_by"
-       }
-      },
-      "install": {
-       "linkValue": {
-        "targetId": "i-browserless",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i-browserless",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
        "stringValue": "studio"
       },
       "status": {
@@ -597,13 +569,6 @@
      "fields": {
       "machine_id": {
        "stringValue": "laptop"
-      },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
-       }
       }
      }
     },
@@ -626,27 +591,6 @@
        "stringValue": "browserless"
       },
       "served_by": {
-       "linkValue": {
-        "targetId": "studio",
-        "relationKey": "served_by"
-       }
-      },
-      "install": {
-       "linkValue": {
-        "targetId": "i-browserless",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i-browserless",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
        "stringValue": "studio"
       },
       "status": {
@@ -726,13 +670,6 @@
      "fields": {
       "machine_id": {
        "stringValue": "laptop"
-      },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
-       }
       }
      }
     },
@@ -755,27 +692,6 @@
        "stringValue": "browserless"
       },
       "served_by": {
-       "linkValue": {
-        "targetId": "studio",
-        "relationKey": "served_by"
-       }
-      },
-      "install": {
-       "linkValue": {
-        "targetId": "i-browserless",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i-browserless",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
        "stringValue": "studio"
       },
       "status": {
@@ -869,27 +785,6 @@
        "stringValue": "browserless"
       },
       "served_by": {
-       "linkValue": {
-        "targetId": "studio",
-        "relationKey": "served_by"
-       }
-      },
-      "install": {
-       "linkValue": {
-        "targetId": "i1",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i1",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
        "stringValue": "studio"
       },
       "status": {
@@ -983,24 +878,6 @@
       "served_by": {
        "stringValue": "alpha"
       },
-      "install": {
-       "linkValue": {
-        "targetId": "i-alpha",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i-alpha",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
-       "stringValue": "alpha"
-      },
       "status": {
        "stringValue": "active"
       }
@@ -1014,27 +891,6 @@
        "stringValue": "browserless"
       },
       "served_by": {
-       "linkValue": {
-        "targetId": "studio",
-        "relationKey": "served_by"
-       }
-      },
-      "install": {
-       "linkValue": {
-        "targetId": "i-studio",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i-studio",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
        "stringValue": "studio"
       },
       "status": {
@@ -1147,27 +1003,6 @@
        "stringValue": "gws"
       },
       "served_by": {
-       "linkValue": {
-        "targetId": "laptop",
-        "relationKey": "served_by"
-       }
-      },
-      "install": {
-       "linkValue": {
-        "targetId": "i-gws",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i-gws",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "gws"
-      },
-      "machine_id": {
        "stringValue": "laptop"
       },
       "status": {
@@ -1183,27 +1018,6 @@
        "stringValue": "browserless"
       },
       "served_by": {
-       "linkValue": {
-        "targetId": "studio",
-        "relationKey": "served_by"
-       }
-      },
-      "install": {
-       "linkValue": {
-        "targetId": "i-browserless",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i-browserless",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
        "stringValue": "studio"
       },
       "status": {
@@ -1296,24 +1110,6 @@
       "key": {
        "stringValue": "browserless"
       },
-      "install": {
-       "linkValue": {
-        "targetId": "i1",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i1",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
-       "stringValue": "studio"
-      },
       "status": {
        "stringValue": "active"
       }
@@ -1344,7 +1140,7 @@
    ]
   },
   {
-   "name": "capability with an inactive install serves nobody",
+   "name": "an inactive capability serves nobody",
    "object": {
     "id": "o",
     "typeKey": "task",
@@ -1417,26 +1213,8 @@
       "served_by": {
        "stringValue": "studio"
       },
-      "install": {
-       "linkValue": {
-        "targetId": "i1",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i1",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
-       "stringValue": "studio"
-      },
       "status": {
-       "stringValue": "installing"
+       "stringValue": "processing"
       }
      }
     }
@@ -1539,27 +1317,6 @@
        "stringValue": "browserless"
       },
       "served_by": {
-       "linkValue": {
-        "targetId": "studio",
-        "relationKey": "served_by"
-       }
-      },
-      "install": {
-       "linkValue": {
-        "targetId": "i1",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i1",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
        "stringValue": "studio"
       },
       "status": {
@@ -1687,27 +1444,6 @@
        "stringValue": "browserless"
       },
       "served_by": {
-       "linkValue": {
-        "targetId": "studio",
-        "relationKey": "served_by"
-       }
-      },
-      "install": {
-       "linkValue": {
-        "targetId": "i1",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i1",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
        "stringValue": "studio"
       },
       "status": {
@@ -1768,15 +1504,7 @@
     {
      "id": "m0",
      "typeKey": "machine",
-     "fields": {
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
-       }
-      }
-     }
+     "fields": {}
     },
     {
      "id": "m2",
@@ -1797,21 +1525,6 @@
        "stringValue": "browserless"
       },
       "served_by": {
-       "linkValue": {
-        "targetId": "studio",
-        "relationKey": "served_by"
-       }
-      }
-     }
-    },
-    {
-     "id": "i1",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
        "stringValue": "studio"
       },
       "status": {
@@ -1846,16 +1559,13 @@
    ]
   },
   {
-   "name": "an install answers for its owning machine",
+   "name": "a capability answers for its owning machine",
    "object": {
-    "id": "i-self",
-    "typeKey": "install",
+    "id": "c-self",
+    "typeKey": "capability",
     "fields": {
-     "machine_id": {
-      "stringValue": "owner"
-     },
      "served_by": {
-      "stringValue": "other"
+      "stringValue": "owner"
      },
      "agent": {
       "valuesValue": {
@@ -1914,27 +1624,6 @@
        "stringValue": "browserless"
       },
       "served_by": {
-       "linkValue": {
-        "targetId": "other",
-        "relationKey": "served_by"
-       }
-      },
-      "install": {
-       "linkValue": {
-        "targetId": "i1",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i1",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
        "stringValue": "other"
       },
       "status": {
@@ -2006,24 +1695,6 @@
        "stringValue": "browserless"
       },
       "served_by": {
-       "stringValue": "studio"
-      },
-      "install": {
-       "linkValue": {
-        "targetId": "i1",
-        "relationKey": "install"
-       }
-      }
-     }
-    },
-    {
-     "id": "i1",
-     "typeKey": "install",
-     "fields": {
-      "key": {
-       "stringValue": "browserless"
-      },
-      "machine_id": {
        "stringValue": "studio"
       },
       "status": {
@@ -2133,13 +1804,6 @@
      "fields": {
       "machine_id": {
        "stringValue": "alpha"
-      },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
-       }
       }
      }
     },
@@ -2184,13 +1848,6 @@
      "fields": {
       "machine_id": {
        "stringValue": "alpha"
-      },
-      "capabilities": {
-       "listValue": {
-        "values": [
-         "browserless"
-        ]
-       }
       }
      }
     },

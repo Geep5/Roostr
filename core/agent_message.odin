@@ -337,8 +337,10 @@ message_space :: proc(s: ^Object_State) -> string {
 	return field_string(s.fields, "channel")
 }
 
+// A capability answering an operation request it received may reply across
+// spaces, to the request's sender or one of its other recipients.
 message_service_reply_to :: proc(source: ^Object_State, object_id, reply_to: string) -> bool {
-	if source == nil || source.type_key != "install" || message_space(source) != "" || reply_to == "" do return false
+	if source == nil || source.type_key != "capability" || reply_to == "" do return false
 	request, _, err := message_load(source, reply_to)
 	if err != "" || request.operation == "" do return false
 	_, addressed := message_recipient(request, source.id)
@@ -353,13 +355,14 @@ message_endpoint_error :: proc(e: Agent_Endpoint, states: map[string]^Object_Sta
 	if target != nil {
 		if target.deleted do return "endpoint object is deleted"
 		if message_space(target) != message_space(source) {
-			service_request := !sender && operation != "" && target.type_key == "install" && message_space(target) == ""
+			// An operation request reaches a machine's capability from any space.
+			service_request := !sender && operation != "" && target.type_key == "capability"
 			service_reply := !sender && operation == "" && message_service_reply_to(source, e.object_id, reply_to)
 			if !service_request && !service_reply do return "message endpoints must belong to the same space"
 		}
-		if !sender && operation != "" && target.type_key != "install" do return "operation recipient must be an installation object"
+		if !sender && operation != "" && target.type_key != "capability" do return "operation recipient must be a capability object"
 	}
-	if !sender && operation != "" && e.agent_id != "" do return "operation recipient must address the installation itself"
+	if !sender && operation != "" && e.agent_id != "" do return "operation recipient must address the capability itself"
 	if e.agent_id == "" do return ""
 	agent := states[e.agent_id]
 	if agent == nil {
@@ -384,7 +387,7 @@ message_validate :: proc(m: Agent_Message, states: map[string]^Object_State, obj
 	if m.reply_to == m.id do return "message cannot reply to itself"
 	if m.historical && m.request_reply do return "historical messages cannot request replies"
 	switch m.operation {
-	case "", "skill.install", "skill.enable", "skill.disable", "skill.uninstall", "auth.login", "auth.check", "auth.revoke":
+	case "", "skill.install", "skill.enable", "skill.disable", "skill.uninstall", "skill.check":
 	case: return "unsupported message operation"
 	}
 	if err := message_endpoint_error(m.sender, states, source, true, m.operation, m.reply_to); err != "" do return err

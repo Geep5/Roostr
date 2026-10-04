@@ -41,12 +41,6 @@ export async function machineSkillKeys(fields: Record<string, ValueJSON>): Promi
 	return keys;
 }
 
-/** The skill object for a catalog key, if one exists yet (a machine creates it on first install). */
-export async function skillForKey(key: string): Promise<{ id: string; name: string } | null> {
-	const hit = (await queryAll({ type: SKILL_TYPE })).find((r) => str(r.fields, "key") === key);
-	return hit ? { id: hit.id, name: str(hit.fields, "name") || key } : null;
-}
-
 /**
  * Serialize an object's blocks in tree order.
  *
@@ -106,8 +100,8 @@ export async function listSkills(agentId?: string, granted?: ReadonlySet<string>
 	// import here would be a module cycle.
 	const { capabilities } = await import("./skillmgr");
 	// A catalog skill is offered only once its capability object on this
-	// machine is fully set up (served_by + active install) - before that the
-	// skill stays invisible, however the toggle looks.
+	// machine is active - before that the skill stays invisible, however
+	// the toggle looks.
 	const ready = new Set(await capabilities());
 	const agent = agentId ? await fetchObject(agentId).catch(() => null) : null;
 	const only = new Set(agent ? skillIds(agent.fields) : []);

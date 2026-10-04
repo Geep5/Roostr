@@ -7,13 +7,18 @@ Status: proposed. Audit of what exists today plus the plan to finish it.
 Every harness registers its host at boot (`harness/src/machine.ts:130`), so the
 objects are already there — three of them:
 
-| object | name | machine_id | capabilities | space |
-| --- | --- | --- | --- | --- |
-| `238d7746` | Mac | `820d3a06` | browserless, google, matcherino | Farwell Castle |
-| `42958f34` | geepOmenComp | `70d3c047` | — | Farwell Castle |
-| `61b360d1` | Grants-MacBook-Pro.local | `055b5775` | browserless, google | Farwell Castle |
+| object | name | machine_id | space |
+| --- | --- | --- | --- |
+| `238d7746` | Mac | `820d3a06` | Farwell Castle |
+| `42958f34` | geepOmenComp | `70d3c047` | Farwell Castle |
+| `61b360d1` | Grants-MacBook-Pro.local | `055b5775` | Farwell Castle |
 
-They are invisible and mute for four separate reasons:
+What a computer can do is not a field on its machine object: it is the
+capability objects (one per catalog skill on that computer, `served_by` =
+its `machine_id`, with a `status`) that the computer writes for itself
+(`docs/skills-and-integrations.md`).
+
+The machine objects are invisible and mute for four separate reasons:
 
 1. **No type object.** `BUNDLED_TYPES` (`core/mutate.odin:1147`) has no `machine`
    entry, so nothing appears in the sidebar's Types list and the objects have no
@@ -69,17 +74,17 @@ Machines are device facts, not space content. Two options:
   rule there (one place, every host) rather than in the harness.
 - The agent's prompt already carries its skills, credentials and
   holdups; the agent serving a machine object (named by the machine's `agent`
-  field) should additionally get that machine row (capabilities, holdups,
-  skills installed here) so "install browserless" is answerable.
-- Guardrail: `machine_id` and `capabilities` are written by the machine itself.
-  The agent must not set them — they are protected fields, so authority already
-  refuses any non-owner write, but the tool layer should refuse too, with a clear
-  message instead of a rejected commit.
+  field) should additionally get that machine's capability objects (status,
+  holdups) so "install browserless" is answerable.
+- Guardrail: `machine_id` and a capability's `key` / `served_by` are written by
+  the machine itself. The agent must not set them — they are protected fields,
+  so authority already refuses any non-owner write, but the tool layer should
+  refuse too, with a clear message instead of a rejected commit.
 
 ### 5. Verification
 
 - Engine fixture: `resolve_server(machine_object)` = that machine, for a machine
-  with and without capabilities.
+  with and without active capability objects.
 - Harness test: a human message on a machine object mints exactly one agent, on
   the machine that owns it, and no other harness answers.
 - Parity test: `/api/objects` and the browser's `fetchObjects()` return the same

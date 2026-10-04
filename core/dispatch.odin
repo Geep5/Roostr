@@ -7,6 +7,7 @@ import "core:encoding/json"
 // dispatcher owns persistent storage, with its own bounded allocator.
 dispatch :: proc(method: string, payload: json.Value) -> (json.Value, string) {
 	switch method {
+	// Changes, conversations and agent messages: one codec, reached by every host.
 	case "codec": return codec_dispatch(payload)
 	case "replay": return replay_dispatch(payload)
 	case "query": return query_dispatch(payload)
@@ -14,8 +15,6 @@ dispatch :: proc(method: string, payload: json.Value) -> (json.Value, string) {
 	case "wire": return wire_dispatch(payload)
 	case "sync": return sync_dispatch(payload)
 	case "serving": return serving_dispatch(payload)
-	// Descriptors and conversations: one codec, reached by every host.
-	case "descriptor": return descriptor_dispatch(payload)
 	// A whole vault, as the protobuf the host already holds.
 	case "corpus": return corpus_dispatch(payload)
 	case: return nil, "unknown core method"

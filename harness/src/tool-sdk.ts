@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { chatPost, createObject, deleteField, fetchObject, guestAgents, mutate, plainValue, query, queryAll, setField, type AgentEndpoint, type BlockJSON, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { HUMAN_THREAD, convBlocks, humanRef, postTo } from "./conv";
 import type { CredentialAction } from "./credentials";
-import type { InstallationRow } from "./descriptors";
+import type { CapabilityRow } from "./capabilities";
 import { STYLE, appendMarkdown, inlineMarks, type Mark } from "./markdown";
 import * as memory from "./memory";
 import { describeRepeat, localClock } from "./repeat";
@@ -34,7 +34,7 @@ import { bodyBlocks, isAgentAuthor, type BodyLine } from "./surfaces";
 
 export type { AgentEndpoint, BlockJSON, ObjectJSON, QueryRow, ValueJSON } from "./api";
 export type { CredentialAction } from "./credentials";
-export type { InstallationRow } from "./descriptors";
+export type { CapabilityRow } from "./capabilities";
 export type { Mark } from "./markdown";
 export type { SkillListing } from "./skills";
 export type { RelDef, TypeDef } from "./spacemap";
@@ -128,8 +128,8 @@ export interface HarnessApi {
 	credentialPage(service: string, url: string, script: string): Promise<CredentialPage>;
 	credentialApi(service: string, path: string, request: CredentialRequest): Promise<CredentialAnswer>;
 	skills(): Promise<SkillListing[]>;
-	installations(): Promise<InstallationRow[]>;
-	requestCapability(installationObjectId: string, operation: string, text: string): Promise<SentMessage>;
+	capabilities(): Promise<CapabilityRow[]>;
+	requestCapability(capabilityObjectId: string, operation: string, text: string): Promise<SentMessage>;
 	ask(message: AskMessage): Promise<SentMessage>;
 	spawn(task: string, template: string): Promise<string>;
 	submitResult(content: string): Promise<void>;
@@ -227,10 +227,10 @@ export interface Roostr {
 	credentials: RoostrCredentials;
 	/** The skills this agent may read: its own and the shared ones, narrowed by its Skills; machine skills only while working here, and only with the shell. */
 	skills(): Promise<SkillListing[]>;
-	/** Every computer's skill and sign-in installations with their status; never a credential's value. */
-	installations(): Promise<InstallationRow[]>;
-	/** Ask an installation's computer for a setup or maintenance operation (skill.install, auth.check, ...) on the agent's behalf; a person there approves it before anything runs. */
-	requestCapability(installationObjectId: string, operation: string, text: string): Promise<SentMessage>;
+	/** Every computer's capabilities (one catalog skill on one computer) with their status. */
+	capabilities(): Promise<CapabilityRow[]>;
+	/** Ask a capability's computer for a setup or maintenance operation (skill.install, skill.check, ...) on the agent's behalf; a person there approves it before anything runs. */
+	requestCapability(capabilityObjectId: string, operation: string, text: string): Promise<SentMessage>;
 	/** A question to other agents (agent_ask), sent from this turn's object; top-level turns only. */
 	ask(message: AskMessage): Promise<SentMessage>;
 	/** Run a subagent on `task` (template task, explore or quick_task) and return what it submitted. */
@@ -349,8 +349,8 @@ export function createRoostr(context: ToolRunContext, touched: Set<string>, harn
 			api: (service, path, request = {}) => sdkCall(() => harness("credentialApi", [service, path, request])),
 		},
 		skills: () => sdkCall(() => harness("skills", [])),
-		installations: () => sdkCall(() => harness("installations", [])),
-		requestCapability: (installationObjectId, operation, text) => sdkCall(() => harness("requestCapability", [installationObjectId, operation, text])),
+		capabilities: () => sdkCall(() => harness("capabilities", [])),
+		requestCapability: (capabilityObjectId, operation, text) => sdkCall(() => harness("requestCapability", [capabilityObjectId, operation, text])),
 		ask: (message) => sdkCall(() => harness("ask", [message])),
 		spawn: (task, template) => sdkCall(() => harness("spawn", [task, template])),
 		submitResult: (content) => sdkCall(() => harness("submitResult", [content])),

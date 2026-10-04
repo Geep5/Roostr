@@ -13,12 +13,12 @@
  */
 import { fetchObject, setField, str, sv, type AgentEndpoint, type AgentMessage } from "./api";
 import { credentialPageAction } from "./browser";
+import { fetchCapabilities } from "./capabilities";
 import { requestCapability } from "./capability-messages";
 import { agentSubject } from "./conv";
 import { noteCredentialIssue } from "./credential-issues";
 import { agentCredential, CredentialNotConnected, type AgentCredential } from "./credential-objects";
 import { actionsOf } from "./credentials";
-import { fetchInstallations } from "./descriptors";
 import { serverOf } from "./machine";
 import { sendMessage } from "./mailbox";
 import { matcherinoApi, matcherinoToken } from "./matcherino";
@@ -262,12 +262,12 @@ export function harnessFor(ctx: ToolContext): HarnessServe {
 			}
 		},
 		skills: () => listSkills(ctx.agentId, ctx.toolset?.granted),
-		installations: () => fetchInstallations(),
-		requestCapability: async ([installationObjectId, operation, text]) => {
+		capabilities: () => fetchCapabilities(),
+		requestCapability: async ([capabilityObjectId, operation, text]) => {
 			const agent = await fetchObject(ctx.agentId);
 			return requestCapability({
 				sender: { objectId: agentSubject(agent), agentId: agent.id },
-				installationObjectId: textArg(installationObjectId, "installationObjectId"),
+				capabilityObjectId: textArg(capabilityObjectId, "capabilityObjectId"),
 				operation: textArg(operation, "operation"),
 				author: agent.id,
 				text: textArg(text, "text"),

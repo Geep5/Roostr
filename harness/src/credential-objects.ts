@@ -12,14 +12,16 @@
  * credential, so two computers never fight over its status.
  */
 
+import { spawn, type ChildProcess } from "node:child_process";
 import { hostname } from "node:os";
 import { createObject, deleteField, fetchObject, mutate, queryAll, setField, str, sv, iv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
-import { linkTarget, linkValue } from "./capabilities";
+import { linkTarget } from "./capabilities";
 import { openLoginWindow, profileCookies, type LoginWindow, type SessionCookie } from "./browser";
 import { actionsOf, KEY_PREFIX, credentialKeys, credentialSession, dropLegacySecrets, legacyKeyName, legacyKeys, legacyProfileDir, legacyProfileExists, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
-import { fetchInstallations } from "./descriptors";
+import { legacyInstalls } from "./migrate-capabilities";
 import { renewMatcherinoSession } from "./matcherino";
-import { GOOGLE_SERVICE, syncGoogleCredentials } from "./google-credentials";
+import { GOOGLE_SERVICE, localSignIn, signInOf, syncGoogleCredentials } from "./google-credentials";
+import { googleAccountStatus, removeGoogleAccount } from "./google";
 import { machines } from "./machine";
 import { machineId } from "./roster";
 import { CREDENTIAL_BADGE, credentialBadge } from "./credential-issues";
@@ -78,7 +80,7 @@ async function rowOf(r: QueryRow | ObjectJSON): Promise<CredentialRow> {
 const windows = new Map<string, LoginWindow>();
 
 /** What is true for a credential right now, from what it carries. */
-function liveState(row: CredentialRow): { status: CredentialStatus; auth: CredentialRow["auth"]; error: string } {
+function liveState(row: CredentialRow): LiveState {
 	const recipe = recipeOf(row.fields);
 	const label = recipe.label || "this service";
 	if (!recipe.sessionCookie && recipe.passwordFields.length === 0) {
@@ -93,9 +95,10 @@ function liveState(row: CredentialRow): { status: CredentialStatus; auth: Creden
 	return { status: "missing", auth: "", error: "" };
 }
 
-/** Write a credential's live state when it changed (or always, with `stamp`); returns the new row. */
-async function publishState(row: CredentialRow, stamp = false): Promise<CredentialRow> {
-	const next = liveState(row);
+type LiveState = { status: CredentialStatus; auth: CredentialRow["auth"]; error: string };
+
+/** Write a credential's live state (`next`, else what it carries) when it changed (or always, with `stamp`); returns the new row. */
+async function publishState(row: CredentialRow, stamp = false, next: LiveState = liveState(row)): Promise<CredentialRow> {
 	const changed = next.status !== row.status || next.auth !== row.auth || next.error !== row.error;
 	if (changed) {
 		await setField(row.id, "status", sv(next.status));
@@ -143,7 +146,7 @@ async function renewSession(row: CredentialRow): Promise<CredentialRow> {
 export async function refreshCredentials(): Promise<CredentialRow[]> {
 	const me = await machineId();
 	const rows = await Promise.all((await queryAll({ type: CREDENTIAL_TYPE })).map(rowOf));
-	mine = await Promise.all(rows.filter((r) => r.servedBy === me).map(async (r) => publishState(await renewSession(r))));
+	mine = await Promise.all(rows.filter((r) => r.servedBy === me).map(async (r) => (r.service === GOOGLE_SERVICE ? publishState(r, false, await googleState(r)) : publishState(await renewSession(r)))));
 	// Google sign-ins travel on their Credentials: import local ones, write the listed ones here.
 	await syncGoogleCredentials().catch((err) => console.error("[google] sync failed:", err instanceof Error ? err.message : err));
 	const current = new Map(rows.map((r) => [r.id, r]));
@@ -217,6 +220,7 @@ async function keptHere(id: string): Promise<CredentialRow> {
  */
 export async function connectCredential(id: string): Promise<CredentialRow> {
 	const row = await keptHere(id);
+	if (row.service === GOOGLE_SERVICE) return connectGoogle(row);
 	const recipe = recipeOf(row.fields);
 	if (!recipe.loginUrl || !recipe.sessionCookie) throw new CredentialError(400, `${recipe.label || "This credential"} has no login page and signed-in cookie - it connects with pasted keys.`);
 	if (windows.has(row.id)) throw new CredentialError(409, "A sign-in window for this credential is already open on this computer.");
@@ -248,11 +252,94 @@ export async function connectCredential(id: string): Promise<CredentialRow> {
 	return state;
 }
 
-/** Check a credential now and stamp `checked_at`. */
+/** Check a credential now and stamp `checked_at`; a Google credential runs `gws-as <account> auth status`. */
 export async function checkCredential(id: string): Promise<CredentialRow> {
-	const row = await publishState(await keptHere(id), true);
+	const kept = await keptHere(id);
+	const row = await publishState(kept, true, kept.service === GOOGLE_SERVICE ? await googleCheck(kept) : undefined);
 	mine = [...mine.filter((c) => c.id !== row.id), row];
 	return row;
+}
+
+/** Running `gws-as <account> auth login` processes, by credential id. */
+const googleLogins = new Map<string, ChildProcess>();
+const GOOGLE_LOGIN_TIMEOUT_MS = 15 * 60_000;
+
+/** The live check: does `gws-as <account> auth status` on this computer show a working sign-in? */
+async function googleCheck(row: CredentialRow): Promise<LiveState> {
+	if (googleLogins.has(row.id)) return googleConnecting();
+	if (!row.account) return { status: "broken", auth: "", error: "Set Account to the Google email address." };
+	if (!signInOf(row.fields)) return googleSignedOut(row);
+	const s = await googleAccountStatus(row.account);
+	if (!s.error && s.credentialsExists && s.authMethod !== "none") return { status: "active", auth: "api_key", error: "" };
+	return { status: "needs_auth", auth: "", error: s.error === "not configured" ? `${row.account} is not signed in on ${hostname()} - press Connect.` : (s.error ?? `The Google sign-in for ${row.account} no longer works - press Connect.`) };
+}
+
+function googleConnecting(): LiveState {
+	return { status: "connecting", auth: "", error: `Finish signing in to Google in the browser on ${hostname()}.` };
+}
+
+function googleSignedOut(row: CredentialRow): LiveState {
+	if (row.status === "active" || row.status === "needs_auth") return { status: "needs_auth", auth: "", error: "The Google sign-in is gone - press Connect." };
+	// A failed Connect left its reason; keep it until the next Connect.
+	if (row.status === "broken" && row.error) return { status: "broken", auth: "", error: row.error };
+	return { status: "missing", auth: "", error: "" };
+}
+
+/**
+ * What the slow refresh writes for a Google credential: the last live
+ * check stands while the keys are there; keys that arrived without a
+ * check yet (an import) get one; gone keys mean signed out.
+ */
+async function googleState(row: CredentialRow): Promise<LiveState> {
+	if (googleLogins.has(row.id)) return googleConnecting();
+	if (!signInOf(row.fields)) return googleSignedOut(row);
+	if (row.status === "active" || row.status === "needs_auth") return { status: row.status, auth: row.auth, error: row.error };
+	return googleCheck(row);
+}
+
+/**
+ * Connect a Google credential: run `gws-as <account> auth login` on this
+ * computer (it opens Google's consent page in the browser). The process
+ * exiting 0 is the sign-in landing: its keys are read back with
+ * `gws auth export` and saved on the credential, then a live check sets
+ * the status. A failed or timed-out sign-in leaves the reason on `error`.
+ */
+async function connectGoogle(row: CredentialRow): Promise<CredentialRow> {
+	const email = row.account.trim();
+	if (!/^[^\s/@]+@[^\s/@]+$/.test(email)) throw new CredentialError(400, "Set Account to the Google email address first.");
+	if (googleLogins.has(row.id)) throw new CredentialError(409, "A Google sign-in for this credential is already running on this computer.");
+	let proc: ChildProcess;
+	try {
+		proc = spawn("gws-as", [email, "auth", "login"], { detached: true, stdio: "ignore" });
+	} catch (err) {
+		throw new CredentialError(409, err instanceof Error ? err.message : String(err));
+	}
+	googleLogins.set(row.id, proc);
+	const state = await publishState(row, true, googleConnecting());
+	const timer = setTimeout(() => proc.kill(), GOOGLE_LOGIN_TIMEOUT_MS);
+	const exited = new Promise<{ code: number | null; err?: Error }>((resolve) => {
+		proc.once("error", (err) => resolve({ code: null, err }));
+		proc.once("exit", (code) => resolve({ code }));
+	});
+	void (async () => {
+		const { code, err } = await exited;
+		clearTimeout(timer);
+		const ours = googleLogins.get(row.id) === proc;
+		if (!ours) return; // disconnected meanwhile
+		googleLogins.delete(row.id);
+		let fail = "";
+		try {
+			const signIn = code === 0 ? await localSignIn(email) : null;
+			if (signIn) for (const [k, v] of Object.entries(signIn)) await setField(row.id, `key_${k}`, sv(v));
+			else fail = err ? `Could not run gws-as on ${hostname()}: ${err.message}` : code === 0 ? `The Google sign-in finished but no sign-in was saved for ${email}.` : code === null ? "The Google sign-in timed out or was stopped - press Connect again." : `The Google sign-in did not finish (gws exited ${code}).`;
+			const fresh = await credentialObject(row.id);
+			await publishState(fresh, true, fail ? { status: "broken", auth: "", error: fail } : await googleCheck(fresh));
+		} catch (e) {
+			console.error("[credentials] finishing the Google sign-in failed:", e instanceof Error ? e.message : e);
+		}
+		await refreshCredentials().catch((e) => console.error("[credentials] refresh after Google sign-in failed:", e instanceof Error ? e.message : e));
+	})();
+	return state;
 }
 
 /** Clear a credential's secret; it stays, as never-connected. */
@@ -261,7 +348,14 @@ export async function disconnectCredential(id: string): Promise<CredentialRow> {
 	const win = windows.get(row.id);
 	windows.delete(row.id);
 	void win?.finish().catch(() => {});
-	for (const key of ["session", "secret", "auth", "error"]) if (row.fields[key]) await deleteField(row.id, key);
+	const login = googleLogins.get(row.id);
+	googleLogins.delete(row.id);
+	login?.kill();
+	const google = row.service === GOOGLE_SERVICE;
+	// A Google sign-in also lives in the account's local folder; remove it so the import cannot bring it back.
+	if (google && row.account) removeGoogleAccount(row.account);
+	const keys = google ? Object.keys(row.fields).filter((k) => k.startsWith(KEY_PREFIX)) : [];
+	for (const key of ["session", "secret", "auth", "error", ...keys]) if (row.fields[key]) await deleteField(row.id, key);
 	await setField(row.id, "status", sv("missing"));
 	await setField(row.id, "checked_at", iv(Date.now()));
 	await refreshCredentials();
@@ -343,13 +437,13 @@ export async function credentialsPromptLine(agent: ObjectJSON): Promise<string> 
  * THIS computer's rows only (each computer migrates its own when it
  * updates). A login that works here becomes a Credential looked after here,
  * carrying its secret (the legacy Chrome profile's cookies, or the saved
- * keys); capabilities that linked the old row link the credential. Rows
- * that never worked are vanished and their local leftovers deleted.
+ * keys). Rows that never worked are vanished and their local leftovers
+ * deleted; capabilities pointing at sign-in keys go in migrateCapabilities.
  * Idempotent: afterwards there are no rows to move.
  */
 export async function migrateLoginInstalls(): Promise<{ credentials: number; vanished: number }> {
 	const me = await machineId();
-	const rows = (await fetchInstallations()).filter((r) => r.machineId === me && !!seedFor(r.key));
+	const rows = (await legacyInstalls()).filter((r) => r.machineId === me && !!seedFor(r.key));
 	let credentials = 0;
 	for (const row of rows) {
 		const seed = seedFor(row.key)!;
@@ -358,7 +452,7 @@ export async function migrateLoginInstalls(): Promise<{ credentials: number; van
 		const session = sessionSignedIn(cookies, recipe) ? cookies : [];
 		const keys = legacyKeys(row.key);
 		if (session.length === 0 && !keys) continue;
-		const { id } = await createObject(seed.label, CREDENTIAL_TYPE, {
+		await createObject(seed.label, CREDENTIAL_TYPE, {
 			...seedRecipeFields(seed),
 			...(row.account ? { account: sv(row.account) } : {}),
 			served_by: sv(me),
@@ -368,9 +462,6 @@ export async function migrateLoginInstalls(): Promise<{ credentials: number; van
 			auth: sv(session.length ? "browser_profile" : "api_key"),
 			...(row.channel ? { channel: sv(row.channel) } : {}),
 		});
-		for (const cap of await queryAll({ type: "capability" })) {
-			if (linkTarget(cap.fields, "install") === row.id) await setField(cap.id, "install", linkValue(id));
-		}
 		credentials += 1;
 	}
 	for (const row of rows) dropLegacySecrets(row.key);

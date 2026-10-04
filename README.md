@@ -110,9 +110,16 @@ an agent to answer, configures one through properties. This is the contract.
 ### The object model
 
 Everything is an object in a content-addressed Change-DAG, space-scoped.
-Types: `note`, `task`, `person`, `agent`, `capability`, `install`, `machine`,
-`system_prompt`, `channel` (a space). Objects carry typed **properties**; the
-same properties you set in the UI are the ones you set through the API.
+Types: `note`, `task`, `person`, `agent`, `skill`, `capability`, `credential`,
+`machine`, `system_prompt`, `channel` (a space). Objects carry typed
+**properties**; the same properties you set in the UI are the ones you set
+through the API.
+
+What a computer needs to run an agent is three types
+(`docs/skills-and-integrations.md`): a **Skill** per catalog key (what the
+software is, and the instructions agents read), a **Capability** per catalog
+key × computer (that software's status there, written only by that computer),
+and a **Credential** per signed-in identity (including Google accounts).
 
 Read and write against the daemon (auth: `Authorization: Bearer <GLON_DATA/api-token>`):
 
@@ -194,9 +201,9 @@ curl http://127.0.0.1:7334/agent/status -H "Authorization: Bearer $TOK"
 An agent is working when it is in `serving`, its state is `idle` or `working`
 (not `error`), and a `chat_post` with its `@Name` on a configured object gets a
 reply in `__discussion__`. An `error` state carries the reason (a missing
-capability, a credential that is not connected). Skill and Google-account
-requests that need a human are under `GET /capability-requests`; a paired human
-approves them (they never run on receipt).
+capability, a credential that is not connected). Skill requests that need a
+human are under `GET /capability-requests`; a paired human approves them
+(they never run on receipt).
 
 ### Credentials
 
@@ -292,7 +299,7 @@ Browser edits enter a durable outbox before publication, and logout refuses
 unpublished work unless it is explicitly exported.
 
 Serving (`docs/object-serving.md`): an agent runs on its own computer (its
-`served_by`) on every object, except work on a computer or installation
+`served_by`) on every object, except work on a computer or capability
 object, which stays on that computer. Its model, model login (an `anthropic`
 or `kimi` Credential), service logins and instructions are objects, so
 re-pinning it moves nothing else. An object's own resolution (`core/serving.odin`:
@@ -366,12 +373,12 @@ private replies start a separate exchange. Replies do not automatically request
 another response, avoiding agent reply loops. Existing exchanges migrate as
 historical messages and never run again merely because they were imported.
 
-Capability requests address the installation object owned by the relevant
-machine. Skill install, enable, disable, uninstall, and Google account
-login/check/revoke use this message path. Receiving or syncing a request never
-starts an installation or login: a paired human approves it on that machine.
-Google OAuth tokens remain local. Service logins are Credential objects instead
-(see Credentials).
+Capability requests address the capability object of the relevant machine
+(one catalog skill on that machine). `skill.install`, `skill.enable`,
+`skill.disable`, `skill.uninstall` and `skill.check` use this message path,
+from any space. Receiving or syncing a request never starts an installation:
+a paired human approves it on that machine. Logins - service logins and Google
+accounts - are Credential objects instead (see Credentials).
 
 ### Recurring objects
 

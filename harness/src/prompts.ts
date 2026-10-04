@@ -12,11 +12,11 @@
  * alone. Which objects an agent works on is not configured here: an agent
  * is put on an object's guest list, typically by that object's template.
  *
- * PROMPT_SEEDS is not a runtime lookup: it seeds the descriptor cards a
- * setup form renders from and the prompt objects the boot migration and
- * `setup` link agents to. Nothing here is consulted to resolve a live
- * agent - promptFor reads the linked object, so editing the object (or
- * pointing the agent at another) is the whole reconfiguration.
+ * PROMPT_SEEDS is not a runtime lookup: it seeds each space's agent-kind
+ * Templates (catalog-seeds.ts) and the prompt objects those templates, the
+ * boot migration and `setup` link agents to. Nothing here is consulted to
+ * resolve a live agent - promptFor reads the linked object, so editing the
+ * object (or pointing the agent at another) is the whole reconfiguration.
  */
 
 import { readFileSync } from "node:fs";
@@ -34,8 +34,9 @@ export interface AgentKindEntry {
 	model: string;
 	/** Catalog keys of the skills an agent seeded from this entry lists in its Skills. */
 	skills: string[];
-	fields: Array<{ key: string; label: string; secret: boolean; format: "text" | "password" | "url" | "email"; note: string }>;
-	/** Values written for fields the setup left blank (harness-side; the card's `note` tells the human). */
+	/** Per-agent settings an agent of this kind fills in: each one a property of its space (`note` = the property's description). Never a secret: secrets are Credentials. */
+	fields: Array<{ key: string; label: string; note: string }>;
+	/** Values the kind's template carries for fields left blank. */
 	defaults: Record<string, string>;
 }
 
@@ -92,7 +93,7 @@ read it with skill_read before starting.`;
 
 export const DEFAULT_MODEL = process.env.GLON_AGENT_MODEL || "claude-sonnet-4-5";
 
-/** Marco's standing prompt travels as a file so the card stays byte-identical to the source it was ported from. */
+/** Marco's standing prompt travels as a file so the prompt stays byte-identical to the source it was ported from. */
 const MARCO_SYSTEM = readFileSync(`${import.meta.dir}/../kinds/marco.md`, "utf8");
 
 /** Default checkout for the Matcherino dev bot; also the `matcherino-dev` skill's check path. */
@@ -125,10 +126,10 @@ export const PROMPT_SEEDS: AgentKindEntry[] = [
 		// Its Discord bot token is a Credential the agent lists, not a skill.
 		skills: ["matcherino-dev"],
 		fields: [
-			{ key: "discord_channel_id", label: "Discord channel id", secret: false, format: "text", note: "Admin channel the bot answers in. Required." },
-			{ key: "discord_extra_channel_ids", label: "Extra channel ids", secret: false, format: "text", note: "Comma-separated additional guild channels to answer in." },
-			{ key: "discord_allowed_dm_users", label: "Allowed DM users", secret: false, format: "text", note: "Comma-separated Discord user ids whose DMs are answered." },
-			{ key: "repo_path", label: "Repository path", secret: false, format: "text", note: `Checkout shell_exec starts in. Default ${MATCHERINO_REPO}.` },
+			{ key: "discord_channel_id", label: "Discord channel id", note: "Admin channel the bot answers in. Required." },
+			{ key: "discord_extra_channel_ids", label: "Extra channel ids", note: "Comma-separated additional guild channels to answer in." },
+			{ key: "discord_allowed_dm_users", label: "Allowed DM users", note: "Comma-separated Discord user ids whose DMs are answered." },
+			{ key: "repo_path", label: "Repository path", note: `Checkout shell_exec starts in. Default ${MATCHERINO_REPO}.` },
 		],
 		defaults: { repo_path: MATCHERINO_REPO },
 	},

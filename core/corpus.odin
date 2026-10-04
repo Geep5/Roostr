@@ -13,7 +13,7 @@ package core
 // beside its JSON. So it hands those bytes over untouched, and the core does
 // what it already knows how to do - decode, toposort, replay - straight into
 // the cache region. No JSON anywhere on the path, and no second protobuf
-// implementation on the host, which is the trap the descriptor work removed.
+// implementation on the host, which is the trap the shared codec exists to avoid.
 //
 // Frame format in the blob, repeated until the end:
 //

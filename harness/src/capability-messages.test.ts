@@ -10,23 +10,19 @@ import { mock } from "bun:test";
 import assert from "node:assert/strict";
 const objects = new Map();
 const sent = [];
-let opened = 0;
 let authenticated = false;
 let skillStarts = 0;
 let skillState = { phase: "off", installed: false };
 let clock = 100;
-// The login boundary: gws opens the person's browser; count launches instead.
-Bun.spawn = () => { opened++; return { exited: new Promise(() => {}) }; };
 mock.module("./roster", () => ({ machineId: async () => "owner-machine" }));
-mock.module("./descriptors", () => ({ INSTALL_TYPE: "install" }));
-mock.module("./skillmgr", () => ({ CATALOG: [{ key: "browserless" }, { key: "google" }], republishCapabilities: async () => {}, skillOperationState: async () => skillState, enableSkill: async () => { skillStarts++; skillState = { phase: "installing", installed: false }; return "installing"; }, disableSkill: async () => { throw new Error("unexpected disable"); }, uninstallSkill: async () => { throw new Error("unexpected uninstall"); }, recheckSkill: async () => authenticated ? "on" : "off" }));
-mock.module("./google", () => ({ addGoogleAccount: async () => {}, removeGoogleAccount: () => {}, googleAccountStatus: async () => ({ authMethod: "none" }) }));
-const object = { id: "install-google", typeKey: "install", fields: { key: { stringValue: "google" }, machine_id: { stringValue: "owner-machine" }, status: { stringValue: "missing" } }, mailbox: [], blocks: [], deleted: false, createdAt: 0, updatedAt: 0 };
+mock.module("./capabilities", () => ({ CAPABILITY_TYPE: "capability", linkTarget: (fields, key) => fields[key]?.linkValue?.targetId || fields[key]?.stringValue || "" }));
+mock.module("./skillmgr", () => ({ CATALOG: [{ key: "browserless" }, { key: "google" }], skillOperationState: async () => skillState, enableSkill: async () => { skillStarts++; skillState = { phase: "installing", installed: false }; return "installing"; }, disableSkill: async () => { throw new Error("unexpected disable"); }, uninstallSkill: async () => { throw new Error("unexpected uninstall"); }, recheckSkill: async () => authenticated ? "on" : "needs-auth" }));
+const object = { id: "capability-google", typeKey: "capability", fields: { key: { stringValue: "google" }, served_by: { stringValue: "owner-machine" }, status: { stringValue: "missing" } }, mailbox: [], blocks: [], deleted: false, createdAt: 0, updatedAt: 0 };
 objects.set(object.id, object);
 const source = { ...object, id: "requester", typeKey: "note", fields: {}, mailbox: [] };
 objects.set(source.id, source);
 function addRequest(operation, extra = {}) {
- const message = { id: "request-" + (++clock), exchangeId: "exchange", sender: { objectId: source.id, agentId: "requester-agent" }, recipients: [{ objectId: object.id, agentId: "" }], text: "Please set up this installation.", replyTo: "", sentAt: clock, title: "Setup", requestReply: true, historical: false, operation, author: "requester-agent", ...extra };
+ const message = { id: "request-" + (++clock), exchangeId: "exchange", sender: { objectId: source.id, agentId: "requester-agent" }, recipients: [{ objectId: object.id, agentId: "" }], text: "Please set up this capability.", replyTo: "", sentAt: clock, title: "Setup", requestReply: true, historical: false, operation, author: "requester-agent", ...extra };
  const entry = { message, incoming: true, outgoing: false, threadId: "__thread__exchange", deliveries: [], processing: { status: "pending", owner: "", error: "", at: 0 } };
  object.mailbox.push(entry);
  return entry;
@@ -66,56 +62,57 @@ async function scenario(body: string): Promise<void> {
 
 test("sync only stages approval; historical and foreign-machine requests never execute", async () => {
 	await scenario(String.raw`
-const entry = addRequest("auth.login");
-const historical = addRequest("auth.login", { historical: true });
+const entry = addRequest("skill.install");
+const historical = addRequest("skill.install", { historical: true });
 await capability.receiveCapabilityRequests(structuredClone(object), "live-owner");
 assert.equal(entry.processing.status, "awaiting_approval");
 assert.equal(historical.processing.status, "pending");
 assert.equal(object.fields.status.stringValue, "needs_approval");
-assert.equal(opened, 0);
+assert.equal(skillStarts, 0);
 assert.equal(sent.length, 0);
-object.fields.machine_id.stringValue = "another-machine";
+object.fields.served_by.stringValue = "another-machine";
 await capability.receiveCapabilityRequests(structuredClone(object), "live-owner");
 await assert.rejects(() => capability.approveCapabilityRequest(object.id, entry.message.id), /another machine/);
-assert.throws(() => capability.capabilityTarget({ ...object, fields: { ...object.fields, machine_id: { stringValue: "owner-machine" } } }, "constructor", "owner-machine"), /Unsupported/);
-assert.equal(opened, 0);
+assert.throws(() => capability.capabilityTarget({ ...object, fields: { ...object.fields, served_by: { stringValue: "owner-machine" } } }, "constructor", "owner-machine"), /Unsupported/);
+assert.throws(() => capability.capabilityTarget({ ...object, fields: { ...object.fields, served_by: { stringValue: "owner-machine" } } }, "auth.login", "owner-machine"), /Unsupported/);
+assert.equal(skillStarts, 0);
 `);
 });
 
-test("login stays pending until actual authentication and competing approvals claim once", async () => {
+test("a check runs once per approval and replies with the live result", async () => {
 	await scenario(String.raw`
-const entry = addRequest("auth.login");
+const entry = addRequest("skill.check");
 await capability.receiveCapabilityRequests(structuredClone(object), "live-owner");
 const results = await Promise.allSettled([capability.approveCapabilityRequest(object.id, entry.message.id), capability.approveCapabilityRequest(object.id, entry.message.id)]);
 assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
-assert.equal(opened, 1);
-assert.equal(entry.processing.status, "processing");
-assert.equal(sent.length, 0);
-await capability.receiveCapabilityRequests(structuredClone(object), "live-owner");
-assert.equal(entry.processing.status, "processing");
-assert.deepEqual(await capability.finishCapabilityLogin(object.id, entry.message.id), { active: false });
-assert.equal(entry.processing.status, "processing");
-authenticated = true;
-assert.deepEqual(await capability.finishCapabilityLogin(object.id, entry.message.id), { active: true });
-assert.equal(entry.processing.status, "processed");
-assert.equal(object.fields.auth.stringValue, "oauth");
+assert.equal(entry.processing.status, "failed");
+assert.equal(object.fields.status.stringValue, "needs_auth");
 assert.equal(sent.length, 1);
+authenticated = true;
+const again = addRequest("skill.check");
+await capability.receiveCapabilityRequests(structuredClone(object), "live-owner");
+assert.deepEqual(await capability.approveCapabilityRequest(object.id, again.message.id), { pending: false });
+assert.equal(again.processing.status, "processed");
+assert.equal(object.fields.status.stringValue, "active");
+assert.equal(object.fields.error.stringValue, "");
+assert.equal(sent.length, 2);
 `);
 });
 
 test("recovery reports interruption and never relaunches a previously approved operation", async () => {
 	await scenario(String.raw`
-const entry = addRequest("auth.login");
+object.fields.key.stringValue = "browserless";
+const entry = addRequest("skill.install");
 await capability.approveCapabilityRequest(object.id, entry.message.id);
 const claimTime = entry.processing.at;
 await capability.receiveCapabilityRequests(structuredClone(object), "new-process-owner");
-assert.equal(opened, 1);
+assert.equal(skillStarts, 1);
 assert.equal(entry.processing.status, "failed");
 assert.match(entry.processing.error, /interrupted/);
 assert.equal(sent[0].id, "reply:" + entry.message.id + ":" + object.id + ":" + claimTime);
 assert.equal(sent[0].sentAt, claimTime);
 await capability.receiveCapabilityRequests(structuredClone(object), "new-process-owner");
-assert.equal(opened, 1);
+assert.equal(skillStarts, 1);
 assert.equal(sent.length, 1);
 `);
 });

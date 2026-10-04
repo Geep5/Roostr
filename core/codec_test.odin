@@ -1,8 +1,10 @@
 #+build !js
 package core
 
+import "core:encoding/base64"
 import "core:encoding/json"
 import "core:encoding/hex"
+import "core:slice"
 import "core:testing"
 
 // Fixed legacy-wire goldens are shared with the browser WASM parity script.
@@ -103,4 +105,59 @@ codec_rejects_over_capped_repeated_fields :: proc(t: ^testing.T) {
 	write_len_prefixed(&change, 7, snap.buf[:])
 	_, ok = decode_change(change.buf[:])
 	testing.expect(t, !ok, "children_ids beyond the decode cap must be rejected")
+}
+
+@(test)
+codec_message_types_round_trip_through_the_abi :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	// What a client does with the bytes on a thread root.
+	c := Conversation {
+		id           = "__thread__50706675",
+		kind         = .Agent_To_Agent,
+		title        = "Pricing research",
+		created_at   = 1789700000000,
+		opened_by    = "device-a",
+		participants = make([dynamic]string),
+	}
+	append(&c.participants, "agent-scout", "agent-analyst")
+	original := encode_conversation(c)
+
+	request := jobj()
+	request["action"] = json.String("decode")
+	request["type"] = json.String("conversation")
+	request["bytes"] = json.String(base64.encode(original, allocator = context.temp_allocator))
+	decoded, err := dispatch("codec", json.Object(request))
+	testing.expect_value(t, err, "")
+	testing.expect_value(t, json_str(decoded, "kind"), "a2a")
+	testing.expect_value(t, json_str(decoded, "title"), "Pricing research")
+	testing.expect_value(t, len(json_array(decoded, "participants")), 2)
+	testing.expect_value(t, json_str(decoded, "openedBy"), "device-a")
+
+	encode_request := jobj()
+	encode_request["action"] = json.String("encode")
+	encode_request["type"] = json.String("conversation")
+	encode_request["value"] = decoded
+	reencoded, encode_error := dispatch("codec", json.Object(encode_request))
+	testing.expect_value(t, encode_error, "")
+	text, is_string := reencoded.(json.String)
+	testing.expect(t, is_string, "encode returns base64")
+	bytes, ok := bytes_from_base64(string(text), context.temp_allocator)
+	testing.expect(t, ok, "valid base64")
+	testing.expect(t, slice.equal(original, bytes), "a JSON round trip through this host is byte-identical")
+
+	// A type names a schema message; an unknown one is refused, never read
+	// as a Change.
+	_, unknown_type := dispatch("codec", json.Object(codec_params("decode", "descriptor")))
+	testing.expect_value(t, unknown_type, "unknown codec type")
+	_, unknown_action := dispatch("codec", json.Object(codec_params("frobnicate", "conversation")))
+	testing.expect_value(t, unknown_action, "unknown codec action")
+}
+
+@(private = "file")
+codec_params :: proc(action, kind: string) -> map[string]json.Value {
+	out := jobj()
+	out["action"] = json.String(action)
+	out["type"] = json.String(kind)
+	out["bytes"] = json.String("")
+	return out
 }

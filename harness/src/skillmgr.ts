@@ -2,36 +2,31 @@
  * Installable skills — a curated catalog of device-local capabilities
  * (CLIs the agents can shell out to). Toggling one on in Settings runs a
  * one-shot installer subagent (the harness's own spawn machinery, holdfast
- * lineage) gated by a deterministic check
- * command. State is device-local (~/.glon/skills.json — installs don't
- * sync); the agent-facing skill body is a DAG `skill` object created on
- * success, so every agent picks it up through the normal skills listing.
+ * lineage) gated by a deterministic check command.
+ *
+ * State lives only in vault objects: this machine's `capability` object per
+ * key (status/error). The harness never derives it from local files; an
+ * install/enable/disable action writes it, and whatever the objects say is
+ * what this machine can do. The agent-facing skill body is the key's
+ * shared `skill` object.
  *
  * Auth handoff: when a skill installs fine but needs a human to finish
- * OAuth (gws), the row goes `needs-auth` and the installer posts to this
- * machine's own discussion - the install is a fact about this device, and
- * the Machine panel is where a human already looks for it.
+ * OAuth (gws), the capability goes `needs_auth` and the installer posts to
+ * this machine's own discussion - the state is a fact about this device,
+ * and the Machine panel is where a human already looks for it.
  */
 
-import { createObject, fetchObject, mutate, str, queryAll } from "./api";
+import { createObject, fetchObject, mutate, setField, str, sv, queryAll, type QueryRow } from "./api";
 import { machines, publishMachine } from "./machine";
 import { machineId } from "./roster";
 import { humanRef, postTo } from "./conv";
-import { publishHoldup, publishInstallations, publishGoogleInstallations } from "./descriptors";
-import { activeCapabilityKeys, syncCapabilities, type CapabilitySeed } from "./capabilities";
-import { objectText } from "./skills";
+import { activeCapabilityKeys, myCapabilities, publishHoldup, sweepHoldupBadges, upsertCapability, type CapabilityStatus } from "./capabilities";
+import { SKILL_TYPE, objectText } from "./skills";
 
 export interface CatalogEntry {
 	key: string;
-	/** Object name, and the command a check looks for: `browserless`. */
+	/** The human name ("Headless Chrome"): the key's Skill object is created with it, and every display of the key reads that object's name. */
 	name: string;
-	/**
-	 * Human label for a card ("Headless Chrome"). Absent = use `name`, which
-	 * is right when the tool's name IS the human name (`google`). This is the
-	 * publisher's choice, travelling as data - the old copy of these strings
-	 * lived in the website and drifted.
-	 */
-	label?: string;
 	description: string;
 	/** One-shot OMP prompt that performs the install. */
 	installPrompt: string;
@@ -43,15 +38,14 @@ export interface CatalogEntry {
 	authCheckCmd?: string;
 	/** Human instruction shown in Settings + posted to the Setup chat. */
 	authHint?: string;
-	/** Agent-facing skill body written to the DAG on successful install. */
+	/** Agent-facing skill body: the Skill object's page until someone edits it. */
 	skillBody: string;
 }
 
 export const CATALOG: CatalogEntry[] = [
 	{
 		key: "browserless",
-		name: "browserless",
-		label: "Headless Chrome",
+		name: "Headless Chrome",
 		description: "Render pages, screenshots, and PDFs in headless Chrome; use machine credential profiles when a task needs a signed-in account.",
 		// Two traps, both learned the hard way. The npm package named
 		// `browserless` is a Puppeteer *library* with no `bin`, so installing
@@ -99,8 +93,7 @@ export const CATALOG: CatalogEntry[] = [
 	},
 	{
 		key: "google",
-		name: "google",
-		label: "Google Workspace",
+		name: "Google Workspace",
 		description: "Google Workspace from the shell via the gws CLI — Gmail, Calendar, Drive under the signed-in account.",
 		installPrompt:
 			"Install the `gws` Google Workspace CLI on this Mac (Homebrew or npm, whichever the project documents). " +
@@ -126,8 +119,7 @@ export const CATALOG: CatalogEntry[] = [
 	},
 	{
 		key: "matcherino-dev",
-		name: "matcherino-dev",
-		label: "Matcherino dev environment",
+		name: "Matcherino dev environment",
 		description: "The Matcherino checkout at /home/geep/Matcherino plus the SSH tunnel to the production read replica on 127.0.0.1:15432.",
 		// The checkout is a human's clone (ssh key, repo access); the
 		// installer's job is only the tunnel, which is idempotent and dies
@@ -152,109 +144,44 @@ export const CATALOG: CatalogEntry[] = [
 	},
 ];
 
-// -- Device-local state -------------------------------------------
+// -- Object-backed state ------------------------------------------
 
 export type SkillPhase = "off" | "installing" | "needs-auth" | "on" | "failed" | "uninstalling";
 
-interface SkillState {
-	enabled: boolean;
-	installed: boolean;
-	log?: string;
-	updatedAt: number;
-}
-
-const STATE_PATH = `${process.env.GLON_DATA ?? `${process.env.HOME}/.glon`}/skills.json`;
+/** Capability statuses that mean the software is present on this machine. */
+const PRESENT: Partial<Record<string, true>> = { active: true, disabled: true, needs_auth: true };
 
 /** An agent needed a machine capability and could not proceed. */
 export interface Holdup {
-	id: string;
 	capability: string;
 	agentId: string;
 	agentName: string;
 	objectId: string;
 	objectName: string;
 	error: string;
-	count: number;
-	firstAt: number;
-	updatedAt: number;
 }
 
-interface StateFile {
-	skills: Record<string, SkillState>;
-	holdups?: Holdup[];
-}
-
-async function readState(): Promise<StateFile> {
-	try {
-		const j = (await Bun.file(STATE_PATH).json()) as Record<string, unknown>;
-		if (j && typeof j === "object" && "skills" in j) return j as unknown as StateFile;
-		if (j && typeof j === "object") return { skills: j as unknown as Record<string, SkillState> };
-	} catch {
-		/* fresh */
-	}
-	return { skills: {} };
-}
-
-async function writeState(state: StateFile): Promise<void> {
-	await Bun.write(STATE_PATH, JSON.stringify(state, null, "\t"));
+/** This machine's status for a catalog key, read from its capability object. */
+async function localStatus(key: string): Promise<{ status: CapabilityStatus | ""; error: string }> {
+	const row = (await myCapabilities()).get(key);
+	return { status: row?.status ?? "", error: row?.error ?? "" };
 }
 
 /**
- * What this machine can do for an object whose Skills need it, as
- * capability seeds: catalog skills installed AND enabled here. Each seed
- * becomes one capability object naming this machine as `served_by`.
- * (Logins are Credentials the agent carries, not machine capabilities.)
+ * Write a skill's state on this machine's capability object. A heal clears
+ * its error and retracts the badges its holdups filed.
  */
-function capabilitySeeds(state: StateFile): CapabilitySeed[] {
-	return CATALOG.filter((c) => state.skills[c.key]?.enabled && state.skills[c.key]?.installed).map((c) => ({ key: c.key, name: c.name, description: c.description }));
-}
-
-/**
- * A skill state change: persist, then republish. Install rows go first so
- * the capability objects' `install` links point at rows that already exist;
- * both come from the same state, at the same moment, so they cannot disagree.
- */
-async function saveSkills(state: StateFile): Promise<void> {
-	await writeState(state);
+async function recordSkill(entry: CatalogEntry, status: CapabilityStatus, error = ""): Promise<void> {
+	const previous = await localStatus(entry.key);
+	await upsertCapability({ key: entry.key, name: entry.name, description: entry.description }, { status, error });
+	if (status === "active" && previous.error) await sweepHoldupBadges(entry.key);
 	await publishMachine();
-	await publishInstallations(state.skills);
-	await syncCapabilities(capabilitySeeds(state));
-}
-
-/** Republish this machine's installation rows and capability objects from current state. */
-export async function republishCapabilities(): Promise<void> {
-	const state = await readState();
-	await publishMachine();
-	await publishInstallations(state.skills);
-	await syncCapabilities(capabilitySeeds(state));
 }
 
 /**
- * Publish this machine's per-skill installation rows from current state.
- * Boot calls it, because a machine that never changes a skill would otherwise
- * never say what it has - and "no row" must mean "no machine", not "quiet".
- */
-export async function publishInstallationState(): Promise<void> {
-	const state = await readState();
-	await publishInstallations(state.skills);
-	await publishGoogleInstallations();
-	// Holdups are install errors now; the file's old list is not replayed -
-	// a stale row would re-break a healed install on every boot.
-}
-
-/**
- * Publish this machine's capability objects from current state. Boot calls
- * it after publishInstallationState, so every `install` link lands on a row
- * that exists.
- */
-export async function publishCapabilityObjects(): Promise<void> {
-	await syncCapabilities(capabilitySeeds(await readState()));
-}
-
-/**
- * This machine's fully-set-up capability keys: the capability objects that
- * name it as `served_by` AND whose install is active. Anything short of
- * that is not offered - not to agents, not to the resolver.
+ * This machine's active capability keys: the capability objects that name
+ * it as `served_by` with status `active`. Anything short of that is not
+ * offered - not to agents, not to the resolver.
  */
 export async function capabilities(): Promise<string[]> {
 	return activeCapabilityKeys();
@@ -268,29 +195,13 @@ export async function capabilities(): Promise<string[]> {
  */
 export const GLOBAL_SCOPE = "global";
 
-/**
- * Backfill the markers on catalog skill objects made before they existed:
- * the global scope, and `key` - the catalog key that makes a skill machine
- * software, so listing it in Skills routes work to a machine that has it.
- */
-export async function convergeCatalogScope(): Promise<void> {
-	const names = new Map(CATALOG.map((c) => [c.name.toLowerCase(), c]));
-	const rows = await queryAll({ type: "skill" });
-	for (const r of rows) {
-		const entry = names.get(str(r.fields, "name").toLowerCase());
-		if (!entry) continue;
-		if (str(r.fields, "scope") !== GLOBAL_SCOPE) await mutate("set_field", { object_id: r.id, key: "scope", value: { stringValue: GLOBAL_SCOPE } });
-		if (!str(r.fields, "key")) await mutate("set_field", { object_id: r.id, key: "key", value: { stringValue: entry.key } });
-	}
-}
-
 // ── Holdups: blocked capability calls ─────
 //
-// A holdup IS the installation's `error` row now - visible, sortable, and
-// self-healing when the capability next publishes active. There is no list
-// to clear; the machine-local ledger that used to back one is gone.
+// A holdup is the capability's `error` text - visible and sortable. It
+// never changes the capability's status: a blocked call is an observation,
+// and letting it rewrite status would keep the capability off for good.
 
-export async function fileHoldup(h: Omit<Holdup, "id" | "count" | "firstAt" | "updatedAt">): Promise<void> {
+export async function fileHoldup(h: Holdup): Promise<void> {
 	void publishHoldup(h.capability, h.error);
 }
 
@@ -298,10 +209,11 @@ export async function fileHoldup(h: Omit<Holdup, "id" | "count" | "firstAt" | "u
 export async function skillReady(key: string): Promise<{ ok: boolean; reason: string }> {
 	const entry = CATALOG.find((c) => c.key === key);
 	if (!entry) return { ok: false, reason: `unknown capability "${key}"` };
-	const st = (await readState()).skills[key];
-	if (!st?.enabled) return { ok: false, reason: `${entry.name} is switched off on this machine` };
-	if (!st.installed) return { ok: false, reason: `${entry.name} is not installed on this machine` };
-	return { ok: true, reason: "" };
+	if ((await activeCapabilityKeys()).includes(key)) return { ok: true, reason: "" };
+	const { status } = await localStatus(key);
+	if (status === "disabled") return { ok: false, reason: `${entry.name} is switched off on this machine` };
+	if (status === "needs_auth") return { ok: false, reason: `${entry.name} needs sign-in on this machine` };
+	return { ok: false, reason: `${entry.name} is not active on this machine` };
 }
 
 // -- Live jobs ----------------------------------------------------
@@ -337,26 +249,50 @@ async function postSetupNotice(text: string): Promise<void> {
 	}
 }
 
-/** The catalog entry's skill object, if it exists. */
-async function findSkillObject(entry: CatalogEntry): Promise<string | null> {
-	const rows = await queryAll({ type: "skill" });
-	return (rows.find((r) => str(r.fields, "key") === entry.key) ?? rows.find((r) => str(r.fields, "name") === entry.name))?.id ?? null;
+/**
+ * The catalog entry's Skill object among `rows`: the one carrying its key,
+ * else a keyless one still named for it (made before skills had keys,
+ * named by its catalog name or by the key that was its name then).
+ */
+function findSkillObject(entry: CatalogEntry, rows: QueryRow[]): QueryRow | null {
+	const names = [entry.name.toLowerCase(), entry.key.toLowerCase()];
+	return rows.find((r) => str(r.fields, "key") === entry.key) ?? rows.find((r) => !str(r.fields, "key") && names.includes(str(r.fields, "name").toLowerCase())) ?? null;
 }
 
+async function createSkillObject(entry: CatalogEntry): Promise<string> {
+	const { id } = await createObject(entry.name, SKILL_TYPE, { key: sv(entry.key), description: sv(entry.description), scope: sv(GLOBAL_SCOPE) });
+	return id;
+}
+
+const addBody = (id: string, text: string) => mutate("block_add", { object_id: id, block: { content: { text: { text, style: 0 } } } });
+
 /**
- * Seed the agent-facing skill object in the DAG. An existing body is the
- * user's to edit (Settings exposes it) - only an empty shell gets the
- * catalog default. The object keeps its id: agents link it in Skills.
+ * Converge the key's shared Skill object (seeded at boot, catalog-seeds.ts):
+ * a missing one is created with the catalog name, description and body. An
+ * older one gains its `key` and the global scope, a name still equal to its
+ * key becomes the catalog name, and an empty page gets the catalog body;
+ * everything else is the user's to edit. `rows` are the vault's skill
+ * objects. Returns whether it wrote.
  */
-async function upsertSkillObject(entry: CatalogEntry): Promise<void> {
-	const hitId = await findSkillObject(entry);
-	if (hitId && objectText(await fetchObject(hitId)).trim() !== "") return;
-	const id = hitId ?? (await createObject(entry.name, "skill", {
-		key: { stringValue: entry.key },
-		description: { stringValue: entry.description },
-		scope: { stringValue: GLOBAL_SCOPE },
-	})).id;
-	await mutate("block_add", { object_id: id, block: { content: { text: { text: entry.skillBody, style: 0 } } } });
+export async function upsertSkillObject(entry: CatalogEntry, rows: QueryRow[]): Promise<boolean> {
+	const hit = findSkillObject(entry, rows);
+	if (!hit) {
+		await addBody(await createSkillObject(entry), entry.skillBody);
+		return true;
+	}
+	let wrote = false;
+	const fix = async (key: string, value: string) => {
+		await setField(hit.id, key, sv(value));
+		wrote = true;
+	};
+	if (str(hit.fields, "key") !== entry.key) await fix("key", entry.key);
+	if (str(hit.fields, "scope") !== GLOBAL_SCOPE) await fix("scope", GLOBAL_SCOPE);
+	if (str(hit.fields, "name") === entry.key && entry.name !== entry.key) await fix("name", entry.name);
+	if (objectText(await fetchObject(hit.id)).trim() === "") {
+		await addBody(hit.id, entry.skillBody);
+		wrote = true;
+	}
+	return wrote;
 }
 
 /** Restore a skill's prompt to the catalog default (the "reinstall" button). */
@@ -371,14 +307,9 @@ export async function resetSkillPrompt(key: string): Promise<string> {
 export async function setSkillPrompt(key: string, text: string): Promise<void> {
 	const entry = CATALOG.find((c) => c.key === key);
 	if (!entry) throw new Error(`unknown skill "${key}"`);
-	let id = await findSkillObject(entry);
+	let id = findSkillObject(entry, await queryAll({ type: SKILL_TYPE }))?.id;
 	if (!id) {
-		id = (
-			await createObject(entry.name, "skill", {
-				description: { stringValue: entry.description },
-				scope: { stringValue: GLOBAL_SCOPE },
-			})
-		).id;
+		id = await createSkillObject(entry);
 	} else {
 		// Drop the existing body blocks (everything except the discussion subtree).
 		const obj = await fetchObject(id);
@@ -389,16 +320,16 @@ export async function setSkillPrompt(key: string, text: string): Promise<void> {
 			await mutate("block_remove", { object_id: id, block_id: b.id });
 		}
 	}
-	await mutate("block_add", { object_id: id, block: { content: { text: { text, style: 0 } } } });
+	await addBody(id, text);
 }
 
 
-/** Local execution state without loading prompts or running install/auth gates. */
+/** Execution state from the live job, else this machine's capability object - no gates run. */
 export async function skillOperationState(key: string): Promise<{ phase: SkillPhase; installed: boolean }> {
 	if (!CATALOG.some((entry) => entry.key === key)) throw new Error("Unknown skill.");
-	const state = (await readState()).skills[key];
-	const phase = jobs.get(key)?.phase ?? (state?.enabled ? "on" : state?.log?.startsWith("[needs-auth]") ? "needs-auth" : state?.log?.startsWith("[failed]") ? "failed" : "off");
-	return { phase, installed: state?.installed ?? false };
+	const { status } = await localStatus(key);
+	const settled: SkillPhase = status === "active" ? "on" : status === "needs_auth" ? "needs-auth" : status === "broken" ? "failed" : "off";
+	return { phase: jobs.get(key)?.phase ?? settled, installed: PRESENT[status] === true };
 }
 
 
@@ -411,24 +342,19 @@ export async function skillOperationState(key: string): Promise<{ phase: SkillPh
 export async function recheckSkill(key: string): Promise<SkillPhase> {
 	const entry = CATALOG.find((c) => c.key === key);
 	if (!entry) throw new Error(`unknown skill: ${key}`);
-	const state = await readState();
 	const check = await sh(entry.checkCmd);
 	if (!check.ok) {
-		state.skills[key] = { enabled: false, installed: false, log: `[failed] check "${entry.checkCmd}" failed:\n${check.out}`, updatedAt: Date.now() };
-		await saveSkills(state);
+		await recordSkill(entry, "broken", `check "${entry.checkCmd}" failed:\n${check.out}`);
 		return "failed";
 	}
 	if (entry.authCheckCmd) {
 		const auth = await sh(entry.authCheckCmd);
 		if (!auth.ok) {
-			state.skills[key] = { enabled: false, installed: true, log: `[needs-auth] ${entry.authHint ?? "authentication required"}\n${auth.out}`, updatedAt: Date.now() };
-			await saveSkills(state);
+			await recordSkill(entry, "needs_auth", `${entry.authHint ?? "authentication required"}\n${auth.out}`);
 			return "needs-auth";
 		}
 	}
-	state.skills[key] = { enabled: true, installed: true, log: "", updatedAt: Date.now() };
-	await saveSkills(state);
-	await upsertSkillObject(entry);
+	await recordSkill(entry, "active");
 	return "on";
 }
 
@@ -515,9 +441,9 @@ export async function enableSkill(key: string): Promise<SkillPhase> {
 	if (!entry) throw new Error(`unknown skill: ${key}`);
 	if (jobs.has(key)) return jobs.get(key)!.phase;
 
-	// Already installed (or present on the machine anyway)? Just gate.
-	const state = await readState();
-	if (state.skills[key]?.installed || (await sh(entry.checkCmd)).ok) {
+	// Already present (per its capability object, or on the machine anyway)? Just gate.
+	const { status } = await localStatus(key);
+	if (PRESENT[status] || (await sh(entry.checkCmd)).ok) {
 		return recheckSkill(key);
 	}
 
@@ -532,13 +458,8 @@ export async function enableSkill(key: string): Promise<SkillPhase> {
 					`\u2699\uFE0F **${entry.name}** installed, but needs you to finish sign-in: ${entry.authHint ?? "authenticate, then hit Re-check in Settings."}`,
 				);
 			} else if (phase === "failed") {
-				const st = await readState();
-				const job = st.skills[key];
 				await postSetupNotice(`\u26A0\uFE0F **${entry.name}** install failed — see the log in Settings \u2192 Skills.`);
-				if (job) {
-					job.log = `[failed] install did not pass "${entry.checkCmd}"\n${jobLogTail(key)}`;
-					await writeState(st);
-				}
+				await recordSkill(entry, "broken", `install did not pass "${entry.checkCmd}"\n${jobLogTail(key)}`);
 			}
 		},
 		async () => (await sh(entry.checkCmd)).ok,
@@ -553,14 +474,10 @@ function jobLogTail(key: string): string {
 }
 
 export async function disableSkill(key: string): Promise<void> {
-	const state = await readState();
-	const s = state.skills[key];
-	if (s) {
-		s.enabled = false;
-		s.log = "";
-		s.updatedAt = Date.now();
-		await saveSkills(state);
-	}
+	const entry = CATALOG.find((c) => c.key === key);
+	if (!entry) throw new Error(`unknown skill: ${key}`);
+	const { status } = await localStatus(key);
+	if (PRESENT[status]) await recordSkill(entry, "disabled");
 	// Skill object stays in the DAG but stops being listed (device filter).
 }
 
@@ -574,15 +491,8 @@ export async function uninstallSkill(key: string): Promise<SkillPhase> {
 		"uninstalling",
 		entry.uninstallPrompt,
 		async () => {
-			const state = await readState();
 			const gone = !(await sh(entry.checkCmd)).ok;
-			state.skills[key] = {
-				enabled: false,
-				installed: !gone,
-				log: gone ? "" : `[failed] uninstall left "${entry.checkCmd}" passing\n${jobLogTail(key)}`,
-				updatedAt: Date.now(),
-			};
-			await saveSkills(state);
+			await recordSkill(entry, gone ? "missing" : "disabled", gone ? "" : `uninstall left "${entry.checkCmd}" passing\n${jobLogTail(key)}`);
 		},
 		// Symmetric finish line: gone from PATH is what removal means.
 		async () => !(await sh(entry.checkCmd)).ok,

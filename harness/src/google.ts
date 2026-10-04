@@ -1,8 +1,8 @@
 /** Google account selectors for the local gws CLI. Secrets stay in each
- * account's config dir; this only reports which selectors exist and whether
- * their own auth state verifies.
+ * account's config dir; this checks one account's own auth state and
+ * removes an account's local sign-in.
  */
-import { existsSync, mkdirSync, readdirSync, copyFileSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -24,26 +24,10 @@ function accountDir(account: string): string {
 	return join(rootDir(), account);
 }
 
-function defaultClientSecret(): string | undefined {
-	for (const path of [join(rootDir(), "client_secret.json"), join(homedir(), ".config", "gws", "client_secret.json")]) {
-		if (existsSync(path)) return path;
-	}
-	return undefined;
-}
-
-/** Create an account selector directory, sharing only the OAuth client config. */
-export function addGoogleAccount(account: string): Promise<GoogleAccountStatus> {
-	if (!/^[^\s/]+@[^\s/]+$/.test(account)) throw new Error("Enter the Google account email address.");
-	const dir = accountDir(account);
-	mkdirSync(dir, { recursive: true });
-	const client = defaultClientSecret();
-	if (client && !existsSync(join(dir, "client_secret.json"))) copyFileSync(client, join(dir, "client_secret.json"));
-	return googleAccountStatus(account);
-}
-
+/** Delete an account's local sign-in (its config dir under the accounts root). */
 export function removeGoogleAccount(account: string): void {
+	if (!/^[^\s/@]+@[^\s/@]+$/.test(account)) throw new Error("Invalid Google account.");
 	const dir = accountDir(account);
-	if (!dir.startsWith(rootDir())) throw new Error("Invalid Google account.");
 	rmSync(dir, { recursive: true, force: true });
 }
 
@@ -74,8 +58,8 @@ export async function googleAccountStatus(account: string): Promise<GoogleAccoun
 	} catch {
 		return { ...base, error: "Google CLI status is unavailable on this machine." };
 	}
-	// Status can be mirrored into an installation object. CLI stderr is
-	// local-only and may contain credentials or configuration material.
+	// Status lands on a credential's error. CLI stderr is local-only and may
+	// contain credentials or configuration material.
 	if (res.code !== 0) return { ...base, error: "Google authentication status could not be verified on this machine." };
 	try {
 		const parsed = JSON.parse(res.out) as Record<string, unknown>;
@@ -89,14 +73,4 @@ export async function googleAccountStatus(account: string): Promise<GoogleAccoun
 	} catch {
 		return { ...base, error: "gws auth status returned invalid JSON" };
 	}
-}
-
-/** Every configured account selector, in stable order. */
-export async function listGoogleAccounts(): Promise<GoogleAccountStatus[]> {
-	mkdirSync(rootDir(), { recursive: true });
-	const accounts = readdirSync(rootDir(), { withFileTypes: true })
-		.filter((entry) => entry.isDirectory() && entry.name.includes("@"))
-		.map((entry) => entry.name)
-		.sort();
-	return Promise.all(accounts.map(googleAccountStatus));
 }

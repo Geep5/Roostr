@@ -18,7 +18,7 @@
  * `name` (hostname) - durable facts, each written only when it changes, so
  * restarts are free. What the machine can DO is no longer a field here: it
  * is the capability objects (type `capability`, capabilities.ts) that name
- * it as `served_by` and whose install is active.
+ * it as `served_by` with status `active`.
  */
 
 import { execSync } from "node:child_process";
@@ -115,7 +115,7 @@ export function agentServedHere(agent: { id: string; fields: Record<string, Valu
  * computer (`served_by`), whatever object it is working on - models, logins
  * and skills travel as objects, so the object's placement has no say. An
  * agent with no pin runs nowhere. One exception: an object that IS a
- * computer or an installation on one (`self`) is physical, so work on it
+ * computer or a capability on one (`self`) is physical, so work on it
  * happens on that computer.
  */
 export function agentRunsOn(serving: Serving, agentPin: string): string {

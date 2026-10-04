@@ -1087,9 +1087,9 @@ relation_value_cascade :: proc(states: map[string]^Object_State, object_id: stri
 // are shared history with another agent.
 
 // Types that never have an agent of their own; an `agent` field on them
-// means something else (a chat's owner, an installation's requester).
+// means something else (a chat's owner).
 // Mirrors the harness's UNMINTABLE set (harness/src/index.ts).
-AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "type", "skill", "tool", "descriptor", "install", "credential", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
+AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "type", "skill", "tool", "credential", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
 
 /** Agents on an object's guest list. `agent` was a single string before it became a link list; both shapes read. */
 object_agents :: proc(fields: [dynamic]Value_Entry, allocator := context.temp_allocator) -> [dynamic]string {
@@ -1192,9 +1192,6 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// Agent-related properties are hidden from query/collection views by
 	// default (FeaturedProps shows them on the object page regardless).
 	{"agent", "object", "Agent", "🤖", false, false, 0, {}},
-	// A capability's link to the software/login row that makes it usable on
-	// its machine: harness plumbing, not something people pick.
-	{"install", "object", "Installation", "🔌", true, false, 0, {}},
 	// Which logins an agent's work uses: Credential objects, each kept by the
 	// computer its own Served by names (secrets stay on that computer).
 	{"credentials", "object", "Credentials", "🔑", false, false, 0, {}},
@@ -1357,6 +1354,9 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 		}
 		mutation_add(plan, input, id, ops)
 	}
+	for key in RETIRED_BUNDLED_TYPES {
+		if e, ok := types[key]; ok do mutation_add(plan, input, e.id, {Operation{kind = .Object_Delete}})
+	}
 
 }
 mutation_bootstrap_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input) {
@@ -1430,7 +1430,6 @@ bundled_relation_shipped :: proc(key: string) -> bool {
 // The bundled type a relation's picker is restricted to, when it is.
 BUNDLED_PICKER_TYPES := [?][2]string {
 	{"agent", "agent"},
-	{"install", "install"},
 	{"skills", "skill"},
 	{"tools", "tool"},
 	{"check_first", "tool"},
@@ -1440,8 +1439,14 @@ BUNDLED_PICKER_TYPES := [?][2]string {
 }
 
 // Bundled relations that were replaced: seeding deletes a space's copy.
-// `requires` (links to per-machine capability objects) became `skills`.
-RETIRED_BUNDLED_RELATIONS :: []string{"requires"}
+// `requires` (links to per-machine capability objects) became `skills`;
+// `install` (a capability's link to its install row) went with the row.
+RETIRED_BUNDLED_RELATIONS :: []string{"requires", "install"}
+
+// Bundled types that were replaced: seeding deletes a space's copy.
+// `install` rows folded into capability objects; `descriptor` cards became
+// Skill objects and agent templates.
+RETIRED_BUNDLED_TYPES :: []string{"install", "descriptor"}
 
 bundled_picker_type :: proc(key: string) -> (string, bool) {
 	for pair in BUNDLED_PICKER_TYPES do if pair[0] == key do return pair[1], true
@@ -1473,15 +1478,11 @@ BUNDLED_TYPES :: []Bundled_Type{
 	// Every harness registers its host at boot; without a type object the
 	// objects existed but had no definition, no sidebar row, and no way in.
 	{"machine", "Computer", "🖥️", "page"},
-	// What a skill or login IS (bytes on the card), and what is true for it
-	// on one machine (fields, so `error` reaches views).
-	{"descriptor", "Descriptor", "🗂️", "page"},
-	{"install", "Installation", "🔌", "page"},
 	// A login for a service (X, LinkedIn, a bot token...) kept by the computer
 	// its Served by names; the object holds everything but the secret.
 	{"credential", "Credential", "🔑", "page"},
-	// A capability: one skill offered by one machine. Served by that machine
-	// with an active install before it is usable or offered to an agent.
+	// A capability: one skill on one machine, written only by that machine.
+	// Its status says whether the software works there; active means usable.
 	{"capability", "Capability", "🧩", "page"},
 	// Instructions an agent reads; the ones an agent (or object) lists in
 	// Skills. A skill with a `key` is catalog software computers install.

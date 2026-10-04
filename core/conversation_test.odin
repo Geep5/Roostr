@@ -670,32 +670,38 @@ mailbox_capability_approval_and_global_service_replies :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
 	v := Vault{changes = make([dynamic]Change)}
 	space := mail_object(t, &v, "channel")
+	integrations := mail_object(t, &v, "channel")
 	source := mail_object(t, &v, "note", space)
-	install := mail_object(t, &v, "install")
-	request := mail_envelope("auth-request", source, Agent_Endpoint{object_id = install})
-	request.operation = "auth.check"
+	capability := mail_object(t, &v, "capability", integrations)
+	note := mail_object(t, &v, "note", integrations)
+	misaddressed := mail_envelope("check-note", source, Agent_Endpoint{object_id = note})
+	misaddressed.operation = "skill.check"
+	_, misaddressed_error := mail_send(&v, misaddressed)
+	testing.expect_value(t, misaddressed_error, "message endpoints must belong to the same space")
+	request := mail_envelope("check-request", source, Agent_Endpoint{object_id = capability})
+	request.operation = "skill.check"
 	_, send_error := mail_send(&v, request)
 	testing.expect(t, send_error == "", send_error)
-	_, delivery_error := mail_deliver(&v, request, install)
+	_, delivery_error := mail_deliver(&v, request, capability)
 	testing.expect(t, delivery_error == "", delivery_error)
-	_, approval_error := mail_process(&v, install, request.id, "awaiting_approval", "")
+	_, approval_error := mail_process(&v, capability, request.id, "awaiting_approval", "")
 	testing.expect(t, approval_error == "", approval_error)
-	loaded, _, _ := message_load(state_of(&v, install), request.id)
-	testing.expect_value(t, message_status(state_of(&v, install), loaded, "").status, "awaiting_approval")
-	claim, claim_error := mail_process(&v, install, request.id, "processing", "paired-approval")
+	loaded, _, _ := message_load(state_of(&v, capability), request.id)
+	testing.expect_value(t, message_status(state_of(&v, capability), loaded, "").status, "awaiting_approval")
+	claim, claim_error := mail_process(&v, capability, request.id, "processing", "paired-approval")
 	testing.expect(t, claim_error == "", claim_error)
 	claimed, _ := json_bool(claim, "claimed")
 	testing.expect(t, claimed, "approval can claim waiting request")
-	reply := mail_envelope("auth-result", install, Agent_Endpoint{object_id = source})
+	reply := mail_envelope("check-result", capability, Agent_Endpoint{object_id = source})
 	_, ungrounded_error := mail_send(&v, reply)
-	testing.expect(t, ungrounded_error != "", "global install is not a general cross-space sender")
+	testing.expect(t, ungrounded_error != "", "a capability is not a general cross-space sender")
 	reply.reply_to = request.id
 	_, reply_error := mail_send(&v, reply)
 	testing.expect(t, reply_error == "", reply_error)
 	_, reply_delivery_error := mail_deliver(&v, reply, source)
 	testing.expect(t, reply_delivery_error == "", reply_delivery_error)
 	third_party := mail_object(t, &v, "note", space)
-	reply.id = "auth-leak"
+	reply.id = "check-leak"
 	reply.recipients[0].object_id = third_party
 	_, third_party_error := mail_send(&v, reply)
 	testing.expect(t, third_party_error != "", "service reply cannot add unrelated recipients")

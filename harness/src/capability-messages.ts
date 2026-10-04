@@ -1,19 +1,19 @@
 import { fetchObject, mutate, queryAll, setField, str, sv, iv, type AgentEndpoint, type AgentMessage, type MailboxEntry, type ObjectJSON } from "./api";
+import { CAPABILITY_TYPE, linkTarget, type CapabilityState, type CapabilityStatus } from "./capabilities";
 import { claimMessage, deliverOutbox, finishMessage, replyRecipients, sendMessage } from "./mailbox";
 import { machineId } from "./roster";
-import { CATALOG, disableSkill, enableSkill, recheckSkill, republishCapabilities, skillOperationState, uninstallSkill } from "./skillmgr";
-import { addGoogleAccount, googleAccountStatus, removeGoogleAccount } from "./google";
-import { INSTALL_TYPE, type InstallationState } from "./descriptors";
+import { CATALOG, disableSkill, enableSkill, recheckSkill, skillOperationState, uninstallSkill } from "./skillmgr";
 
-// Installations are skills and Google accounts; service logins are Credential objects (credential-objects.ts).
-const OPERATIONS: Record<string, true> = { "skill.install": true, "skill.enable": true, "skill.disable": true, "skill.uninstall": true, "auth.login": true, "auth.check": true, "auth.revoke": true };
+// A capability is one catalog skill on one machine; its object is the inbox
+// for these operations. Service and Google sign-ins are Credential objects
+// (credential-objects.ts), not capability operations.
+const OPERATIONS: Record<string, true> = { "skill.install": true, "skill.enable": true, "skill.disable": true, "skill.uninstall": true, "skill.check": true };
 const INTERRUPTED = "Operation interrupted. Its effects are unknown; inspect this machine before explicitly retrying.";
-const WAITING_LOGIN = "Finish signing in on this machine, then confirm login completion.";
 let requestOwner = `capability:${crypto.randomUUID()}`;
 export function setCapabilityRequestOwner(owner: string): void { requestOwner = owner; }
 
-interface Target { key: string; account: string }
-interface Execution extends Target { messageId: string; starting: boolean; outcome?: { state: InstallationState; error: string } }
+interface Target { key: string }
+interface Execution extends Target { messageId: string; starting: boolean; outcome?: { state: CapabilityState; error: string } }
 // These locks only guard live execution. The inbox claim is the durable record;
 // a restarted process fails the old claim rather than replaying side effects.
 const executions = new Map<string, Execution>();
@@ -25,19 +25,15 @@ async function locked<T>(objectId: string, work: () => Promise<T>): Promise<T> {
 	try { return await next; } finally { if (locks.get(objectId) === next) locks.delete(objectId); }
 }
 
+const servedBy = (object: ObjectJSON): string => linkTarget(object.fields, "served_by");
+
 export function capabilityTarget(object: ObjectJSON, operation: string, localMachine: string): Target {
-	if (object.deleted) throw new Error("This installation has been deleted.");
-	if (object.typeKey !== INSTALL_TYPE || str(object.fields, "machine_id") !== localMachine) throw new Error("This installation belongs to another machine.");
+	if (object.deleted) throw new Error("This capability has been deleted.");
+	if (object.typeKey !== CAPABILITY_TYPE || servedBy(object) !== localMachine) throw new Error("This capability belongs to another machine.");
 	if (!Object.hasOwn(OPERATIONS, operation)) throw new Error("Unsupported capability operation.");
 	const key = str(object.fields, "key");
-	const account = str(object.fields, "account");
-	const skill = CATALOG.find((entry) => entry.key === key);
-	if (!skill) throw new Error("This installation is not in the local catalog.");
-	if (account && (key !== "google" || !/^[^\s/\\]+@[^\s/\\]+$/.test(account))) throw new Error("Invalid installation account.");
-	if (operation.startsWith("skill.") && (!skill || account)) throw new Error("This installation does not accept skill operations.");
-	if (operation === "auth.login" && key !== "google") throw new Error("This installation has no login workflow.");
-	if (operation === "auth.revoke" && !(key === "google" && account)) throw new Error("Choose an account installation to revoke.");
-	return { key, account };
+	if (!CATALOG.some((entry) => entry.key === key)) throw new Error("This capability is not in the local catalog.");
+	return { key };
 }
 
 function incoming(object: ObjectJSON, messageId?: string): MailboxEntry[] {
@@ -47,28 +43,27 @@ function incoming(object: ObjectJSON, messageId?: string): MailboxEntry[] {
 async function canonical(objectId: string, messageId: string): Promise<{ object: ObjectJSON; entry: MailboxEntry; target: Target }> {
 	const object = await fetchObject(objectId);
 	const entry = incoming(object, messageId)[0];
-	if (!entry) throw new Error("Capability request is not in this installation's inbox.");
+	if (!entry) throw new Error("Capability request is not in this capability's inbox.");
 	const target = capabilityTarget(object, entry.message.operation, await machineId());
 	return { object, entry, target };
 }
 
-async function publish(object: ObjectJSON, state: InstallationState): Promise<void> {
+async function publish(object: ObjectJSON, state: CapabilityState): Promise<void> {
 	const key = str(object.fields, "key");
-	const account = str(object.fields, "account");
 	object = await fetchObject(object.id);
-	if (str(object.fields, "machine_id") !== await machineId()) throw new Error("Installation ownership changed.");
-	if (object.deleted || object.typeKey !== INSTALL_TYPE || str(object.fields, "key") !== key || str(object.fields, "account") !== account) throw new Error("Installation identity changed.");
-	const fields = { status: state.status, error: state.error ?? "", ...(state.auth ? { auth: state.auth } : {}) };
+	if (servedBy(object) !== await machineId()) throw new Error("Capability ownership changed.");
+	if (object.deleted || object.typeKey !== CAPABILITY_TYPE || str(object.fields, "key") !== key) throw new Error("Capability identity changed.");
+	const fields = { status: state.status, error: state.error ?? "" };
 	let changed = false;
-	for (const [key, value] of Object.entries(fields)) {
-		if (str(object.fields, key) === value) continue;
-		await setField(object.id, key, sv(value));
+	for (const [field, value] of Object.entries(fields)) {
+		if (str(object.fields, field) === value) continue;
+		await setField(object.id, field, sv(value));
 		changed = true;
 	}
 	if (changed) await setField(object.id, "checked_at", iv(Date.now()));
 }
 
-async function complete(object: ObjectJSON, entry: MailboxEntry, state: InstallationState, error = ""): Promise<void> {
+async function complete(object: ObjectJSON, entry: MailboxEntry, state: CapabilityState, error = ""): Promise<void> {
 	const execution = executions.get(object.id);
 	if (execution?.messageId === entry.message.id) execution.outcome = { state, error };
 	await publish(object, state);
@@ -80,7 +75,7 @@ async function complete(object: ObjectJSON, entry: MailboxEntry, state: Installa
 		if (recipients.length && !alreadySent) {
 			// The claim time distinguishes explicit retry attempts, while remaining
 			// stable if committing the response is retried after a network failure.
-			await sendMessage({ id: replyId, exchangeId: entry.message.exchangeId, sender, recipients, text: `${entry.message.operation}: ${state.status}${error ? `. ${error}` : "."}`, replyTo: entry.message.id, sentAt: entry.processing.at, title: entry.message.title, requestReply: false, historical: false, operation: "", author: str(object.fields, "machine_id") });
+			await sendMessage({ id: replyId, exchangeId: entry.message.exchangeId, sender, recipients, text: `${entry.message.operation}: ${state.status}${error ? `. ${error}` : "."}`, replyTo: entry.message.id, sentAt: entry.processing.at, title: entry.message.title, requestReply: false, historical: false, operation: "", author: servedBy(object) });
 		}
 	}
 	await finishMessage(object.id, entry.message.id, entry.processing.owner || requestOwner, error || undefined);
@@ -88,27 +83,23 @@ async function complete(object: ObjectJSON, entry: MailboxEntry, state: Installa
 	await deliverOutbox(await fetchObject(object.id));
 }
 
-async function skillOutcome(key: string, operation: string): Promise<{ state: InstallationState; error: string } | null> {
+async function skillOutcome(key: string, operation: string): Promise<{ state: CapabilityState; error: string } | null> {
 	const local = await skillOperationState(key);
 	if (local.phase === "installing" || local.phase === "uninstalling") return null;
 	if (local.phase === "failed") return { state: { status: "broken" }, error: "The local skill operation failed. Inspect its local installer log." };
 	if (local.phase === "needs-auth") return { state: { status: "needs_auth" }, error: operation === "skill.install" ? "" : "Authentication is required on this machine." };
-	return { state: { status: local.phase === "on" ? "active" : local.installed ? "disabled" : "missing", auth: "none" }, error: "" };
+	return { state: { status: local.phase === "on" ? "active" : local.installed ? "disabled" : "missing" }, error: "" };
 }
 
 /** Sync can stage approval or observe an already-approved job; never execute an operation. */
 export async function receiveCapabilityRequests(object: ObjectJSON, owner: string): Promise<void> {
-	if (object.deleted || object.typeKey !== INSTALL_TYPE || str(object.fields, "machine_id") !== await machineId()) return;
+	if (object.deleted || object.typeKey !== CAPABILITY_TYPE || servedBy(object) !== await machineId()) return;
 	await locked(object.id, async () => {
 		object = await fetchObject(object.id);
 		for (const entry of incoming(object)) {
 			if (entry.processing.status === "processing") {
 				const execution = executions.get(object.id);
-				if (entry.processing.owner !== owner || !execution || execution.messageId !== entry.message.id) {
-					await complete(object, entry, { status: "broken", error: INTERRUPTED }, INTERRUPTED);
-					continue;
-				}
-				if (execution.key !== str(object.fields, "key") || execution.account !== str(object.fields, "account")) {
+				if (entry.processing.owner !== owner || !execution || execution.messageId !== entry.message.id || execution.key !== str(object.fields, "key")) {
 					await complete(object, entry, { status: "broken", error: INTERRUPTED }, INTERRUPTED);
 					continue;
 				}
@@ -116,7 +107,7 @@ export async function receiveCapabilityRequests(object: ObjectJSON, owner: strin
 					await complete(object, entry, execution.outcome.state, execution.outcome.error);
 					continue;
 				}
-				if (!execution.starting && entry.message.operation.startsWith("skill.")) {
+				if (!execution.starting) {
 					const outcome = await skillOutcome(execution.key, entry.message.operation);
 					if (outcome) await complete(object, entry, { ...outcome.state, error: outcome.error }, outcome.error);
 				}
@@ -127,131 +118,94 @@ export async function receiveCapabilityRequests(object: ObjectJSON, owner: strin
 			let valid = true;
 			try { capabilityTarget(object, entry.message.operation, await machineId()); } catch { valid = false; }
 			await mutate("message_processing", { object_id: object.id, message_id: entry.message.id, status: "awaiting_approval", owner });
-			if (!executions.has(object.id)) await publish(object, { status: "needs_approval", error: valid ? "A capability request is waiting for approval on this machine." : "This request is not supported by the local catalog. Reject it on this machine." });
+			// An active capability keeps serving while a request waits; the request itself is the visible record.
+			if (!executions.has(object.id) && (str(object.fields, "status") !== "active" || !valid)) await publish(object, { status: "needs_approval", error: valid ? "A capability request is waiting for approval on this machine." : "This request is not supported by the local catalog. Reject it on this machine." });
 		}
 	});
 }
 
 export interface CapabilityRequestView {
-	objectId: string; messageId: string; key: string; account: string; operation: string; sender: AgentEndpoint;
+	objectId: string; messageId: string; key: string; operation: string; sender: AgentEndpoint;
 	status: string; error: string; sentAt: number; canApprove: boolean;
 }
 export async function listCapabilityRequests(): Promise<CapabilityRequestView[]> {
 	const local = await machineId();
 	const requests: CapabilityRequestView[] = [];
-	for (const row of await queryAll({ type: INSTALL_TYPE })) {
-		if (str(row.fields, "machine_id") !== local) continue;
+	for (const row of await queryAll({ type: CAPABILITY_TYPE })) {
+		if (linkTarget(row.fields, "served_by") !== local) continue;
 		const object = await fetchObject(row.id);
 		for (const entry of incoming(object)) {
 			if (entry.processing.status === "processed") continue;
 			let canApprove = true;
 			try { capabilityTarget(object, entry.message.operation, local); } catch { canApprove = false; }
-			requests.push({ objectId: object.id, messageId: entry.message.id, key: str(object.fields, "key"), account: str(object.fields, "account"), operation: entry.message.operation, sender: entry.message.sender, status: entry.processing.status, error: entry.processing.error || str(object.fields, "error"), sentAt: entry.message.sentAt, canApprove });
+			requests.push({ objectId: object.id, messageId: entry.message.id, key: str(object.fields, "key"), operation: entry.message.operation, sender: entry.message.sender, status: entry.processing.status, error: entry.processing.error || str(object.fields, "error"), sentAt: entry.message.sentAt, canApprove });
 		}
 	}
 	return requests.sort((a, b) => a.sentAt - b.sentAt || a.messageId.localeCompare(b.messageId));
 }
 
+const PHASE_STATUS: Record<string, CapabilityStatus> = { on: "active", "needs-auth": "needs_auth", failed: "broken" };
+
 export async function approveCapabilityRequest(objectId: string, messageId: string): Promise<{ pending: boolean }> {
 	const initial = await canonical(objectId, messageId);
-	return locked(`catalog:${initial.target.key}:${initial.target.account}`, () => locked(objectId, async () => {
+	return locked(`catalog:${initial.target.key}`, () => locked(objectId, async () => {
 		let { object, entry, target } = await canonical(objectId, messageId);
-		if (target.key !== initial.target.key || target.account !== initial.target.account) throw new Error("Installation identity changed before approval.");
+		if (target.key !== initial.target.key) throw new Error("Capability identity changed before approval.");
 		if (!["pending", "awaiting_approval"].includes(entry.processing.status)) throw new Error("This request is not awaiting approval.");
-		if ([...executions.values()].some((run) => run.key === target.key && run.account === target.account)) throw new Error("Another operation is in progress for this installation.");
+		if ([...executions.values()].some((run) => run.key === target.key)) throw new Error("Another operation is in progress for this capability.");
 		if (!(await claimMessage(objectId, messageId, requestOwner))) throw new Error("This request has already been claimed.");
 		({ object, entry, target } = await canonical(objectId, messageId));
-		if (target.key !== initial.target.key || target.account !== initial.target.account) throw new Error("Installation identity changed while claiming approval.");
+		if (target.key !== initial.target.key) throw new Error("Capability identity changed while claiming approval.");
 		const execution: Execution = { ...target, messageId, starting: true };
 		executions.set(objectId, execution);
 		try {
-			await publish(object, { status: "processing", error: "Approved operation in progress on this machine." });
+			if (entry.message.operation !== "skill.check") await publish(object, { status: "processing", error: "Approved operation in progress on this machine." });
 			const operation = entry.message.operation;
-			if (operation === "auth.revoke") {
-				removeGoogleAccount(target.account);
-				await republishCapabilities();
-				await complete(object, entry, { status: "missing", auth: "none" });
-			} else if (operation === "auth.login") {
-				if (target.account) await addGoogleAccount(target.account);
-				const proc = Bun.spawn(target.account ? ["gws-as", target.account, "auth", "login"] : ["gws", "auth", "login"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
-				void proc.exited.then(async (code) => {
-					if (code === 0) return;
-					await locked(objectId, async () => {
-						if (executions.get(objectId) !== execution) return;
-						const current = await canonical(objectId, messageId);
-						const error = "Google login exited without completing. Check the local gws setup and start a new request.";
-						await complete(current.object, current.entry, { status: "needs_auth", error }, error);
-					});
-				}).catch(() => {});
-				await publish(await fetchObject(objectId), { status: "processing", error: WAITING_LOGIN });
-				execution.starting = false;
-				return { pending: true };
-			} else if (operation === "auth.check") {
-				const ready = await authenticationReady(target);
-				const error = ready ? "" : "Authentication is not ready on this machine.";
-				const auth = ready && target.key === "google" ? "oauth" : "none";
-				await complete(object, entry, { status: ready ? "active" : "needs_auth", auth, error }, error);
-			} else {
-				if (operation === "skill.install" || operation === "skill.enable") await enableSkill(target.key);
-				else if (operation === "skill.disable") await disableSkill(target.key);
-				else if (operation === "skill.uninstall") await uninstallSkill(target.key);
-				const outcome = await skillOutcome(target.key, operation);
-				execution.starting = false;
-				if (!outcome) return { pending: true };
-				await complete(object, entry, { ...outcome.state, error: outcome.error }, outcome.error);
+			if (operation === "skill.check") {
+				// The check records its own detail (command output) on this capability.
+				const status = PHASE_STATUS[await recheckSkill(target.key)] ?? "missing";
+				const error = status === "active" ? "" : str((await fetchObject(objectId)).fields, "error") || "The skill check did not pass on this machine.";
+				await complete(object, entry, { status, error }, error);
+				return { pending: false };
 			}
+			if (operation === "skill.install" || operation === "skill.enable") await enableSkill(target.key);
+			else if (operation === "skill.disable") await disableSkill(target.key);
+			else if (operation === "skill.uninstall") await uninstallSkill(target.key);
+			const outcome = await skillOutcome(target.key, operation);
+			execution.starting = false;
+			if (!outcome) return { pending: true };
+			await complete(object, entry, { ...outcome.state, error: outcome.error }, outcome.error);
 			return { pending: false };
 		} catch {
 			if (execution.outcome) throw new Error("The operation finished locally; its durable result is awaiting publication.");
-			const error = "The approved local operation failed. Check the installation on this machine before retrying.";
+			const error = "The approved local operation failed. Check the capability on this machine before retrying.";
 			await complete(await fetchObject(objectId), entry, { status: "broken", error }, error);
 			return { pending: false };
 		}
 	}));
 }
 
-async function authenticationReady(target: Target): Promise<boolean> {
-	if (target.key === "google" && target.account) {
-		const status = await googleAccountStatus(target.account);
-		return !status.error && !!status.authMethod && status.authMethod !== "none" && status.credentialsExists;
-	}
-	return await recheckSkill(target.key) === "on";
-}
-
-export async function finishCapabilityLogin(objectId: string, messageId: string): Promise<{ active: boolean }> {
-	return locked(objectId, async () => {
-		const { object, entry, target } = await canonical(objectId, messageId);
-		const execution = executions.get(objectId);
-		if (entry.message.operation !== "auth.login" || entry.processing.status !== "processing" || entry.processing.owner !== requestOwner || execution?.messageId !== messageId || execution.key !== target.key || execution.account !== target.account) throw new Error("This login is not pending in this harness process.");
-		if (!(await authenticationReady(target))) {
-			await publish(object, { status: "processing", error: WAITING_LOGIN });
-			return { active: false };
-		}
-		await republishCapabilities();
-		await complete(object, entry, { status: "active", auth: "oauth" });
-		return { active: true };
-	});
-}
-
 export async function rejectCapabilityRequest(objectId: string, messageId: string): Promise<void> {
 	await locked(objectId, async () => {
 		const object = await fetchObject(objectId);
-		if (object.deleted) throw new Error("This installation has been deleted.");
-		if (object.typeKey !== INSTALL_TYPE || str(object.fields, "machine_id") !== await machineId()) throw new Error("This installation belongs to another machine.");
+		if (object.deleted) throw new Error("This capability has been deleted.");
+		if (object.typeKey !== CAPABILITY_TYPE || servedBy(object) !== await machineId()) throw new Error("This capability belongs to another machine.");
 		let entry = incoming(object, messageId)[0];
 		if (!entry || !["pending", "awaiting_approval"].includes(entry.processing.status)) throw new Error("This request is not awaiting approval.");
 		if (!(await claimMessage(objectId, messageId, requestOwner))) throw new Error("This request has already been claimed.");
 		entry = incoming(await fetchObject(objectId), messageId)[0]!;
 		const error = "Request rejected by the human on the owning machine.";
-		await complete(object, entry, { status: "broken", error }, error);
+		// Rejecting changes nothing on this machine: republish its real state, and fail only the request.
+		const current = await skillOutcome(str(object.fields, "key"), entry.message.operation);
+		await complete(object, entry, current ? { ...current.state, error: current.error } : { status: "broken", error }, error);
 	});
 }
 
-/** Commit an intent to the requester's own object before attempting delivery. `operation` is refused unless the installation takes it (capabilityTarget). */
-export async function requestCapability(input: { sender: AgentEndpoint; installationObjectId: string; operation: string; author?: string; text?: string }): Promise<{ id: string; exchangeId: string; threadId: string }> {
-	const target = await fetchObject(input.installationObjectId);
-	capabilityTarget(target, input.operation, str(target.fields, "machine_id"));
-	if (!str(target.fields, "machine_id")) throw new Error("Installation has no owning machine.");
+/** Commit an intent to the requester's own object before attempting delivery. `operation` is refused unless the capability takes it (capabilityTarget). */
+export async function requestCapability(input: { sender: AgentEndpoint; capabilityObjectId: string; operation: string; author?: string; text?: string }): Promise<{ id: string; exchangeId: string; threadId: string }> {
+	const target = await fetchObject(input.capabilityObjectId);
+	if (!servedBy(target)) throw new Error("Capability has no owning machine.");
+	capabilityTarget(target, input.operation, servedBy(target));
 	// Include the sender outbox: its request may not have reached the owner yet.
 	const source = await fetchObject(input.sender.objectId);
 	const previous = [...(target.mailbox ?? []), ...(source.mailbox ?? [])].find((entry) => !entry.message.historical && entry.message.operation === input.operation && entry.message.sender.objectId === input.sender.objectId && entry.message.sender.agentId === input.sender.agentId && entry.message.recipients.some((endpoint) => endpoint.objectId === target.id) && ["pending", "awaiting_approval", "processing"].includes(entry.processing.status) && !target.mailbox?.some((received) => received.message.id === entry.message.id && ["processed", "failed"].includes(received.processing.status)));

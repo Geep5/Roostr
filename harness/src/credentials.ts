@@ -117,7 +117,7 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 	{
 		key: "google-account",
 		label: "Google Workspace",
-		note: "A Google account (Gmail, Calendar, Drive) for agents, through `gws-as <account> …`. Account is the email. Sign in once on any computer with `gws-as <email> auth login`; Roostr copies the sign-in here and every computer uses it.",
+		note: "A Google account (Gmail, Calendar, Drive) for agents, through `gws-as <account> …`. Account is the email. Set Served by to the computer that should open the Google sign-in, then press Connect in the credential's Status; Roostr stores the sign-in here and every computer uses it.",
 		passwordFields: [
 			{ key: "client_id", label: "OAuth client ID", secret: false },
 			{ key: "client_secret", label: "OAuth client secret", secret: true },

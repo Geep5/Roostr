@@ -38,8 +38,8 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 		}
 	}
 	if (msgs.length > 0) out.push("", "LATEST HUMAN MESSAGES:", ...msgs.slice(-5));
-	// This computer's installations that hold an error, one per catalog key (a Google account's own row aside).
-	const mine = new Map((await roostr.installations().catch(() => [])).filter((row) => row.machineId === roostr.context.machineId && !(row.key === "google" && row.account)).map((row) => [row.key, row]));
+	// This computer's capabilities that hold an error, one per catalog key.
+	const mine = new Map((await roostr.capabilities().catch(() => [])).filter((row) => row.machineId === roostr.context.machineId).map((row) => [row.key, row]));
 	const failing = [...mine.values()].filter((row) => row.error !== "");
 	if (failing.length > 0) {
 		out.push("", "OPEN HOLDUPS (capabilities missing):");

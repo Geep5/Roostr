@@ -12,10 +12,12 @@ package core
 //                         lends its pin (the agent pin)
 //   object.skills         skill objects the work uses; a skill with a `key`
 //                         needs a computer with an active capability of it
-//   capability objects    one per (skill key x machine), usable once active
+//   capability objects    one per (skill key x machine), written only by that
+//                         machine; it serves the key once its status is active
 //
 // Resolution, in order:
-//   self                the object is a machine (or an install): its own machine_id
+//   self                the object is a machine (its machine_id) or a
+//                       capability (its served_by)
 //   pinned              served_by set and capable (or no machine skill needed)
 //   pinned-uncapable    served_by set but lacks a skill - the host files a holdup
 //   agent               no machine skill needed → the agent pin
@@ -101,27 +103,14 @@ skill_keys :: proc(object: ^Object_State, states: map[string]^Object_State, allo
 }
 
 // Machines that have a skill working: each serves a capability object of
-// that key whose gate (its linked install, else the same-key install on
-// that machine) is active. An unset or inactive capability does not exist
-// for the resolver.
+// that key whose status is active. A capability with no served_by, or not
+// active, does not exist for the resolver.
 skill_servers :: proc(states: map[string]^Object_State, key: string, allocator := context.temp_allocator) -> [dynamic]string {
 	out := make([dynamic]string, allocator)
 	for _, cap in states {
 		if cap.deleted || cap.type_key != "capability" || field_string(cap.fields, "key") != key do continue
 		machine := served_by(cap)
-		if machine == "" do continue
-		install_id := field_string(cap.fields, "install")
-		if install_id == "" {
-			if v, ok := fields_get(cap.fields, "install"); ok && v.kind == .Link do install_id = v.link_target
-		}
-		inst := states[install_id]
-		if inst == nil {
-			for _, s in states {
-				if s.deleted || s.type_key != "install" do continue
-				if field_string(s.fields, "key") == key && field_string(s.fields, "machine_id") == machine do inst = s
-			}
-		}
-		if inst != nil && field_string(inst.fields, "status") == "active" do insert_sorted(&out, machine)
+		if machine != "" && field_string(cap.fields, "status") == "active" do insert_sorted(&out, machine)
 	}
 	return out
 }
@@ -150,19 +139,19 @@ agent_pin :: proc(object: ^Object_State, states: map[string]^Object_State) -> st
 }
 
 // `states` carries the candidate machines, the skill objects the object
-// lists, the capability objects and their installs, and the agents the
-// object's guest list names.
+// lists, the capability objects, and the agents the object's guest list
+// names.
 resolve_server :: proc(object: ^Object_State, states: map[string]^Object_State, allocator := context.temp_allocator) -> Serving {
 	out: Serving
 	out.candidates = make([dynamic]string, allocator)
 	out.skills = skill_keys(object, states, allocator)
-	// Installations are machine-owned services. Neither an agent pin nor an
-	// object pin may approve credentials or install software elsewhere. An
-	// installation missing its owner stays unserved, rather than falling back
-	// to whichever machine happens to serve its agent.
-	if object != nil && object.type_key == "install" {
-		out.machine_id = field_string(object.fields, MACHINE_ID_KEY)
-		out.reason = "self"
+	// A capability is its machine's own state: only that machine installs,
+	// checks or approves requests for it. Neither an agent pin nor another
+	// machine may answer for it, and one missing its served_by stays unserved
+	// rather than falling back to whichever machine serves its agent.
+	if object != nil && object.type_key == "capability" {
+		out.machine_id = served_by(object)
+		out.reason = out.machine_id != "" ? "self" : "unserved"
 		return out
 	}
 
@@ -255,8 +244,7 @@ payload_states :: proc(payload: json.Value, key, noun: string, states: ^map[stri
 // → {machineId, reason, skills: [key], candidates: [machineId]}
 // `agents` are the agent objects the object's guest list names, in any order:
 // the object's own list order decides. `skills` are the skill objects it
-// lists. Capability objects ride with their installs: the resolver needs
-// both alongside the machines.
+// lists; `capabilities` carry each machine's status for every key.
 serving_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	switch json_str(payload, "action") {
 	case "resolve":

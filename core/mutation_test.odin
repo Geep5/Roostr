@@ -74,3 +74,33 @@ mutation_seed_skips_vanished_defaults :: proc(t: ^testing.T) {
 	testing.expect_value(t, skipped, 0)
 	testing.expect(t, seeded > 0, "the rest of the catalog is seeded")
 }
+
+// Types and properties the engine stopped shipping leave every space:
+// install rows folded into capabilities, descriptor cards into Skills.
+@(test)
+mutation_seed_deletes_retired_types_and_relations :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	payload, err := json.parse(transmute([]byte)string(`{
+		"action": "seed_space_defaults",
+		"params": {"channel_id": "space-aa"},
+		"objects": [
+			{"id": "space-aa", "typeKey": "channel", "fields": [], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []},
+			{"id": "bundled-type-install-space-aa", "typeKey": "type", "fields": [["channel", {"stringValue": "space-aa"}], ["key", {"stringValue": "install"}], ["bundled", {"boolValue": true}]], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []},
+			{"id": "bundled-type-descriptor-space-aa", "typeKey": "type", "fields": [["channel", {"stringValue": "space-aa"}], ["key", {"stringValue": "descriptor"}], ["bundled", {"boolValue": true}]], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []},
+			{"id": "bundled-rel-install-space-aa", "typeKey": "relation", "fields": [["channel", {"stringValue": "space-aa"}], ["key", {"stringValue": "install"}], ["bundled", {"boolValue": true}]], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []}
+		],
+		"timestamp": 1234, "author": "alice", "id_seed": "seed", "key_id": 0
+	}`), parse_integers = true)
+	testing.expect(t, err == nil)
+	result, derr := mutation_dispatch(payload)
+	testing.expect_value(t, derr, "")
+	deleted := make(map[string]bool)
+	for change in json_array(result, "changes") {
+		for op in json_array(change, "ops") {
+			if _, ok := json_field(op, "objectDelete"); ok do deleted[json_str(change, "objectId")] = true
+		}
+	}
+	for id in ([]string{"bundled-type-install-space-aa", "bundled-type-descriptor-space-aa", "bundled-rel-install-space-aa"}) {
+		testing.expectf(t, deleted[id], "%s is deleted", id)
+	}
+}

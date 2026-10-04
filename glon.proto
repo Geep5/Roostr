@@ -442,119 +442,6 @@ message TextMessage {
   string text = 1;
 }
 
-// ── Descriptors: things describing themselves ────────────────────────
-//
-// A client should be able to open a vault it has never seen and know how to
-// work it, without a table of hard-coded knowledge compiled in. A Descriptor
-// is that printed menu card: what exists, what it needs, how to check it.
-// An Installation is the answer for one machine: what is true right now.
-//
-// Descriptors travel as bytes inside an object (machine-authored, versioned,
-// and protected by proto3's unknown-field preservation: a client older than
-// the descriptor renders what it understands and passes the rest through
-// untouched). Installations are ordinary object FIELDS instead, so `error`,
-// `account` and `status` work with views, sorting and the existing badge.
-//
-// Secrets are structurally absent. FieldSpec.secret says a value exists for
-// this on some machine; there is no field here that could carry the value.
-
-enum DescriptorKind {
-  DESCRIPTOR_KIND_UNSPECIFIED = 0;
-  SKILL = 1;        // a tool on the wall: a command, a CLI, a capability
-  INTEGRATION = 2;  // a key on a hook: an account or login
-  AGENT = 3;        // a mind: model, tools, prompt sections
-}
-
-enum FieldFormat {
-  FIELD_FORMAT_UNSPECIFIED = 0;
-  TEXT = 1;
-  PASSWORD = 2;
-  URL = 3;
-  EMAIL = 4;
-}
-
-enum AuthMethod {
-  AUTH_METHOD_UNSPECIFIED = 0;
-  BROWSER_PROFILE = 1;  // a logged-in Chrome profile on that machine
-  OAUTH = 2;            // a token in a local config dir
-  API_KEY = 3;          // fields the human pasted
-  NONE = 4;             // nothing to authenticate
-}
-
-enum InstallStatus {
-  INSTALL_STATUS_UNSPECIFIED = 0;
-  ACTIVE = 1;      // checked and working
-  NEEDS_AUTH = 2;  // present but not authorised
-  MISSING = 3;     // not installed here
-  BROKEN = 4;      // installed, failing (see error)
-}
-
-// One input a human must supply. The form a client renders IS this list.
-message FieldSpec {
-  string key = 1;          // "apiSecret"
-  string label = 2;        // "API secret"
-  bool secret = 3;         // never leaves the machine
-  FieldFormat format = 4;
-  string note = 5;         // shown under the input
-}
-
-// How a machine proves the thing works. `command` is NOT executed because a
-// descriptor said so - see docs/descriptors.md: anything executable needs
-// explicit human consent per descriptor, and never runs on arrival.
-message CheckSpec {
-  string command = 1;         // "command -v browserless"
-  string expect_contains = 2; // optional substring the output must hold
-  int32 timeout_ms = 3;
-}
-
-// How a machine acquires it. Prompt-shaped on purpose: the installer is an
-// agent following instructions, not a package manager.
-message InstallSpec {
-  string prompt = 1;
-  string uninstall_prompt = 2;
-  string docs_url = 3;
-}
-
-// What an agent of this kind is. Present only on kind == AGENT cards; the
-// harness kinds catalog publishes one, and setup copies `requires` onto the
-// agent object so `resolve_server` can hold it to the machine that has them.
-message AgentSpec {
-  string system = 1;                 // standing prompt
-  string model = 2;                  // default model id
-  repeated string requires = 3;      // descriptor keys the serving machine must have active
-  repeated string skills = 4;        // skill keys surfaced to this kind (empty = all)
-  // 5 was responsible_types: agents are placed by templates now. Old cards
-  // still decode; the bytes ride along as unknown fields.
-  reserved 5;
-  reserved "responsible_types";
-}
-
-message Descriptor {
-  string key = 1;               // "x", "browserless", "google"
-  string name = 2;              // "X (Twitter)"
-  string description = 3;
-  DescriptorKind kind = 4;
-  repeated FieldSpec fields = 5;
-  repeated AuthMethod auths = 6;
-  CheckSpec check = 7;
-  InstallSpec install = 8;
-  string version = 9;           // descriptor version, author's own scheme
-  string author = 10;           // who published it; unsigned by design
-  AgentSpec agent = 11;         // present only for kind == AGENT
-}
-
-// What is true for one descriptor on one machine. Mirrored into object
-// fields, so `error` lands on the bundled Error property.
-message Installation {
-  string key = 1;
-  string machine_id = 2;
-  InstallStatus status = 3;
-  string account = 4;        // "@matcherino", "support@matcherino.com"
-  AuthMethod auth = 5;       // which method it actually used
-  int64 checked_at = 6;
-  string error = 7;
-}
-
 // ── Conversations: many chats per object ─────────────────────────────
 //
 // An object holds MORE than one conversation: the human's chat about the
@@ -600,7 +487,7 @@ message Conversation {
 // processing receipts are ordinary metadata blocks nested below that message.
 message AgentEndpoint {
   string object_id = 1;
-  string agent_id = 2; // empty for human or installation endpoint
+  string agent_id = 2; // empty for a human or capability endpoint
 }
 
 message AgentMessage {

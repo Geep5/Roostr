@@ -4,21 +4,21 @@
  * durable inbox/outbox copies on every participant's own object DAG.
  * Delivery retries independently of agent execution and machine liveness.
  *
- *   bun run src/index.ts setup --name Gracie [--kind assistant|marco] [--model claude-…] [--channel id] [--<kind field> value…]
+ *   bun run src/index.ts setup --name Gracie [--kind assistant|marco] [--channel id] [--<field> value…]
  *   bun run src/index.ts serve
  *   bun run src/index.ts ask <agentId> "message"
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
 import { API, VANISH_LOG_ID, apiFetch, chatPost, deleteField, fetchObject, guestAgents, mutate, query, setField, str, subscribe, sv, createObject, queryAll, vanishedEntries, wasDeleted } from "./api";
-import { PROMPT_SEEDS, ensureSystemPrompt } from "./prompts";
+import { TEMPLATE_OWN, kindTemplates, seedCatalog } from "./catalog-seeds";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./credential-objects";
 import { installGwsAs } from "./google-credentials";
 import { fillCredential, seedCredentials } from "./credential-seeds";
-import { capabilities, convergeCatalogScope, publishCapabilityObjects, publishInstallationState } from "./skillmgr";
+import { capabilities } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tool-harness";
 import { startAuthServer } from "./authserver";
 import { FILE_TYPE, startFilePeer } from "./files";
@@ -26,9 +26,8 @@ import { KEEP_ALL_SWEEP_MS, keepAllFiles, seedKeepAllProperty } from "./keep-fil
 import { machineId, readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishMachine, serverOf, servesHere } from "./machine";
-import { publishDescriptors, INSTALL_TYPE } from "./descriptors";
-import { CAPABILITY_TYPE, linkValue } from "./capabilities";
-import { SKILLS_KEY, machineSkillKeys, skillForKey } from "./skills";
+import { CAPABILITY_TYPE } from "./capabilities";
+import { SKILLS_KEY, machineSkillKeys } from "./skills";
 import { TOOLS_KEY, ensureBuiltinTools, ensureBuiltinToolsEverywhere, linkList } from "./tool-objects";
 import { migrateToolGrants } from "./migrate-tool-grants";
 import { migrateSkills } from "./migrate-skills";
@@ -67,54 +66,55 @@ async function servedAgents(): Promise<Set<string>> {
 	return out;
 }
 
+/** setup's own flags; every other `--<field> value` sets that field on the agent. */
+const SETUP_FLAGS: Record<string, true> = { name: true, kind: true, channel: true };
+
 async function setup(): Promise<void> {
 	const name = argValue("--name") || "Agent";
 	const kindKey = argValue("--kind") || "assistant";
-	const seed = PROMPT_SEEDS.find((k) => k.key === kindKey);
-	if (!seed) {
-		console.log(`unknown kind "${kindKey}"; kinds: ${PROMPT_SEEDS.map((k) => k.key).join(", ")}`);
-		return;
-	}
 	const existing = await query({ type: "agent", filters: [{ key: "name", condition: "equal", value: name }] });
 	if (existing.length > 0) {
 		console.log(`agent "${name}" already exists: ${existing[0].id}`);
 		return;
 	}
-	// The standing configuration is a system_prompt object the agent links:
-	// the seed's object in this space, created on first use and shared by
-	// every agent seeded from it here. Only per-agent overrides land on the
-	// agent object: an explicit --model, and the seed's non-secret setup
-	// fields. Secrets go to the credential store, never here.
-	const channel = argValue("--channel");
-	const prompt = await ensureSystemPrompt(seed, channel);
-	const fields: Record<string, ValueJSON> = {
-		prompt: linkValue(prompt.id),
-		served_by: sv(await machineId()),
-	};
-	if (channel) fields.channel = sv(channel);
-	if (argValue("--model")) fields.model = sv(argValue("--model"));
-	// The seed's skills, as links to the skill objects that exist so far (a
-	// machine creates a catalog skill's object on its first install).
-	const skills = (await Promise.all(seed.skills.map(skillForKey))).filter((x) => x !== null);
-	if (skills.length > 0) fields[SKILLS_KEY] = { valuesValue: { items: skills.map((x) => linkValue(x.id)) } };
-	// A normal agent can run commands and fetch the web: list both built-ins
-	// in its Tools (its space's Tool objects; no --channel = the default space,
-	// where serving binds it).
-	const space = channel || ((await (await apiFetch(`${API}/api/channels`)).json()) as Array<{ id: string }>)[0]?.id || "";
-	if (space) {
-		const builtins = await ensureBuiltinTools(space);
-		fields[TOOLS_KEY] = linkList(TOOLS_KEY, ["shell_exec", "web_fetch"].flatMap((name) => builtins.get(name) ?? []));
+	// No --channel = the default space, where serving binds it.
+	const space = argValue("--channel") || ((await (await apiFetch(`${API}/api/channels`)).json()) as Array<{ id: string }>)[0]?.id || "";
+	if (!space) {
+		console.log("no space to create the agent in");
+		return;
 	}
-	for (const f of seed.fields) {
-		if (f.secret) continue;
-		const value = argValue(`--${f.key}`) || seed.defaults[f.key];
-		if (value) fields[f.key] = sv(value);
+	// The kind is the space's agent Template seeded from it (seeded here too:
+	// setup may run before this vault was ever served), applied like the
+	// website applies a template: every field but the template's own.
+	await seedCatalog();
+	const templates = await queryAll({ type: "template" });
+	const template = kindTemplates(templates, kindKey, space)[0];
+	if (!template) {
+		const kinds = [...new Set(templates.filter((t) => str(t.fields, "channel") === space).map((t) => str(t.fields, "seed_key")).filter(Boolean))];
+		console.log(`no "${kindKey}" agent template in space ${space.slice(0, 8)}; kinds: ${kinds.join(", ")}`);
+		return;
+	}
+	const fields: Record<string, ValueJSON> = {};
+	for (const [key, value] of Object.entries(template.fields)) if (!TEMPLATE_OWN[key]) fields[key] = value;
+	fields.channel = sv(space);
+	fields.served_by = sv(await machineId());
+	// A normal agent can run commands and fetch the web: list both built-ins
+	// in its Tools (its space's Tool objects).
+	const builtins = await ensureBuiltinTools(space);
+	fields[TOOLS_KEY] = linkList(TOOLS_KEY, ["shell_exec", "web_fetch"].flatMap((tool) => builtins.get(tool) ?? []));
+	// Flags override the template: --model, a kind's settings, any field.
+	const args = process.argv.slice(process.argv.indexOf("setup") + 1);
+	for (let i = 0; i < args.length - 1; i++) {
+		const key = args[i].startsWith("--") ? args[i].slice(2) : "";
+		if (!key || SETUP_FLAGS[key]) continue;
+		fields[key] = sv(args[i + 1]);
+		i++;
 	}
 	const { id } = await createObject(name, "agent", fields);
 	// Setup on this machine claims serving responsibility here — "mine"
 	// is a local fact, not a synced one.
 	await setEnabled(id, true);
-	console.log(`created ${seed.key} agent "${name}": ${id} (enabled on this machine; prompt "${seed.promptName}" ${prompt.created ? "created" : "linked"}${skills.length ? `; skills ${skills.map((x) => x.name).join(", ")}` : ""})`);
+	console.log(`created ${kindKey} agent "${name}": ${id} from template "${str(template.fields, "name") || template.id.slice(0, 8)}" (enabled on this machine)`);
 }
 
 interface Served {
@@ -284,26 +284,20 @@ async function serve(): Promise<void> {
 	setCapabilityRequestOwner(inboxOwner);
 	await publishMachine(); // register this machine before serving resolves against the roster
 	installGwsAs();
-	// Publish what a skill or login IS, as data, so a client can render its
-	// setup form without a compiled-in table (docs/descriptors.md).
-	await publishDescriptors();
-	// And what is TRUE here per skill and login: one row per (thing ×
-	// machine), carrying `error` where a view can see it.
-	await publishInstallationState();
 	// Service logins are Credential objects: move this machine's old login
 	// rows over once, then check the credentials this machine looks after.
 	console.log("[harness] login migration:", JSON.stringify(await migrateLoginInstalls()));
+	// install rows and machine.capabilities fold into capability objects, one
+	// per (key x machine); after the login migration has read its rows.
+	console.log("[harness] capability migration:", JSON.stringify(await migrateCapabilities()));
+	// A Skill object per catalog key and the agent-kind Templates per space.
+	await seedCatalog();
 	// Service presets become Credential templates, and credentials carry their
 	// own recipe - before the check below reads those recipes.
 	console.log("[harness] credential seeds:", JSON.stringify(await seedCredentials()));
 	await refreshCredentials();
 	// The Computer page's "Keep every file" checkbox, in every space with computers.
 	console.log("[harness] keep-every-file property:", JSON.stringify({ seeded: await seedKeepAllProperty() }));
-	// What this machine can DO, as one capability object per (skill/login ×
-	// this machine) linking its install row - after the installs exist, so
-	// every link lands. Invisible to agents and the resolver until active.
-	await publishCapabilityObjects();
-	await convergeCatalogScope();
 	const migration = await migrateExchanges({ apply: true });
 	console.log("[harness] exchange migration:", JSON.stringify(migration));
 	// bound_object -> object.agent, after the exchange migration has read
@@ -315,8 +309,6 @@ async function serve(): Promise<void> {
 	// channel served_by -> each agent's own pin; spaces no longer serve, and
 	// their checkout bindings give way to the agent's Project folder.
 	console.log("[harness] space-computer migration:", JSON.stringify(await migrateSpaceComputers()));
-	// machine.capabilities -> capability objects.
-	console.log("[harness] capability migration:", JSON.stringify(await migrateCapabilities()));
 	// agent.kind -> a linked system_prompt object.
 	console.log("[harness] prompt migration:", JSON.stringify(await migratePrompts()));
 	// requires (capability links) and prompt skills -> each object's Skills;
@@ -395,7 +387,7 @@ async function serve(): Promise<void> {
 	/**
 	 * Does THIS machine run `agent` on `object`? Exactly one machine answers:
 	 * the agent's own `served_by` (`agentRunsOn`), on every object - except
-	 * a computer or installation object, whose work stays on that computer.
+	 * a computer or capability object, whose work stays on that computer.
 	 * An unpinned agent runs nowhere. Every machine evaluates the same DAG
 	 * state, so two harnesses never both answer one message. Pin swaps take
 	 * effect on the next event: served_by commits invalidate the cache.
@@ -505,7 +497,7 @@ async function serve(): Promise<void> {
 				// answers and delivers on its own. Outgoing copies were still pumped
 				// above, and a harness restart must not mark its claims interrupted.
 				if (externallyAnswered(object)) return;
-				if (object.typeKey === "install") {
+				if (object.typeKey === CAPABILITY_TYPE) {
 					await receiveCapabilityRequests(object, inboxOwner);
 					return;
 				}
@@ -559,7 +551,7 @@ async function serve(): Promise<void> {
 	 * catalog software this machine does not have working. The
 	 * resolver still says "pinned-uncapable" for it, so the agent stays
 	 * ours - it just does not take turns, and the holdup says why: filed
-	 * once per distinct reason (the ledger and the installation row are the
+	 * once per distinct reason (the ledger and the capability object are the
 	 * places a human looks), mirrored onto the agent's Error badge, and
 	 * cleared from the badge the moment the requirement is met.
 	 */
@@ -781,7 +773,7 @@ async function serve(): Promise<void> {
 			}
 			return; // agent objects are not surfaces
 		}
-		// An agent assigned here by `served_by` (a /setup from any client) is
+		// An agent assigned here by `served_by` (from any client) is
 		// adopted on sight, so its first message needs no restart; any agent
 		// event keeps the external-responder set current.
 		if (!agents.has(objectId)) {
@@ -820,11 +812,11 @@ async function serve(): Promise<void> {
 		// A rule edit (repeat_set/clear, an occurrence completed or fired)
 		// may move the earliest occurrence.
 		if (obj.fields["repeat"]) void armScheduler();
-		// Serving inputs changed: a machine or capability object, an install
-		// status flip, a pin (served_by) or Skills on any object. Refresh
+		// Serving inputs changed: a machine or capability object (its status
+		// included), a pin (served_by) or Skills on any object. Refresh
 		// the resolver cache and re-arm, so the next event and the clock
 		// follow the new answer.
-		if (obj.typeKey === MACHINE_TYPE || obj.typeKey === CAPABILITY_TYPE || obj.typeKey === INSTALL_TYPE || obj.fields["served_by"] || obj.fields[SKILLS_KEY]) {
+		if (obj.typeKey === MACHINE_TYPE || obj.typeKey === CAPABILITY_TYPE || obj.fields["served_by"] || obj.fields[SKILLS_KEY]) {
 			invalidateServing();
 			void armScheduler();
 		}

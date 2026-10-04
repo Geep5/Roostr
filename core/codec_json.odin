@@ -224,8 +224,11 @@ object_from_json :: proc(v: json.Value, allocator := context.allocator, clone_js
 }
 
 // Caller owns a request arena; all temporary models and return JSON die with it.
+// With a `type` the payload is a schema message (conversation, agent_message)
+// rather than a Change: see message_codec.
 codec_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	action := json_str(payload, "action")
+	if _, typed := json_field(payload, "type"); typed do return message_codec(action, json_str(payload, "type"), payload)
 	if action == "decode" {
 		bytes, bytes_ok := bytes_from_base64(json_str(payload, "bytes"))
 		if !bytes_ok do return nil, "invalid base64 change"
@@ -253,6 +256,80 @@ codec_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	change.id = digest[:]
 	bytes := encode_change(change)
 	return json.String(base64.encode(bytes, allocator = context.temp_allocator)), ""
+}
+
+// {action: "decode", type, bytes} → JSON, {action: "encode", type, value} →
+// base64, for the schema messages blocks carry: a Conversation on a thread
+// root, an Agent_Message in a mailbox. Every host reaches this one codec, so
+// a client names a thread's participants without its own protobuf reader.
+// Unknown fields survive the JSON boundary as `unknown` base64: a host that
+// decodes, edits and re-encodes a message from a newer client must not drop
+// what it could not name.
+@(private = "file")
+message_codec :: proc(action, kind: string, payload: json.Value) -> (json.Value, string) {
+	switch action {
+	case "decode":
+		bytes, bytes_ok := bytes_from_base64(json_str(payload, "bytes"), context.temp_allocator)
+		if !bytes_ok do return nil, "invalid base64 payload"
+		switch kind {
+		case "conversation":
+			value, ok := decode_conversation(bytes, context.temp_allocator)
+			if !ok do return nil, "invalid conversation"
+			return conversation_to_json(value), ""
+		case "agent_message":
+			value, ok := decode_agent_message(bytes, context.temp_allocator)
+			if !ok do return nil, "invalid agent message"
+			return agent_message_to_json(value), ""
+		}
+		return nil, "unknown codec type"
+	case "encode":
+		value, has_value := json_field(payload, "value")
+		if !has_value do return nil, "value required"
+		switch kind {
+		case "conversation":
+			return json.String(base64.encode(encode_conversation(conversation_from_json(value), context.temp_allocator), allocator = context.temp_allocator)), ""
+		case "agent_message":
+			message, ok := agent_message_from_json(value)
+			if !ok do return nil, "invalid agent message"
+			return json.String(base64.encode(encode_agent_message(message, context.temp_allocator), allocator = context.temp_allocator)), ""
+		}
+		return nil, "unknown codec type"
+	}
+	return nil, "unknown codec action"
+}
+
+conversation_to_json :: proc(c: Conversation) -> json.Value {
+	out := jobj()
+	out["id"] = json.String(c.id)
+	out["kind"] = json.String(conversation_kind_key(c.kind))
+	out["title"] = json.String(c.title)
+	participants := make([dynamic]json.Value, context.temp_allocator)
+	for p in c.participants do append(&participants, json.String(p))
+	out["participants"] = json.Array(participants)
+	out["createdAt"] = json.Integer(c.created_at)
+	out["openedBy"] = json.String(c.opened_by)
+	out["aboutMessageId"] = json.String(c.about_message_id)
+	out["closed"] = json.Boolean(c.closed)
+	if len(c.unknown) > 0 do out["unknown"] = json.String(base64.encode(c.unknown[:], allocator = context.temp_allocator))
+	return json.Object(out)
+}
+
+conversation_from_json :: proc(v: json.Value) -> Conversation {
+	out: Conversation
+	out.id = json_str(v, "id")
+	out.kind = conversation_kind_from_key(json_str(v, "kind"))
+	out.title = json_str(v, "title")
+	out.participants = make([dynamic]string, context.temp_allocator)
+	for item in json_array(v, "participants") {
+		if s, ok := item.(json.String); ok do append(&out.participants, string(s))
+	}
+	out.created_at, _ = json_int(v, "createdAt")
+	out.opened_by = json_str(v, "openedBy")
+	out.about_message_id = json_str(v, "aboutMessageId")
+	out.closed, _ = json_bool(v, "closed")
+	out.unknown = make([dynamic]byte, context.temp_allocator)
+	if bytes, ok := bytes_from_base64(json_str(v, "unknown"), context.temp_allocator); ok do append(&out.unknown, ..bytes)
+	return out
 }
 
 bytes_from_base64 :: proc(s: string, allocator := context.allocator) -> ([]byte, bool) {

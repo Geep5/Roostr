@@ -10,7 +10,7 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 	roostr.touch(obj.id);
 	const key = typeof input.type === "string" ? input.type : "";
 	// Infrastructure types: never retyped, and nothing is retyped into them.
-	const fixed: Record<string, true> = { agent: true, machine: true, install: true, capability: true, channel: true, relation: true, type: true, template: true, query: true, collection: true, set: true, chat: true, skill: true, tool: true };
+	const fixed: Record<string, true> = { agent: true, machine: true, capability: true, channel: true, relation: true, type: true, template: true, query: true, collection: true, set: true, chat: true, skill: true, tool: true };
 	if (fixed[obj.typeKey] === true) return `error: nothing changed. A ${obj.typeKey} object keeps its type.`;
 	if (fixed[key] === true) return `error: nothing changed. Objects are not turned into ${key} objects this way.`;
 	const types = await roostr.types();

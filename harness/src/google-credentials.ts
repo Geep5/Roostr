@@ -5,10 +5,10 @@
  * refresh token, what `gws auth export --unmasked` prints - so it can live on
  * the Credential object like any pasted key, and any computer can use it:
  *
- *  - import: an account signed in locally (`gws-as <email> auth login`,
- *    ~/.config/gws/accounts/<email>) is copied onto that account's
- *    Credential, created in the default space when there is none. A fresh
- *    local sign-in (a new refresh token) replaces the stored one.
+ *  - import: an account signed in locally (`gws-as <email> auth login`, run
+ *    by the credential's Connect, ~/.config/gws/accounts/<email>) is copied
+ *    onto that account's Credential when this computer serves it, or onto a
+ *    new one in the default space when there is none.
  *  - materialize: for every Google credential an agent served here lists,
  *    write `<GLON_DATA>/google/<email>.json` (0600, authorized_user) and
  *    remove files for accounts no longer listed. `gws-as <email>` prefers
@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { API, apiFetch, createObject, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
 import { agentServedHere } from "./machine";
 import { machineId } from "./roster";
+import { pinOf } from "./credential-objects";
 
 export const GOOGLE_SERVICE = "google-account";
 const KEYS = ["client_id", "client_secret", "refresh_token"] as const;
@@ -31,8 +32,8 @@ export const googleFilesDir = (): string => join(process.env.GLON_DATA ?? join(h
 
 const emailOk = (s: string): boolean => /^[^\s/@]+@[^\s/@]+$/.test(s);
 
-/** A local account's sign-in, read with its own config dir; null when it has none. */
-async function localSignIn(email: string): Promise<SignIn | null> {
+/** A local account's sign-in (`gws-as <email> auth login`), read with its own config dir; null when it has none. */
+export async function localSignIn(email: string): Promise<SignIn | null> {
 	const dir = join(accountsDir(), email);
 	if (!existsSync(join(dir, "credentials.enc"))) return null;
 	const proc = Bun.spawn(["gws", "auth", "export", "--unmasked"], {
@@ -50,7 +51,7 @@ async function localSignIn(email: string): Promise<SignIn | null> {
 	}
 }
 
-function signInOf(fields: Record<string, ValueJSON>): SignIn | null {
+export function signInOf(fields: Record<string, ValueJSON>): SignIn | null {
 	const out = Object.fromEntries(KEYS.map((k) => [k, str(fields, `key_${k}`)])) as SignIn;
 	return KEYS.every((k) => out[k]) ? out : null;
 }
@@ -69,11 +70,15 @@ export async function importLocalGoogleAccounts(creds: QueryRow[]): Promise<stri
 	const emails = readdirSync(accountsDir()).filter(emailOk);
 	const google = creds.filter((c) => str(c.fields, "service") === GOOGLE_SERVICE);
 	const wrote: string[] = [];
+	const me = await machineId();
 	for (const email of emails) {
 		const signIn = await localSignIn(email);
 		if (!signIn) continue;
 		const existing = google.find((c) => str(c.fields, "account").toLowerCase() === email.toLowerCase());
 		if (existing) {
+			// Only the computer serving the credential writes it - and a
+			// disconnect removed the local sign-in it would come from.
+			if ((await pinOf(existing.fields)) !== me) continue;
 			const stored = signInOf(existing.fields);
 			if (stored && KEYS.every((k) => stored[k] === signIn[k])) continue;
 			for (const k of KEYS) await setField(existing.id, `key_${k}`, sv(signIn[k]));
@@ -82,7 +87,7 @@ export async function importLocalGoogleAccounts(creds: QueryRow[]): Promise<stri
 				channel: sv(await defaultSpace()),
 				service: sv(GOOGLE_SERVICE),
 				account: sv(email),
-				served_by: sv(await machineId()),
+				served_by: sv(me),
 				...Object.fromEntries(KEYS.map((k) => [`key_${k}`, sv(signIn[k])])),
 			});
 		}

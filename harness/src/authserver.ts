@@ -11,7 +11,7 @@ import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from
 import { agentTurnStatus } from "./index";
 import { readRoster } from "./roster";
 import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
-import { approveCapabilityRequest, finishCapabilityLogin, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
+import { approveCapabilityRequest, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
 import { CredentialError, checkCredential, connectCredential, disconnectCredential, type CredentialRow } from "./credential-objects";
 import { ensureBlob, blobDir, mimeOf, storeUpload } from "./files";
 import { apiFetch, authorizeLocalRequest, localCors, localPreflight, sessionOrigin, validLocalHost } from "./local-api-auth";
@@ -178,7 +178,6 @@ export function startAuthServer(served: Set<string>): void {
 					if (typeof body.objectId !== "string" || typeof body.messageId !== "string" || !body.objectId || !body.messageId) return json({ error: "objectId and messageId are required." }, 400);
 					try {
 						if (url.pathname === "/capability-requests/approve") return json(await approveCapabilityRequest(body.objectId, body.messageId));
-						if (url.pathname === "/capability-requests/finish-login") return json(await finishCapabilityLogin(body.objectId, body.messageId));
 						if (url.pathname === "/capability-requests/reject") {
 							await rejectCapabilityRequest(body.objectId, body.messageId);
 							return json({ ok: true });

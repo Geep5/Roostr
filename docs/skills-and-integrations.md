@@ -1,161 +1,103 @@
-# Skills and integrations as objects — plan (nothing built yet)
+# Skills, capabilities and credentials
 
-Status: proposal for review. Research of what exists, the shape I recommend,
-and the one place the obvious design bites.
+What a computer needs to run an agent is three object types, each with one job:
 
-## Where things live today
-
-| thing | where it lives | synced? | queryable? |
+| type | how many | written by | job |
 | --- | --- | --- | --- |
-| skill instructions | `skill` objects (3 of them: `summarize-notes`, `browserless`, `google`) — `name`, `description`, `scope`, body in blocks | yes | yes |
-| skill install state | `~/.glon/skills.json` → `{ installed, enabled }` per key | **no** | no |
-| integration catalog | `CREDENTIALS` in `harness/src/credentials.ts` (x, matcherino, linkedin) — code, not data | n/a | no |
-| integration auth | `~/.glon/credentials.json`, `~/.glon/browser-profiles/<key>`, `~/.config/gws/accounts/<email>` | **no (correct — secrets)** | no |
-| what a machine can do | `machine.capabilities` — a flat list of keys | yes | barely |
-| failures | `~/.glon/skills.json` → `holdups[]` (capability, agent, error, count, timestamps) | **no** | no |
-| `error` property | bundled relation (`shorttext`, ⚠️), already used by the scheduler (`run failed: …`) and `object_flag_error` | yes | yes |
+| **Skill** (`skill`) | one per catalog key, shared | seeded by every harness; people edit the body | what the software is, and the instructions agents read |
+| **Capability** (`capability`) | one per catalog key × computer | only the computer it names | that software's state on that computer, and the inbox for setup requests |
+| **Credential** (`credential`) | one per signed-in identity | people; the computer in its Served by | a login: service logins, model logins, Google accounts |
 
-A real example on this Mac right now, invisible to every view:
-
-```json
-{ "capability": "x", "agentName": "Matcherino", "count": 3,
-  "error": "credential \"x\" has no logged-in browser profile" }
-```
-
-So the instinct is right: **the state of skills and integrations is trapped in
-machine-local JSON**, and the only thing that reaches the DAG is a flat list of
-capability keys. You cannot ask "which integrations are broken?", "which
-machines have X?", or "what account does each one use?" — and `error`, the
-property that already drives badges and sorting, is unused here.
+There are no install rows, no descriptor cards and no per-machine capability
+list: a machine object says only which computer it is.
 
 ## ELI5
 
 Think of a workshop.
 
-- A **skill** is a *tool on the wall*: "headless Chrome", "Google CLI". The
-  wall card says what the tool does and how to use it.
-- An **integration** is a *key on a hook*: "the X account", "the Matcherino
-  login". The hook says which door it opens and how it opens it — never the
-  cut of the key itself.
-- A **computer** is a *workbench*. Tools and keys are bolted to a bench, and
-  two benches can each have their own copy of the same tool and their own key
-  to the same door.
+- A **Skill** is the *card on the wall*: "Headless Chrome — render pages and
+  screenshots; here is how to use it." One card, everyone reads it.
+- A **Capability** is the *tag on one bench's copy of the tool*: "on Mac,
+  Headless Chrome works, checked 3 minutes ago." Each bench writes its own tags.
+- A **Credential** is a *key on a hook*: "support@matcherino.com". It says which
+  door it opens and which bench looks after it, never the cut of the key in a
+  way anyone else can read.
 
-Today the wall cards are public (skill objects) but **which bench has which
-tool, and whether it is broken, is written on a sticky note inside the bench
-drawer** (`skills.json`) that nobody else can read.
+## Skill
 
-The plan: put a small card on the wall for *every tool on every bench*, so you
-can stand in the doorway and see the whole workshop at a glance.
+Every catalog key (`CATALOG` in `harness/src/skillmgr.ts`) has a Skill object,
+seeded at boot by `seedCatalog()` (`harness/src/catalog-seeds.ts`): found by
+`key`, else by a matching name without a key (the key is then set), else
+created. Its name is the catalog entry's `name`; that name is the label every
+client shows. A Skill with a `key` is machine software: listing it in an
+object's Skills routes the work to a computer with an active capability of that
+key. A Skill without a `key` is instructions only.
 
-## The shape I recommend
+Agent kinds (`PROMPT_SEEDS`) are seeded the same way, as agent Templates per
+space carrying the kind's prompt link, Skill links and field defaults, and are
+re-seeded only while unedited (the `credential-seeds.ts` pattern).
 
-Two object types per concern, not one:
+## Capability
 
-```
-integration  "X (Twitter)"        ← what it is. One object. Hand-editable.
-  └─ install "X on Mac"           ← written by Mac, only by Mac
-  └─ install "X on geepOmenComp"  ← written by that box, only by it
+Fields: `key` (catalog key), `served_by` (the computer's machine id, as a
+string), `status` (`active`, `needs_auth`, `needs_approval`, `processing`,
+`missing`, `broken`, `disabled`), `error` (the holdup or failure text, on the
+bundled Error property), `checked_at`, `channel` (the integration space) and
+`description`. `key` and `served_by` are protected fields.
 
-skill        "browserless"        ← the instructions (already exists today)
-  └─ install "browserless on Mac"
-```
+- **Only that computer writes it.** `skillmgr` upserts this computer's
+  capability (`upsertCapability` in `harness/src/capabilities.ts`) when an
+  install, enable, disable, uninstall or check settles. One row per (key ×
+  computer) means two computers never write the same field, and `error` can
+  say exactly what is wrong where.
+- **It gates serving.** The engine's `skill_servers(key)` is the set of
+  computers with a non-deleted capability of that key whose `status` is
+  `active` (`core/serving.odin`). Anything short of `active` is not offered —
+  not to agents, not to the resolver.
+- **It is physical.** A capability object resolves to its own `served_by`
+  (reason `self`), so an agent's work on it happens on that computer.
+- **Holdups land on it.** A blocked call sets the capability's `error`
+  (`publishHoldup`) and the blocked object's `needs <key>:` badge; a heal
+  clears both. A holdup never changes `status`.
+- **It is the request inbox.** An agent asks a computer to act on a skill by
+  messaging the capability object with an `operation`: `skill.install`,
+  `skill.enable`, `skill.disable`, `skill.uninstall` or `skill.check`
+  (`capability_request` tool, `roostr.requestCapability`). Such a message may
+  come from any space and the capability's reply may cross back. Nothing runs
+  on arrival: the owning harness marks the request `awaiting_approval`, the
+  capability `needs_approval`, and a paired human on that computer approves
+  or rejects it (`GET /capability-requests`, `POST
+  /capability-requests/approve|reject` with `{objectId, messageId}` on the
+  harness's local port).
 
-The install object carries, per machine:
+Agents read every computer's capabilities through `capability_list` /
+`roostr.capabilities()`: `{id, key, machineId, status, error, checkedAt,
+channel}`.
 
-| property | example | why |
-| --- | --- | --- |
-| `machine` | → Mac | the link that makes "2 machines have X" a query |
-| `integration` / `skill` | → X (Twitter) | the other half of the link |
-| `auth_method` | `browser_profile` \| `oauth` \| `api_key` | *how*, never the secret |
-| `account` | `@matcherino`, `support@matcherino.com` | which identity |
-| `status` | `active` \| `needs_auth` \| `missing` | the answer agents need |
-| `checked_at` | timestamp | so "active" has an age |
-| **`error`** | `credential "x" has no logged-in browser profile` | the badge you already have |
+## Credential
 
-Secrets never move. The install object says *how it authenticates* and
-*whether it works*; the key itself stays in `credentials.json`, the browser
-profile, or the `gws` config dir.
+A Credential is one signed-in identity: service logins (seeded from
+`CREDENTIAL_SEEDS` in `harness/src/credentials.ts`), model logins and Google
+accounts (service `google-account`, `account` = the email). Its secret rides
+on the Credential (`key_*`, `session`) and is materialized only on the
+computer that serves an agent listing it.
 
-## Where the obvious design bites
+`POST /credentials/connect|check|disconnect` with `{id}` on the computer in
+the Credential's Served by. For a Google account, connect runs `gws-as
+<account> auth login` there and imports the sign-in into the `key_*` fields;
+check runs the live `gws-as <account> auth status`; disconnect clears the keys
+and the local account folder so nothing re-imports it.
 
-The tempting version is **one object per integration, with each machine's info
-written inside it** — "X (Twitter)", marked by two machines. It breaks in three
-ways, all from the same cause: two writers, one row.
+## Migration
 
-1. **Same-field writes collide.** The DAG merges `field_set` by timestamp, so
-   if Mac writes `status: active` and the dev box writes `status: needs_auth`,
-   one silently wins. Per-machine maps inside one field make it worse: both
-   machines rewrite the *same* map field, so the merge drops one machine's
-   entry rather than blending them.
-2. **`error` can only say one thing.** The whole benefit you are after is
-   using the existing `error` property so a broken integration shows up in
-   views. With one shared object, whose error is it? Nesting errors inside a
-   map abandons the bundled property — and with it the sorting, filtering and
-   badges you wanted for free.
-3. **Serving is ambiguous.** Objects are answered by one machine (the resolver
-   picks it). A per-machine install row answers itself — the same `self` rule
-   Computers just got — so the box that owns the problem is the box that
-   explains it. A shared object has no such owner.
-
-One row per (thing × machine) costs more objects and makes "the overview" a
-query instead of a single object. That is the right trade here, because the
-overview *is* a query: `type = install AND error notEmpty` is your broken-
-integrations view, and `integration = X` is your "which machines have X" view.
-
-## What this unlocks
-
-- **Views instead of a panel.** "Integrations needing auth", "skills that
-  failed this week", "everything broken on the dev box" — all saved queries,
-  because the data is objects with an `error` property.
-- **Holdups become first-class.** The machine-local holdup above becomes an
-  `error` on "X on Mac". It shows on the Computer's page, in the space, and in
-  any view — instead of only in the Machine modal on that one machine.
-- **Cross-machine answers.** With install rows the DAG can answer "no machine
-  here has X; the Studio does".
-- **Per-machine accounts, visibly.** Two machines, same integration, different
-  accounts (`support@` vs `grant@`) stops being a guess.
-- **A chat per install row.** Each install object can hold a discussion
-  answered by its own machine: "why is X broken here?" answered by the box
-  where it is broken.
-
-## What stays as it is
-
-- **`machine.capabilities` stays published.** The engine's serving resolver
-  reads it (`core/serving.odin`), and the fixtures pin that. Install rows
-  become the detailed truth; `capabilities` stays as the derived flat list the
-  resolver needs. One source, two shapes.
-- **`CREDENTIALS` / `CATALOG` stay in code.** They describe what Roostr knows
-  how to install and which fields a login needs — that is program logic. The
-  integration *object* is the human-facing card, seeded from the catalog the
-  way bundled types are seeded.
-- **Secrets stay machine-local.** Always.
-
-## Phases
-
-1. **Seed definitions.** Bundled `integration` type + one object per catalog
-   entry (x, matcherino, linkedin, google), like `BUNDLED_TYPES` seeds Computer.
-   Skill objects already exist and need nothing.
-2. **Publish install rows.** Each harness writes its own rows where
-   `publishCapabilities` already runs (`harness/src/machine.ts:123`) — created
-   on first boot, updated only on change, exactly as capabilities are today.
-3. **Move holdups onto them.** `fileHoldup` also sets `error` on the matching
-   install row; a clean check clears it. The Machine panel keeps working,
-   because it can read the rows instead of the JSON.
-4. **Seed the views.** "Integrations", "Needs auth", "Broken" as bundled saved
-   queries, so the paradigm is visible without anyone building a panel.
-5. **Teach resolution.** Skills consult install rows, so a missing
-   integration can name the machine that has it.
-
-## Open questions for you
-
-1. **One `install` type, or `skill_install` and `integration_install`?** One
-   type with a `kind` property keeps views simple ("everything installed
-   anywhere"); two types make each list self-explanatory. I lean to one.
-2. **Should install rows be hidden from normal object lists?** They are
-   machinery and there will be dozens. I lean to hiding them from lists (like
-   agent transcripts) and surfacing them through views and the Computer page.
-3. **Who may edit an install row?** Machine-written, human-readable. If a
-   human edits `account`, is that a request ("use this account") or a fact?
-   A request is more useful — the machine reconciles it — but it needs a
-   separate `desired_account` property to stay honest.
+Each boot runs, in order (`harness/src/index.ts`): `migrateLoginInstalls`
+(this computer's old login rows → Credentials), then `migrateCapabilities`
+(`harness/src/migrate-capabilities.ts`), then `seedCatalog()`.
+`migrateCapabilities` folds every legacy `install` row into the capability for
+its (key × machine) — copying status, error, checked_at and channel — and
+vanishes it (account-keyed Google rows just vanish; pending requests in their
+inboxes go with them); turns a legacy machine `capabilities` list into
+capability objects and deletes the field; keeps the earliest capability per
+(key × machine); stores `served_by` as a string; drops `install`, `account`
+and `auth` fields; and vanishes capabilities for sign-in keys. `seedCatalog()`
+vanishes the retired `descriptor` cards. All three are idempotent.

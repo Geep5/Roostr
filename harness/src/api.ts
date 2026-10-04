@@ -25,9 +25,8 @@ export interface BlockJSON {
 	content: {
 		/** `marks` are inline formatting ranges (bold, links, mentions); `color` the text colour. */
 		text?: { text: string; style: number; checked?: boolean; marks?: Array<{ from: number; to: number; type: number; param?: string }>; color?: string };
-		/** `data` is base64 protobuf: a Conversation on a thread root, a
-		 *  Descriptor on a card. The core decodes it and serves the result
-		 *  alongside, so nothing here parses it. */
+		/** `data` is base64 protobuf, e.g. a Conversation on a thread root;
+		 *  nothing here parses it. */
 		custom?: { contentType: string; data?: string; meta?: Record<string, string> };
 		layout?: { style: number };
 	};
