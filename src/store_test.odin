@@ -179,6 +179,34 @@ checkpoint_replaces_history :: proc(t: ^testing.T, root: string) {
 	testing.expect(t, ok && !stored, "a covered subset never replaces its superset")
 	reloaded, has := load_checkpoint("obj-cp", context.temp_allocator)
 	testing.expect(t, has && len(reloaded.covered_ids) == 3)
+
+	// ── Import rows: held vs. superseded, the relay sweep's evidence ──
+	held_hash := core.checkpoint_hash(next.bytes, context.temp_allocator)
+	held, superseded := checkpoint_relation(&next.checkpoint, held_hash)
+	testing.expect(t, held && !superseded, "identical bytes are held, never superseded")
+	held, superseded = checkpoint_relation(&built.checkpoint, core.checkpoint_hash(built.bytes, context.temp_allocator))
+	testing.expect(t, !held && superseded, "a strict subset is superseded")
+	// Same covered set, other bytes: whichever hash is larger is held and
+	// supersedes the other.
+	twin := next.checkpoint
+	twin.created_at += 1
+	twin_bytes := core.encode_checkpoint(twin, context.temp_allocator)
+	twin_hash := core.checkpoint_hash(twin_bytes, context.temp_allocator)
+	loser, loser_hash := &twin, twin_hash
+	if twin_hash > held_hash {
+		stored, ok = store_checkpoint(&twin, twin_bytes)
+		testing.expect(t, ok && stored, "the larger hash takes an equal covered set")
+		loser, loser_hash = &next.checkpoint, held_hash
+	}
+	held, superseded = checkpoint_relation(loser, loser_hash)
+	testing.expect(t, !held && superseded, "an equal set with the smaller hash is superseded")
+	// A branch the held checkpoint does not contain is never superseded.
+	fork := next.checkpoint
+	fork.covered_ids = make([dynamic][]byte, context.temp_allocator)
+	append(&fork.covered_ids, first.id, transmute([]byte)strings.repeat("f", 32, context.temp_allocator))
+	fork_bytes := core.encode_checkpoint(fork, context.temp_allocator)
+	held, superseded = checkpoint_relation(&fork, core.checkpoint_hash(fork_bytes, context.temp_allocator))
+	testing.expect(t, !held && !superseded, "an incomparable checkpoint is neither held nor superseded")
 }
 
 @(test)

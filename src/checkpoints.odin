@@ -104,11 +104,27 @@ checkpointed_object_ids :: proc(allocator := context.temp_allocator) -> [dynamic
 	return out
 }
 
-/** Hash of the checkpoint on disk for `object_id`, "" when none. */
-stored_checkpoint_hash :: proc(object_id: string) -> string {
+/** The checkpoint on disk for `object_id` and its hash (temp-allocated); ok=false when none. */
+held_checkpoint :: proc(object_id: string) -> (cp: core.Checkpoint, hash: string, ok: bool) {
 	bytes, rerr := os.read_entire_file(checkpoint_path(object_id), context.temp_allocator)
-	if rerr != nil do return ""
-	return core.checkpoint_hash(bytes, context.temp_allocator)
+	if rerr != nil do return {}, "", false
+	cp, ok = core.decode_checkpoint(bytes, context.temp_allocator)
+	if !ok || cp.object_id != object_id do return {}, "", false
+	return cp, core.checkpoint_hash(bytes, context.temp_allocator), true
+}
+
+/**
+ * How the checkpoint held for `cp.object_id` relates to `cp` (whose bytes
+ * hash to `hash`). held: the same bytes. superseded: the held one wins the
+ * store rule over `cp` - it covers everything `cp` covers, and more or the
+ * larger hash. Identical bytes are held, not superseded; an incomparable
+ * branch is neither. The harness deletes a superseded copy of its own from
+ * the relays once its covering copy is there.
+ */
+checkpoint_relation :: proc(cp: ^core.Checkpoint, hash: string) -> (held: bool, superseded: bool) {
+	current, current_hash, ok := held_checkpoint(cp.object_id)
+	if !ok do return false, false
+	return current_hash == hash, core.checkpoint_supersedes(&current, current_hash, cp, hash)
 }
 
 // ── HTTP ─────────────────────────────────────────────────────────────
@@ -283,7 +299,6 @@ handle_checkpoints_import :: proc(sock: net.TCP_Socket, body: []byte) {
 		respond_error(sock, "invalid shared provenance", "403 Forbidden")
 		return
 	}
-
 	imported := 0
 	skipped := 0
 	rejected := 0
@@ -292,7 +307,12 @@ handle_checkpoints_import :: proc(sock: net.TCP_Socket, body: []byte) {
 	touched := make(map[string]bool, context.temp_allocator)
 	// One row per accepted (stored or already-covered) checkpoint: the
 	// harness has no codec, so heads and hash come back from here.
-	items := make([dynamic]json.Value, context.temp_allocator)
+	Accepted :: struct {
+		cp:     core.Checkpoint,
+		hash:   string,
+		stored: bool,
+	}
+	accepted := make([dynamic]Accepted, context.temp_allocator)
 	for item in arr {
 		s, sok := item.(json.String)
 		if !sok {
@@ -336,18 +356,25 @@ handle_checkpoints_import :: proc(sock: net.TCP_Socket, body: []byte) {
 		} else {
 			skipped += 1
 		}
-		hash := core.checkpoint_hash(data, context.temp_allocator)
+		append(&accepted, Accepted{cp = cp, hash = core.checkpoint_hash(data, context.temp_allocator), stored = stored})
+	}
+	// Rows describe the store after the whole import, not mid-batch.
+	items := make([dynamic]json.Value, 0, len(accepted), context.temp_allocator)
+	for &a in accepted {
 		row := core.jobj()
-		row["objectId"] = json.String(cp.object_id)
-		row["hash"] = json.String(hash)
-		row["covered"] = json.Integer(i64(len(cp.covered_ids)))
-		row["stored"] = json.Boolean(stored)
-		// The daemon holds these exact bytes now (just stored, or already
-		// had them). A subset or an incomparable fork reports false: it stays
-		// on the relay as harmless cache, never deleted, never mistaken for ours.
-		row["held"] = json.Boolean(stored || hash == stored_checkpoint_hash(cp.object_id))
-		heads := make([dynamic]json.Value, 0, len(cp.head_ids), context.temp_allocator)
-		for h in cp.head_ids do append(&heads, json.String(string(hex.encode(h, context.temp_allocator))))
+		row["objectId"] = json.String(a.cp.object_id)
+		row["hash"] = json.String(a.hash)
+		row["covered"] = json.Integer(i64(len(a.cp.covered_ids)))
+		row["stored"] = json.Boolean(a.stored)
+		// held: the daemon holds these exact bytes. superseded: what it holds
+		// covers them (containment, then hash). Neither - an incomparable
+		// fork - stays on the relay as harmless cache, never deleted, never
+		// mistaken for ours.
+		held, superseded := checkpoint_relation(&a.cp, a.hash)
+		row["held"] = json.Boolean(held)
+		row["superseded"] = json.Boolean(superseded)
+		heads := make([dynamic]json.Value, 0, len(a.cp.head_ids), context.temp_allocator)
+		for h in a.cp.head_ids do append(&heads, json.String(string(hex.encode(h, context.temp_allocator))))
 		row["heads"] = json.Array(heads)
 		append(&items, json.Object(row))
 	}

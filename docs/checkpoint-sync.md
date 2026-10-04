@@ -21,9 +21,12 @@ delete history:
   device's opinion of one branch at one moment.
 - Originals folded into a checkpoint are still stored and still published.
   Nothing is skipped because "the checkpoint covers it".
-- Superseded or unrelated checkpoints on the relay are left alone. No NIP-09
-  for kind 1079: the one another device published may be the only copy of
-  its branch.
+- An outdated checkpoint is deleted from the relay (NIP-09, kind 5 with `k`
+  1079) only by the identity that signed it, and only once the daemon proves
+  it covered and a covering checkpoint from that same identity is on the
+  relay - see [Sweeping](#sweeping-outdated-checkpoints). Incomparable
+  checkpoints (another branch) and anyone else's are never touched: they may
+  be the only copy of their branch. Kind 1078 is never swept.
 - There is no manifest, floor, or "history up to time C is covered" claim.
   Kind 30079 is obsolete; readers ignore it.
 
@@ -134,8 +137,9 @@ Every replica, every startup, regardless of what it held before:
 
 Under its own key the harness treats a received 1079 as *the relay's copy* of
 that object only when the daemon reports `held` (it stored these exact bytes,
-or already had them). Anything else - a subset, an incomparable fork from
-another device - is remembered nowhere and deleted never.
+or already had them). When the daemon reports `superseded` instead, the group
+is a sweep candidate. Anything else - an incomparable fork from another
+device - is remembered nowhere and deleted never.
 
 ### Publishing (harness, `nostrsync.ts`)
 
@@ -145,11 +149,49 @@ Every `CHECKPOINT_INTERVAL_MS` and after the startup reconcile:
 2. For every object whose heads moved (or has no checkpoint), and which is
    personal or in a space this identity owns: `POST /api/checkpoints/build`.
    `409 history incomplete` → skip, retry next pass.
-3. Seal and publish as 1079; remember the event ids as the relay's copy. The
-   previous event stays on the relay.
+3. Seal and publish as 1079. Once every part is accepted, re-import the bytes:
+   when the daemon reports them `held`, they become the relay's copy and the
+   previous copy's events are sweep candidates (the daemon held both in turn,
+   and what it holds only grows by containment). Not held: recorded, but the
+   previous copy stays.
 
 A checkpoint that will not fit in 64 chunks is skipped and logged; the object
 keeps syncing as changes.
+
+### Sweeping outdated checkpoints
+
+Without a sweep every checkpoint ever published stays on the relay forever
+(thousands of events, hundreds of MB for ~1,500 objects) though only the
+newest covering one per object is useful. The harness deletes an own 1079
+group - every chunk part, and republished copies of the same bytes - iff:
+
+1. it is signed by this identity; in shared spaces, only spaces this
+   identity owns (owner-signed checkpoints);
+2. its import row said `superseded`: what the daemon held then covers it
+   (`checkpoint_supersedes(held, candidate)` - covered set ⊆ held's, equal
+   set with the held one winning the hash tie);
+3. the harness's recorded relay copy for that object exists, is not this
+   group, and is exactly what the daemon holds now.
+
+Why this is safe: the daemon's checkpoint per object is only ever replaced by
+one that supersedes it, so what it holds now covers everything it held at
+import time, and by (2) the candidate. By (3) those bytes are on the relay,
+signed by this identity. Deleting the candidate therefore loses no state any
+reader could rebuild from it, and every replica still reconciles the full
+1078 history regardless. An incomparable checkpoint is never `superseded`; a
+foreign one fails (1). Candidates whose object has no verified copy on the
+relay wait for a later pass.
+
+Candidates are collected from the startup walk, live and catch-up receipts,
+and after publishing a new checkpoint. A pass runs after the startup
+reconcile, after each checkpoint pass, and when new candidates arrive. It
+sends kind 5 with `e` tags in batches of at most `DELETE_BATCH` (254) plus
+`k` 1079, paced like other publishes, and logs one summary line. Ids every
+relay accepted are kept in `sync-state.json` (`checkpointDeletes`) and never
+requested again; a complete startup walk forgets the ones the relay no
+longer serves. `GLON_CHECKPOINT_SWEEP_DRY_RUN=1` logs
+`[sync] checkpoint sweep (dry run): N event(s) across M object(s) would be deleted`
+and deletes nothing.
 
 ## Daemon (`src/`)
 
@@ -161,7 +203,9 @@ keeps syncing as changes.
 - `GET /api/checkpoints` → `{objectId: {heads, checkpointHeads|null, checkpointHash, changes, covered}}`
 - `POST /api/checkpoints/build` `{objectId}` → `{objectId, b64, hash, heads, covered}` or `409 history incomplete`
 - `POST /api/checkpoints` `{checkpoints:[b64], provenance?}` → import with the
-  trust and containment rules; each row reports `stored` and `held`.
+  trust and containment rules; each row reports `stored`, `held` (the daemon
+  holds these bytes after the import) and `superseded` (what it holds after
+  the import supersedes them).
 
 ## Browser (`RoostrWebsite/src/lib/engine`)
 

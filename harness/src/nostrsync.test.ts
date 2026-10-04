@@ -42,16 +42,15 @@ function event(part: string, created_at: number, chunk?: [string, number, number
 function decrypt(item: Event): string {
 	return nip44.decrypt(item.content, conversationKey);
 }
-function chunks(createdAt = 10): Event[] {
-	const b64 = "YWJjZGVm";
+function chunks(createdAt = 10, kind = 1078, b64 = "YWJjZGVm"): Event[] {
 	const hasher = new Bun.CryptoHasher("sha256");
 	hasher.update(b64);
 	const gid = hasher.digest("hex").slice(0, 16);
-	return [event(b64.slice(0, 4), createdAt, [gid, 0, 2]), event(b64.slice(4), createdAt + 1, [gid, 1, 2])];
+	return [event(b64.slice(0, 4), createdAt, [gid, 0, 2], kind), event(b64.slice(4), createdAt + 1, [gid, 1, 2], kind)];
 }
 async function state() {
 	intervals.find((timer) => timer.ms === 5000)!.callback();
-	return await Bun.file(join(root, "sync-state.json")).json() as { cursor: number; replaySince?: number; vanishRequested: Record<string, true>; checkpoints: Record<string, { hash: string; heads: string[]; eventIds: string[] }> };
+	return await Bun.file(join(root, "sync-state.json")).json() as { cursor: number; replaySince?: number; vanishRequested: Record<string, true>; checkpoints: Record<string, { hash: string; heads: string[]; eventIds: string[] }>; checkpointDeletes: Record<string, true> };
 }
 /** The contract's blinding: sha256(key || id), 16 hex. */
 function blind(key: string, id: string): string {
@@ -383,28 +382,60 @@ test("startup reconciles the whole 1078 history even when an old state file carr
 	expect(published.some((item) => item.kind === 30079)).toBe(false);
 });
 
-test("the checkpoint pass rebuilds moved objects and publishes 1079 without deleting the old event or stamping a manifest", async () => {
+/** The daemon's view of relay checkpoints by b64: object, bytes hash, and how what it holds relates to them. */
+function checkpointDaemon(rows: Record<string, { objectId: string; hash: string; held?: boolean; superseded?: boolean }>) {
+	importCheckpoint = async (body) => Response.json({ imported: 0, rejected: 0, items: body.checkpoints.map((b64) => ({ heads: ["a"], stored: false, held: false, superseded: false, ...rows[b64] })) });
+}
+/** GET /api/checkpoints row: heads unmoved, the daemon holds `hash`. */
+function heldRow(hash: string) {
+	return { heads: ["a"], checkpointHeads: ["a"], checkpointHash: hash, changes: 1, covered: 1 };
+}
+function deletions(): Event[] {
+	return published.filter((item) => item.kind === 5);
+}
+function deleted(): Set<string> {
+	return new Set(deletions().flatMap((item) => item.tags.filter((tag) => tag[0] === "e").map((tag) => tag[1])));
+}
+/** Let the paced publish loop (and paced deletions) run. */
+function realTimers() {
+	timeoutMock.mockImplementation(((callback: () => void) => realSetTimeout(callback, 0)) as unknown as typeof setTimeout);
+}
+
+/** obj's copy h0 is on the relay; the pass builds h1 and publishes it. `holds`: the daemon holds h1 afterwards. */
+async function republish(holds: boolean) {
 	const old = event("T0xE", 50, undefined, 1079);
 	history = [old, event("U1RM", 60, undefined, 1079)];
-	const onRelay: Record<string, { objectId: string; hash: string }> = { T0xE: { objectId: "obj", hash: "h0" }, U1RM: { objectId: "still", hash: "hs" } };
-	importCheckpoint = async (body) => Response.json({ imported: 1, rejected: 0, items: body.checkpoints.map((b64) => ({ ...onRelay[b64], heads: ["a"], stored: true, held: true })) });
-	checkpointRows = { obj: { heads: ["b"], checkpointHeads: ["a"], checkpointHash: "h0", changes: 2, covered: 1 }, still: { heads: ["a"], checkpointHeads: ["a"], checkpointHash: "hs", changes: 1, covered: 1 } };
+	checkpointDaemon({ T0xE: { objectId: "obj", hash: "h0", held: true }, U1RM: { objectId: "still", hash: "hs", held: true }, TkVX: { objectId: "obj", hash: "h1", held: holds } });
+	checkpointRows = { obj: { heads: ["b"], checkpointHeads: ["a"], checkpointHash: "h0", changes: 2, covered: 1 }, still: heldRow("hs") };
 	const builds: string[] = [];
 	buildCheckpoint = async (objectId) => {
 		builds.push(objectId);
+		if (holds) checkpointRows.obj = { heads: ["b"], checkpointHeads: ["b"], checkpointHash: "h1", changes: 2, covered: 2 };
 		return Response.json({ objectId, b64: "TkVX", hash: "h1", heads: ["b"], covered: 2 });
 	};
-	// Let the paced publish loop run for this test.
-	timeoutMock.mockImplementation(((callback: () => void) => realSetTimeout(callback, 0)) as unknown as typeof setTimeout);
+	realTimers();
 	await startNostrSync();
 	expect(builds).toEqual(["obj"]);
 	await until(() => published.some((item) => item.kind === 1079));
 	await settle();
 	const checkpoint = published.find((item) => item.kind === 1079)!;
 	expect(decrypt(checkpoint)).toBe("TkVX");
-	expect(published.some((item) => item.kind === 5)).toBe(false);
 	expect(published.some((item) => item.kind === 30079)).toBe(false);
 	expect((await state()).checkpoints.obj).toEqual({ hash: "h1", heads: ["b"], eventIds: [checkpoint.id] });
+	return old;
+}
+
+test("the checkpoint pass publishes a moved object's 1079, then deletes the previous copy once the daemon reports the new one held", async () => {
+	const old = await republish(true);
+	await until(() => deletions().length > 0);
+	await settle();
+	expect(deletions().map((item) => ({ tags: item.tags, content: item.content }))).toEqual([{ tags: [["e", old.id], ["k", "1079"]], content: "checkpoint superseded" }]);
+});
+
+test("a published checkpoint the daemon does not hold never retires the previous copy", async () => {
+	await republish(false);
+	await settle();
+	expect(deletions()).toEqual([]);
 });
 
 test("a build the daemon refuses (incomplete history) leaves the object syncing as changes", async () => {
@@ -462,4 +493,107 @@ test("a vanished space is deleted on the relays by its stream tag; a left space 
 	expect(deletions).toEqual([{ pubkey: pk, tags: [["h", blind(KEY_A, "space:gone")], ["k", "1078"], ["k", "1079"]], content: "space deleted" }]);
 	expect((await state()).vanishRequested).toEqual({ gone: true, "space:gone": true });
 	expect(filters.some((filter) => filter["#h"]?.includes(blind(KEY_B, "space:left")))).toBe(false);
+});
+
+test("the sweep deletes our superseded checkpoint groups with every chunk part, never the covering copy or an incomparable fork", async () => {
+	const old = event("T0xE", 50, undefined, 1079);
+	const parts = chunks(60, 1079, "Q0hVTktFRA==");
+	const current = event("Q1Ax", 70, undefined, 1079);
+	const republished = event("Q1Ax", 75, undefined, 1079);
+	const fork = event("Rk9S", 80, undefined, 1079);
+	history = [old, ...parts, current, republished, fork];
+	checkpointDaemon({ T0xE: { objectId: "obj", hash: "h0", superseded: true }, "Q0hVTktFRA==": { objectId: "obj", hash: "h1", superseded: true }, Q1Ax: { objectId: "obj", hash: "h2", held: true }, Rk9S: { objectId: "obj", hash: "hf" } });
+	checkpointRows = { obj: heldRow("h2") };
+	realTimers();
+	await startNostrSync();
+	await until(() => deletions().length > 0);
+	await settle();
+	const victims = [old.id, ...parts.map((part) => part.id)];
+	expect(deletions().map((item) => item.tags.filter((tag) => tag[0] !== "e"))).toEqual([[["k", "1079"]]]);
+	expect(deleted()).toEqual(new Set(victims));
+	const after = await state();
+	expect(after.checkpoints.obj.eventIds).toEqual([current.id, republished.id]);
+	expect(Object.keys(after.checkpointDeletes).sort()).toEqual(victims.sort());
+	// Heard again (a watchdog catch-up): already requested, never requested again.
+	liveEvent(old);
+	await settle();
+	expect(deletions().length).toBe(1);
+});
+
+test("nothing is deleted without a recorded relay copy of ours, or while that copy is not what the daemon holds", async () => {
+	history = [event("T0xE", 50, undefined, 1079), event("VDE=", 55, undefined, 1079), event("VDI=", 60, undefined, 1079)];
+	// obj: no copy of ours on the relay. moved: our copy t2, but the daemon has since built t3.
+	checkpointDaemon({ T0xE: { objectId: "obj", hash: "h0", superseded: true }, "VDE=": { objectId: "moved", hash: "t1", superseded: true }, "VDI=": { objectId: "moved", hash: "t2", held: true } });
+	checkpointRows = { obj: heldRow("h2"), moved: heldRow("t3") };
+	realTimers();
+	await startNostrSync();
+	await settle();
+	expect(deletions()).toEqual([]);
+	const after = await state();
+	expect(after.checkpoints.obj).toBeUndefined();
+	expect(after.checkpointDeletes).toEqual({});
+});
+
+/** A 1079 on `spaceId`'s stream, signed by `signer`, sealed with the space key. */
+function spaceCheckpoint(signer: Uint8Array, key: string, spaceId: string, objectId: string, part: string, created_at: number): Event {
+	return finalizeEvent({ kind: 1079, created_at, tags: [["h", blind(key, objectId)], ["h", blind(key, `space:${spaceId}`)]], content: nip44.encrypt(part, Uint8Array.from(Buffer.from(key, "hex"))) }, signer);
+}
+
+test("in shared spaces the sweep only touches the spaces this identity owns", async () => {
+	await keyring({ joined: { key: KEY_A, owner: admin }, mine: { key: KEY_B } });
+	spaceObjects = { mine: spaceWithMembers("mine", [admin]), joined: spaceWithMembers("joined", [pk]) };
+	objectRows = [{ id: "a", channelId: "joined" }, { id: "b", channelId: "mine" }];
+	const mineOld = spaceCheckpoint(sk, KEY_B, "mine", "b", "YjE=", 50);
+	history = [
+		mineOld,
+		spaceCheckpoint(sk, KEY_B, "mine", "b", "YjI=", 60),
+		spaceCheckpoint(sk, KEY_A, "joined", "a", "YTE=", 50),
+		spaceCheckpoint(sk, KEY_A, "joined", "a", "YTI=", 60),
+		spaceCheckpoint(adminSk, KEY_A, "joined", "a", "YTA=", 40),
+	];
+	checkpointDaemon({
+		"YjE=": { objectId: "b", hash: "hb1", superseded: true },
+		"YjI=": { objectId: "b", hash: "hb2", held: true },
+		"YTE=": { objectId: "a", hash: "ha1", superseded: true },
+		"YTI=": { objectId: "a", hash: "ha2", held: true },
+		"YTA=": { objectId: "a", hash: "ha0", superseded: true },
+	});
+	checkpointRows = { a: heldRow("ha2"), b: heldRow("hb2") };
+	realTimers();
+	await startNostrSync();
+	await until(() => deletions().length > 0);
+	await settle();
+	expect(deleted()).toEqual(new Set([mineOld.id]));
+	expect((await state()).checkpoints.a).toBeUndefined();
+});
+
+test("a dry run logs what the sweep would delete and deletes nothing", async () => {
+	history = [event("T0xE", 50, undefined, 1079), event("Q1Ax", 70, undefined, 1079)];
+	checkpointDaemon({ T0xE: { objectId: "obj", hash: "h0", superseded: true }, Q1Ax: { objectId: "obj", hash: "h2", held: true } });
+	checkpointRows = { obj: heldRow("h2") };
+	const lines: string[] = [];
+	const log = spyOn(console, "log").mockImplementation((...args: unknown[]) => void lines.push(args.join(" ")));
+	restore.push(() => log.mockRestore());
+	process.env.GLON_CHECKPOINT_SWEEP_DRY_RUN = "1";
+	restore.push(() => delete process.env.GLON_CHECKPOINT_SWEEP_DRY_RUN);
+	realTimers();
+	await startNostrSync();
+	await until(() => lines.some((line) => line.startsWith("[sync] checkpoint sweep")));
+	await settle();
+	expect(lines.filter((line) => line.startsWith("[sync] checkpoint sweep"))).toEqual(["[sync] checkpoint sweep (dry run): 1 event(s) across 1 object(s) would be deleted"]);
+	expect(deletions()).toEqual([]);
+	expect((await state()).checkpointDeletes).toEqual({});
+});
+
+test("the sweep splits its deletions so no kind-5 names more than 254 events", async () => {
+	const outdated = Array.from({ length: 300 }, (_, i) => event("T0xE", 1000 + i, undefined, 1079));
+	history = [...outdated, event("Q1Ax", 2000, undefined, 1079)];
+	checkpointDaemon({ T0xE: { objectId: "obj", hash: "h0", superseded: true }, Q1Ax: { objectId: "obj", hash: "h2", held: true } });
+	checkpointRows = { obj: heldRow("h2") };
+	realTimers();
+	await startNostrSync();
+	await until(() => deleted().size === 300);
+	expect(deletions().length).toBe(2);
+	expect(deletions().every((item) => item.tags.filter((tag) => tag[0] === "e").length <= 254)).toBe(true);
+	expect(deleted()).toEqual(new Set(outdated.map((item) => item.id)));
 });

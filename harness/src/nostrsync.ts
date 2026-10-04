@@ -70,6 +70,8 @@ interface SyncState {
 	wrapsSeen?: Record<string, true>;
 	/** Relay's checkpoint per object (own signer): heads it describes and the events carrying it. */
 	checkpoints?: Record<string, PublishedCheckpoint>;
+	/** Outdated own 1079 event ids already named in a NIP-09 request (checkpoint sweep). */
+	checkpointDeletes?: Record<string, true>;
 }
 
 interface PublishedCheckpoint {
@@ -86,11 +88,11 @@ function statePath(): string {
 async function readState(): Promise<SyncState> {
 	try {
 		const parsed = (await Bun.file(statePath()).json()) as SyncState;
-		if (parsed?.version === 1) return { ...parsed, pendingChunkGroups: parsed.pendingChunkGroups ?? {}, vanishScanVersion: 2, vanishRequested: parsed.vanishScanVersion === 2 ? (parsed.vanishRequested ?? {}) : {}, publishedSpace: parsed.publishedSpace ?? {}, sharedQueued: parsed.sharedQueued ?? {}, invitesSent: parsed.invitesSent ?? {}, wrapsSeen: parsed.wrapsSeen ?? {}, checkpoints: parsed.checkpoints ?? {} };
+		if (parsed?.version === 1) return { ...parsed, pendingChunkGroups: parsed.pendingChunkGroups ?? {}, vanishScanVersion: 2, vanishRequested: parsed.vanishScanVersion === 2 ? (parsed.vanishRequested ?? {}) : {}, publishedSpace: parsed.publishedSpace ?? {}, sharedQueued: parsed.sharedQueued ?? {}, invitesSent: parsed.invitesSent ?? {}, wrapsSeen: parsed.wrapsSeen ?? {}, checkpoints: parsed.checkpoints ?? {}, checkpointDeletes: parsed.checkpointDeletes ?? {} };
 	} catch {
 		/* fresh */
 	}
-	return { version: 1, published: {}, cursor: 0, pendingChunkGroups: {}, vanishScanVersion: 2, vanishRequested: {}, publishedSpace: {}, sharedQueued: {}, invitesSent: {}, wrapsSeen: {}, checkpoints: {} };
+	return { version: 1, published: {}, cursor: 0, pendingChunkGroups: {}, vanishScanVersion: 2, vanishRequested: {}, publishedSpace: {}, sharedQueued: {}, invitesSent: {}, wrapsSeen: {}, checkpoints: {}, checkpointDeletes: {} };
 }
 
 function writeState(state: SyncState): void {
@@ -438,6 +440,8 @@ interface ImportedCheckpoint {
 	stored: boolean;
 	/** The daemon holds exactly these bytes after the import. */
 	held: boolean;
+	/** What the daemon holds after the import covers these bytes (containment, then hash): an outdated copy. */
+	superseded: boolean;
 }
 
 async function localCheckpointImport(b64s: string[], provenance?: SharedProvenance): Promise<{ imported: number; rejected: number; items: ImportedCheckpoint[] }> {
@@ -638,7 +642,7 @@ export async function startNostrSync(): Promise<void> {
 		/** present = publish under this space's key instead of self. */
 		space?: SharedSpace;
 		/** CHECKPOINT_KIND: runs with the relay event ids once every part is accepted. */
-		onPublished?: (eventIds: string[]) => void;
+		onPublished?: (eventIds: string[]) => Promise<void>;
 	}
 	const queue: QueueItem[] = [];
 	const queued = new Set<string>();
@@ -669,7 +673,7 @@ export async function startNostrSync(): Promise<void> {
 		queue.push(item);
 	}
 	/** A checkpoint supersedes the object's previous one on the relays; `onPublished` gets the event ids. False = nothing to do. */
-	function enqueueCheckpoint(objectId: string, hash: string, b64: string, onPublished: (eventIds: string[]) => void): boolean {
+	function enqueueCheckpoint(objectId: string, hash: string, b64: string, onPublished: (eventIds: string[]) => Promise<void>): boolean {
 		if (vanished.has(objectId)) return false;
 		const space = sharedSpaces.get(spaceMap.get(objectId) ?? "");
 		const item: QueueItem = { kind: CHECKPOINT_KIND, objectId, changeHex: hash, b64, attempts: 0, notBefore: 0, space, onPublished };
@@ -783,7 +787,7 @@ export async function startNostrSync(): Promise<void> {
 			}
 			const eventIds = await publishOnce(item);
 			if (eventIds) {
-				if (item.kind === CHECKPOINT_KIND) item.onPublished?.(eventIds);
+				if (item.kind === CHECKPOINT_KIND) await item.onPublished?.(eventIds);
 				else if (item.space) state.publishedSpace![doneKey] = true;
 				else state.published[item.changeHex] = true;
 				queued.delete(doneKey);
@@ -842,31 +846,93 @@ export async function startNostrSync(): Promise<void> {
 		dirty = true;
 	}
 
+	// ── Outdated checkpoints (docs/checkpoint-sync.md, "Sweeping") ──
+	//
+	// Own 1079 groups the daemon reports superseded, per object and bytes
+	// hash: every event carrying those bytes (all chunk parts, republished
+	// copies). In memory - the startup walk rebuilds it from the relays.
+	const sweepCandidates = new Map<string, Map<string, Set<string>>>();
+	/** Objects whose recorded relay copy was published but not verified held by the daemon. */
+	const unverifiedCopies = new Set<string>();
+	/** Completed own chunk groups -> their import row, so republished parts join the same bytes. */
+	const checkpointGroups = new Map<string, ImportedCheckpoint>();
+	/** GLON_CHECKPOINT_SWEEP_DRY_RUN=1: log what a sweep would delete, delete nothing. */
+	const SWEEP_DRY_RUN = process.env.GLON_CHECKPOINT_SWEEP_DRY_RUN === "1";
+	/** Off during the startup walk: one sweep follows it, then candidates trigger passes. */
+	let sweepReady = false;
+	let sweepBusy = false;
+	let sweepAgain = false;
+
+	function addSweepCandidate(objectId: string, hash: string, eventIds: readonly string[]): void {
+		const fresh = eventIds.filter((eid) => !state.checkpointDeletes![eid]);
+		if (fresh.length === 0) return;
+		let byHash = sweepCandidates.get(objectId);
+		if (!byHash) sweepCandidates.set(objectId, (byHash = new Map()));
+		let ids = byHash.get(hash);
+		if (!ids) byHash.set(hash, (ids = new Set()));
+		for (const eid of fresh) ids.add(eid);
+		if (sweepReady) void sweepCheckpoints();
+	}
+
+	/**
+	 * `eventIds` carry the object's checkpoint on the relay. The same bytes as
+	 * the recorded copy: more carriers of it. Other bytes: they become the
+	 * copy, and when the daemon verifiably held the previous copy and holds
+	 * this one now, the previous one is covered (what the daemon holds only
+	 * grows by containment) - a sweep candidate.
+	 */
+	function recordRelayCopy(objectId: string, hash: string, heads: readonly string[], eventIds: readonly string[], held: boolean): void {
+		const previous = state.checkpoints![objectId];
+		if (previous?.hash === hash) {
+			previous.eventIds = [...new Set([...previous.eventIds, ...eventIds])];
+		} else {
+			if (previous && held && !unverifiedCopies.has(objectId)) addSweepCandidate(objectId, previous.hash, previous.eventIds);
+			state.checkpoints![objectId] = { hash, heads: [...heads].sort(), eventIds: [...eventIds] };
+		}
+		if (held) unverifiedCopies.delete(objectId);
+		else unverifiedCopies.add(objectId);
+		dirty = true;
+	}
+
 	/**
 	 * A 1079 from the relays. The daemon decides whether it takes it (covers a
 	 * superset of the stored one, then larger hash) and enforces the shared
-	 * owner rule via provenance. Under our own key, when the daemon holds
-	 * exactly these bytes afterwards, it is what the relay has for the object:
-	 * remember it so the checkpoint pass does not republish. Anything else
-	 * (a subset, an incomparable fork from another device) stays on the relay
-	 * as harmless cache - never deleted: it may be the only copy of a branch.
+	 * owner rule via provenance. Signed by us (personal, or a space we own):
+	 * when the daemon holds exactly these bytes afterwards, it is what the
+	 * relay has for the object - remember it so the checkpoint pass does not
+	 * republish; when what it holds supersedes them, they are outdated - a
+	 * sweep candidate. Anything else (an incomparable fork from another
+	 * device, anyone else's checkpoint) stays on the relay, never deleted: it
+	 * may be the only copy of a branch. Returns the row of an own checkpoint.
 	 */
-	async function importCheckpointB64(b64: string, space: SharedSpace | null, signer: string, eventIds: string[]): Promise<void> {
+	async function importCheckpointB64(b64: string, space: SharedSpace | null, signer: string, eventIds: string[]): Promise<ImportedCheckpoint | undefined> {
 		const provenance = space ? { spaceId: space.spaceId, keyId: space.keyId, signer } : undefined;
 		const res = await localCheckpointImport([b64], provenance);
 		if (res.rejected > 0) throw new Error("Checkpoint import rejected");
-		if (signer !== id!.pk) return;
+		if (signer !== id!.pk || (space && (space.owner ?? id!.pk) !== id!.pk)) return undefined;
 		for (const row of res.items) {
-			if (!row.held) continue;
-			const current = state.checkpoints![row.objectId];
-			const ids = current?.hash === row.hash ? [...new Set([...current.eventIds, ...eventIds])] : eventIds;
-			state.checkpoints![row.objectId] = { hash: row.hash, heads: [...row.heads].sort(), eventIds: ids };
+			if (row.held) recordRelayCopy(row.objectId, row.hash, row.heads, eventIds, true);
+			else if (row.superseded) addSweepCandidate(row.objectId, row.hash, eventIds);
+		}
+		return res.items[0];
+	}
+
+	/** A republished part of a completed own group: one more carrier of the same bytes. */
+	function noteCheckpointCarrier(row: ImportedCheckpoint, eventId: string): void {
+		const copy = state.checkpoints![row.objectId];
+		if (copy?.hash === row.hash) {
+			if (copy.eventIds.includes(eventId)) return;
+			copy.eventIds.push(eventId);
 			dirty = true;
+		} else if (row.superseded || sweepCandidates.get(row.objectId)?.has(row.hash)) {
+			addSweepCandidate(row.objectId, row.hash, [eventId]);
 		}
 	}
 
-	function importEvent(kind: number, b64: string, space: SharedSpace | null, signer: string, eventIds: string[]): Promise<void> {
-		return kind === CHECKPOINT_KIND ? importCheckpointB64(b64, space, signer, eventIds) : importB64(b64, space, signer);
+	async function importEvent(kind: number, b64: string, space: SharedSpace | null, signer: string, eventIds: string[]): Promise<ImportedCheckpoint | undefined> {
+		if (kind === CHECKPOINT_KIND) return importCheckpointB64(b64, space, signer, eventIds);
+		await importB64(b64, space, signer);
+		return undefined;
 	}
 
 	/** Try self key, then every shared-space key. */
@@ -985,6 +1051,8 @@ export async function startNostrSync(): Promise<void> {
 				if (part.length === 0 || part.length > CHUNK_CHARS || !/^[A-Za-z0-9+/=]+$/.test(part)) return;
 				const groupKey = JSON.stringify([event.kind, event.pubkey, space?.spaceId ?? null, space?.keyId ?? null, gid]);
 				if (completedChunkGroups.has(groupKey)) {
+					const row = checkpointGroups.get(groupKey);
+					if (row) noteCheckpointCarrier(row, event.id);
 					if (event.created_at > state.cursor) {
 						state.cursor = event.created_at;
 						dirty = true;
@@ -1020,10 +1088,11 @@ export async function startNostrSync(): Promise<void> {
 						return;
 					}
 					group.parts.set(index, part);
-					group.eventIds.push(event.id);
 					group.bytes += part.length;
 					chunkBytes += part.length;
 				}
+				// A republished part (same bytes, another event) carries the group too.
+				if (!group.eventIds.includes(event.id)) group.eventIds.push(event.id);
 				if (group.parts.size !== group.total) return;
 				const parts: string[] = [];
 				for (let i = 0; i < group.total; i++) parts.push(group.parts.get(i)!);
@@ -1035,7 +1104,8 @@ export async function startNostrSync(): Promise<void> {
 				}
 				importing = true;
 				try {
-					await importEvent(event.kind, full, space, event.pubkey, group.eventIds);
+					const row = await importEvent(event.kind, full, space, event.pubkey, group.eventIds);
+					if (row) checkpointGroups.set(groupKey, row);
 					if (chunkGroups.get(groupKey) === group) {
 						completedChunkGroups.add(groupKey);
 						delete state.pendingChunkGroups![groupKey];
@@ -1335,8 +1405,10 @@ export async function startNostrSync(): Promise<void> {
 	// One 1079 per object this identity may speak for: every personal
 	// object and every object of a space it owns. A pass rebuilds where
 	// heads moved and publishes. Checkpoints are replay caches: the 1078
-	// history stays the truth and every replica reconciles it in full, so
-	// a stale checkpoint on the relay is left alone rather than deleted.
+	// history stays the truth and every replica reconciles it in full. An
+	// outdated checkpoint of ours is deleted from the relay only once the
+	// daemon proves it covered and a covering copy of ours is there (the
+	// sweep below); incomparable and foreign ones are never touched.
 
 	function sameList(a: readonly string[], b: readonly string[]): boolean {
 		return a.length === b.length && a.every((x, i) => x === b[i]);
@@ -1372,9 +1444,17 @@ export async function startNostrSync(): Promise<void> {
 					continue;
 				}
 				if (current?.hash === cp.hash) continue; // the relay already holds these bytes
-				enqueueCheckpoint(objectId, cp.hash, cp.b64, (eventIds) => {
-					state.checkpoints![objectId] = { hash: cp.hash, heads: [...cp.heads].sort(), eventIds };
-					dirty = true;
+				const provenance = space ? { spaceId: space.spaceId, keyId: space.keyId, signer: id!.pk } : undefined;
+				enqueueCheckpoint(objectId, cp.hash, cp.b64, async (eventIds) => {
+					// The previous copy only counts as covered if the daemon still
+					// holds exactly what went out - ask it rather than assume.
+					let held = false;
+					try {
+						held = (await localCheckpointImport([cp.b64], provenance)).items.some((item) => item.objectId === objectId && item.hash === cp.hash && item.held);
+					} catch (err) {
+						console.error(`[sync] checkpoint verify failed for ${objectId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
+					}
+					recordRelayCopy(objectId, cp.hash, cp.heads, eventIds, held);
 				});
 			}
 			if (built > 0) console.log(`[sync] checkpoint pass: ${built} rebuilt`);
@@ -1383,6 +1463,93 @@ export async function startNostrSync(): Promise<void> {
 		} finally {
 			checkpointBusy = false;
 		}
+	}
+
+	/**
+	 * Delete outdated own checkpoints from the relays. A candidate group goes
+	 * only when its object's recorded relay copy is not that group and is
+	 * exactly what the daemon holds now: the candidate was covered by what
+	 * the daemon held when it was imported, and that only grows by
+	 * containment, so the copy on the relay covers it. NIP-09 kind 5 with
+	 * `k` 1079 only, ≤ DELETE_BATCH ids each, paced; ids accepted by every
+	 * relay are remembered and never requested again.
+	 */
+	async function sweepCheckpoints(): Promise<void> {
+		if (sweepBusy) {
+			sweepAgain = true;
+			return;
+		}
+		sweepBusy = true;
+		try {
+			do {
+				sweepAgain = false;
+				if (sweepCandidates.size > 0) await sweepPass();
+			} while (sweepAgain);
+		} catch (err) {
+			console.error("[sync] checkpoint sweep failed:", err instanceof Error ? err.message : err);
+		} finally {
+			sweepBusy = false;
+		}
+	}
+
+	async function sweepPass(): Promise<void> {
+		const held = await localCheckpoints();
+		const victims: string[] = [];
+		let objects = 0;
+		let waiting = 0;
+		for (const [objectId, byHash] of sweepCandidates) {
+			const copy = state.checkpoints![objectId];
+			if (vanished.has(objectId)) {
+				sweepCandidates.delete(objectId); // the vanish chase takes every event of it
+				continue;
+			}
+			const covered = !!copy && held[objectId]?.checkpointHash === copy.hash;
+			const keep = new Set(copy?.eventIds);
+			let found = 0;
+			for (const [hash, ids] of byHash) {
+				if (hash === copy?.hash) {
+					byHash.delete(hash); // these bytes are the copy itself
+					continue;
+				}
+				for (const eid of ids) {
+					if (state.checkpointDeletes![eid] || keep.has(eid)) ids.delete(eid);
+					else if (!covered) waiting++;
+					else {
+						victims.push(eid);
+						found++;
+					}
+				}
+				if (ids.size === 0) byHash.delete(hash);
+			}
+			if (byHash.size === 0) sweepCandidates.delete(objectId);
+			if (found > 0) objects++;
+		}
+		if (SWEEP_DRY_RUN) {
+			console.log(`[sync] checkpoint sweep (dry run): ${victims.length} event(s) across ${objects} object(s) would be deleted`);
+			return;
+		}
+		let requests = 0;
+		let retry = 0;
+		for (let i = 0; i < victims.length; i += DELETE_BATCH) {
+			const batch = victims.slice(i, i + DELETE_BATCH);
+			const result = await publishDeleteRequests(pool, id!, batch, "checkpoint superseded", [CHECKPOINT_KIND]);
+			requests += result.requests;
+			if (!result.complete) {
+				retry += batch.length;
+				continue;
+			}
+			for (const eid of batch) state.checkpointDeletes![eid] = true;
+			dirty = true;
+		}
+		// Requested ids leave the candidate sets; the rest wait for the next pass.
+		for (const [objectId, byHash] of sweepCandidates) {
+			for (const [hash, ids] of byHash) {
+				for (const eid of ids) if (state.checkpointDeletes![eid]) ids.delete(eid);
+				if (ids.size === 0) byHash.delete(hash);
+			}
+			if (byHash.size === 0) sweepCandidates.delete(objectId);
+		}
+		console.log(`[sync] checkpoint sweep: ${victims.length} event(s) across ${objects} object(s), ${requests} delete request(s)${retry > 0 ? `, ${retry} to retry` : ""}${waiting > 0 ? `, ${waiting} awaiting a covering copy` : ""}`);
 	}
 
 	// ── Startup: backfill both directions ─────────────────────────
@@ -1425,6 +1592,12 @@ export async function startNostrSync(): Promise<void> {
 	}
 	finishReplayScan(backfillScan, backfillComplete, true);
 	if (assembled > 0) console.log(`[sync] backfill processed ${assembled} event(s)`);
+	// Deletions the relays honoured are gone from a complete walk: forget
+	// them so the requested set stays bounded. Ids still served stay
+	// remembered and are never requested again.
+	if (backfillComplete) {
+		for (const eid of Object.keys(state.checkpointDeletes!)) if (!backfillById.has(eid)) delete state.checkpointDeletes![eid];
+	}
 	dirty = true;
 
 	const keyringEvents = await pool.querySync(id.relays, { kinds: [KEYRING_KIND], authors: [id.pk], "#d": [KEYRING_D] });
@@ -1471,7 +1644,9 @@ export async function startNostrSync(): Promise<void> {
 	// Checkpoints ride the same queue behind the changes just enqueued, so
 	// a peer that receives the checkpoint first only skips what it covers.
 	await checkpointPass();
-	setInterval(() => void checkpointPass(), CHECKPOINT_INTERVAL_MS);
+	sweepReady = true;
+	void sweepCheckpoints();
+	setInterval(() => void checkpointPass().then(sweepCheckpoints), CHECKPOINT_INTERVAL_MS);
 	persist();
 
 	// ── Live: both directions ──────────────────────────────────────
