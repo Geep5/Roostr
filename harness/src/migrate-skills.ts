@@ -8,7 +8,9 @@
  *  - a catalog key becomes a link to that skill's object;
  *  - a login key (x, discord-bot...) is a Credential now: an agent gets the
  *    matching Credential this computer looks after in its Credentials;
- *  - a prompt's `requires`/`skills` fold into each agent that links it.
+ *  - a prompt's `requires`/`skills` fold into each agent that links it;
+ *  - a key that is neither (an extension's this computer doesn't load) keeps
+ *    its `requires` for a computer that does.
  *
  * An agent is migrated by the computer that serves it (the one whose
  * Credentials it can link, and whose old harness still reads `requires`
@@ -37,20 +39,29 @@ export async function migrateSkills(): Promise<{ objects: number; agents: number
 
 	/** Catalog/login keys a `requires` value names. */
 	const requiredKeys = (v: ValueJSON | undefined): string[] => items(v).map((i) => (i.linkValue ? capKey.get(i.linkValue.targetId) : i.stringValue) ?? "").filter(Boolean);
-	/** Skill ids for keys and a prompt's `skills` items; login keys are returned apart. */
-	const resolve = (keys: string[], promptSkills: ValueJSON[]): { skillIds: string[]; logins: string[] } => {
+	/**
+	 * Skill ids for keys and a prompt's `skills` items; login keys are
+	 * returned apart. `missing`: keys neither a login nor a skill here - an
+	 * extension this computer doesn't load (extensions.ts) may know them, so
+	 * the `requires` that names them stays for a computer that does.
+	 */
+	const resolve = (keys: string[], promptSkills: ValueJSON[]): { skillIds: string[]; logins: string[]; missing: boolean } => {
 		const ids: string[] = [];
 		const logins: string[] = [];
+		let missing = false;
 		for (const key of keys) {
 			if (seedFor(key)) logins.push(key);
 			else if (skillByKey.has(key)) ids.push(skillByKey.get(key)!);
-			else unresolved.push(key);
+			else {
+				unresolved.push(key);
+				missing = true;
+			}
 		}
 		for (const i of promptSkills) {
 			const id = i.linkValue?.targetId || skillByName.get((i.stringValue ?? "").toLowerCase()) || "";
 			if (id) ids.push(id);
 		}
-		return { skillIds: ids, logins };
+		return { skillIds: ids, logins, missing };
 	};
 	const merge = async (row: QueryRow, add: string[], key: string, current: string[]): Promise<void> => {
 		const next = [...new Set([...current, ...add])];
@@ -68,17 +79,18 @@ export async function migrateSkills(): Promise<{ objects: number; agents: number
 		const keys = [...requiredKeys(row.fields["requires"]), ...(prompt ? requiredKeys(prompt.fields["requires"]) : [])];
 		const promptSkills = prompt ? items(prompt.fields["skills"]) : [];
 		if (keys.length === 0 && promptSkills.length === 0 && !row.fields["requires"]) continue;
-		const { skillIds: ids, logins } = resolve(keys, promptSkills);
+		const { skillIds: ids, logins, missing } = resolve(keys, promptSkills);
 		await merge(row, ids, SKILLS_KEY, skillIds(row.fields));
 		const creds = localCredentials().filter((c) => logins.includes(c.service) && c.status === "active").map((c) => c.id);
 		await merge(row, creds, "credentials", credentialIds(row.fields));
-		if (row.fields["requires"]) await deleteField(row.id, "requires");
+		if (row.fields["requires"] && !missing) await deleteField(row.id, "requires");
 		agents += 1;
 	}
 	for (const row of await queryAll({ filters: [{ key: "requires", condition: "notEmpty" }] })) {
 		if (row.typeKey === "agent" || row.typeKey === SYSTEM_PROMPT_TYPE) continue;
-		const { skillIds: ids } = resolve(requiredKeys(row.fields["requires"]), []);
+		const { skillIds: ids, missing } = resolve(requiredKeys(row.fields["requires"]), []);
 		await merge(row, ids, SKILLS_KEY, skillIds(row.fields));
+		if (missing) continue;
 		await deleteField(row.id, "requires");
 		objects += 1;
 	}
@@ -87,7 +99,7 @@ export async function migrateSkills(): Promise<{ objects: number; agents: number
 	for (const prompt of prompts.values()) {
 		if (!prompt.fields["requires"] && !prompt.fields["skills"]) continue;
 		const users = agentRows.filter((a) => promptTarget(a.fields) === prompt.id);
-		if (users.some((a) => pinOf(a) !== me)) continue;
+		if (users.some((a) => pinOf(a) !== me) || resolve(requiredKeys(prompt.fields["requires"]), []).missing) continue;
 		for (const key of ["requires", "skills"]) if (prompt.fields[key]) await deleteField(prompt.id, key);
 		cleared += 1;
 	}

@@ -11,6 +11,7 @@
 
 import { bv, fetchObject, fv, guestAgents, iv, lv, mutate, plainValue, str, sv, type ObjectJSON, type ValueJSON } from "./api";
 import { HUMAN_THREAD, humanRef, postTo } from "./conv";
+import { hideCredentialSecrets } from "./credentials";
 import { appendMarkdown, inlineMarks } from "./markdown";
 import { describeRepeat, localClock } from "./repeat";
 import { machineId } from "./roster";
@@ -143,7 +144,7 @@ const SCHEDULE_KEYS = new Set(["repeat", "repeats", "recurrence", "recurring", "
 /** object_get as the harness keeps it, frozen: what object_get's Tool object falls back to (RECOVERY_CORE). */
 const objectGetCopy: Handler = async (input, ctx) => {
 	ctx.touched.add(S(input.id));
-	const obj = await assertInSpace(await fetchObject(S(input.id)), ctx.channelId);
+	const obj = hideCredentialSecrets(await assertInSpace(await fetchObject(S(input.id)), ctx.channelId));
 	const fields: Record<string, unknown> = {};
 	for (const [k, v] of Object.entries(obj.fields)) fields[k] = plainValue(v);
 	const body = bodyBlocks(obj);

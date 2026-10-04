@@ -18,14 +18,15 @@ import { requestCapability } from "./capability-messages";
 import { agentSubject } from "./conv";
 import { noteCredentialIssue } from "./credential-issues";
 import { agentCredential, CredentialNotConnected, type AgentCredential } from "./credential-objects";
-import { actionsOf } from "./credentials";
+import { actionsOf, blankSecrets, blankSecretsDeep, secretList } from "./credentials";
 import { serverOf } from "./machine";
 import { sendMessage } from "./mailbox";
-import { matcherinoApi, matcherinoToken } from "./matcherino";
+import { credentialActions, credentialApis } from "./extensions";
+import { queryPostgres, rowLimit, urlSecrets, type SqlResult } from "./sql";
 import { fileHoldup, skillReady } from "./skillmgr";
 import { listSkills } from "./skills";
 import type { HarnessServe } from "./tool-host";
-import type { AskMessage, HarnessApi, HarnessMethod, ShellRun } from "./tool-sdk";
+import type { AskMessage, CredentialAnswer, HarnessApi, HarnessMethod, ShellRun } from "./tool-sdk";
 import type { ToolContext } from "./tools";
 
 const SHELL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -36,8 +37,6 @@ const WEB_PAGE_TIMEOUT_MS = 60_000;
 const WEB_PAGE_CAP = 2_000_000;
 /** Where a site sends a signed-out session instead of the page asked for. */
 const LOGIN_WALL = /login|signin|sign-in|onboarding|checkpoint|authwall/i;
-/** Secret values shorter than this aren't blanked: they would match ordinary text. */
-const SECRET_MIN_LENGTH = 8;
 const METHODS: Readonly<Record<string, true>> = { GET: true, POST: true, PUT: true, PATCH: true, DELETE: true };
 
 function errorText(error: unknown): string {
@@ -116,10 +115,14 @@ export async function fileCapabilityHoldup(capability: string, error: string, ct
 
 // ── Credentials ─────────────────────────────────────────────────
 
-/** The run's agent's credential for `service`, or why it can't be used; one that is signed out is noted for the run's badge (credential-issues.ts). */
-async function credentialFor(ctx: ToolContext, service: string): Promise<{ ok: true; cred: AgentCredential } | { ok: false; error: string }> {
+/**
+ * The run's agent's credential for `service` (the one named `pick` - its
+ * name or id - when given), or why it can't be used; one that is signed out
+ * is noted for the run's badge (credential-issues.ts).
+ */
+async function credentialFor(ctx: ToolContext, service: string, pick = ""): Promise<{ ok: true; cred: AgentCredential } | { ok: false; error: string }> {
 	try {
-		return { ok: true, cred: await agentCredential(await fetchObject(ctx.agentId), service) };
+		return { ok: true, cred: await agentCredential(await fetchObject(ctx.agentId), service, pick) };
 	} catch (error) {
 		if (error instanceof CredentialNotConnected) noteCredentialIssue(ctx.agentId, error.credentialName);
 		return { ok: false, error: errorText(error) };
@@ -129,8 +132,8 @@ async function credentialFor(ctx: ToolContext, service: string): Promise<{ ok: t
 /**
  * Every value of a credential's that is a secret, longest first: its
  * session cookies as stored and decoded - and the strings inside one that
- * holds JSON (Matcherino's refresh token) - its pasted keys, and tokens
- * minted from them.
+ * holds JSON (a refresh token kept in a cookie) - its pasted keys, and
+ * tokens minted from them.
  */
 function secretsOf(cred: AgentCredential, minted: string[] = []): string[] {
 	const values = [...minted, ...Object.values(cred.keys ?? {})];
@@ -145,20 +148,7 @@ function secretsOf(cred: AgentCredential, minted: string[] = []): string[] {
 			/* not URI-encoded JSON: the value itself is the secret */
 		}
 	}
-	return [...new Set(values.filter((v) => v.length >= SECRET_MIN_LENGTH))].sort((a, b) => b.length - a.length);
-}
-
-/** `text` with every secret blanked out. */
-function blankSecrets(text: string, secrets: string[]): string {
-	return secrets.reduce((out, secret) => out.replaceAll(secret, "[secret]"), text);
-}
-
-/** Any JSON value with every secret blanked out of its strings, at any depth. */
-function blankSecretsDeep(value: unknown, secrets: string[]): unknown {
-	if (typeof value === "string") return blankSecrets(value, secrets);
-	if (Array.isArray(value)) return value.map((v: unknown) => blankSecretsDeep(v, secrets));
-	if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, blankSecretsDeep(v, secrets)]));
-	return value;
+	return secretList(values);
 }
 
 // ── Agent messages ──────────────────────────────────────────────
@@ -187,8 +177,32 @@ type Handlers = { [M in HarnessMethod]: (args: unknown[], signal: AbortSignal) =
 
 /** The answers to one tool run's harness calls, for the agent and turn `ctx` is. */
 export function harnessFor(ctx: ToolContext): HarnessServe {
-	/** Matcherino access tokens minted for this run, by credential: one sign-in for its several calls. */
+	/** API tokens minted for this run, by credential: one sign-in for its several calls. */
 	const tokens = new Map<string, string>();
+	/** One request to `service`'s own API, signed in with the agent's credential for it; secrets blanked out of the answer. */
+	const signedCall = async (service: string, path: string, method: string, body: unknown): Promise<CredentialAnswer> => {
+		const api = credentialApis[service];
+		if (!api) return { ok: false, signedOut: false, error: `the harness signs no API requests for "${service}" credentials` };
+		const found = await credentialFor(ctx, service);
+		if (!found.ok) return { ok: false, signedOut: false, error: found.error };
+		const { row } = found.cred;
+		let token = tokens.get(row.id);
+		if (!token) {
+			try {
+				token = await api.token(row.fields);
+			} catch (error) {
+				noteCredentialIssue(ctx.agentId, row.name);
+				return { ok: false, signedOut: true, error: blankSecrets(errorText(error), secretsOf(found.cred)) };
+			}
+			tokens.set(row.id, token);
+		}
+		const secrets = secretsOf(found.cred, [token]);
+		try {
+			return { ok: true, body: blankSecretsDeep(await api.call(token, path, method, body), secrets) };
+		} catch (error) {
+			return { ok: false, signedOut: false, error: blankSecrets(errorText(error), secrets) };
+		}
+	};
 	const handlers: Handlers = {
 		shell: async ([command], signal) => {
 			requireGrant(ctx, "shell_exec");
@@ -239,26 +253,47 @@ export function harnessFor(ctx: ToolContext): HarnessServe {
 			if (typeof request !== "object" || request === null) throw new Error("request must be an object");
 			const method = "method" in request && request.method !== undefined ? textArg(request.method, "method").toUpperCase() : "GET";
 			if (!Object.hasOwn(METHODS, method)) throw new Error(`${method} is not an HTTP method`);
-			// The one service whose API the harness knows how to sign in to.
-			if (name !== "matcherino") return { ok: false, signedOut: false, error: `the harness signs no API requests for "${name}" credentials` };
+			return signedCall(name, path, method, "body" in request ? request.body : undefined);
+		},
+		credentialAct: async ([service, rawAction, rawInput]) => {
+			const name = textArg(service, "service");
+			const action = textArg(rawAction, "action");
+			if (typeof rawInput !== "object" || rawInput === null || Array.isArray(rawInput)) throw new Error("input must be an object");
+			const input = rawInput as Record<string, unknown>;
 			const found = await credentialFor(ctx, name);
-			if (!found.ok) return { ok: false, signedOut: false, error: found.error };
+			if (!found.ok) return { ok: false, error: found.error };
 			const { row } = found.cred;
-			let token = tokens.get(row.id);
-			if (!token) {
-				try {
-					token = await matcherinoToken(row.fields);
-				} catch (error) {
-					noteCredentialIssue(ctx.agentId, row.name);
-					return { ok: false, signedOut: true, error: errorText(error) };
-				}
-				tokens.set(row.id, token);
-			}
-			const secrets = secretsOf(found.cred, [token]);
+			// Having the credential is the permission; its actions are its service's.
+			if (!actionsOf(row.fields).some((a) => a.key === action)) return { ok: false, error: `"${row.name}" has no action "${action}"` };
+			const run = credentialActions[name]?.[action];
+			if (!run) return { ok: false, error: `${name}.${action} is declared on the credential but this computer has no code for it` };
+			const api = (path: string, request: { method?: string; body?: unknown } = {}): Promise<CredentialAnswer> => {
+				const method = (request.method ?? "GET").toUpperCase();
+				if (!Object.hasOwn(METHODS, method)) return Promise.resolve({ ok: false, signedOut: false, error: `${method} is not an HTTP method` });
+				return signedCall(name, path, method, request.body);
+			};
+			// Whatever the action returns or throws, with this run's secrets (a token it minted too) blanked out.
+			const outcome = await run(input, api).then((result) => ({ ok: true as const, result }), (error: unknown) => ({ ok: false as const, error: errorText(error) }));
+			const secrets = secretsOf(found.cred, [tokens.get(row.id) ?? ""]);
+			return outcome.ok ? { ok: true, result: blankSecretsDeep(outcome.result, secrets) } : { ok: false, error: blankSecrets(outcome.error, secrets) };
+		},
+		credentialSql: async ([service, rawSql, rawOptions]) => {
+			const sql = textArg(rawSql, "sql");
+			const options = typeof rawOptions === "object" && rawOptions !== null ? rawOptions : {};
+			const pick = "credential" in options && options.credential !== undefined ? textArg(options.credential, "credential").trim() : "";
+			const maxRows = "maxRows" in options ? options.maxRows : undefined;
+			// Having the credential is the permission: one the agent's Credentials list, of this service, active.
+			const found = await credentialFor(ctx, textArg(service, "service"), pick);
+			if (!found.ok) return found;
+			const { row, keys } = found.cred;
+			const url = keys?.url ?? "";
+			if (!url) return { ok: false, error: `"${row.name}" has no Database URL (key_url) - tell the person to fill it in.` };
+			const secrets = secretList([...secretsOf(found.cred), ...urlSecrets(url)]);
 			try {
-				return { ok: true, body: blankSecretsDeep(await matcherinoApi(token, path, method, "body" in request ? request.body : undefined), secrets) };
+				const result = await queryPostgres({ id: row.id, url, sshHost: str(row.fields, "ssh_host") }, sql, rowLimit(maxRows));
+				return { ok: true, ...(blankSecretsDeep(result, secrets) as SqlResult) };
 			} catch (error) {
-				return { ok: false, signedOut: false, error: blankSecrets(errorText(error), secrets) };
+				return { ok: false, error: blankSecrets(errorText(error), secrets) };
 			}
 		},
 		skills: () => listSkills(ctx.agentId, ctx.toolset?.granted),

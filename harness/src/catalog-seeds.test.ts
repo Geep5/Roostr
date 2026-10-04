@@ -2,7 +2,8 @@
  * The catalogs seed objects once and then leave them to their owners: one
  * Skill per catalog key (an older one adopted, never duplicated), one agent
  * Template per kind per space that is only rewritten while unedited, and
- * the retired descriptor cards gone. Runs against a fake daemon.
+ * the retired descriptor cards gone. Runs against a fake daemon, with a
+ * kind of its own registered as a private extension would (extensions.ts).
  */
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
@@ -11,8 +12,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { agentTypeId, kindHash, seedCatalog } from "./catalog-seeds";
-import { PROMPT_SEEDS } from "./prompts";
+import { registerExtension } from "./extensions";
+import { PROMPT_SEEDS, type AgentKindEntry } from "./prompts";
 import { CATALOG } from "./skillmgr";
+
+/** A kind with settings of its own, a default and a catalog skill. */
+const PROBE: AgentKindEntry = {
+	key: "probe",
+	name: "Probe (test kind)",
+	promptName: "Probe",
+	description: "A kind registered by this test.",
+	system: "You are a probe.",
+	model: "test-model",
+	skills: ["browserless"],
+	fields: [
+		{ key: "probe_channel_id", label: "Probe channel id", note: "A setting of the kind's own." },
+		{ key: "repo_path", label: "Repository path", note: "A setting the space already has." },
+	],
+	defaults: { repo_path: "/srv/probe" },
+};
+let unregister = () => {};
 
 const SPACE = "space-0001-aaaa";
 const originalFetch = globalThis.fetch;
@@ -26,9 +45,11 @@ beforeEach(async () => {
 	await writeFile(join(root, "api-token"), "a".repeat(64), { mode: 0o600 });
 	process.env.GLON_DATA = root;
 	console.log = () => {};
+	unregister = registerExtension({ kinds: [PROBE] });
 });
 
 afterEach(async () => {
+	unregister();
 	globalThis.fetch = originalFetch;
 	console.log = originalLog;
 	if (previousRoot === undefined) delete process.env.GLON_DATA;
@@ -121,15 +142,15 @@ test("an empty vault gets one Skill per catalog key and one template per agent k
 
 	const templates = vault.ofType("template");
 	expect(templates.map((t) => t.fields.seed_key?.stringValue).sort()).toEqual(PROMPT_SEEDS.map((s) => s.key).sort());
-	const marco = templates.find((t) => t.fields.seed_key?.stringValue === "marco")!;
-	expect(marco.fields.target_type?.stringValue).toBe(agentTypeId(SPACE));
-	expect(marco.fields.channel?.stringValue).toBe(SPACE);
-	expect(vault.objects.get(target(marco.fields.prompt)[0])?.fields.name?.stringValue).toBe("Marco");
-	expect(target(marco.fields.skills)).toEqual([skills.find((s) => s.fields.key?.stringValue === "matcherino-dev")!.id]);
-	expect(marco.fields.repo_path?.stringValue).toBe(PROMPT_SEEDS.find((s) => s.key === "marco")!.defaults.repo_path);
-	// Marco's own settings became properties of the space; the bundled ones were not repeated.
+	const probe = templates.find((t) => t.fields.seed_key?.stringValue === "probe")!;
+	expect(probe.fields.target_type?.stringValue).toBe(agentTypeId(SPACE));
+	expect(probe.fields.channel?.stringValue).toBe(SPACE);
+	expect(vault.objects.get(target(probe.fields.prompt)[0])?.fields.name?.stringValue).toBe("Probe");
+	expect(target(probe.fields.skills)).toEqual([skills.find((s) => s.fields.key?.stringValue === "browserless")!.id]);
+	expect(probe.fields.repo_path?.stringValue).toBe(PROBE.defaults.repo_path);
+	// The kind's own settings became properties of the space; the bundled ones were not repeated.
 	const props = vault.ofType("relation").map((r) => r.fields.key?.stringValue);
-	expect(props.filter((k) => k === "discord_channel_id")).toHaveLength(1);
+	expect(props.filter((k) => k === "probe_channel_id")).toHaveLength(1);
 	expect(props.filter((k) => k === "repo_path")).toHaveLength(1);
 
 	vault.writes.length = 0;
@@ -151,23 +172,22 @@ test("an older skill object is adopted, never duplicated, and its page stays the
 test("a kind template is re-seeded only while nobody has edited it", async () => {
 	const vault = daemon([object(SPACE, "channel", {}), ...bundled]);
 	await seedCatalog();
-	const marco = vault.ofType("template").find((t) => t.fields.seed_key?.stringValue === "marco")!;
-	const seed = PROMPT_SEEDS.find((s) => s.key === "marco")!;
-	const repo = marco.fields.repo_path?.stringValue;
+	const probe = vault.ofType("template").find((t) => t.fields.seed_key?.stringValue === "probe")!;
+	const repo = probe.fields.repo_path?.stringValue;
 
 	// Seeded by an older catalog (no default yet), untouched since: brought up to date.
-	delete marco.fields.repo_path;
-	marco.fields.seed_hash = sv(kindHash(seed, marco.fields));
+	delete probe.fields.repo_path;
+	probe.fields.seed_hash = sv(kindHash(PROBE, probe.fields));
 	await seedCatalog();
-	expect(marco.fields.repo_path?.stringValue).toBe(repo);
+	expect(probe.fields.repo_path?.stringValue).toBe(repo);
 
 	// Same, but someone filled in a setting: the template is theirs now.
-	delete marco.fields.repo_path;
-	marco.fields.seed_hash = sv(kindHash(seed, marco.fields));
-	marco.fields.discord_channel_id = sv("123");
+	delete probe.fields.repo_path;
+	probe.fields.seed_hash = sv(kindHash(PROBE, probe.fields));
+	probe.fields.probe_channel_id = sv("123");
 	await seedCatalog();
-	expect(marco.fields.repo_path).toBeUndefined();
-	expect(marco.fields.discord_channel_id?.stringValue).toBe("123");
+	expect(probe.fields.repo_path).toBeUndefined();
+	expect(probe.fields.probe_channel_id?.stringValue).toBe("123");
 });
 
 test("the retired descriptor cards are vanished", async () => {

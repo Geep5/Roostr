@@ -5,10 +5,10 @@
  * requirements, and skills. One object per (prompt x space): the first
  * agent of a kind in a space creates it, the rest reuse it, so editing
  * the object reconfigures every agent linked to it. assistant -> the
- * "Assistant" prompt (DEFAULT_SYSTEM, default model); marco -> the
- * "Marco" prompt (kinds/marco.md, kimi-k3, requires links to the
- * matcherino-dev and discord-bot capability objects). An unknown kind
- * key seeds from the assistant defaults.
+ * "Assistant" prompt (DEFAULT_SYSTEM, default model); a kind a private
+ * extension adds (extensions.ts) -> that kind's prompt. A kind this
+ * computer doesn't know may be an extension's it doesn't load: the agent
+ * keeps its `kind` for a computer that does, and is not linked here.
  *
  * Runs with the other boot migrations, after migrate-capabilities, so
  * the prompt's `requires` links land on capability objects. Idempotent:
@@ -26,7 +26,8 @@ export async function migratePrompts(): Promise<{ created: number; reused: numbe
 	let upgraded = 0;
 	for (const agent of await queryAll({ type: "agent", filters: [{ key: "kind", condition: "notEmpty" }] })) {
 		const key = str(agent.fields, "kind");
-		const seed = PROMPT_SEEDS.find((s) => s.key === key) ?? DEFAULT_PROMPT;
+		const seed = PROMPT_SEEDS.find((s) => s.key === key);
+		if (!seed) continue;
 		try {
 			const prompt = await ensureSystemPrompt(seed, str(agent.fields, "channel"));
 			if (prompt.created) created++;
@@ -43,6 +44,8 @@ export async function migratePrompts(): Promise<{ created: number; reused: numbe
 	// without a live prompt link is pointed at its space's Assistant object.
 	for (const agent of await queryAll({ type: "agent" })) {
 		if (str(agent.fields, "spawn_parent")) continue;
+		// Still waiting on a computer that knows its kind (above).
+		if (str(agent.fields, "kind")) continue;
 		try {
 			const before = agent.fields["prompt"];
 			const after = await ensureAgentPrompt({ ...agent, blocks: [], deleted: false, mailbox: [] });

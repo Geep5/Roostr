@@ -51,6 +51,7 @@ import * as skill_read from "./tool-code/skill_read";
 import * as space_activity from "./tool-code/space_activity";
 import * as space_map from "./tool-code/space_map";
 import * as spawn from "./tool-code/spawn";
+import * as sql_query from "./tool-code/sql_query";
 import * as submit_result from "./tool-code/submit_result";
 import * as web_fetch from "./tool-code/web_fetch";
 
@@ -118,6 +119,7 @@ const FILES: ReadonlyArray<[string, { description: string; inputs: string }]> = 
 	["skill_read", skill_read],
 	["credential_action", credential_action],
 	["credential_fetch", credential_fetch],
+	["sql_query", sql_query],
 	["web_fetch", web_fetch],
 	["capability_list", capability_list],
 	["capability_request", capability_request],

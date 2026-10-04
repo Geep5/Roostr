@@ -19,11 +19,12 @@ import { linkTarget } from "./capabilities";
 import { openLoginWindow, profileCookies, type LoginWindow, type SessionCookie } from "./browser";
 import { actionsOf, KEY_PREFIX, credentialKeys, credentialSession, dropLegacySecrets, legacyKeyName, legacyKeys, legacyProfileDir, legacyProfileExists, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionSignedIn } from "./credentials";
 import { legacyInstalls } from "./migrate-capabilities";
-import { renewMatcherinoSession } from "./matcherino";
+import { sessionRenewers } from "./extensions";
 import { GOOGLE_SERVICE, localSignIn, signInOf, syncGoogleCredentials } from "./google-credentials";
 import { googleAccountStatus, removeGoogleAccount } from "./google";
 import { machines } from "./machine";
 import { machineId } from "./roster";
+import { checkPostgres, POSTGRES_SERVICE } from "./sql";
 import { CREDENTIAL_BADGE, credentialBadge } from "./credential-issues";
 
 export const CREDENTIAL_TYPE = "credential";
@@ -111,21 +112,18 @@ async function publishState(row: CredentialRow, stamp = false, next: LiveState =
 	return { ...row, ...next };
 }
 
-/**
- * Services whose session cookie's browser clock is not the truth: the site
- * re-sets it on every visit while the login behind it lives much longer.
- * Each renews the way a visit would, returning the re-stamped cookies, or
- * null when the login is really gone.
- */
-const SESSION_RENEWERS: Record<string, (fields: Record<string, ValueJSON>) => Promise<SessionCookie[] | null>> = {
-	matcherino: renewMatcherinoSession,
-};
 /** Renew this long before the cookie runs out, so a 5-minute refresh never lets it lapse. */
 const RENEW_AHEAD_S = 20 * 60;
 
-/** A renewable credential whose session cookie is about to lapse (or has), renewed; else unchanged. */
+/**
+ * A renewable credential whose session cookie is about to lapse (or has),
+ * renewed; else unchanged. Renewable: a service with an extension's session
+ * renewer - the site re-sets the cookie on every visit while the login behind
+ * it lives much longer, so the renewer visits the way a browser would and
+ * returns the re-stamped cookies, or null when the login is really gone.
+ */
 async function renewSession(row: CredentialRow): Promise<CredentialRow> {
-	const renew = SESSION_RENEWERS[row.service];
+	const renew = sessionRenewers[row.service];
 	const recipe = recipeOf(row.fields);
 	const session = credentialSession(row.fields);
 	if (!renew || !recipe.sessionCookie || session.length === 0) return row;
@@ -146,7 +144,7 @@ async function renewSession(row: CredentialRow): Promise<CredentialRow> {
 export async function refreshCredentials(): Promise<CredentialRow[]> {
 	const me = await machineId();
 	const rows = await Promise.all((await queryAll({ type: CREDENTIAL_TYPE })).map(rowOf));
-	mine = await Promise.all(rows.filter((r) => r.servedBy === me).map(async (r) => (r.service === GOOGLE_SERVICE ? publishState(r, false, await googleState(r)) : publishState(await renewSession(r)))));
+	mine = await Promise.all(rows.filter((r) => r.servedBy === me).map(async (r) => (r.service === GOOGLE_SERVICE ? publishState(r, false, await googleState(r)) : r.service === POSTGRES_SERVICE ? publishState(r, false, await postgresState(r)) : publishState(await renewSession(r)))));
 	// Google sign-ins travel on their Credentials: import local ones, write the listed ones here.
 	await syncGoogleCredentials().catch((err) => console.error("[google] sync failed:", err instanceof Error ? err.message : err));
 	const current = new Map(rows.map((r) => [r.id, r]));
@@ -221,6 +219,8 @@ async function keptHere(id: string): Promise<CredentialRow> {
 export async function connectCredential(id: string): Promise<CredentialRow> {
 	const row = await keptHere(id);
 	if (row.service === GOOGLE_SERVICE) return connectGoogle(row);
+	// A database has no sign-in to open: Connect is its live check.
+	if (row.service === POSTGRES_SERVICE) return checkCredential(id);
 	const recipe = recipeOf(row.fields);
 	if (!recipe.loginUrl || !recipe.sessionCookie) throw new CredentialError(400, `${recipe.label || "This credential"} has no login page and signed-in cookie - it connects with pasted keys.`);
 	if (windows.has(row.id)) throw new CredentialError(409, "A sign-in window for this credential is already open on this computer.");
@@ -252,12 +252,43 @@ export async function connectCredential(id: string): Promise<CredentialRow> {
 	return state;
 }
 
-/** Check a credential now and stamp `checked_at`; a Google credential runs `gws-as <account> auth status`. */
+/** Check a credential now and stamp `checked_at`; a Google credential runs `gws-as <account> auth status`, a PostgreSQL one connects and runs `select 1`. */
 export async function checkCredential(id: string): Promise<CredentialRow> {
 	const kept = await keptHere(id);
-	const row = await publishState(kept, true, kept.service === GOOGLE_SERVICE ? await googleCheck(kept) : undefined);
+	const live = kept.service === GOOGLE_SERVICE ? await googleCheck(kept) : kept.service === POSTGRES_SERVICE ? await postgresCheck(kept) : undefined;
+	const row = await publishState(kept, true, live);
 	mine = [...mine.filter((c) => c.id !== row.id), row];
 	return row;
+}
+
+/** PostgreSQL credentials this computer checked since it started: what was checked (URL and ssh host, hashed) and when. */
+const postgresChecks = new Map<string, { fingerprint: string; at: number }>();
+/** A broken database is tried again on a refresh at most this often. */
+const POSTGRES_RETRY_MS = 5 * 60_000;
+
+/** The live check: connect (through the SSH tunnel, when ssh_host is set) and run `select 1`; the error says why not, with no secret in it. */
+async function postgresCheck(row: CredentialRow): Promise<LiveState> {
+	const url = credentialKeys(row.fields)?.url ?? "";
+	const sshHost = str(row.fields, "ssh_host").trim();
+	if (!url) return { status: "missing", auth: "", error: "Fill in the Database URL (postgres://user:password@host:port/database), then press Connect." };
+	const error = await checkPostgres({ id: row.id, url, sshHost });
+	postgresChecks.set(row.id, { fingerprint: Bun.hash(`${url}\n${sshHost}`).toString(16), at: Date.now() });
+	return error ? { status: "broken", auth: "", error: `Could not query the database from ${hostname()}: ${error}` } : { status: "active", auth: "api_key", error: "" };
+}
+
+/**
+ * What the slow refresh writes for a PostgreSQL credential: the last live
+ * check stands while the URL and ssh host are what was checked; a changed
+ * (or never checked here) one gets a check, and a broken one is retried
+ * every few minutes.
+ */
+async function postgresState(row: CredentialRow): Promise<LiveState> {
+	const url = credentialKeys(row.fields)?.url ?? "";
+	const last = postgresChecks.get(row.id);
+	const same = !!url && last?.fingerprint === Bun.hash(`${url}\n${str(row.fields, "ssh_host").trim()}`).toString(16);
+	if (same && row.status === "active") return { status: "active", auth: row.auth, error: row.error };
+	if (same && row.status === "broken" && Date.now() - (last?.at ?? 0) < POSTGRES_RETRY_MS) return { status: "broken", auth: row.auth, error: row.error };
+	return postgresCheck(row);
 }
 
 /** Running `gws-as <account> auth login` processes, by credential id. */
@@ -371,16 +402,19 @@ export interface AgentCredential {
 
 /**
  * The credential an agent may act with: one it lists in its Credentials
- * property, of the service asked for, that is active. Any computer can use
- * it - the secret rides on the object.
+ * property, of the service asked for, that is active - the one `pick`
+ * names (its name or id) when given, else the first active one. Any
+ * computer can use it - the secret rides on the object.
  */
-export async function agentCredential(agent: ObjectJSON, service: string): Promise<AgentCredential> {
+export async function agentCredential(agent: ObjectJSON, service: string, pick = ""): Promise<AgentCredential> {
 	const linked = agentCredentialIds(agent);
 	if (linked.length === 0) throw new Error("This agent lists no credentials. Add one to its Credentials property.");
 	const rows = await Promise.all(linked.map((id) => credentialObject(id).catch(() => null)));
 	const ofService = rows.filter((r): r is CredentialRow => !!r && r.service === service);
 	if (ofService.length === 0) throw new Error(`None of this agent's credentials is for "${service}".`);
-	const row = ofService.find((r) => r.status === "active") ?? ofService[0];
+	const picked = pick ? ofService.find((r) => r.id === pick || r.name === pick) ?? ofService.find((r) => r.name.toLowerCase() === pick.toLowerCase()) : undefined;
+	if (pick && !picked) throw new Error(`None of this agent's "${service}" credentials is "${pick}"; they are: ${ofService.map((r) => `"${r.name}"`).join(", ")}.`);
+	const row = picked ?? ofService.find((r) => r.status === "active") ?? ofService[0];
 	if (row.status !== "active") throw new CredentialNotConnected(row.name, `Credential "${row.name}" is not connected (${row.status || "missing"}${row.error ? `: ${row.error}` : ""}).`);
 	return { row, cookies: credentialSession(row.fields), keys: credentialKeys(row.fields) };
 }
@@ -424,7 +458,7 @@ export async function credentialsPromptLine(agent: ObjectJSON): Promise<string> 
 	const rows = (await Promise.all(agentCredentialIds(agent).map((id) => credentialObject(id).catch(() => null)))).filter((r): r is CredentialRow => !!r);
 	if (rows.length === 0) return "";
 	const lines = rows.map((c) => {
-		const how = c.status !== "active" ? `not connected (${c.status || "missing"}) - tell the person to connect it` : c.service === GOOGLE_SERVICE ? `signed in: run \`gws-as ${c.account} …\` in the shell (the google skill says how)` : c.auth === "browser_profile" ? `signed in: credential_fetch reads pages, credential_action acts (service "${c.service}")` : "keys saved";
+		const how = c.status !== "active" ? `not connected (${c.status || "missing"}) - tell the person to connect it` : c.service === GOOGLE_SERVICE ? `signed in: run \`gws-as ${c.account} …\` in the shell (the google skill says how)` : c.service === POSTGRES_SERVICE ? `connected: query it read-only with sql_query (credential "${c.name}"); its Skill or guide has the schema` : c.auth === "browser_profile" ? `signed in: credential_fetch reads pages, credential_action acts (service "${c.service}")` : "keys saved";
 		const acts = actionsOf(c.fields);
 		const doing = acts.length > 0 ? `; actions: ${acts.map((a) => `${a.key} - ${a.summary} (${a.access})`).join("; ")}` : "";
 		return `- ${c.name || c.service || "Credential"}${c.account ? ` (${c.account})` : ""} - service "${c.service}": ${how}${doing}`;

@@ -19,7 +19,7 @@ Think of a workshop.
   screenshots; here is how to use it." One card, everyone reads it.
 - A **Capability** is the *tag on one bench's copy of the tool*: "on Mac,
   Headless Chrome works, checked 3 minutes ago." Each bench writes its own tags.
-- A **Credential** is a *key on a hook*: "support@matcherino.com". It says which
+- A **Credential** is a *key on a hook*: "support@example.com". It says which
   door it opens and which bench looks after it, never the cut of the key in a
   way anyone else can read.
 
@@ -36,6 +36,14 @@ key. A Skill without a `key` is instructions only.
 Agent kinds (`PROMPT_SEEDS`) are seeded the same way, as agent Templates per
 space carrying the kind's prompt link, Skill links and field defaults, and are
 re-seeded only while unedited (the `credential-seeds.ts` pattern).
+
+All three seed lists (`CATALOG`, `PROMPT_SEEDS`, `CREDENTIAL_SEEDS`) also take
+the entries of private extensions: `harness/private/<name>/index.ts`, a
+gitignored checkout loaded at boot by `harness/src/extensions.ts`, which can
+also add per-service session renewers, signed APIs and credential-action code.
+A computer without an extension seeds only the public lists and leaves
+what an extension seeded elsewhere alone: seeding iterates its own entries,
+and the boot migrations skip keys and kinds they don't know.
 
 ## Capability
 
@@ -87,6 +95,47 @@ the Credential's Served by. For a Google account, connect runs `gws-as
 <account> auth login` there and imports the sign-in into the `key_*` fields;
 check runs the live `gws-as <account> auth status`; disconnect clears the keys
 and the local account folder so nothing re-imports it.
+
+Tool code never sees those secrets: every object the roostr SDK hands a tool
+(`get`, `getInSpace`, `writable`, `query`) shows a Credential's filled
+`key_*`, `session` and `secret` fields as `[secret]` (`hideCredentialSecrets`
+in `credentials.ts`). Only the harness acts with them. The daemon and the
+website still see the real values.
+
+### PostgreSQL (read-only)
+
+Service `postgres` is a database an agent may query but not change. A human
+fills in two fields:
+
+- **Database URL** (`key_url`, secret): `postgres://user:password@host:port/database`.
+  Give it a read-only database role. The harness enforces read-only access as
+  well, but a role is the real guard.
+- **SSH host** (`ssh_host`, optional): e.g. `root@1.2.3.4`. When it is set,
+  the serving computer reaches the URL's host:port through its own tunnel,
+  `ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -N -L 127.0.0.1:<free port>:<host>:<port> <ssh_host>`.
+  That computer's ssh keys and `~/.ssh/config` must reach the host
+  non-interactively. There is one tunnel per credential: it is reused while it
+  lives, reopened when it dies, and killed when the harness exits.
+
+There is no browser sign-in. Connect and Check run a live `select 1`, which
+sets the status to active or broken (the error never contains the URL or
+password). The slow refresh keeps the last result until the URL or SSH host
+changes, and retries a broken credential every five minutes.
+
+Agents use the built-in `sql_query` tool (`harness/src/tool-code/sql_query.ts`),
+or `roostr.credentials.sql(service, sql, {credential, maxRows})` from tool code.
+As with `credential_action`, permission is having the credential: the agent's
+Credentials must list an active `postgres` credential, and `credential` (a name
+or id) picks one when there are several. `harness/src/sql.ts` runs the query:
+
+- It accepts exactly one SELECT, WITH, VALUES, TABLE, SHOW or EXPLAIN statement.
+  Semicolons inside strings and comments are fine.
+- The statement runs as a prepared statement in a `READ ONLY` transaction with
+  `SET LOCAL statement_timeout = '30s'`, and the transaction is always rolled back.
+- It returns `{columns, rows, rowCount, truncated}`: 500 rows by default and
+  2000 at most (`max_rows`).
+
+Put the database's schema in a Skill or guide that the agent reads.
 
 ## Migration
 

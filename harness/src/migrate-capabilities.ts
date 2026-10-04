@@ -14,6 +14,10 @@
  *     earliest-created; `served_by` as the machine id string; no `install`,
  *     `account` or `auth` fields; none for a sign-in (credential seed) key.
  *
+ * A key this computer knows neither as catalog software nor as a sign-in
+ * belongs to an extension it doesn't load: its rows and lists are left for
+ * a computer that does.
+ *
  * Runs after migrateLoginInstalls, which turns this machine's login rows
  * into Credentials first. Idempotent: a re-run finds nothing to fold.
  */
@@ -50,6 +54,12 @@ export async function legacyInstalls(): Promise<LegacyInstall[]> {
 
 /** A sign-in key (a Credential seed) that is not catalog software. */
 const loginKey = (key: string): boolean => !!seedFor(key) && !CATALOG.some((c) => c.key === key);
+/**
+ * A key this computer knows: catalog software or a sign-in. Anything else
+ * belongs to an extension this computer doesn't load (extensions.ts), so it
+ * is left exactly as it is for a computer that does.
+ */
+const knownKey = (key: string): boolean => !!seedFor(key) || CATALOG.some((c) => c.key === key);
 
 function capabilityFields(key: string, machine: string, state: { status: string; error: string; checkedAt: number; channel: string }): Record<string, ValueJSON> {
 	const entry = CATALOG.find((c) => c.key === key);
@@ -82,6 +92,7 @@ export async function migrateCapabilities(): Promise<{ folded: number; created: 
 	// 1. Fold install rows.
 	const installs = await legacyInstalls();
 	for (const row of installs) {
+		if (row.key && !row.account && !knownKey(row.key)) continue;
 		vanish.push(row.id);
 		if (row.account || !row.key || !row.machineId || loginKey(row.key)) continue;
 		const id = `${row.key}@${row.machineId}`;
@@ -103,13 +114,16 @@ export async function migrateCapabilities(): Promise<{ folded: number; created: 
 	for (const m of await queryAll({ type: MACHINE_TYPE })) {
 		if (m.fields["capabilities"] === undefined) continue;
 		const mid = str(m.fields, "machine_id");
-		for (const key of list(m.fields, "capabilities")) {
+		const keys = list(m.fields, "capabilities");
+		for (const key of keys) {
 			const id = `${key}@${mid}`;
-			if (!mid || loginKey(key) || firstCap.has(id)) continue;
+			if (!mid || !knownKey(key) || loginKey(key) || firstCap.has(id)) continue;
 			const made = await createObject(CATALOG.find((c) => c.key === key)?.name ?? key, CAPABILITY_TYPE, capabilityFields(key, mid, { status: "missing", error: "", checkedAt: 0, channel: "" }));
 			firstCap.set(id, { id: made.id, fields: {}, createdAt: Date.now() } as QueryRow);
 			created += 1;
 		}
+		// A key only an extension knows keeps the list for a computer that loads it.
+		if (keys.some((key) => !knownKey(key))) continue;
 		await deleteField(m.id, "capabilities");
 		machinesCleared += 1;
 	}

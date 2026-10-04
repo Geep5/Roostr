@@ -4,14 +4,17 @@
  * durable inbox/outbox copies on every participant's own object DAG.
  * Delivery retries independently of agent execution and machine liveness.
  *
- *   bun run src/index.ts setup --name Gracie [--kind assistant|marco] [--channel id] [--<field> value…]
+ *   bun run src/index.ts setup --name Gracie [--kind <kind key, e.g. assistant>] [--channel id] [--<field> value…]
  *   bun run src/index.ts serve
  *   bun run src/index.ts ask <agentId> "message"
  *   bun run src/index.ts vanish <objectId…> | --trash   [--yes]
  */
 
+// First: private extensions (harness/private/) register their seeds before anything reads them.
+import "./extensions";
 import { API, VANISH_LOG_ID, apiFetch, chatPost, deleteField, fetchObject, guestAgents, mutate, query, setField, str, subscribe, sv, createObject, queryAll, vanishedEntries, wasDeleted } from "./api";
 import { TEMPLATE_OWN, kindTemplates, seedCatalog } from "./catalog-seeds";
+import { PROMPT_SEEDS } from "./prompts";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
@@ -1012,5 +1015,5 @@ else if (cmd === "import-kb") {
 	process.exit(0);
 }
 else {
-	console.log("commands: setup --name X [--kind assistant|marco] [--model m] [--channel id] [--<kind field> v] | serve | ask <agentId> <msg> | vanish <objectId…>|--trash [--yes] | import-kb <dir> --space <id>");
+	console.log(`commands: setup --name X [--kind ${PROMPT_SEEDS.map((s) => s.key).join("|")}] [--model m] [--channel id] [--<kind field> v] | serve | ask <agentId> <msg> | vanish <objectId…>|--trash [--yes] | import-kb <dir> --space <id>`);
 }

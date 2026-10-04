@@ -40,7 +40,7 @@ test("parseKbFile maps the staff-file convention to audience, and open questions
 });
 
 test("parseKbFile turns non-empty preamble into a named entry", () => {
-	const entries = parseKbFile("global.md", "# Global\n\nThe canonical invite is matcherino.com/discord.\n\n## Links\n- x");
+	const entries = parseKbFile("global.md", "# Global\n\nThe canonical invite is example.com/discord.\n\n## Links\n- x");
 	expect(entries.map((e) => e.title)).toEqual(["General", "Links"]);
 });
 

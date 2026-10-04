@@ -23,7 +23,7 @@
 import { join } from "node:path";
 import { chatPost, createObject, deleteField, fetchObject, guestAgents, mutate, plainValue, query, queryAll, setField, type AgentEndpoint, type BlockJSON, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { HUMAN_THREAD, convBlocks, humanRef, postTo } from "./conv";
-import type { CredentialAction } from "./credentials";
+import { hideCredentialSecrets, type CredentialAction } from "./credentials";
 import type { CapabilityRow } from "./capabilities";
 import { STYLE, appendMarkdown, inlineMarks, type Mark } from "./markdown";
 import * as memory from "./memory";
@@ -99,6 +99,18 @@ export interface CredentialRequest {
 /** The API's answer, secrets blanked out; or why there is none (`signedOut`: the credential no longer signs in). */
 export type CredentialAnswer = { ok: true; body: unknown } | { ok: false; signedOut: boolean; error: string };
 
+/** What a credential action's harness-side code returned, secrets blanked out; or why it could not run. */
+export type CredentialActResult = { ok: true; result: unknown } | { ok: false; error: string };
+
+/** A read-only statement's answer through a database credential (sql.ts), secrets blanked out; or why it did not run. */
+export type CredentialSqlResult = { ok: true; columns: string[]; rows: unknown[][]; rowCount: number; truncated: boolean } | { ok: false; error: string };
+
+/** Which of the agent's database credentials (its name or id, when it has several) and how many rows at most (default 500, at most 2000). */
+export interface CredentialSqlOptions {
+	credential?: string;
+	maxRows?: number;
+}
+
 /** A question to other agents (agent_ask), sent from this turn's object and agent. */
 export interface AskMessage {
 	recipients: AgentEndpoint[];
@@ -127,6 +139,8 @@ export interface HarnessApi {
 	credential(service: string): Promise<CredentialInfo>;
 	credentialPage(service: string, url: string, script: string): Promise<CredentialPage>;
 	credentialApi(service: string, path: string, request: CredentialRequest): Promise<CredentialAnswer>;
+	credentialAct(service: string, action: string, input: Record<string, unknown>): Promise<CredentialActResult>;
+	credentialSql(service: string, sql: string, options: CredentialSqlOptions): Promise<CredentialSqlResult>;
 	skills(): Promise<SkillListing[]>;
 	capabilities(): Promise<CapabilityRow[]>;
 	requestCapability(capabilityObjectId: string, operation: string, text: string): Promise<SentMessage>;
@@ -153,8 +167,12 @@ export interface RoostrCredentials {
 	get(service: string): Promise<CredentialInfo>;
 	/** Open `url` in a throwaway headless Chrome signed in with that credential, run `script` there (an async function body; what it returns is `result`), and read the page. */
 	page(service: string, url: string, script: string): Promise<CredentialPage>;
-	/** A request to the service's own API (a path on it), signed in with that credential; only for services whose sign-in the harness knows how to send (matcherino). */
+	/** A request to the service's own API (a path on it), signed in with that credential; only for services whose sign-in the harness knows how to send (an extension's `credentialApis`). */
 	api(service: string, path: string, request?: CredentialRequest): Promise<CredentialAnswer>;
+	/** Run one of the credential's actions whose code lives on the harness (an extension's `credentialActions`), with `input` from the tool. */
+	act(service: string, action: string, input?: Record<string, unknown>): Promise<CredentialActResult>;
+	/** One read-only SQL statement against the service's database (a `postgres` credential), run by the harness in a READ ONLY transaction with a 30s timeout; the URL and password stay with the harness. */
+	sql(service: string, sql: string, options?: CredentialSqlOptions): Promise<CredentialSqlResult>;
 }
 
 export interface Roostr {
@@ -263,15 +281,16 @@ export function createRoostr(context: ToolRunContext, touched: Set<string>, harn
 	const owner = context.agentId;
 	return {
 		context,
-		query: (params) => sdkCall(() => (typeof params.limit === "number" ? query(params) : queryAll(params))),
-		get: (id) => sdkCall(() => fetchObject(id)),
-		getInSpace: (id) => sdkCall(async () => assertInSpace(await fetchObject(id), context.channelId)),
+		// Every object a tool is handed shows a Credential's secrets as "[secret]" (credentials.ts hideCredentialSecrets): only the harness acts with them.
+		query: (params) => sdkCall(async () => (typeof params.limit === "number" ? await query(params) : await queryAll(params)).map(hideCredentialSecrets)),
+		get: (id) => sdkCall(async () => hideCredentialSecrets(await fetchObject(id))),
+		getInSpace: (id) => sdkCall(async () => hideCredentialSecrets(await assertInSpace(await fetchObject(id), context.channelId))),
 		writable: (id) =>
 			sdkCall(async () => {
 				const obj = await assertInSpace(await fetchObject(id), context.channelId);
 				if (obj.typeKey === TOOL_TYPE) throw new Error(TOOL_EDIT_REFUSAL);
 				notTools.add(obj.id);
-				return obj;
+				return hideCredentialSecrets(obj);
 			}),
 		space: () => sdkCall(async () => context.channelId || (await defaultSpaceId())),
 		spaceFilter: () => sdkCall(() => spaceFilterFor(context.channelId)),
@@ -347,6 +366,8 @@ export function createRoostr(context: ToolRunContext, touched: Set<string>, harn
 			get: (service) => sdkCall(() => harness("credential", [service])),
 			page: (service, url, script) => sdkCall(() => harness("credentialPage", [service, url, script])),
 			api: (service, path, request = {}) => sdkCall(() => harness("credentialApi", [service, path, request])),
+			act: (service, action, input = {}) => sdkCall(() => harness("credentialAct", [service, action, input])),
+			sql: (service, sql, options = {}) => sdkCall(() => harness("credentialSql", [service, sql, options])),
 		},
 		skills: () => sdkCall(() => harness("skills", [])),
 		capabilities: () => sdkCall(() => harness("capabilities", [])),

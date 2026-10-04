@@ -66,8 +66,7 @@ test("a credential's actions are its service's", () => {
 	const x = actionsOf(seeded("x"));
 	expect(x.map((a) => a.key)).toEqual(["read_mentions", "retweet_post"]);
 	expect(x[1].access).toBe("write");
-	expect(actionsOf(seeded("matcherino")).map((a) => a.key)).toEqual(["list_featured", "feature_events"]);
 	expect(actionsOf(seeded("discord-bot"))).toEqual([]);
 	// Actions are code, never fields on the object.
-	expect(Object.keys(seeded("matcherino")).some((k) => k.startsWith("action"))).toBe(false);
+	expect(Object.keys(seeded("x")).some((k) => k.startsWith("action"))).toBe(false);
 });

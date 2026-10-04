@@ -19,7 +19,6 @@
  * object (or pointing the agent at another) is the whole reconfiguration.
  */
 
-import { readFileSync } from "node:fs";
 import { addBlock, choice, createObject, fetchObject, queryAll, setField, str, sv, type ObjectJSON, type ValueJSON } from "./api";
 
 export const SYSTEM_PROMPT_TYPE = "system_prompt";
@@ -93,12 +92,6 @@ read it with skill_read before starting.`;
 
 export const DEFAULT_MODEL = process.env.GLON_AGENT_MODEL || "claude-sonnet-4-5";
 
-/** Marco's standing prompt travels as a file so the prompt stays byte-identical to the source it was ported from. */
-const MARCO_SYSTEM = readFileSync(`${import.meta.dir}/../kinds/marco.md`, "utf8");
-
-/** Default checkout for the Matcherino dev bot; also the `matcherino-dev` skill's check path. */
-export const MATCHERINO_REPO = "/home/geep/Matcherino";
-
 /** The prompt-less default: a generic standing prompt, the default model, no skills. */
 export const DEFAULT_PROMPT: AgentKindEntry = {
 	key: "assistant",
@@ -112,28 +105,8 @@ export const DEFAULT_PROMPT: AgentKindEntry = {
 	defaults: {},
 };
 
-export const PROMPT_SEEDS: AgentKindEntry[] = [
-	DEFAULT_PROMPT,
-	{
-		key: "marco",
-		name: "Marco (Matcherino dev bot)",
-		promptName: "Marco",
-		description: "Matcherino admin assistant on Discord: codebase, production read replica, tickets, Shortcut and Google Workspace from this machine's shell.",
-		system: MARCO_SYSTEM,
-		// Moonshot's model list for the stored key (GET /v1/models): kimi-k3,
-		// kimi-k2.7-code, kimi-k2.6. BotAdmin ran on omp's kimi-code/k3.
-		model: "kimi-k3",
-		// Its Discord bot token is a Credential the agent lists, not a skill.
-		skills: ["matcherino-dev"],
-		fields: [
-			{ key: "discord_channel_id", label: "Discord channel id", note: "Admin channel the bot answers in. Required." },
-			{ key: "discord_extra_channel_ids", label: "Extra channel ids", note: "Comma-separated additional guild channels to answer in." },
-			{ key: "discord_allowed_dm_users", label: "Allowed DM users", note: "Comma-separated Discord user ids whose DMs are answered." },
-			{ key: "repo_path", label: "Repository path", note: `Checkout shell_exec starts in. Default ${MATCHERINO_REPO}.` },
-		],
-		defaults: { repo_path: MATCHERINO_REPO },
-	},
-];
+/** The built-in kinds; private extensions (extensions.ts) append their own at load. */
+export const PROMPT_SEEDS: AgentKindEntry[] = [DEFAULT_PROMPT];
 
 /** The id a `prompt` property points at: a single link, a one-link list, or the legacy string id. */
 export function promptTarget(fields: Record<string, ValueJSON>): string {

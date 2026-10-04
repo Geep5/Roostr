@@ -1,5 +1,5 @@
 /**
- * Discord surface - port of MatcherinoBotAdmin/bot.py's REST poller onto the
+ * Discord surface - port of an earlier standalone bot's (bot.py) REST poller onto the
  * harness runtime. No gateway: every 3 s each configured channel is read
  * with `after=<mark>` (bot.py:143-148, 556), and a human message becomes a
  * chat block in the channel's own conversation on the agent's object:

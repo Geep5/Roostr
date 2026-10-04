@@ -1,7 +1,7 @@
 /**
  * Credentials as properties. Every setting of a Credential is an ordinary
  * property of its space (Account, Service, Login page, Signed-in host and
- * cookie, one property per key - CREDENTIAL_PROPERTIES), and the service
+ * cookie, one property per key and per option - credentialProperties()), and the service
  * presets are Credential templates. This seeds both, once per space, like
  * system prompts: created once, then the objects are the truth.
  *
@@ -16,7 +16,7 @@
 import { bv, createObject, iv, lv, mutate, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
 import { CREDENTIAL_TYPE, pinOf } from "./credential-objects";
 import { machineId } from "./roster";
-import { CREDENTIAL_PROPERTIES, CREDENTIAL_SEEDS, KEY_PREFIX, legacyKeyName, recipeFieldKeys, recipeHash, recipeMissing, seedFor, seedRecipeFields } from "./credentials";
+import { CREDENTIAL_SEEDS, credentialProperties, KEY_PREFIX, legacyKeyName, optionKeys, recipeFieldKeys, recipeHash, recipeMissing, seedFor, seedRecipeFields } from "./credentials";
 
 /**
  * Retired shapes of credential actions, removed from credentials, templates
@@ -78,7 +78,7 @@ export async function seedCredentials(): Promise<{ properties: number; templates
 	const relations = await queryAll({ type: "relation" });
 	for (const space of spaces) {
 		const have = new Set(relations.filter((r) => str(r.fields, "channel") === space.id).map((r) => str(r.fields, "key")));
-		for (const p of CREDENTIAL_PROPERTIES) {
+		for (const p of credentialProperties()) {
 			if (have.has(p.key)) continue;
 			await createObject(p.name, "relation", {
 				channel: sv(space.id),
@@ -169,8 +169,9 @@ export async function fillCredential(cred: { id: string; fields: Record<string, 
 	const seed = seedFor(service);
 	const source = tpl ? Object.fromEntries(recipeFieldKeys(tpl.fields).filter((k) => tpl.fields[k]).map((k) => [k, tpl.fields[k]])) : seed ? seedRecipeFields(seed) : null;
 	if (!source) return false;
-	// The credential's own Service stays; a template's description only fills an empty one.
-	const fields = { ...source, service: cred.fields["service"], ...(cred.fields["description"] ? { description: cred.fields["description"] } : {}) };
+	// The credential's own Service stays; a template's description only fills an empty one; an option it already set (ssh_host) is kept.
+	const ownOptions = optionKeys().filter((k) => str(cred.fields, k)).map((k) => [k, cred.fields[k]]);
+	const fields = { ...source, service: cred.fields["service"], ...(cred.fields["description"] ? { description: cred.fields["description"] } : {}), ...Object.fromEntries(ownOptions) };
 	await writeRecipe(cred.id, cred.fields, fields);
 	// An unnamed credential takes the service's name ("Kimi (Moonshot)").
 	const name = str(cred.fields, "name").trim();

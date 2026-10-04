@@ -16,43 +16,6 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 		return `error: "${cred.name}" has no action "${action}"${valid ? `; its actions are ${valid}` : " - it has no actions"}. Don't retry with another name.`;
 	}
 
-	if (service === "matcherino" && (action === "list_featured" || action === "feature_events")) {
-		// Matcherino's own API, signed in by the harness. feature_events only
-		// ever adds: an id already featured is left alone, and nothing is
-		// unfeatured. Each id is read back from the live list afterwards; the
-		// list is served from a short cache, so an id the API accepted but
-		// the list doesn't show yet is `notShownYet`, not done.
-		const featured = async () => {
-			const res = await roostr.credentials.api("matcherino", "/events/featured?page=0&pageSize=100");
-			if (!res.ok) return res;
-			const body = res.body;
-			const contents: unknown[] = body && typeof body === "object" && "contents" in body && Array.isArray(body.contents) ? body.contents : [];
-			const events = contents.flatMap((e) => (e && typeof e === "object" && "id" in e && typeof e.id === "number" ? [{ id: e.id, title: "title" in e ? String(e.title) : "" }] : []));
-			return { ok: true as const, events };
-		};
-		const before = await featured();
-		if (!before.ok) {
-			return before.signedOut
-				? `Credential signed out: "${cred.name}" no longer signs in to Matcherino (${before.error}). Tell the person to press Reconnect on it; do not retry this turn.`
-				: `Matcherino failed: ${before.error}`;
-		}
-		if (action === "list_featured") return before.events;
-		const ids = (Array.isArray(input.ids) ? input.ids : []).map((v) => Number(v)).filter((n) => Number.isInteger(n) && n > 0);
-		if (ids.length === 0) return "error: pass the bounty ids to feature in `ids`";
-		const was = new Set(before.events.map((e) => e.id));
-		const accepted: number[] = [];
-		const failed: Array<{ id: number; error: string }> = [];
-		for (const id of ids.filter((x) => !was.has(x))) {
-			const res = await roostr.credentials.api("matcherino", "/users/admin/events/setFeatured", { method: "POST", body: { bountyId: id, feature: true } });
-			if (res.ok) accepted.push(id);
-			else failed.push({ id, error: res.error });
-		}
-		const after = await featured();
-		if (!after.ok) return `Matcherino failed: ${after.error}`;
-		const now = new Set(after.events.map((e) => e.id));
-		return { featured: accepted.filter((id) => now.has(id)), already: ids.filter((id) => was.has(id)), failed, notShownYet: accepted.filter((id) => !now.has(id)) };
-	}
-
 	if (service === "x" && (action === "read_mentions" || action === "retweet_post")) {
 		const url = action === "read_mentions" ? "https://x.com/notifications/mentions" : (typeof input.url === "string" ? input.url : "").trim();
 		if (!/^https:\/\/(?:x|twitter)\.com\//i.test(url)) return "error: url must be an x.com or twitter.com URL";
@@ -107,5 +70,8 @@ return JSON.stringify({ ok: false, error: "clicked Repost but the page never sho
 		return `${page.result ? `Result: ${page.result}\n\n` : ""}${page.title}\n${page.url}\n${page.text}`.slice(0, 14_000);
 	}
 
-	return `error: ${service}.${action} is declared on the credential but this tool has no code for it`;
+	// Any other action's code lives on the harness (a private extension's credentialActions), signed in there.
+	const { service: _service, action: _action, ...rest } = input;
+	const done = await roostr.credentials.act(service, action, rest);
+	return done.ok ? done.result : `Credential action failed: ${done.error}`;
 }

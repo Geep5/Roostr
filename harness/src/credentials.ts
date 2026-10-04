@@ -52,6 +52,8 @@ export interface CredentialSeed {
 	sessionCookie?: { host: string; name: string };
 	/** Password setup: the fields the form asks for. */
 	passwordFields?: PasswordField[];
+	/** Plain settings beside the keys (not secret), each seeded empty on the template under its own key: postgres's `ssh_host`. */
+	options?: Array<{ key: string; label: string }>;
 	/** What the signed-in account can do; seeds one `action_*` field each. */
 	actions?: CredentialAction[];
 }
@@ -65,6 +67,7 @@ export interface CredentialAction {
 	access: "read" | "write";
 }
 
+/** The built-in presets; private extensions (extensions.ts) append their own at load. */
 export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 	{
 		key: "x",
@@ -84,17 +87,6 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 		],
 	},
 	{
-		key: "matcherino",
-		label: "Matcherino",
-		note: "Log in with Chrome to let agents administer Matcherino featured content through this machine.",
-		loginUrl: "https://matcherino.com/login",
-		sessionCookie: { host: "matcherino.com", name: "credentials" },
-		actions: [
-			{ key: "list_featured", summary: "the events featured on the homepage now as JSON [{id, title}]", access: "read" },
-			{ key: "feature_events", summary: "feature each bounty id in `ids` that is not featured yet (never unfeatures); returns {featured, already, failed, notShownYet}", access: "write" },
-		],
-	},
-	{
 		key: "linkedin",
 		label: "LinkedIn",
 		note: "LinkedIn has no write API for people; a logged-in Chrome session is the only way agents can act here.",
@@ -104,7 +96,7 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 	{
 		key: "discord-bot",
 		label: "Discord bot",
-		note: "Bot token for a Discord application; agents of the Marco kind poll and answer their channels with it.",
+		note: "Bot token for a Discord application; agents with Discord channel settings poll and answer their channels with it.",
 		passwordFields: [{ key: "token", label: "Bot token", secret: true }],
 	},
 	// A Google account for the gws CLI. The sign-in itself lives on the
@@ -137,6 +129,16 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 		label: "Kimi (Moonshot)",
 		note: "Moonshot API key for Kimi models. Agents whose Model is a kimi model use it on any computer.",
 		passwordFields: [{ key: "api_key", label: "API key", secret: true }],
+	},
+	// A database agents read through sql_query: the harness connects (through
+	// an SSH tunnel it opens when ssh_host is set - sql.ts), the model never
+	// sees the URL. Connect/Check runs `select 1` to set the status.
+	{
+		key: "postgres",
+		label: "PostgreSQL (read-only)",
+		note: "A PostgreSQL database agents query read-only with sql_query. Database URL: postgres://user:password@host:port/database - use a read-only database role. SSH host (optional, e.g. root@1.2.3.4): the computer running the agent reaches the URL's host:port through an SSH tunnel to it, with that computer's own SSH keys. Press Connect to check it.",
+		passwordFields: [{ key: "url", label: "Database URL", secret: true }],
+		options: [{ key: "ssh_host", label: "SSH host" }],
 	},
 ];
 
@@ -210,23 +212,33 @@ export function seedRecipeFields(seed: CredentialSeed): Record<string, ValueJSON
 		out.session_cookie = { stringValue: seed.sessionCookie.name };
 	}
 	for (const f of seed.passwordFields ?? []) out[`${KEY_PREFIX}${f.key}`] = { stringValue: "" };
+	for (const o of seed.options ?? []) out[o.key] = { stringValue: "" };
 	return out;
 }
 
 export const RECIPE_KEYS = ["service", "description", "login_url", "session_host", "session_cookie"] as const;
 
-/** The recipe's field keys on this object: the fixed ones plus its key fields. */
+/** Every seed's plain option keys (`ssh_host`), from the seeds as they are now - extensions add theirs at load. */
+export function optionKeys(): string[] {
+	return [...new Set(CREDENTIAL_SEEDS.flatMap((s) => s.options ?? []).map((o) => o.key))];
+}
+
+/** The recipe's field keys on this object: the fixed ones, its key fields, and the option fields it carries. */
 export function recipeFieldKeys(fields: Record<string, ValueJSON>): string[] {
-	return [...RECIPE_KEYS, ...keyFieldNames(fields).map((k) => `${KEY_PREFIX}${k}`)];
+	return [...RECIPE_KEYS, ...keyFieldNames(fields).map((k) => `${KEY_PREFIX}${k}`), ...optionKeys().filter((k) => fields[k])];
 }
 
 /**
  * A fingerprint of the recipe, so a template nobody edited can be told apart
- * from one someone did. Key fields count by name only - a value typed into a
- * key never makes a template look edited.
+ * from one someone did. Key and option fields count by name only - a value
+ * typed into one never makes a template look edited. (Option names join
+ * only when there are some, so templates without any keep their hash.)
  */
 export function recipeHash(fields: Record<string, ValueJSON>): string {
-	return Bun.hash(JSON.stringify([RECIPE_KEYS.map((k) => fields[k] ?? null), keyFieldNames(fields).sort()])).toString(16);
+	const options = optionKeys().filter((k) => fields[k]).sort();
+	const shape: unknown[] = [RECIPE_KEYS.map((k) => fields[k] ?? null), keyFieldNames(fields).sort()];
+	if (options.length > 0) shape.push(options);
+	return Bun.hash(JSON.stringify(shape)).toString(16);
 }
 
 /** A credential's pasted keys, when it lists some and every one is filled. */
@@ -242,18 +254,61 @@ export function credentialKeys(fields: Record<string, ValueJSON>): Record<string
 	return out;
 }
 
-/** The properties a credential's fields are shown and edited through, seeded in every space. */
-export const CREDENTIAL_PROPERTIES: Array<{ key: string; name: string; format: string; emoji: string }> = [
-	{ key: "account", name: "Account", format: "shorttext", emoji: "🪪" },
-	{ key: "service", name: "Service", format: "shorttext", emoji: "🧩" },
-	{ key: "login_url", name: "Login page", format: "url", emoji: "🔗" },
-	{ key: "session_host", name: "Signed-in host", format: "shorttext", emoji: "🌐" },
-	{ key: "session_cookie", name: "Signed-in cookie", format: "shorttext", emoji: "🍪" },
-	// One per distinct seed key; the first seed's label names it ("API key").
-	...CREDENTIAL_SEEDS.flatMap((s) => s.passwordFields ?? [])
-		.filter((f, i, all) => all.findIndex((g) => g.key === f.key) === i)
-		.map((f) => ({ key: `${KEY_PREFIX}${f.key}`, name: f.label, format: "shorttext", emoji: "🔑" })),
-];
+/** The properties a credential's fields are shown and edited through, seeded in every space; from the seeds as they are now. */
+export function credentialProperties(): Array<{ key: string; name: string; format: string; emoji: string }> {
+	const unique = <T extends { key: string }>(items: T[]): T[] => items.filter((f, i, all) => all.findIndex((g) => g.key === f.key) === i);
+	return [
+		{ key: "account", name: "Account", format: "shorttext", emoji: "🪪" },
+		{ key: "service", name: "Service", format: "shorttext", emoji: "🧩" },
+		{ key: "login_url", name: "Login page", format: "url", emoji: "🔗" },
+		{ key: "session_host", name: "Signed-in host", format: "shorttext", emoji: "🌐" },
+		{ key: "session_cookie", name: "Signed-in cookie", format: "shorttext", emoji: "🍪" },
+		// One per distinct seed key; the first seed's label names it ("API key").
+		...unique(CREDENTIAL_SEEDS.flatMap((s) => s.passwordFields ?? [])).map((f) => ({ key: `${KEY_PREFIX}${f.key}`, name: f.label, format: "shorttext", emoji: "🔑" })),
+		...unique(CREDENTIAL_SEEDS.flatMap((s) => s.options ?? [])).map((o) => ({ key: o.key, name: o.label, format: "shorttext", emoji: "⚙️" })),
+	];
+}
+
+// ── Keeping secrets from the model ──────────────────────────────
+
+/** What a secret reads as wherever a tool or the model would otherwise see it. */
+export const SECRET_SHOWN = "[secret]";
+/** Secret values shorter than this aren't blanked out of text: they would match ordinary words. */
+const SECRET_MIN_LENGTH = 8;
+
+/** Secret values worth blanking out of text: long enough, once each, longest first (so a secret inside another goes with it). */
+export function secretList(values: string[]): string[] {
+	return [...new Set(values.filter((v) => v.length >= SECRET_MIN_LENGTH))].sort((a, b) => b.length - a.length);
+}
+
+/** `text` with every secret blanked out. */
+export function blankSecrets(text: string, secrets: string[]): string {
+	return secrets.reduce((out, secret) => out.replaceAll(secret, SECRET_SHOWN), text);
+}
+
+/** Any JSON value with every secret blanked out of its strings, at any depth. */
+export function blankSecretsDeep(value: unknown, secrets: string[]): unknown {
+	if (typeof value === "string") return blankSecrets(value, secrets);
+	if (Array.isArray(value)) return value.map((v: unknown) => blankSecretsDeep(v, secrets));
+	if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, blankSecretsDeep(v, secrets)]));
+	return value;
+}
+
+/**
+ * An object as tool code and the model may see it: a Credential's secret
+ * fields - its keys (`key_*`), its browser `session`, the pre-property
+ * `secret` - read "[secret]" when they hold anything (an empty one stays
+ * empty, so an unfilled key still shows as unfilled). Any other object is
+ * returned as it is. The daemon and the website keep the real values.
+ */
+export function hideCredentialSecrets<T extends { typeKey: string; fields: Record<string, ValueJSON> }>(obj: T): T {
+	if (obj.typeKey !== "credential") return obj;
+	const secret = Object.entries(obj.fields)
+		.filter(([k, v]) => (k === "session" || k === "secret" || (k.startsWith(KEY_PREFIX) && k.length > KEY_PREFIX.length && k !== LEGACY_KEY_LIST)) && v.stringValue !== "" && Object.keys(v).length > 0)
+		.map(([k]) => k);
+	if (secret.length === 0) return obj;
+	return { ...obj, fields: { ...obj.fields, ...Object.fromEntries(secret.map((k) => [k, { stringValue: SECRET_SHOWN }])) } };
+}
 
 /** Keys as the pre-property shapes stored them (camelCase JSON in `secret`), as key field names. */
 export function legacyKeyName(key: string): string {

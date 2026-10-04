@@ -5,3 +5,4 @@ app/.svelte-kit/
 harness/node_modules/
 ui-sessions
 glon-odin.next
+harness/private/

@@ -3,6 +3,8 @@
  * of the optional agent harness: `bun run sync`.
  * Agent startup/crashes must not control whether notes reach other devices.
  */
+// First: private extensions (harness/private/) register their seeds before anything reads them.
+import "./extensions";
 import { startNostrSync } from "./nostrsync";
 
 try {

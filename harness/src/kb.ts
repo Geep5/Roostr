@@ -1,8 +1,8 @@
 /**
  * Knowledge base: support-bot articles as ordinary objects, one per topic.
  *
- * Replaces the md-file KBs the Discord bots (MatcherinoTicketBot,
- * MatcherinoBSTicketBot) edit on disk: a file's category becomes the
+ * Replaces the md-file KBs the Discord ticket bots edit on disk: a file's
+ * category becomes the
  * `kb_category` property, the customer-vs-staff filename convention becomes
  * `kb_audience`, and each `##` section becomes one entry whose body is
  * native blocks (`>` response templates stay quote blocks). Edits are DAG

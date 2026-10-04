@@ -220,7 +220,8 @@ you add named "Key: App ID" (`key_app_id`) is a key too. Status, Error and
 Served by are the built-in properties; the Status popover carries Connect /
 Check now / Disconnect.
 
-The presets (X, Matcherino, LinkedIn, Discord bot, Anthropic, Kimi) are
+The presets (X, LinkedIn, Discord bot, Anthropic, Kimi, and any a private
+extension adds) are
 Credential **templates** seeded once per space; like system prompts, a seed
 only upgrades a template nobody edited. Setting Service on a credential that
 says nothing yet about signing in copies that service's template onto it
@@ -246,6 +247,21 @@ Agents use browser credentials through `credential_fetch` (read a page) and
 `credential_action` (act), which inject the cookies into a throwaway headless
 Chrome. A page that lands on a login wall is reported as signed out; nothing is
 done there.
+
+### Private extensions
+
+What only one deployment needs stays out of this repo: the harness imports
+every `harness/private/<name>/index.ts` at boot (`harness/src/extensions.ts`,
+the first import of `index.ts` and `sync.ts`). `harness/private/` is
+gitignored - keep it as its own private checkout. Each `index.ts`
+default-exports an `Extension`: catalog skills (`catalog`), agent kinds
+(`kinds`), credential presets (`credentialSeeds`), and per service a session
+renewer (`sessionRenewers`), a signed API for `roostr.credentials.api`
+(`credentialApis`), and the code behind its credential actions
+(`credentialActions`, run through `credential_action`). Without the folder the
+harness builds, tests and runs on the public seeds alone, and a computer that
+lacks an extension leaves the vault objects it seeded elsewhere (skills,
+templates, capabilities, agents of its kinds) untouched.
 
 ## Verified
 
