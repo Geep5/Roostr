@@ -64,6 +64,8 @@ corpus_contract :: proc(t: ^testing.T) {
 	push_without_reset_merges(t)
 	survives_the_blob_being_reused(t)
 	checkpoint_frames_seed_the_tail(t)
+	caches_only_compact_state(t)
+	reset_frees_the_old_snapshot_first(t)
 }
 
 /**
@@ -284,4 +286,107 @@ push_without_reset_merges :: proc(t: ^testing.T) {
 	total, query_error := query_names()
 	testing.expect_value(t, query_error, "")
 	testing.expect_value(t, total, 2)
+}
+
+/** A text-heavy object: `blocks` text blocks plus a few small fields. */
+@(private = "file")
+wide_state :: proc(id: string, blocks: int) -> Object_State {
+	s := Object_State{id = id, type_key = "note", created_at = 1, updated_at = 2}
+	s.fields = make([dynamic]Value_Entry, context.temp_allocator)
+	fields_set(&s.fields, "name", Value{kind = .String, str = id})
+	fields_set(&s.fields, "done", Value{kind = .Bool, b = true})
+	s.blocks = make([dynamic]Block, context.temp_allocator)
+	for i in 0 ..< blocks {
+		b: Block
+		b.id = fmt.tprintf("%s-b%d", id, i)
+		b.content.kind = .Text
+		b.content.text.text = fmt.tprintf("line %d of %s", i, id)
+		append(&s.blocks, b)
+	}
+	s.heads = make([dynamic]string, context.temp_allocator)
+	append(&s.heads, "ab")
+	return s
+}
+
+@(private = "file")
+upsert :: proc(states: []json.Value, reset: bool) -> string {
+	body := jobj()
+	body["filters"] = json.Array(make([dynamic]json.Value, context.temp_allocator))
+	payload := jobj()
+	payload["body"] = json.Object(body)
+	payload["nowMs"] = json.Integer(1)
+	upserts := make([dynamic]json.Value, context.temp_allocator)
+	append(&upserts, ..states)
+	payload["upserts"] = json.Array(upserts)
+	payload["removed"] = json.Array(make([dynamic]json.Value, context.temp_allocator))
+	payload["reset"] = json.Boolean(reset)
+	_, err := dispatch("query", json.Object(payload))
+	return err
+}
+
+/**
+ * The bug this pins: a cached object kept the parsed JSON tree its typed
+ * state borrowed from (Odin maps: ~600 bytes per small JSON object), and the
+ * corpus kept every decoded change beside the state. A real vault's 8.19 MB
+ * of state JSON became 112 MB of cache and a phone could not open it
+ * ("query cache memory limit exceeded"). Now only the compact state stays.
+ */
+@(private = "file")
+caches_only_compact_state :: proc(t: ^testing.T) {
+	query_cache_reset()
+	state := wide_state("obj-wide", 2_000)
+	text := object_to_json(&state, context.temp_allocator)
+	parsed, parse_error := json.parse(text, parse_integers = true)
+	testing.expect(t, parse_error == nil, "state JSON parses")
+	testing.expect_value(t, upsert({parsed}, true), "")
+	cached, ok := query_cached_states["obj-wide"]
+	testing.expect(t, ok, "object is cached")
+	if !ok do return
+	testing.expect_value(t, len(cached.blocks), 2_000)
+	testing.expect_value(t, cached.blocks[1_999].content.text.text, "line 1999 of obj-wide")
+	// The typed model itself is the floor (a Block is 312 bytes, this JSON
+	// ~140 per block); the parsed JSON tree used to put it near 14x.
+	testing.expectf(t, query_cache_bytes < 3 * len(text), "cache %d bytes for %d bytes of JSON", query_cache_bytes, len(text))
+
+	// Corpus: 500 renames of one object cache one state, not 500 changes.
+	query_cache_reset()
+	frames := make([dynamic][]byte, context.temp_allocator)
+	parent: []byte
+	for i in 0 ..< 500 {
+		c := Change{object_id = "obj-renamed", timestamp = i64(i + 1), author = "fixture"}
+		c.ops = make([dynamic]Operation, context.temp_allocator)
+		if i == 0 do append(&c.ops, Operation{kind = .Object_Create, type_key = "note"})
+		append(&c.ops, Operation{kind = .Field_Set, key = "name", value = Value{kind = .String, str = fmt.tprintf("name %d", i)}})
+		c.parent_ids = make([dynamic][]byte, context.temp_allocator)
+		if parent != nil do append(&c.parent_ids, parent)
+		digest := sha256(encode_change(c, true, context.temp_allocator))
+		c.id = make([]byte, 32, context.temp_allocator)
+		copy(c.id, digest[:])
+		parent = c.id
+		append(&frames, encode_change(c, false, context.temp_allocator))
+	}
+	out, err := push(frames[:])
+	testing.expect_value(t, err, "")
+	changes, _ := json_int(out, "changes")
+	testing.expect_value(t, changes, 500)
+	renamed := query_cached_states["obj-renamed"]
+	name, _ := fields_get(renamed.fields, "name")
+	testing.expect_value(t, name.str, "name 499")
+	testing.expectf(t, query_cache_bytes < 4_096, "cache %d bytes for one renamed object", query_cache_bytes)
+}
+
+/** A reset frees the old snapshot before parsing the new one: one snapshot at peak, and a refused reset leaves the cache empty. */
+@(private = "file")
+reset_frees_the_old_snapshot_first :: proc(t: ^testing.T) {
+	query_cache_reset()
+	state := wide_state("obj-old", 10)
+	parsed, _ := json.parse(object_to_json(&state, context.temp_allocator), parse_integers = true)
+	testing.expect_value(t, upsert({parsed}, true), "")
+	testing.expect_value(t, len(query_cached_states), 1)
+	// A refused delta keeps the cache; a refused reset already dropped it.
+	testing.expect(t, upsert({json.Integer(1)}, false) != "", "a malformed delta is refused")
+	testing.expect_value(t, len(query_cached_states), 1)
+	testing.expect(t, upsert({json.Integer(1)}, true) != "", "a malformed reset is refused")
+	testing.expect_value(t, len(query_cached_states), 0)
+	testing.expect_value(t, query_cache_bytes, 0)
 }

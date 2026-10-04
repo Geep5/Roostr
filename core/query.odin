@@ -555,11 +555,19 @@ query_result :: proc(states: map[string]^Object_State, body: json.Value, now_ms:
 }
 
 // Each cached object owns a region; no dispatch-arena reference survives.
+//
+// A region holds ONLY the object's typed state, as the checkpoint snapshot
+// encoding plus what decoding it allocates: every string borrows the one
+// buffer. Measured on a real vault (1,548 objects, 8.19 MB of state JSON):
+// keeping the parsed JSON tree the typed state borrowed from cost 112 MB of
+// cache (~600 bytes per small JSON object in Odin maps), and the corpus kept
+// every decoded change beside the state (87 MB for 35 objects' 8,808
+// changes). `heads`, which a snapshot does not carry, is copied beside it.
 QUERY_CACHE_MAX_BYTES :: 128 * 1024 * 1024
 QUERY_CACHE_MAX_OBJECTS :: 100_000
 Query_Allocation :: struct {
-	next: ^Query_Allocation,
-	size: int,
+	prev, next: ^Query_Allocation,
+	size:       int,
 }
 Query_Cached_Object :: struct {
 	state: Object_State,
@@ -586,6 +594,11 @@ query_region_allocator :: proc(owner: ^Query_Cached_Object) -> mem.Allocator {
 	return {procedure = query_region_allocate, data = owner}
 }
 
+// Every allocation is its own heap block, linked into the owner's list so the
+// whole region dies with the object; a free (and so every resize, which is
+// alloc + copy + free) unlinks and returns its block at once. Growing arrays
+// otherwise left every outgrown buffer counted against the cache: a
+// 2,000-block object held its blocks about twice over.
 query_region_allocate :: proc(
 	data: rawptr, mode: mem.Allocator_Mode, size, alignment: int,
 	old_memory: rawptr, old_size: int, loc := #caller_location,
@@ -594,27 +607,33 @@ query_region_allocate :: proc(
 	switch mode {
 	case .Alloc, .Alloc_Non_Zeroed:
 		if size == 0 do return nil, nil
-		total := size + size_of(Query_Allocation) + alignment
+		// [node][padding][back pointer][data], data aligned to at least 16.
+		align := max(alignment, 16)
+		total := size + size_of(Query_Allocation) + size_of(rawptr) + align
 		if total < size || total > QUERY_CACHE_MAX_BYTES - query_cache_bytes {
 			owner.failed = true
 			return nil, .Out_Of_Memory
 		}
 		heap := runtime.default_allocator()
-		bytes, err := heap.procedure(heap.data, .Alloc, total, max(alignment, align_of(Query_Allocation)), nil, 0, loc)
+		bytes, err := heap.procedure(heap.data, .Alloc, total, align_of(Query_Allocation), nil, 0, loc)
 		if err != nil {
 			owner.failed = true
 			return nil, err
 		}
 		node := (^Query_Allocation)(raw_data(bytes))
 		node^ = {next = owner.allocations, size = total}
+		if owner.allocations != nil do owner.allocations.prev = node
 		owner.allocations = node
 		query_cache_bytes += total
-		start := mem.align_forward(rawptr(([^]byte)(node)[size_of(Query_Allocation):]), uintptr(alignment))
+		start := mem.align_forward(rawptr(([^]byte)(node)[size_of(Query_Allocation) + size_of(rawptr):]), uintptr(align))
+		(^^Query_Allocation)(uintptr(start) - size_of(rawptr))^ = node
 		return ([^]byte)(start)[:size], nil
 	case .Resize, .Resize_Non_Zeroed:
 		return mem.default_resize_bytes_align(mem.byte_slice(old_memory, old_size), size, alignment, query_region_allocator(owner), loc)
 	case .Free:
-		return nil, nil // reclaimed together when the cached object is replaced
+		if old_memory == nil do return nil, nil
+		query_region_free(owner, (^^Query_Allocation)(uintptr(old_memory) - size_of(rawptr))^)
+		return nil, nil
 	case .Query_Features:
 		if set := (^mem.Allocator_Mode_Set)(old_memory); set != nil {
 			set^ = {.Alloc, .Alloc_Non_Zeroed, .Resize, .Resize_Non_Zeroed, .Free, .Query_Features}
@@ -626,19 +645,53 @@ query_region_allocate :: proc(
 	return nil, nil
 }
 
+@(private = "file")
+query_region_free :: proc(owner: ^Query_Cached_Object, node: ^Query_Allocation) {
+	if node.prev != nil do node.prev.next = node.next
+	else do owner.allocations = node.next
+	if node.next != nil do node.next.prev = node.prev
+	query_cache_bytes -= node.size
+	mem.free(node, runtime.default_allocator())
+}
+
 query_cached_object_destroy :: proc(owner: ^Query_Cached_Object) {
-	node := owner.allocations
-	for node != nil {
-		next := node.next
-		query_cache_bytes -= node.size
-		mem.free(node, runtime.default_allocator())
-		node = next
-	}
+	for owner.allocations != nil do query_region_free(owner, owner.allocations)
 	free(owner, runtime.default_allocator())
+}
+
+/** Stores `state`, built in any shorter-lived allocator, as `owner`'s compact copy. */
+query_cache_own :: proc(owner: ^Query_Cached_Object, state: Object_State) -> bool {
+	w := Writer{buf = make([dynamic]byte, context.temp_allocator)}
+	{
+		context.allocator = context.temp_allocator
+		encode_snapshot(Snapshot{
+			id = state.id, type_key = state.type_key, fields = state.fields, blocks = state.blocks,
+			deleted = state.deleted, created_at = state.created_at, updated_at = state.updated_at,
+		}, &w)
+	}
+	region := query_region_allocator(owner)
+	bytes := make([]byte, len(w.buf), region)
+	if owner.failed do return false
+	copy(bytes, w.buf[:])
+	snapshot := decode_snapshot(bytes, region)
+	heads := make([dynamic]string, 0, len(state.heads), region)
+	for head in state.heads do append(&heads, strings.clone(head, region))
+	if owner.failed do return false
+	owner.state = Object_State{
+		id = snapshot.id, type_key = snapshot.type_key, fields = snapshot.fields, blocks = snapshot.blocks,
+		deleted = snapshot.deleted, created_at = snapshot.created_at, updated_at = snapshot.updated_at,
+		heads = heads,
+	}
+	return true
 }
 
 query_cache_reset :: proc() {
 	query_pending_reset()
+	query_cache_clear()
+}
+
+/** Frees every committed cached object; pending (uncommitted) ones are untouched. */
+query_cache_clear :: proc() {
 	for _, owner in query_cached_objects do query_cached_object_destroy(owner)
 	delete(query_cached_objects)
 	query_cached_objects = nil
@@ -690,26 +743,35 @@ query_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	if !upserts_ok || !removed_ok || len(upserts) > QUERY_CACHE_MAX_OBJECTS || len(removed) > QUERY_CACHE_MAX_OBJECTS do return nil, "query cache updates must be bounded arrays"
 	for id in removed do if _, ok := id.(json.String); !ok do return nil, "query removed ids must be strings"
 	reset, _ := json_bool(payload, "reset")
+	// A reset frees the old snapshot BEFORE building the new one, so a host
+	// re-opening its vault peaks at one snapshot, not two. A reset refused
+	// below leaves the cache empty; the host's next query must reset again.
+	// Any other refused update leaves the cache exactly as it was.
+	if reset do query_cache_clear()
 	pending := make(map[string]^Query_Cached_Object, allocator = context.temp_allocator)
 	query_pending_objects = make([dynamic]^Query_Cached_Object, 0, len(upserts), runtime.default_allocator())
 	defer query_pending_reset()
+	// Each object's typed state is built in a scratch arena emptied after it:
+	// the request arena already holds the whole parsed request.
+	scratch: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&scratch, runtime.default_allocator(), runtime.default_allocator())
+	defer mem.dynamic_arena_destroy(&scratch)
 	for value in upserts {
 		if id := json_str(value, "id"); id == "" do return nil, "query object id is required"
 		owner, alloc_error := new(Query_Cached_Object, runtime.default_allocator())
 		if alloc_error != nil do return nil, "query cache allocation failed"
 		append(&query_pending_objects, owner)
-		// JSON parsing copies strings; model arrays share the same owner.
-		owned, parse_error := json.parse(marshal(value), allocator = query_region_allocator(owner), parse_integers = true)
-		if parse_error != nil || owner.failed {
-			return nil, "query cache memory limit exceeded"
+		owned: bool
+		{
+			defer mem.dynamic_arena_free_all(&scratch)
+			context.temp_allocator = mem.dynamic_arena_allocator(&scratch)
+			state, valid := object_from_json(value, context.temp_allocator, clone_json = false)
+			if !valid do return nil, "invalid query object"
+			owned = query_cache_own(owner, state)
 		}
-		state, valid := object_from_json(owned, query_region_allocator(owner), clone_json = false)
-		if !valid || owner.failed {
-			return nil, "invalid query object or cache memory limit exceeded"
-		}
-		owner.state = state
-		delete_key(&pending, state.id)
-		pending[state.id] = owner
+		if !owned do return nil, "query cache memory limit exceeded"
+		delete_key(&pending, owner.state.id)
+		pending[owner.state.id] = owner
 	}
 	// Validate the prospective snapshot before changing persistent state.
 	removed_ids := make(map[string]bool, allocator = context.temp_allocator)
@@ -723,13 +785,6 @@ query_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		if reset || !exists || removed_ids[id] do count += 1
 	}
 	if count > QUERY_CACHE_MAX_OBJECTS do return nil, "query cache object limit exceeded"
-	if reset {
-		for _, owner in query_cached_objects do query_cached_object_destroy(owner)
-		delete(query_cached_objects)
-		query_cached_objects = nil
-		delete(query_cached_states)
-		query_cached_states = nil
-	}
 	if query_cached_objects == nil do query_cached_objects = make(map[string]^Query_Cached_Object, allocator = runtime.default_allocator())
 	if query_cached_states == nil do query_cached_states = make(map[string]^Object_State, allocator = runtime.default_allocator())
 	for id_value in removed {

@@ -59,33 +59,44 @@ Measured on this machine, fresh process per row:
 The warm path is what a view render costs now; before, it was the cold number
 every single time.
 
-### The ceiling that remains
+### The ceiling, and how the cache was cut to the model's size
 
-The core's query arena is `QUERY_CACHE_MAX_BYTES :: 128 * 1024 * 1024`, and it
-is consumed several times faster than payload because every parsed allocation
-carries its own header. Measured limits:
+The core's query cache is `QUERY_CACHE_MAX_BYTES :: 128 * 1024 * 1024`. It used
+to be consumed many times faster than payload: each cached object kept the
+parsed JSON tree its typed state borrowed strings from (Odin maps, ~600 bytes
+per small JSON object, every allocation with its own header), outgrown array
+buffers stayed counted, and the corpus kept every decoded change beside the
+state. Measured on a copy of the real vault (2026-10-04: 43,213 events, 1,548
+objects, 8.19 MB of state JSON), a phone could no longer open it:
 
-| payload | result |
-| --- | --- |
-| 16.6 MB | works |
-| 20.4 MB | `query cache memory limit exceeded` |
-| 24.8 MB | `query cache memory limit exceeded` |
+| path | before | after |
+| --- | --- | --- |
+| JSON upserts, cold | 112.1 MB (limit 134.2 MB) | **20.9 MB** |
+| same, retry over a live cache (`reset`) | ~2x peak: old snapshot freed only after the new one was parsed | **20.9 MB**, old freed first |
+| corpus push, 2.0 MB of bytes / 35 objects / 8,808 changes | 87.4 MB | — |
+| corpus push, whole vault (20.9 MB / 29,124 changes) | request arena overrun (abort) | **21.6 MB** |
 
-So a space tops out around **20 MB of object JSON** — roughly 4× the current
-vault (4.79 MB). Two honest options when that becomes real, in this order:
+What changed (`core/query.odin`, `core/corpus.odin`):
 
-1. **Cut arena overhead per object.** The cache reparses each object's JSON
-   into a region with a header per allocation. Fewer, larger allocations (or
-   decoding straight from the wire bytes) buys multiples without raising the
-   budget.
-2. **Raise the budget.** One constant, linear effect — but it is WASM memory,
-   and the phone is the binding constraint, so this is the second lever.
+1. **A region holds only the compact typed state** (`query_cache_own`): the
+   state is built in a per-object scratch arena, written as the checkpoint
+   snapshot encoding, and decoded into the region, every string borrowing that
+   one buffer; `heads` is copied beside it. The cost floor is the model itself
+   (a `Block` is 312 bytes natively).
+2. **The region frees for real**: allocations are doubly linked, so a free —
+   and every resize — returns its block at once.
+3. **The corpus replays each object in a scratch arena** emptied after it, and
+   peeks object ids the same way, so the request arena no longer accumulates
+   every decoded change.
+4. **A `reset` frees the old snapshot before building the new one**: one
+   snapshot at peak. A refused reset leaves the cache empty, so hosts reset
+   again on their next query (the website's generation and the iOS signature
+   snapshot are invalidated on failure).
 
-Neither needs a database. What a database would have bought — an indexed store
-that queries without holding the corpus — is the same work as (1), minus a
-dependency and minus a second query implementation. Two hand-written query
-engines is exactly the divergence that produced the daemon-vs-browser bugs this
-audit started from.
+Hosts still push in batches, because the *request* is parsed into the ABI's
+128 MiB arena first: the website's 6 MiB (`PUSH_BUDGET_BYTES`, 32-bit WASM
+nodes) fits; natively 6.3 MB of block-heavy notes overran it while 4.2 MB fit,
+so the iOS host uses 2 MiB (`Backend.queryPushBudget`).
 
 ## Layer 2, third fix — the corpus arrives as protobuf
 

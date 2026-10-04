@@ -27,6 +27,8 @@ package core
 
 import "base:runtime"
 import "core:encoding/json"
+import "core:mem"
+import "core:strings"
 
 CORPUS_MAX_CHANGES :: 1_000_000
 CORPUS_CHECKPOINT_FLAG :: u32(1) << 31
@@ -42,6 +44,9 @@ corpus_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	blob := get_request_blob()
 	if len(blob) == 0 do return nil, "corpus push requires change bytes"
 	reset, _ := json_bool(payload, "reset")
+	// As in `query_dispatch`: a reset frees the old snapshot before the new
+	// one is built (one snapshot at peak); a refused reset leaves it empty.
+	if reset do query_cache_clear()
 
 	// Group by object without decoding twice: one pass to read frames, then
 	// per-object replay. Frames are borrowed from the blob, which outlives
@@ -59,23 +64,24 @@ corpus_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		if len(frames) > CORPUS_MAX_CHANGES do return nil, "corpus exceeds the change limit"
 	}
 
-	// Group frames by object WITHOUT decoding yet. The codec borrows every
-	// string out of the bytes it reads (zero-copy, by design), so a decode
-	// against the blob would leave the cached state pointing into a buffer
-	// the ABI reuses on the next request: garbage names, replays that fail
-	// for no visible reason, and a response that will not even parse. Each
-	// object's bytes are copied into its own cache region first, and decoded
-	// from that copy, so the region owns everything it hands out.
+	// Group frames by object WITHOUT keeping any decode. A peek decodes the
+	// whole message, so it runs in a scratch arena emptied after every frame
+	// and only the object id is kept: a 20 MB corpus of 30k changes otherwise
+	// piles every decoded change into the request arena and overruns it.
+	scratch: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&scratch, runtime.default_allocator(), runtime.default_allocator())
+	defer mem.dynamic_arena_destroy(&scratch)
+	scratch_allocator := mem.dynamic_arena_allocator(&scratch)
 	grouped := make(map[string][dynamic]Corpus_Frame, allocator = context.temp_allocator)
 	skipped := 0
 	for frame in frames {
-		// Peek only at the object id; the real decode happens in the region.
 		object_id := ""
 		if frame.checkpoint {
-			if peek, ok := decode_checkpoint(frame.bytes, context.temp_allocator); ok do object_id = peek.object_id
-		} else if peek, ok := decode_change(frame.bytes, context.temp_allocator); ok {
-			object_id = peek.object_id
+			if peek, ok := decode_checkpoint(frame.bytes, scratch_allocator); ok do object_id = strings.clone(peek.object_id, context.temp_allocator)
+		} else if peek, ok := decode_change(frame.bytes, scratch_allocator); ok {
+			object_id = strings.clone(peek.object_id, context.temp_allocator)
 		}
+		mem.dynamic_arena_free_all(&scratch)
 		if object_id == "" {
 			// A damaged frame is skipped and COUNTED, never guessed at -
 			// same discipline as the store's quarantine.
@@ -88,46 +94,46 @@ corpus_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		grouped[object_id] = list
 	}
 
+	// Each object decodes and replays in the scratch arena - borrowing from the
+	// blob is fine there, nothing of it survives - and only its compact state
+	// is copied into the cache region (query_cache_own); then the arena empties.
 	pending := make(map[string]^Query_Cached_Object, allocator = context.temp_allocator)
 	query_pending_objects = make([dynamic]^Query_Cached_Object, 0, len(grouped), runtime.default_allocator())
 	defer query_pending_reset()
 	unreplayable := 0
 	decoded := 0
 	for object_id, list in grouped {
-		owner, alloc_error := new(Query_Cached_Object, runtime.default_allocator())
-		if alloc_error != nil do return nil, "query cache allocation failed"
-		append(&query_pending_objects, owner)
-		region := query_region_allocator(owner)
-		changes := make([dynamic]Change, 0, len(list), region)
+		defer mem.dynamic_arena_free_all(&scratch)
+		context.allocator = scratch_allocator
+		context.temp_allocator = scratch_allocator
+		changes := make([dynamic]Change, 0, len(list))
 		checkpoint: ^Checkpoint
 		for frame in list {
-			owned := make([]byte, len(frame.bytes), region)
-			if owner.failed do return nil, "query cache memory limit exceeded"
-			copy(owned, frame.bytes)
 			if frame.checkpoint {
 				// Several checkpoints for one object: the store rule applies.
-				cp, cp_ok := decode_checkpoint(owned, region)
+				cp, cp_ok := decode_checkpoint(frame.bytes)
 				if !cp_ok do continue
-				if checkpoint != nil && !checkpoint_supersedes(&cp, checkpoint_hash(owned, context.temp_allocator), checkpoint, checkpoint_hash(encode_checkpoint(checkpoint^, context.temp_allocator), context.temp_allocator)) do continue
-				checkpoint = new(Checkpoint, region)
+				if checkpoint != nil && !checkpoint_supersedes(&cp, checkpoint_hash(frame.bytes), checkpoint, checkpoint_hash(encode_checkpoint(checkpoint^))) do continue
+				checkpoint = new(Checkpoint)
 				checkpoint^ = cp
 				continue
 			}
-			change, change_ok := decode_change(owned, region)
+			change, change_ok := decode_change(frame.bytes)
 			if !change_ok do continue
 			append(&changes, change)
 		}
-		if owner.failed do return nil, "query cache memory limit exceeded"
-		state, ok := compute_state(changes[:], region, checkpoint)
-		if owner.failed do return nil, "query cache memory limit exceeded"
+		state, ok := compute_state(changes[:], scratch_allocator, checkpoint)
 		if !ok {
 			// A history that cannot replay (missing parent, cyclic blocks) is
 			// left out rather than cached half-built.
 			unreplayable += 1
 			continue
 		}
+		owner, alloc_error := new(Query_Cached_Object, runtime.default_allocator())
+		if alloc_error != nil do return nil, "query cache allocation failed"
+		append(&query_pending_objects, owner)
+		if !query_cache_own(owner, state) do return nil, "query cache memory limit exceeded"
 		decoded += len(changes)
-		owner.state = state
 		pending[object_id] = owner
 	}
 
@@ -147,7 +153,8 @@ corpus_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 /**
  * Swap the replayed objects into the persistent cache. Mirrors the commit in
  * `query_dispatch`: the bound is checked BEFORE any live state changes, so a
- * refused push leaves the previous cache exactly as it was.
+ * refused push leaves the previous cache exactly as it was (a reset already
+ * emptied it).
  */
 @(private = "file")
 corpus_commit :: proc(pending: map[string]^Query_Cached_Object, reset: bool) -> bool {
@@ -158,13 +165,6 @@ corpus_commit :: proc(pending: map[string]^Query_Cached_Object, reset: bool) -> 
 	}
 	if count > QUERY_CACHE_MAX_OBJECTS do return false
 
-	if reset {
-		for _, owner in query_cached_objects do query_cached_object_destroy(owner)
-		delete(query_cached_objects)
-		query_cached_objects = nil
-		delete(query_cached_states)
-		query_cached_states = nil
-	}
 	if query_cached_objects == nil do query_cached_objects = make(map[string]^Query_Cached_Object, allocator = runtime.default_allocator())
 	if query_cached_states == nil do query_cached_states = make(map[string]^Object_State, allocator = runtime.default_allocator())
 	for id, owner in pending {
