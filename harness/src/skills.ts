@@ -21,6 +21,8 @@ import { blockLine, listOrdinals } from "./surfaces";
 
 export const SKILL_TYPE = "skill";
 export const SKILLS_KEY = "skills";
+/** The Roostr Guide Skill's `seed_key` (guide.ts): listed for every agent. */
+export const GUIDE_SEED_KEY = "roostr-guide";
 
 /** Skill object ids an object lists in its Skills property. */
 export function skillIds(fields: Record<string, ValueJSON>): string[] {
@@ -90,7 +92,9 @@ export interface SkillListing {
  * Spaces do not enter into it: an agent already belongs to exactly one,
  * so ownership is the finer grain and a global skill stays reachable
  * from anywhere. An agent's Skills property narrows the list to the skills
- * it names; empty means everything above. A machine skill (one with a
+ * it names; empty means everything above. The Roostr Guide (guide.ts) is
+ * listed regardless: it is how Roostr itself works, which every agent
+ * works in. A machine skill (one with a
  * `key`) is listed only while this machine has it working, and only to an
  * agent with the shell: `granted` = the gated built-ins its Tools give it
  * (tool-objects.ts), omitted = no agent to ask about.
@@ -114,16 +118,17 @@ export async function listSkills(agentId?: string, granted?: ReadonlySet<string>
 			description: str(r.fields, "description"),
 			owner: str(r.fields, "agent"),
 			key: str(r.fields, "key"),
+			always: str(r.fields, "seed_key") === GUIDE_SEED_KEY,
 		}))
 		.filter((s) => {
 			// Someone else's playbook: invisible, whoever is asking.
 			if (s.owner !== "" && s.owner !== agentId) return false;
-			if (only.size > 0 && !only.has(s.id)) return false;
+			if (only.size > 0 && !only.has(s.id) && !s.always) return false;
 			// Machine skills are shell tools: no shell, no use listing them.
 			if (s.key && !shell) return false;
 			return !s.key || ready.has(s.key);
 		})
-		.map(({ key: _key, ...listing }) => listing);
+		.map(({ key: _key, always: _always, ...listing }) => listing);
 }
 
 /** Prompt section: descriptions only (OMP system-prompt.md:88-93). */

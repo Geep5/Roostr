@@ -22,6 +22,7 @@ import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./cre
 import { installGwsAs } from "./google-credentials";
 import { fillCredential, seedCredentials } from "./credential-seeds";
 import { judgeOnChange, seedJudges, sweepJudges } from "./judges";
+import { seedGuide } from "./guide";
 import { capabilities } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tool-harness";
 import { startAuthServer } from "./authserver";
@@ -296,6 +297,8 @@ async function serve(): Promise<void> {
 	console.log("[harness] capability migration:", JSON.stringify(await migrateCapabilities()));
 	// A Skill object per catalog key and the agent-kind Templates per space.
 	await seedCatalog();
+	// The Roostr Guide (docs/roostr-guide.md) as a Skill every agent can read.
+	console.log("[harness] roostr guide:", await seedGuide());
 	// Service presets become Credential templates, and credentials carry their
 	// own recipe - before the check below reads those recipes.
 	console.log("[harness] credential seeds:", JSON.stringify(await seedCredentials()));
