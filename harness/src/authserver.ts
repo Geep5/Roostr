@@ -14,7 +14,6 @@ import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
 import { CredentialError, checkCredential, connectCredential, disconnectCredential, type CredentialRow } from "./credential-objects";
 import { scoreAgain } from "./jev";
-import { runNow } from "./schedule";
 import { ensureBlob, blobDir, mimeOf, storeUpload } from "./files";
 import { apiFetch, authorizeLocalRequest, localCors, localPreflight, sessionOrigin, validLocalHost } from "./local-api-auth";
 import { loadIdentity, type SpaceJoinLink } from "./nostrsync";
@@ -203,18 +202,6 @@ export function startAuthServer(served: Set<string>): void {
 					} catch (error) {
 						if (error instanceof CredentialError) return json({ error: error.message }, error.status);
 						throw error;
-					}
-				}
-				// Run now: an extra run of a repeating object, on the computer that serves it.
-				if (req.method === "POST" && url.pathname === "/schedule/run") {
-					if (authorization.role !== "ui") return json({ error: "A paired app is required." }, 403);
-					const body = (await req.json().catch(() => null)) as { id?: unknown } | null;
-					if (typeof body?.id !== "string" || !body.id) return json({ error: "id is required." }, 400);
-					try {
-						await runNow(body.id);
-						return json({ started: true });
-					} catch (error) {
-						return json({ error: error instanceof Error ? error.message : String(error) }, 409);
 					}
 				}
 				// "Ask again": the Jev Skill and agent that set a value run it on the object once

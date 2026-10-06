@@ -114,6 +114,8 @@ let timer: Timer | undefined;
 let arming = false;
 let armAgain = false;
 let firing = false;
+/** Bumped by resetScheduler: work started under an older scheduler leaves the new one alone. */
+let generation = 0;
 
 /** `repeat.next` / `repeat.fired_for`, or null when the object does not repeat. */
 function dueOf(row: { id: string; fields: Record<string, ValueJSON> }): Due | null {
@@ -136,6 +138,13 @@ async function recurringMine(): Promise<Due[]> {
 /** Wire the host and arm; `serve` calls this once after boot catch-up. */
 export async function startScheduler(h: ScheduleHost): Promise<void> {
 	host = h;
+	// Nothing runs at boot: a Running… mark left by a run this computer was killed in is stale.
+	for (const d of await recurringMine().catch(() => [] as Due[])) {
+		const obj = await fetchObject(d.id).catch(() => null);
+		if (obj?.fields[RUN_ACTIVE_KEY]) await deleteField(d.id, RUN_ACTIVE_KEY).catch(() => {});
+		// A Run now asked for while this computer was off.
+		if (obj?.fields[RUN_REQUEST_KEY]) await handleRunRequest(obj);
+	}
 	await arm();
 }
 /** Completion signal for deterministic tests; production ignores it. */
@@ -153,6 +162,8 @@ export function resetScheduler(): void {
 	arming = false;
 	armAgain = false;
 	firing = false;
+	running.clear();
+	generation += 1;
 }
 
 /**
@@ -195,7 +206,8 @@ async function fire(): Promise<void> {
 	firing = true;
 	try {
 		const now = Date.now();
-		const due = (await recurringMine()).filter((d) => d.next <= now && d.firedFor !== d.next).sort((a, b) => a.next - b.next);
+		// An object mid-run waits: it fires when that run ends (runExclusive re-arms).
+		const due = (await recurringMine()).filter((d) => d.next <= now && d.firedFor !== d.next && !running.has(d.id)).sort((a, b) => a.next - b.next);
 		const me = await machineId();
 		for (const d of due) {
 			try {
@@ -212,7 +224,7 @@ async function fire(): Promise<void> {
 			// Turns run for as long as the agent needs; the next due object
 			// must not wait on them. `fired_for` is already committed, so a
 			// re-arm mid-turn cannot fire this occurrence twice.
-			void dispatch(d, me).catch((err) => {
+			void runExclusive(d, me, false).catch((err) => {
 				// Deleted mid-run: the run has nowhere left to be recorded.
 				if (wasDeleted(err)) console.log(`[schedule] dispatch ${d.id.slice(0, 8)} stopped: ${err.message}`);
 				else console.error(`[schedule] dispatch ${d.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err);
@@ -342,21 +354,59 @@ async function dispatch(d: Due, me: string, manual = false): Promise<void> {
 const RUN_NOW_SUFFIX =
 	"This turn was started by a person pressing Run now on the object - an extra run, not a scheduled occurrence. Follow the object's instructions exactly - they decide what to post. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
 
+/** On a repeating object: a person asked for Run now ({at}); the computer that serves it starts the run and deletes this. */
+export const RUN_REQUEST_KEY = "run_now";
+/** On a repeating object while a run of it is in progress ({at, machine, manual}): every device shows it; another run waits. */
+const RUN_ACTIVE_KEY = "run_active";
+
+/** Objects with a run in progress on this computer. */
+const running = new Set<string>();
+
+/** Mark the run on the object, run it, then clear the mark and look again for what waited on it. */
+async function runExclusive(d: Due, me: string, manual: boolean): Promise<void> {
+	const gen = generation;
+	running.add(d.id);
+	try {
+		await setField(d.id, RUN_ACTIVE_KEY, { mapValue: { entries: { at: { intValue: Date.now() }, machine: sv(me), manual: { boolValue: manual } } } }).catch(() => {});
+		await dispatch(d, me, manual);
+	} finally {
+		// A run that outlived its scheduler (tests reset it) neither frees nor re-arms the new one.
+		if (gen === generation) {
+			running.delete(d.id);
+			await deleteField(d.id, RUN_ACTIVE_KEY).catch(() => {});
+			// An occurrence that came due mid-run was held back: fire it now (unless reset meanwhile).
+			if (gen === generation) void arm();
+		}
+	}
+}
+
 /**
- * Run now: one extra run of a repeating object, exactly as an occurrence
- * runs (Check first, the agent's turn with the page as instructions, the
- * run record) but outside the schedule - nothing is fired or completed,
- * so the next occurrence stays where it is. Only on the computer that
- * serves the object. Returns once the run has started.
+ * A Run now request on `obj` (its `run_now` field, written by any device):
+ * the computer that serves the object claims it - deletes the request - and
+ * starts one extra run, exactly as an occurrence runs (Check first, the
+ * agent's turn with the page as instructions, the run record) but outside
+ * the schedule: nothing is fired or completed. A request while a run is in
+ * progress is dropped; the app shows Running… and offers no Run now then.
  */
-export async function runNow(objectId: string): Promise<void> {
-	if (!host) throw new Error("the scheduler isn't running on this computer yet");
-	const obj = await fetchObject(objectId);
-	if (!obj.fields["repeat"]) throw new Error("this object doesn't repeat");
-	if (!(await servesHere(objectId))) throw new Error("this object runs on another computer - press Run now from Roostr on that computer");
-	// No `next` to match: completeOccurrence leaves the real occurrence alone.
-	const d: Due = { id: objectId, next: -1, firedFor: undefined };
-	const me = await machineId();
-	void dispatch(d, me, true).catch((err) => console.error(`[schedule] run now ${objectId.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
+export async function handleRunRequest(obj: ObjectJSON): Promise<void> {
+	if (!host || !obj.fields[RUN_REQUEST_KEY] || !obj.fields["repeat"]) return;
+	if (!(await servesHere(obj.id))) return;
+	// Check and claim with no await between: two events for one click can't both start a run.
+	if (running.has(obj.id)) {
+		await deleteField(obj.id, RUN_REQUEST_KEY).catch(() => {});
+		console.log(`[schedule] run now of ${obj.id.slice(0, 8)} skipped: a run is in progress`);
+		return;
+	}
+	running.add(obj.id);
+	try {
+		await deleteField(obj.id, RUN_REQUEST_KEY);
+		const me = await machineId();
+		console.log(`[schedule] run now of "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)})`);
+		// No `next` to match: completeOccurrence leaves the real occurrence alone.
+		void runExclusive({ id: obj.id, next: -1, firedFor: undefined }, me, true).catch((err) => console.error(`[schedule] run now ${obj.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
+	} catch (err) {
+		running.delete(obj.id);
+		throw err;
+	}
 }
 

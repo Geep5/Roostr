@@ -46,7 +46,7 @@ import { migrateExchanges } from "./migrate-exchanges";
 import { migrateAgentLists, migrateBoundAgents, migrateSpaceComputers, migrateSpaceDefaults } from "./migrate-bound";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
-import { arm as armScheduler, startScheduler } from "./schedule";
+import { arm as armScheduler, handleRunRequest, RUN_REQUEST_KEY, startScheduler } from "./schedule";
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);
@@ -821,6 +821,8 @@ async function serve(): Promise<void> {
 		// A rule edit (repeat_set/clear, an occurrence completed or fired)
 		// may move the earliest occurrence.
 		if (obj.fields["repeat"]) void armScheduler();
+		// Run now, asked for from any device: the computer that serves the object starts it.
+		if (obj.fields[RUN_REQUEST_KEY] && !obj.deleted) void handleRunRequest(obj).catch((err) => console.error(`[schedule] run request ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
 		// Serving inputs changed: a machine or capability object (its status
 		// included), a pin (served_by) or Skills on any object. Refresh
 		// the resolver cache and re-arm, so the next event and the clock
