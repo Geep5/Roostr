@@ -20,8 +20,9 @@
  * `origin: "schedule"`, which keeps them out of the watermark path
  * (`pendingMessages`) - the turn is driven explicitly, never by ingestion.
  *
- * A Judge (judges.ts) has no agent: its occurrence is one Jev pass over
- * what it Runs on, recorded with `run_record` and completed right away.
+ * What a Check first returns as objects (`[{id, …}]`) is scored by the
+ * Judges each lists (judges.ts) before the turn, so the agent sees the
+ * scores; a Judge that fails badges itself and the run goes on.
  *
  * Check first: an object whose `check_first` links a Tool runs it before
  * anything else, without a model, given `{object_id}`. Nothing found (an
@@ -47,7 +48,7 @@ import { machineId } from "./roster";
 import { objectText } from "./skills";
 import { linkIds, runToolObject } from "./tool-objects";
 import { localClock } from "./repeat";
-import { JUDGE_TYPE, runJudge, runSummary } from "./judges";
+import { judgeListed } from "./judges";
 
 export interface ScheduleHost {
 	/** The agent's holistic transcript when this machine serves it; undefined otherwise. */
@@ -64,6 +65,23 @@ export interface ScheduleHost {
  */
 const TURN_SUFFIX =
 	"This turn was started by the scheduler, not a person. Follow the object's instructions exactly - they decide what to post and when the run is done. If they say to stop, end with no reply. Call occurrence_complete only when they say the run is done; if something blocks the run, say what, once, and do not call it.";
+
+/** How long a run waits for its finds to be scored before the turn starts anyway. */
+const JUDGE_WAIT_MS = 20_000;
+
+/** The object ids a check's result names: a list of `{id}` (or JSON text of one). */
+export function foundIds(value: unknown): string[] {
+	let v = value;
+	if (typeof v === "string") {
+		try { v = JSON.parse(v); } catch { return []; }
+	}
+	if (!Array.isArray(v)) return [];
+	return v.flatMap((item) => (item && typeof item === "object" && "id" in item && typeof item.id === "string" ? [item.id] : []));
+}
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
+	return Promise.race([work, new Promise<undefined>((resolve) => setTimeout(resolve, ms))]);
+}
 
 /** How much of a check's finding goes into the frame. */
 const FINDING_CAP = 8000;
@@ -276,11 +294,6 @@ async function dispatch(d: Due, me: string): Promise<void> {
 	try {
 		const obj = await fetchObject(d.id);
 		const name = str(obj.fields, "name") || "(untitled)";
-		// A Judge has no agent: its occurrence is one Jev pass over Runs on.
-		if (obj.typeKey === JUDGE_TYPE) {
-			await dispatchJudge(obj, d, me, name);
-			return;
-		}
 		const when = new Date(d.next).toLocaleString();
 		const owner = await ownerOf(obj);
 		const checkId = linkIds(obj.fields, "check_first")[0];
@@ -305,6 +318,9 @@ async function dispatch(d: Due, me: string): Promise<void> {
 				console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) - ${check.name} found nothing new; no turn`);
 				return;
 			}
+			// Fresh objects it brought in carry their Judges: score them before the agent reads them.
+			const found = foundIds(check.value);
+			if (found.length > 0) await withTimeout(judgeListed(found), JUDGE_WAIT_MS).catch((err) => console.error(`[schedule] judging "${name}" finds:`, err instanceof Error ? err.message : err));
 			const shown = typeof check.value === "string" ? check.value : JSON.stringify(check.value, null, 1);
 			finding = `Check first (${check.name}) found:\n${shown.length > FINDING_CAP ? `${shown.slice(0, FINDING_CAP)}\n… (cut at ${FINDING_CAP} characters)` : shown}`;
 		}
@@ -345,20 +361,3 @@ async function dispatch(d: Due, me: string): Promise<void> {
 	}
 }
 
-/** A Judge's occurrence: judge what changed, record it, badge a failure, and move on to the next occurrence. */
-async function dispatchJudge(obj: ObjectJSON, d: Due, me: string, name: string): Promise<void> {
-	let error = "";
-	let result = "";
-	try {
-		const run = await runJudge(obj.id);
-		result = runSummary(run);
-		if (run.failed > 0) error = `${result}; ${run.firstError ?? ""}`;
-	} catch (err) {
-		error = err instanceof Error ? err.message : String(err);
-	}
-	await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, ...(error ? { error: error.slice(0, 300) } : { result }) } });
-	if (error) await setField(obj.id, "error", sv(`run failed: ${error}`.slice(0, 300)));
-	else await clearRunBadge(obj, true);
-	await completeOccurrence(d);
-	console.log(`[schedule] judge "${name}" (${obj.id.slice(0, 8)}) ${error ? `failed: ${error}` : result}`);
-}

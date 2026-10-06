@@ -1,8 +1,9 @@
 /**
  * Judges: a property filled in by TypeSafe's Jev, set up as an object.
  *
- * A Judge (typeKey `judge`) is one Jev question. Its body is the question,
- * in Jev's terms:
+ * A Judge (typeKey `judge`) is one Jev question, and its name is the
+ * property it fills in: a Judge called "Spam meter" writes "Spam meter".
+ * Its body is the question, in Jev's terms:
  *
  * - paragraphs: the `instructions`;
  * - a numbered list: a Score's levels, lowest first (`criteria`);
@@ -10,39 +11,46 @@
  *   name;
  * - `Yes: …` / `No: …` lines: what a Yes/No answer means.
  *
- * Its properties are the settings: Answer (Score / Choice / Yes or no),
- * Runs on (a saved query or collection - every object in it - or one
- * object), Writes to (the property the answer goes in, made when missing:
- * a number for a Score, a status for a Choice, a checkbox for Yes/No),
- * Credentials (a TypeSafe credential carries the key), Served by and
- * Repeat. No agent: on each occurrence the scheduler calls `runJudge`.
+ * Its properties: Answer (Score / Choice / Yes or no), Credentials (a
+ * TypeSafe credential carries the key) and optionally Served by.
  *
- * A run asks Jev only about objects whose content changed since this
- * Judge last judged them: the Judge keeps a hash of what it sent per
- * object (`judge_seen`), and the state it sends leaves out every
- * Judge-written property, so Judges writing to the same object don't
- * make each other re-run.
+ * Any object lists the Judges that score it in its Judges property, the
+ * way Agent lists who works on it. The computer that runs a Judge - its
+ * Served by, else the computer keeping its credential - scores each object
+ * listing it when the object appears and whenever its content changes:
+ * the Judge keeps a hash of what it sent per object (`judge_seen`), and
+ * the state it sends leaves out every Judge-written property, so Judges
+ * writing to the same object don't make each other re-run. "Ask again"
+ * scores one object regardless.
  *
- * Next to the value, each judged object keeps `judged`: per property,
- * which Judge set it, when, and how sure Jev was - the property row's
- * "94% sure".
+ * The answer is an ordinary property (a number for a Score, a status for
+ * a Choice, a checkbox for Yes/No), so queries, tables and sorting work on
+ * it. Next to it each judged object keeps `judged`: per property, which
+ * Judge set it, when, and how sure Jev was - the row's "94% sure".
  */
-import { createObject, fetchObject, plainValue, queryAll, setField, str, sv, bv, type ObjectJSON, type ValueJSON } from "./api";
+import { createObject, fetchObject, mutate, plainValue, queryAll, setField, deleteField, str, sv, bv, type ObjectJSON, type ValueJSON } from "./api";
 import { credentialKeys } from "./credentials";
+import { machineId } from "./roster";
 import { objectText } from "./skills";
-import { relationDefs, savedViewBody } from "./spacemap";
+import { relationDefs } from "./spacemap";
 import { linkIds } from "./tool-objects";
 
 export const JUDGE_TYPE = "judge";
+/** On any object: the Judges that score it. */
+export const JUDGES_KEY = "judges";
 /** On a judged object: property key -> who set it and how sure. */
 export const JUDGED_FIELD = "judged";
 /** On a Judge: object id -> hash of the state last judged. */
 const SEEN_FIELD = "judge_seen";
+/** On a Judge: the key of the property it writes (its name can change; the key can't). */
+const PROPERTY_FIELD = "judge_property";
+/** A Judge's own error badge starts with this, so a clean run clears only what a run wrote. */
+const BADGE = "Jev failed:";
 
 const JEV_URL = "https://api.typesafe.ai/v1/systemone";
 const JEV_MODEL = "jev-latest";
 const JEV_TIMEOUT_MS = 30_000;
-/** Objects judged at once in a run. */
+/** Objects judged at once. */
 const CONCURRENCY = 8;
 /** How much of an object's body goes to Jev. */
 const BODY_CAP = 20_000;
@@ -54,37 +62,47 @@ const ANSWERS: Array<[text: string, kind: AnswerKind, color: string]> = [
 	["Yes or no", "yes_no", "teal"],
 ];
 
-/** The Judge type's own properties: ordinary relations of each space (never bundled). */
-const JUDGE_PROPERTIES: Array<{ key: string; name: string; format: string; emoji: string; options?: Array<[string, string]> }> = [
-	{ key: "judge_answer", name: "Answer", format: "status", emoji: "⚖️", options: ANSWERS.map(([text, , color]) => [text, color]) },
-	{ key: "judge_runs_on", name: "Runs on", format: "object", emoji: "🎯" },
-	{ key: "judge_writes", name: "Writes to", format: "shorttext", emoji: "✍️" },
-];
+/** Settings the first design had: Runs on / Writes to. Their property defs go. */
+const RETIRED_PROPERTIES = ["judge_runs_on", "judge_writes"];
 
-/** The Judge type and its properties in every space, made once. */
-export async function seedJudges(): Promise<{ types: number; properties: number }> {
-	const out = { types: 0, properties: 0 };
+/**
+ * The Judge type, its Answer property and the Judges property in every
+ * space, made once: ordinary relations (never bundled). The Judges picker
+ * is limited to the space's Judge type.
+ */
+export async function seedJudges(): Promise<{ types: number; properties: number; retired: number }> {
+	const out = { types: 0, properties: 0, retired: 0 };
 	const [spaces, types, relations] = await Promise.all([queryAll({ type: "channel" }), queryAll({ type: "type" }), queryAll({ type: "relation" })]);
 	for (const space of spaces) {
-		if (!types.some((t) => str(t.fields, "key") === JUDGE_TYPE && str(t.fields, "channel") === space.id)) {
-			await createObject("Judge", "type", { key: sv(JUDGE_TYPE), name: sv("Judge"), iconEmoji: sv("⚖️"), layout: sv("page"), channel: sv(space.id) });
+		let typeId = types.find((t) => str(t.fields, "key") === JUDGE_TYPE && str(t.fields, "channel") === space.id)?.id;
+		if (!typeId) {
+			typeId = (await createObject("Judge", "type", { key: sv(JUDGE_TYPE), name: sv("Judge"), iconEmoji: sv("⚖️"), layout: sv("page"), channel: sv(space.id) })).id;
 			out.types += 1;
 		}
-		const have = new Set(relations.filter((r) => str(r.fields, "channel") === space.id).map((r) => str(r.fields, "key")));
-		for (const p of JUDGE_PROPERTIES) {
-			if (have.has(p.key)) continue;
-			await createObject(p.name, "relation", relationFields(space.id, p.key, p.name, p.format, p.emoji, p.options ?? []));
+		const mine = relations.filter((r) => str(r.fields, "channel") === space.id && r.fields["bundled"]?.boolValue !== true);
+		const have = new Set(mine.map((r) => str(r.fields, "key")));
+		if (!have.has("judge_answer")) {
+			await createObject("Answer", "relation", relationFields(space.id, "judge_answer", "Answer", "status", "⚖️", ANSWERS.map(([text, , color]) => [text, color])));
 			out.properties += 1;
+		}
+		if (!have.has(JUDGES_KEY)) {
+			await createObject("Judges", "relation", { ...relationFields(space.id, JUDGES_KEY, "Judges", "object", "⚖️", []), object_types: { valuesValue: { items: [sv(typeId)] } } });
+			out.properties += 1;
+		}
+		for (const r of mine) {
+			if (!RETIRED_PROPERTIES.includes(str(r.fields, "key"))) continue;
+			await mutate("delete", { object_id: r.id });
+			out.retired += 1;
 		}
 	}
 	return out;
 }
 
-function optionsValue(key: string, options: Array<[text: string, color: string]>): ValueJSON {
+function optionsValue(key: string, options: Array<[text: string, color: string]>, from = 0): ValueJSON {
 	return {
 		valuesValue: {
 			items: options.map(([text, color], i) => ({
-				mapValue: { entries: { id: sv(`${key}-${text}`), text: sv(text), color: sv(color), orderId: sv(String(i).padStart(6, "0")) } },
+				mapValue: { entries: { id: sv(`${key}-${text}`), text: sv(text), color: sv(color), orderId: sv(String(from + i).padStart(6, "0")) } },
 			})),
 		},
 	};
@@ -190,7 +208,7 @@ export async function jevAsk(apiKey: string, state: unknown, questions: Record<s
 // ── What a Judge reads ───────────────────────────────────────────
 
 /** Never part of what's judged: bookkeeping, links, and anything a Judge writes. */
-const SKIPPED_FIELDS = new Set(["name", "channel", "error", "done", "repeat", "served_by", "agent", "credentials", "featuredRelations", JUDGED_FIELD, SEEN_FIELD]);
+const SKIPPED_FIELDS = new Set(["name", "channel", "error", "done", "repeat", "served_by", "agent", "credentials", "featuredRelations", JUDGES_KEY, JUDGED_FIELD, SEEN_FIELD]);
 const SKIPPED_FORMATS = new Set(["object", "file", "date", "checkbox", "repeat"]);
 
 /** What Jev is shown about an object: its name, its plain properties by name, its body. */
@@ -216,29 +234,26 @@ function stateHash(state: unknown): string {
 	return new Bun.CryptoHasher("sha256").update(JSON.stringify(state)).digest("hex").slice(0, 16);
 }
 
-/** The TypeSafe key from the Judge's Credentials. */
-async function judgeKey(judge: ObjectJSON): Promise<string> {
+/** The TypeSafe credential among the Judge's Credentials, or null. */
+async function judgeCredential(judge: ObjectJSON): Promise<ObjectJSON | null> {
 	for (const id of linkIds(judge.fields, "credentials")) {
 		const cred = await fetchObject(id).catch(() => null);
-		if (!cred || cred.deleted || str(cred.fields, "service") !== "typesafe") continue;
-		const key = credentialKeys(cred.fields)?.["api_key"];
-		if (!key) throw new Error(`the TypeSafe credential "${str(cred.fields, "name") || id.slice(0, 8)}" has no API key yet`);
-		return key;
+		if (cred && !cred.deleted && str(cred.fields, "service") === "typesafe") return cred;
 	}
-	throw new Error("add a TypeSafe (Jev) credential to this Judge's Credentials");
+	return null;
 }
 
-/** The objects a Judge's Runs on names: a saved view's rows, or the one object. */
-async function judgeTargets(judge: ObjectJSON, space: string): Promise<ObjectJSON[]> {
-	const targetId = linkIds(judge.fields, "judge_runs_on")[0];
-	if (!targetId) throw new Error("pick what this Judge runs on in Runs on: a saved query, a collection, or one object");
-	const target = await fetchObject(targetId);
-	if (target.deleted) throw new Error("what Runs on names was deleted");
-	if (!["query", "set", "collection"].includes(target.typeKey)) return [target];
-	const body = await savedViewBody(target, space, await relationDefs(space));
-	if (!body) return [];
-	const rows = await queryAll(body);
-	return Promise.all(rows.filter((r) => r.id !== judge.id).map((r) => fetchObject(r.id)));
+/** The TypeSafe key from the Judge's Credentials. */
+function judgeKey(judge: ObjectJSON, cred: ObjectJSON | null): string {
+	if (!cred) throw new Error("add a TypeSafe (Jev) credential to this Judge's Credentials");
+	const key = credentialKeys(cred.fields)?.["api_key"];
+	if (!key) throw new Error(`the TypeSafe credential "${str(cred.fields, "name") || cred.id.slice(0, 8)}" has no API key yet`);
+	return key;
+}
+
+/** The computer that runs a Judge: its Served by, else the computer keeping its credential. */
+export function judgeMachine(judge: ObjectJSON, cred: ObjectJSON | null): string {
+	return str(judge.fields, "served_by") || (cred ? str(cred.fields, "served_by") : "");
 }
 
 // ── Writing the answer ───────────────────────────────────────────
@@ -251,40 +266,39 @@ function slug(name: string): string {
 }
 
 /**
- * The property a Judge writes: Writes to (else the Judge's name), found by
- * name in its space or made with the format its answer needs. A Choice's
- * options are kept on it, so every answer shows as a known option.
+ * The property a Judge writes, named after it: the one it made before
+ * (renamed along with the Judge), else one of that name in its space, else
+ * a new one in the format its answer needs. A Choice's options are kept on
+ * it, so every answer shows as a known option.
  */
-export async function ensureTarget(judge: ObjectJSON, kind: AnswerKind, question: JevQuestion): Promise<string> {
+export async function ensureProperty(judge: ObjectJSON, kind: AnswerKind, question: JevQuestion): Promise<string> {
 	const space = str(judge.fields, "channel");
-	const name = str(judge.fields, "judge_writes").trim() || str(judge.fields, "name").trim();
-	if (!name) throw new Error("name the property this Judge writes in Writes to");
+	const name = str(judge.fields, "name").trim();
+	if (!name) throw new Error("name this Judge - its name is the property it fills in");
 	const format = FORMAT_FOR[kind];
-	const relations = (await queryAll({ type: "relation" })).filter((r) => str(r.fields, "channel") === space || r.fields["bundled"]?.boolValue === true);
-	const existing = relations.find((r) => str(r.fields, "name").toLowerCase() === name.toLowerCase());
+	const relations = (await queryAll({ type: "relation" })).filter((r) => str(r.fields, "channel") === space);
+	const madeKey = str(judge.fields, PROPERTY_FIELD);
+	const existing = (madeKey && relations.find((r) => str(r.fields, "key") === madeKey)) || relations.find((r) => str(r.fields, "name").toLowerCase() === name.toLowerCase());
 	const choices = question.type === "choice" ? Object.keys(question.criteria) : [];
 	if (existing) {
+		const key = str(existing.fields, "key");
 		const has = str(existing.fields, "format");
-		if (has !== format) throw new Error(`Writes to "${name}" is a ${has} property; ${KIND_WORD[kind]} needs a ${format} property - pick another name`);
+		if (has !== format) throw new Error(`"${str(existing.fields, "name")}" is already a ${has} property; ${KIND_WORD[kind]} needs a ${format} property - rename this Judge`);
+		if (str(existing.fields, "name") !== name) await setField(existing.id, "name", sv(name));
 		if (choices.length > 0) {
 			const items = existing.fields["options"]?.valuesValue?.items ?? [];
 			const known = new Set(items.map((i) => i.mapValue?.entries?.["text"]?.stringValue ?? ""));
 			const missing = choices.filter((c) => !known.has(c));
-			if (missing.length > 0) {
-				const key = str(existing.fields, "key");
-				const added = optionsValue(key, missing.map((c) => [c, "grey"])).valuesValue!.items.map((item, i) => {
-					item.mapValue!.entries!["orderId"] = sv(String(items.length + i).padStart(6, "0"));
-					return item;
-				});
-				await setField(existing.id, "options", { valuesValue: { items: [...items, ...added] } });
-			}
+			if (missing.length > 0) await setField(existing.id, "options", { valuesValue: { items: [...items, ...optionsValue(key, missing.map((c) => [c, "grey"]), items.length).valuesValue!.items] } });
 		}
-		return str(existing.fields, "key");
+		if (madeKey !== key) await setField(judge.id, PROPERTY_FIELD, sv(key));
+		return key;
 	}
 	const taken = new Set(relations.map((r) => str(r.fields, "key")));
 	let key = slug(name);
 	for (let n = 2; taken.has(key); n++) key = `${slug(name)}_${n}`;
 	await createObject(name, "relation", relationFields(space, key, name, format, kind === "score" ? "📊" : kind === "choice" ? "🏷️" : "☑️", choices.map((c) => [c, "grey"])));
+	await setField(judge.id, PROPERTY_FIELD, sv(key));
 	return key;
 }
 
@@ -310,12 +324,20 @@ export function verdictOf(answer: JevAnswer): Verdict {
 	return { value: bv(answer.noul >= 0.5), text: answer.noul >= 0.5 ? "yes" : "no", probability: answer.noul };
 }
 
-/** Writes to judged objects go one at a time per object, so two Judges' `judged` notes never overwrite each other here. */
-const writing = new Map<string, Promise<unknown>>();
+/** One chain per key: writes to the same object (two Judges' `judged` notes) or the same Judge (its ledger) never interleave here. */
+const chains = new Map<string, Promise<unknown>>();
+async function serial<T>(key: string, fn: () => Promise<T>): Promise<T> {
+	const next = (chains.get(key) ?? Promise.resolve()).catch(() => {}).then(fn);
+	chains.set(key, next);
+	try {
+		return await next;
+	} finally {
+		if (chains.get(key) === next) chains.delete(key);
+	}
+}
 
 async function writeVerdict(objectId: string, key: string, judgeId: string, verdict: Verdict): Promise<void> {
-	const prev = writing.get(objectId) ?? Promise.resolve();
-	const next = prev.catch(() => {}).then(async () => {
+	await serial(objectId, async () => {
 		await setField(objectId, key, verdict.value);
 		const now = await fetchObject(objectId);
 		const entries = { ...(now.fields[JUDGED_FIELD]?.mapValue?.entries ?? {}) };
@@ -325,44 +347,16 @@ async function writeVerdict(objectId: string, key: string, judgeId: string, verd
 		entries[key] = { mapValue: { entries: note } };
 		await setField(objectId, JUDGED_FIELD, { mapValue: { entries } });
 	});
-	writing.set(objectId, next);
-	try {
-		await next;
-	} finally {
-		if (writing.get(objectId) === next) writing.delete(objectId);
-	}
 }
 
-// ── A run ────────────────────────────────────────────────────────
+// ── Judging ──────────────────────────────────────────────────────
 
 export interface JudgeRun {
 	judged: number;
 	unchanged: number;
 	failed: number;
-	/** The first object's failure, for the run record. */
+	/** The first failure, in words. */
 	firstError?: string;
-}
-
-export interface TrialRow {
-	id: string;
-	name: string;
-	text: string;
-	confidence?: number;
-	probability?: number;
-	error?: string;
-}
-
-/** Everything a run needs from the Judge itself; throws its setup problem as a sentence. */
-async function prepare(judgeId: string) {
-	const judge = await fetchObject(judgeId);
-	if (judge.typeKey !== JUDGE_TYPE) throw new Error(`${judgeId.slice(0, 8)} is a ${judge.typeKey}, not a Judge`);
-	const kind = answerKind(judge.fields);
-	if (!kind) throw new Error("pick an Answer: Score, Choice, or Yes or no");
-	const question = parseJudge(objectText(judge), kind);
-	const space = str(judge.fields, "channel");
-	const apiKey = await judgeKey(judge);
-	const rels = await relationDefs(space);
-	return { judge, kind, question, space, apiKey, rels };
 }
 
 async function eachLimited<T>(items: T[], fn: (item: T) => Promise<void>): Promise<void> {
@@ -372,57 +366,124 @@ async function eachLimited<T>(items: T[], fn: (item: T) => Promise<void>): Promi
 	}));
 }
 
-/** Judge every object in Runs on whose content changed since last time, writing each answer. */
-export async function runJudge(judgeId: string): Promise<JudgeRun> {
-	const { judge, kind, question, space, apiKey, rels } = await prepare(judgeId);
-	const key = await ensureTarget(judge, kind, question);
-	const targets = await judgeTargets(judge, space);
-	const seen = { ...(judge.fields[SEEN_FIELD]?.mapValue?.entries ?? {}) };
-	const out: JudgeRun = { judged: 0, unchanged: 0, failed: 0 };
-	await eachLimited(targets, async (obj) => {
-		const state = judgedState(obj, rels);
-		const hash = stateHash({ question, state });
-		if (seen[obj.id]?.stringValue === hash && obj.fields[key] !== undefined) {
-			out.unchanged += 1;
-			return;
-		}
+/**
+ * Score `objectIds` with one Judge: each whose content changed since this
+ * Judge last scored it (every one, with `force`). The Judge's setup problem
+ * - no question, no key, a clashing property - throws; one object's failure
+ * is counted and the rest go on. A run that judged clears the Judge's own
+ * badge; a failing one sets it.
+ */
+export async function judgeObjects(judgeId: string, objectIds: string[], force = false): Promise<JudgeRun> {
+	return serial(judgeId, async () => {
+		const judge = await fetchObject(judgeId);
+		const out: JudgeRun = { judged: 0, unchanged: 0, failed: 0 };
 		try {
-			const answers = await jevAsk(apiKey, state, { [key]: question });
-			await writeVerdict(obj.id, key, judge.id, verdictOf(answers[key]));
-			seen[obj.id] = sv(hash);
-			out.judged += 1;
+			if (judge.deleted || judge.typeKey !== JUDGE_TYPE) throw new Error(`${judgeId.slice(0, 8)} is not a Judge`);
+			const kind = answerKind(judge.fields);
+			if (!kind) throw new Error("pick an Answer: Score, Choice, or Yes or no");
+			const question = parseJudge(objectText(judge), kind);
+			const apiKey = judgeKey(judge, await judgeCredential(judge));
+			const key = await ensureProperty(judge, kind, question);
+			const rels = await relationDefs(str(judge.fields, "channel"));
+			const seen = { ...(judge.fields[SEEN_FIELD]?.mapValue?.entries ?? {}) };
+			await eachLimited(objectIds, async (id) => {
+				const obj = await fetchObject(id).catch(() => null);
+				if (!obj || obj.deleted) return;
+				const state = judgedState(obj, rels);
+				const hash = stateHash({ question, state });
+				if (!force && seen[id]?.stringValue === hash && obj.fields[key] !== undefined) {
+					out.unchanged += 1;
+					return;
+				}
+				try {
+					const answers = await jevAsk(apiKey, state, { [key]: question });
+					await writeVerdict(id, key, judge.id, verdictOf(answers[key]));
+					seen[id] = sv(hash);
+					out.judged += 1;
+				} catch (err) {
+					out.failed += 1;
+					out.firstError ??= `${str(obj.fields, "name") || id.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}`;
+				}
+			});
+			if (out.judged > 0) await setField(judge.id, SEEN_FIELD, { mapValue: { entries: seen } });
 		} catch (err) {
-			out.failed += 1;
-			out.firstError ??= `${str(obj.fields, "name") || obj.id.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}`;
+			out.failed = Math.max(out.failed, 1);
+			out.firstError = err instanceof Error ? err.message : String(err);
 		}
+		const badge = str(judge.fields, "error");
+		// Written only when it changes: the write is an edit of the Judge, which re-runs it.
+		const failure = out.firstError ? `${BADGE} ${out.firstError}`.slice(0, 300) : "";
+		if (failure && failure !== badge) await setField(judge.id, "error", sv(failure)).catch(() => {});
+		else if (out.judged > 0 && badge.startsWith(BADGE)) await deleteField(judge.id, "error");
+		return out;
 	});
-	// Objects no longer in Runs on drop out of the ledger.
-	const live = new Set(targets.map((t) => t.id));
-	for (const id of Object.keys(seen)) if (!live.has(id)) delete seen[id];
-	if (out.judged > 0 || Object.keys(seen).length !== Object.keys(judge.fields[SEEN_FIELD]?.mapValue?.entries ?? {}).length) {
-		await setField(judge.id, SEEN_FIELD, { mapValue: { entries: seen } });
+}
+
+/** The Judges an object lists in its Judges property. */
+export function listedJudges(obj: ObjectJSON | { fields: Record<string, ValueJSON> }): string[] {
+	return linkIds(obj.fields, JUDGES_KEY);
+}
+
+/** Which of these Judges this computer runs. */
+async function judgesHere(judgeIds: string[]): Promise<string[]> {
+	const me = await machineId();
+	const out: string[] = [];
+	for (const id of judgeIds) {
+		const judge = await fetchObject(id).catch(() => null);
+		if (!judge || judge.deleted || judge.typeKey !== JUDGE_TYPE) continue;
+		if (judgeMachine(judge, await judgeCredential(judge)) === me) out.push(id);
 	}
 	return out;
 }
 
-/** Try it: the Judge's answers for the newest objects in Runs on, written nowhere. */
-export async function tryJudge(judgeId: string, limit = 5): Promise<TrialRow[]> {
-	const { judge, question, space, apiKey, rels } = await prepare(judgeId);
-	const targets = (await judgeTargets(judge, space)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
-	const rows: TrialRow[] = targets.map((t) => ({ id: t.id, name: str(t.fields, "name") || "Untitled", text: "" }));
-	await eachLimited(targets.map((t, i) => [t, i] as const), async ([obj, i]) => {
-		try {
-			const answers = await jevAsk(apiKey, judgedState(obj, rels), { q: question });
-			const v = verdictOf(answers["q"]);
-			rows[i] = { ...rows[i], text: v.text, confidence: v.confidence, probability: v.probability };
-		} catch (err) {
-			rows[i] = { ...rows[i], error: err instanceof Error ? err.message : String(err) };
-		}
-	});
-	return rows;
+/**
+ * Score these objects with every Judge they list that this computer runs
+ * (unchanged ones are skipped). The scheduler awaits this for what a Check
+ * first brought in, so the agent's turn sees the scores.
+ */
+export async function judgeListed(objectIds: string[]): Promise<void> {
+	const byJudge = new Map<string, string[]>();
+	for (const id of objectIds) {
+		const obj = await fetchObject(id).catch(() => null);
+		if (!obj || obj.deleted) continue;
+		for (const j of listedJudges(obj)) byJudge.set(j, [...(byJudge.get(j) ?? []), id]);
+	}
+	const mine = await judgesHere([...byJudge.keys()]);
+	await Promise.all(mine.map(async (j) => {
+		const run = await judgeObjects(j, byJudge.get(j)!);
+		if (run.judged || run.failed) console.log(`[judges] ${j.slice(0, 8)}: ${runSummary(run)}${run.firstError ? ` - ${run.firstError}` : ""}`);
+	}));
 }
 
-/** For the scheduler's run record: what a run did, in words. */
+/** Every object listing a Judge, scored where it changed: at boot and on a slow timer, for anything an event missed. */
+export async function sweepJudges(): Promise<void> {
+	const rows = await queryAll({ filters: [{ key: JUDGES_KEY, condition: "exists" }] });
+	await judgeListed(rows.map((r) => r.id));
+}
+
+/** A Judge's own edit (its question, Answer, credential): re-score what lists it. */
+export async function judgeEdited(judgeId: string): Promise<void> {
+	if ((await judgesHere([judgeId])).length === 0) return;
+	const rows = (await queryAll({ filters: [{ key: JUDGES_KEY, condition: "exists" }] })).filter((r) => listedJudges(r).includes(judgeId));
+	if (rows.length > 0) await judgeListed(rows.map((r) => r.id));
+}
+
+/** Edits come in bursts (typing, an import's block adds): judge once they settle. */
+const SETTLE_MS = 2_000;
+const settling = new Map<string, Timer>();
+
+/** Something changed on `obj`: a Judge re-scores what lists it; anything listing Judges is scored. */
+export function judgeOnChange(obj: ObjectJSON): void {
+	const isJudge = obj.typeKey === JUDGE_TYPE;
+	if (!isJudge && listedJudges(obj).length === 0) return;
+	clearTimeout(settling.get(obj.id));
+	settling.set(obj.id, setTimeout(() => {
+		settling.delete(obj.id);
+		void (isJudge ? judgeEdited(obj.id) : judgeListed([obj.id])).catch((err) => console.error(`[judges] ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
+	}, SETTLE_MS));
+}
+
+/** A run in words: "judged 3, 52 unchanged, 1 failed". */
 export function runSummary(run: JudgeRun): string {
 	const parts = [`judged ${run.judged}`];
 	if (run.unchanged > 0) parts.push(`${run.unchanged} unchanged`);

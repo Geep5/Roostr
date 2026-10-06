@@ -21,7 +21,7 @@ import { spawnSubagent } from "./spawn";
 import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./credential-objects";
 import { installGwsAs } from "./google-credentials";
 import { fillCredential, seedCredentials } from "./credential-seeds";
-import { seedJudges } from "./judges";
+import { judgeOnChange, seedJudges, sweepJudges } from "./judges";
 import { capabilities } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tool-harness";
 import { startAuthServer } from "./authserver";
@@ -829,6 +829,8 @@ async function serve(): Promise<void> {
 		// A File appeared or gained a holder, or a computer's "Keep every
 		// file" flipped: a computer that keeps every file fetches what it lacks.
 		if (obj.typeKey === FILE_TYPE || obj.typeKey === MACHINE_TYPE) keepAllFiles();
+		// Judges: an object listing some is scored when it changes; a Judge's own edit re-scores what lists it.
+		if (!obj.deleted) judgeOnChange(obj);
 		if (obj.typeKey === CREDENTIAL_TYPE) {
 			// Service just set on a blank credential: take its template, then check it.
 			void fillCredential(obj)
@@ -905,6 +907,9 @@ async function serve(): Promise<void> {
 	}, 15_000);
 	await scanMailboxes();
 	console.log("[harness] SSE connected; serving.");
+	// Anything listing a Judge that changed while this harness was down, then a slow safety net for missed events.
+	void sweepJudges().catch((err) => console.error("[judges] sweep:", err instanceof Error ? err.message : err));
+	setInterval(() => void sweepJudges().catch((err) => console.error("[judges] sweep:", err instanceof Error ? err.message : err)), 10 * 60_000);
 
 	// The clock: fires occurrences due now (missed while down) and arms for
 	// the next. Only for objects this machine serves - the gate is inside.
