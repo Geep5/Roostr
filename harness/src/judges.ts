@@ -3,7 +3,8 @@
  *
  * A Judge (typeKey `judge`) is one Jev question, and its name is the
  * property it fills in: a Judge called "Spam meter" writes "Spam meter".
- * Its body is the question, in Jev's terms:
+ * The question is the page of the System prompt its Prompt property links
+ * (the same `prompt` link and object type an agent uses), in Jev's terms:
  *
  * - paragraphs: the `instructions`;
  * - a numbered list: a Score's levels, lowest first (`criteria`);
@@ -11,8 +12,8 @@
  *   name;
  * - `Yes: …` / `No: …` lines: what a Yes/No answer means.
  *
- * Its properties: Answer (Score / Choice / Yes or no), Credentials (a
- * TypeSafe credential carries the key) and optionally Served by.
+ * Its properties: Prompt, Answer (Score / Choice / Yes or no), Credentials
+ * (a TypeSafe credential carries the key) and optionally Served by.
  *
  * Any object lists the Judges that score it in its Judges property, the
  * way Agent lists who works on it. The computer that runs a Judge - its
@@ -50,6 +51,18 @@ const BADGE = "Jev failed:";
 const JEV_URL = "https://api.typesafe.ai/v1/systemone";
 const JEV_MODEL = "jev-latest";
 const JEV_TIMEOUT_MS = 30_000;
+/** The Judge's Prompt: a System prompt object - the agents' prompt type - whose page is the question. */
+const PROMPT_KEY = "prompt";
+const PROMPT_TYPE = "system_prompt";
+
+/** The question a Judge asks: its linked System prompt's page. */
+async function judgeQuestion(judge: ObjectJSON): Promise<string> {
+	const promptId = linkIds(judge.fields, PROMPT_KEY)[0];
+	if (!promptId) throw new Error("pick a Prompt: the System prompt whose page is this Judge's question");
+	const prompt = await fetchObject(promptId).catch(() => null);
+	if (!prompt || prompt.deleted) throw new Error("this Judge's Prompt was deleted - pick another");
+	return objectText(prompt);
+}
 /** Objects judged at once. */
 const CONCURRENCY = 8;
 /** How much of an object's body goes to Jev. */
@@ -162,7 +175,7 @@ export function parseJudge(text: string, kind: AnswerKind): JevQuestion {
 		instructions.push(line.replace(/^(#{1,3}|>)\s+/, ""));
 	}
 	const question = instructions.join("\n");
-	if (!question) throw new Error("write the question in the Judge's page");
+	if (!question) throw new Error("write the question on this Judge's Prompt page");
 	if (kind === "score") {
 		if (numbered.length < 2) throw new Error("a Score needs a numbered list of 2 to 10 levels under the question, lowest first");
 		if (numbered.length > 10) throw new Error(`a Score takes at most 10 levels; this one has ${numbered.length}`);
@@ -381,7 +394,7 @@ export async function judgeObjects(judgeId: string, objectIds: string[], force =
 			if (judge.deleted || judge.typeKey !== JUDGE_TYPE) throw new Error(`${judgeId.slice(0, 8)} is not a Judge`);
 			const kind = answerKind(judge.fields);
 			if (!kind) throw new Error("pick an Answer: Score, Choice, or Yes or no");
-			const question = parseJudge(objectText(judge), kind);
+			const question = parseJudge(await judgeQuestion(judge), kind);
 			const apiKey = judgeKey(judge, await judgeCredential(judge));
 			const key = await ensureProperty(judge, kind, question);
 			const rels = await relationDefs(str(judge.fields, "channel"));
@@ -414,7 +427,8 @@ export async function judgeObjects(judgeId: string, objectIds: string[], force =
 		// Written only when it changes: the write is an edit of the Judge, which re-runs it.
 		const failure = out.firstError ? `${BADGE} ${out.firstError}`.slice(0, 300) : "";
 		if (failure && failure !== badge) await setField(judge.id, "error", sv(failure)).catch(() => {});
-		else if (out.judged > 0 && badge.startsWith(BADGE)) await deleteField(judge.id, "error");
+		// A clean run - nothing failed, scored or not - means what the badge said is fixed.
+		else if (!out.firstError && badge.startsWith(BADGE)) await deleteField(judge.id, "error");
 		return out;
 	});
 }
@@ -472,15 +486,31 @@ export async function judgeEdited(judgeId: string): Promise<void> {
 const SETTLE_MS = 2_000;
 const settling = new Map<string, Timer>();
 
-/** Something changed on `obj`: a Judge re-scores what lists it; anything listing Judges is scored. */
+/**
+ * Something changed on `obj`: a Judge re-scores what lists it, and so does
+ * every Judge asking the question a changed System prompt holds; anything
+ * listing Judges is scored.
+ */
 export function judgeOnChange(obj: ObjectJSON): void {
-	const isJudge = obj.typeKey === JUDGE_TYPE;
-	if (!isJudge && listedJudges(obj).length === 0) return;
-	clearTimeout(settling.get(obj.id));
-	settling.set(obj.id, setTimeout(() => {
-		settling.delete(obj.id);
-		void (isJudge ? judgeEdited(obj.id) : judgeListed([obj.id])).catch((err) => console.error(`[judges] ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
+	if (obj.typeKey === PROMPT_TYPE) {
+		void judgesAsking(obj.id).then((ids) => { for (const id of ids) settle(id, () => judgeEdited(id)); });
+		return;
+	}
+	if (obj.typeKey === JUDGE_TYPE) settle(obj.id, () => judgeEdited(obj.id));
+	else if (listedJudges(obj).length > 0) settle(obj.id, () => judgeListed([obj.id]));
+}
+
+function settle(id: string, run: () => Promise<void>): void {
+	clearTimeout(settling.get(id));
+	settling.set(id, setTimeout(() => {
+		settling.delete(id);
+		void run().catch((err) => console.error(`[judges] ${id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
 	}, SETTLE_MS));
+}
+
+/** The Judges whose Prompt links this System prompt. */
+async function judgesAsking(promptId: string): Promise<string[]> {
+	return (await queryAll({ type: JUDGE_TYPE })).filter((j) => linkIds(j.fields, PROMPT_KEY).includes(promptId)).map((j) => j.id);
 }
 
 /** A run in words: "judged 3, 52 unchanged, 1 failed". */
