@@ -20,6 +20,9 @@
  * `origin: "schedule"`, which keeps them out of the watermark path
  * (`pendingMessages`) - the turn is driven explicitly, never by ingestion.
  *
+ * A Judge (judges.ts) has no agent: its occurrence is one Jev pass over
+ * what it Runs on, recorded with `run_record` and completed right away.
+ *
  * Check first: an object whose `check_first` links a Tool runs it before
  * anything else, without a model, given `{object_id}`. Nothing found (an
  * empty result) records the run as "nothing new" and completes the
@@ -44,6 +47,7 @@ import { machineId } from "./roster";
 import { objectText } from "./skills";
 import { linkIds, runToolObject } from "./tool-objects";
 import { localClock } from "./repeat";
+import { JUDGE_TYPE, runJudge, runSummary } from "./judges";
 
 export interface ScheduleHost {
 	/** The agent's holistic transcript when this machine serves it; undefined otherwise. */
@@ -272,6 +276,11 @@ async function dispatch(d: Due, me: string): Promise<void> {
 	try {
 		const obj = await fetchObject(d.id);
 		const name = str(obj.fields, "name") || "(untitled)";
+		// A Judge has no agent: its occurrence is one Jev pass over Runs on.
+		if (obj.typeKey === JUDGE_TYPE) {
+			await dispatchJudge(obj, d, me, name);
+			return;
+		}
 		const when = new Date(d.next).toLocaleString();
 		const owner = await ownerOf(obj);
 		const checkId = linkIds(obj.fields, "check_first")[0];
@@ -334,4 +343,22 @@ async function dispatch(d: Due, me: string): Promise<void> {
 	} finally {
 		turnEnded?.();
 	}
+}
+
+/** A Judge's occurrence: judge what changed, record it, badge a failure, and move on to the next occurrence. */
+async function dispatchJudge(obj: ObjectJSON, d: Due, me: string, name: string): Promise<void> {
+	let error = "";
+	let result = "";
+	try {
+		const run = await runJudge(obj.id);
+		result = runSummary(run);
+		if (run.failed > 0) error = `${result}; ${run.firstError ?? ""}`;
+	} catch (err) {
+		error = err instanceof Error ? err.message : String(err);
+	}
+	await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, ...(error ? { error: error.slice(0, 300) } : { result }) } });
+	if (error) await setField(obj.id, "error", sv(`run failed: ${error}`.slice(0, 300)));
+	else await clearRunBadge(obj, true);
+	await completeOccurrence(d);
+	console.log(`[schedule] judge "${name}" (${obj.id.slice(0, 8)}) ${error ? `failed: ${error}` : result}`);
 }

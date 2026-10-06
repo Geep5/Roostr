@@ -21,6 +21,7 @@ import { spawnSubagent } from "./spawn";
 import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./credential-objects";
 import { installGwsAs } from "./google-credentials";
 import { fillCredential, seedCredentials } from "./credential-seeds";
+import { seedJudges } from "./judges";
 import { capabilities } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tool-harness";
 import { startAuthServer } from "./authserver";
@@ -301,6 +302,8 @@ async function serve(): Promise<void> {
 	await refreshCredentials();
 	// The Computer page's "Keep every file" checkbox, in every space with computers.
 	console.log("[harness] keep-every-file property:", JSON.stringify({ seeded: await seedKeepAllProperty() }));
+	// The Judge type and its Answer / Runs on / Writes to properties, in every space.
+	console.log("[harness] judge seeds:", JSON.stringify(await seedJudges()));
 	const migration = await migrateExchanges({ apply: true });
 	console.log("[harness] exchange migration:", JSON.stringify(migration));
 	// bound_object -> object.agent, after the exchange migration has read

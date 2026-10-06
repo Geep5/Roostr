@@ -130,6 +130,13 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 		note: "Moonshot API key for Kimi models. Agents whose Model is a kimi model use it on any computer.",
 		passwordFields: [{ key: "api_key", label: "API key", secret: true }],
 	},
+	// Judges (judges.ts) ask TypeSafe's Jev; a Judge's Credentials carry the key.
+	{
+		key: "typesafe",
+		label: "TypeSafe (Jev)",
+		note: "TypeSafe API key (apikey_…) for Jev, the fast typed-decision model Judges use to fill in properties.",
+		passwordFields: [{ key: "api_key", label: "API key", secret: true }],
+	},
 	// A database agents read through sql_query: the harness connects (through
 	// an SSH tunnel it opens when ssh_host is set - sql.ts), the model never
 	// sees the URL. Connect/Check runs `select 1` to set the status.

@@ -13,6 +13,7 @@ import { readRoster } from "./roster";
 import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
 import { CredentialError, checkCredential, connectCredential, disconnectCredential, type CredentialRow } from "./credential-objects";
+import { tryJudge } from "./judges";
 import { ensureBlob, blobDir, mimeOf, storeUpload } from "./files";
 import { apiFetch, authorizeLocalRequest, localCors, localPreflight, sessionOrigin, validLocalHost } from "./local-api-auth";
 import { loadIdentity, type SpaceJoinLink } from "./nostrsync";
@@ -201,6 +202,18 @@ export function startAuthServer(served: Set<string>): void {
 					} catch (error) {
 						if (error instanceof CredentialError) return json({ error: error.message }, error.status);
 						throw error;
+					}
+				}
+				// A Judge's Try it: its answers for the newest objects it runs on, written nowhere.
+				// Any computer can answer: the TypeSafe key rides on the synced credential.
+				if (req.method === "POST" && url.pathname === "/judges/try") {
+					if (authorization.role !== "ui") return json({ error: "A paired app is required." }, 403);
+					const body = (await req.json().catch(() => null)) as { id?: unknown } | null;
+					if (typeof body?.id !== "string" || !body.id) return json({ error: "id is required." }, 400);
+					try {
+						return json({ rows: await tryJudge(body.id) });
+					} catch (error) {
+						return json({ error: error instanceof Error ? error.message : String(error) }, 400);
 					}
 				}
 				if (req.method === "GET" && url.pathname === "/auth/status") {
