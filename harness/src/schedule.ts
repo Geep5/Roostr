@@ -267,7 +267,7 @@ async function postScheduled(ref: ConvRef, text: string, d: Due, me: string): Pr
  * Tell the owner: an agent gets the instructions and a turn, a person gets
  * a reminder - unless the object's Check first finds nothing to do.
  */
-async function dispatch(d: Due, me: string): Promise<void> {
+async function dispatch(d: Due, me: string, manual = false): Promise<void> {
 	if (!host) return;
 	try {
 		const obj = await fetchObject(d.id);
@@ -300,24 +300,26 @@ async function dispatch(d: Due, me: string): Promise<void> {
 			finding = `Check first (${check.name}) found:\n${shown.length > FINDING_CAP ? `${shown.slice(0, FINDING_CAP)}\n… (cut at ${FINDING_CAP} characters)` : shown}`;
 		}
 		if (!owner) {
-			await postScheduled(humanRef(obj.id), `\u21bb "${name}" is due (${when})`, d, me);
+			await postScheduled(humanRef(obj.id), manual ? `\u21bb "${name}" was run now` : `\u21bb "${name}" is due (${when})`, d, me);
 			if (subDaily(obj)) await completeOccurrence(d);
 			console.log(`[schedule] reminded "${name}" (${obj.id.slice(0, 8)}) - no served agent owns it`);
 			return;
 		}
 		const body = objectText(obj).slice(0, 4000);
-		const ending = subDaily(obj)
-			? "the scheduler completes this run when your turn ends - don't call occurrence_complete."
-			: `occurrence_complete on object ${obj.id} ends the run when they say it is done.`;
+		const ending = manual
+			? "this is an extra run started by a person with Run now, not a scheduled occurrence - don't call occurrence_complete."
+			: subDaily(obj)
+				? "the scheduler completes this run when your turn ends - don't call occurrence_complete."
+				: `occurrence_complete on object ${obj.id} ends the run when they say it is done.`;
 		const frame = [
-			`Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}. ${finding ? "What its check found, then its instructions" : "Its instructions"} follow; ${ending}`,
+			`${manual ? `Run now of "${name}" (${obj.typeKey || "object"})` : `Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}`}. ${finding ? "What its check found, then its instructions" : "Its instructions"} follow; ${ending}`,
 			...(finding ? [finding, "Instructions:"] : []),
 			body || "(this object has no body text)",
 		].join("\n");
 		await postScheduled(owner.conv, frame, d, me);
 		console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) → agent ${owner.agentId.slice(0, 8)}`);
 		takeCredentialIssues(owner.agentId); // a chat turn's leftovers are not this run's
-		const error = await host.turn(owner.agentId, TURN_SUFFIX);
+		const error = await host.turn(owner.agentId, manual ? RUN_NOW_SUFFIX : TURN_SUFFIX);
 		const deadLogins = takeCredentialIssues(owner.agentId);
 		const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: convKey(owner.conv) };
 		if (error) run.error = error;
@@ -334,5 +336,27 @@ async function dispatch(d: Due, me: string): Promise<void> {
 	} finally {
 		turnEnded?.();
 	}
+}
+
+/** A Run now turn's own words: the object's instructions as usual, but the schedule is not this run's to move. */
+const RUN_NOW_SUFFIX =
+	"This turn was started by a person pressing Run now on the object - an extra run, not a scheduled occurrence. Follow the object's instructions exactly - they decide what to post. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
+
+/**
+ * Run now: one extra run of a repeating object, exactly as an occurrence
+ * runs (Check first, the agent's turn with the page as instructions, the
+ * run record) but outside the schedule - nothing is fired or completed,
+ * so the next occurrence stays where it is. Only on the computer that
+ * serves the object. Returns once the run has started.
+ */
+export async function runNow(objectId: string): Promise<void> {
+	if (!host) throw new Error("the scheduler isn't running on this computer yet");
+	const obj = await fetchObject(objectId);
+	if (!obj.fields["repeat"]) throw new Error("this object doesn't repeat");
+	if (!(await servesHere(objectId))) throw new Error("this object runs on another computer - press Run now from Roostr on that computer");
+	// No `next` to match: completeOccurrence leaves the real occurrence alone.
+	const d: Due = { id: objectId, next: -1, firedFor: undefined };
+	const me = await machineId();
+	void dispatch(d, me, true).catch((err) => console.error(`[schedule] run now ${objectId.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
 }
 
