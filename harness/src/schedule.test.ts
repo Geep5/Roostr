@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isEmptyResult, resetScheduler, startScheduler, waitForTurnEnd } from "./schedule";
+import { flagStuckRuns, isEmptyResult, resetScheduler, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -278,4 +278,46 @@ test("a check that finds something puts it in the turn's frame ahead of the inst
 	expect(text.indexOf("Refund please")).toBeLessThan(text.indexOf("Triage each new email."));
 	// A minute repeat: the scheduler completes the run itself once the turn ends.
 	expect(calls.some((c) => c.body.action === "occurrence_complete")).toBe(true);
+});
+
+test("an occurrence still open when the next would be due is flagged on its Error, quoting the chat; finishing it clears the flag", async () => {
+	const objectId = "0b6c86a7-7063-4dcd-81d8-3c5707bbeb83";
+	const day = 86_400_000;
+	const next = Date.now() - 2 * day; // fired two days ago, never completed
+	let fields: Record<string, unknown> = {
+		name: { stringValue: "Update Featured Tournaments" },
+		repeat: { mapValue: { entries: { freq: { stringValue: "day" }, interval: { intValue: 1 }, next: { intValue: next }, fired_for: { intValue: next } } } },
+	};
+	const blocks = [
+		{ id: "a", childrenIds: [], content: { custom: { contentType: "chat", meta: { author: "scheduler", text: "Scheduled occurrence…", ts: String(next) } } } },
+		{ id: "b", childrenIds: [], content: { custom: { contentType: "chat", meta: { author: "agent-1", text: "Matcherino - Sharky needs Reconnect", ts: String(next + 30_000) } } } },
+	];
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		if (url.pathname === "/api/query") return respond({ records: [{ id: objectId, typeKey: "task", fields }], total: 1 });
+		if (url.pathname === "/api/serving") return respond({ [objectId]: { machineId: "test-machine", reason: "pinned", skills: [], candidates: ["test-machine"] } });
+		if (url.pathname === `/api/objects/${objectId}`) return respond({ id: objectId, typeKey: "task", fields, blocks, deleted: false, createdAt: 0, updatedAt: 0 });
+		if (url.pathname === "/api/mutate") {
+			if (body.action === "set_field") fields = { ...fields, [String(body.key)]: body.value };
+			if (body.action === "delete_field") fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== body.key));
+			return respond({ ok: true });
+		}
+		return respond({ error: "unexpected" }, 404);
+	}) as typeof fetch;
+	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
+
+	expect(await flagStuckRuns()).toBe(1);
+	const badge = (fields.error as { stringValue: string }).stringValue;
+	expect(badge.startsWith(STUCK_BADGE)).toBe(true);
+	expect(badge).toContain('Last message: "Matcherino - Sharky needs Reconnect"');
+
+	// A person ticked Done: the occurrence moved on and the flag goes.
+	fields = { ...fields, repeat: { mapValue: { entries: { freq: { stringValue: "day" }, next: { intValue: Date.now() + day }, fired_for: { intValue: next } } } } };
+	expect(await flagStuckRuns()).toBe(0);
+	expect(fields.error).toBeUndefined();
+
+	// Fired but its next is not due yet: a run in progress, not stuck.
+	fields = { ...fields, repeat: { mapValue: { entries: { freq: { stringValue: "day" }, next: { intValue: Date.now() - 60_000 }, fired_for: { intValue: Date.now() - 60_000 } } } } };
+	expect(await flagStuckRuns()).toBe(0);
 });

@@ -146,6 +146,72 @@ export async function startScheduler(h: ScheduleHost): Promise<void> {
 		if (obj?.fields[RUN_REQUEST_KEY]) await handleRunRequest(obj);
 	}
 	await arm();
+	// An occurrence that never finished stops its object for good: say so on its Error.
+	void flagStuckRuns().catch((err) => console.error("[schedule] stuck-run check:", err instanceof Error ? err.message : err));
+	stuckTimer ??= setInterval(() => void flagStuckRuns().catch((err) => console.error("[schedule] stuck-run check:", err instanceof Error ? err.message : err)), STUCK_CHECK_MS);
+}
+
+/** Error-badge prefix for an occurrence that fired and never finished. */
+export const STUCK_BADGE = "run never finished: ";
+const STUCK_CHECK_MS = 10 * 60_000;
+let stuckTimer: Timer | undefined;
+const UNIT_MS: Record<string, number> = { day: 86_400_000, week: 7 * 86_400_000, month: 28 * 86_400_000, year: 365 * 86_400_000 };
+
+/**
+ * How long after an occurrence the next one is due, roughly (the rule's
+ * unit x interval, divided among its times of day). Null for minute/hour
+ * repeats, which the scheduler completes itself.
+ */
+export function occurrenceGap(rule: Record<string, ValueJSON>): number | null {
+	const unit = UNIT_MS[rule["freq"]?.stringValue ?? ""];
+	if (!unit) return null;
+	const interval = Math.max(1, rule["interval"]?.intValue ?? 1);
+	const times = Math.max(1, rule["times"]?.valuesValue?.items?.length ?? 1);
+	return (unit * interval) / times;
+}
+
+/** The newest message in an object's chat - usually what stopped the run. */
+function lastChatLine(obj: ObjectJSON): string {
+	let best = { ts: -1, text: "" };
+	for (const b of obj.blocks) {
+		const m = b.content.custom?.meta;
+		if (b.content.custom?.contentType !== "chat" || !m?.text || m.author === "scheduler") continue;
+		const ts = Number(m.ts ?? 0);
+		if (ts > best.ts) best = { ts, text: m.text };
+	}
+	return best.text.replace(/\s+/g, " ").trim().slice(0, 140);
+}
+
+/**
+ * A day-or-longer occurrence that fired but is still open once the next one
+ * would have been due is stuck: the schedule waits on it for good. Its
+ * object's Error says so - when, and the last thing said in its chat - and a
+ * person decides (fix the cause, tick Done). Cleared once it finishes. Only
+ * this badge is touched: another Error (a person's, a signed-out login) stays.
+ */
+export async function flagStuckRuns(now = Date.now()): Promise<number> {
+	let stuck = 0;
+	for (const d of await recurringMine()) {
+		const obj = await fetchObject(d.id).catch(() => null);
+		if (!obj) continue;
+		const rule = obj.fields["repeat"]?.mapValue?.entries ?? {};
+		const gap = occurrenceGap(rule);
+		const badge = str(obj.fields, "error");
+		const isStuck = gap !== null && d.firedFor === d.next && !running.has(d.id) && now > d.next + gap;
+		if (isStuck) {
+			stuck += 1;
+			const when = new Date(d.next).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+			const last = lastChatLine(obj);
+			const next = `${STUCK_BADGE}the ${when} run is still open, so this hasn't run since.${last ? ` Last message: "${last}".` : ""} Fix that, then tick Done to finish it - the next run follows.`.slice(0, 300);
+			if ((!badge || badge.startsWith(STUCK_BADGE)) && badge !== next) {
+				await setField(d.id, "error", sv(next));
+				console.log(`[schedule] "${str(obj.fields, "name")}" (${d.id.slice(0, 8)}) stuck since ${when}`);
+			}
+		} else if (badge.startsWith(STUCK_BADGE)) {
+			await deleteField(d.id, "error");
+		}
+	}
+	return stuck;
 }
 /** Completion signal for deterministic tests; production ignores it. */
 export function waitForTurnEnd(): Promise<void> {
@@ -164,6 +230,8 @@ export function resetScheduler(): void {
 	firing = false;
 	running.clear();
 	generation += 1;
+	clearInterval(stuckTimer);
+	stuckTimer = undefined;
 }
 
 /**

@@ -30,3 +30,11 @@ export function takeCredentialIssues(agentId: string): string[] {
 export function credentialBadge(names: string[]): string {
 	return `${CREDENTIAL_BADGE}${names.join(", ")} - reconnect ${names.length === 1 ? "it" : "them"}`.slice(0, 300);
 }
+
+/** Put the dead-login badge on an object, unless it carries another Error (a person's or another writer's). */
+export async function badgeSignedOut(objectId: string, names: string[]): Promise<void> {
+	const { fetchObject, setField, str, sv } = await import("./api");
+	const current = str((await fetchObject(objectId)).fields, "error");
+	const next = credentialBadge(names);
+	if ((!current || current.startsWith(CREDENTIAL_BADGE)) && current !== next) await setField(objectId, "error", sv(next));
+}

@@ -47,6 +47,7 @@ import { migrateAgentLists, migrateBoundAgents, migrateSpaceComputers, migrateSp
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
 import { arm as armScheduler, handleRunRequest, RUN_REQUEST_KEY, startScheduler } from "./schedule";
+import { badgeSignedOut, takeCredentialIssues } from "./credential-issues";
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);
@@ -698,7 +699,14 @@ async function serve(): Promise<void> {
 			}
 			return;
 		}
-		await withTurn(s, surface, () => handleSurface(s, surface));
+		await withTurn(s, surface, async () => {
+			takeCredentialIssues(s.agentId); // another turn's leftovers are not this one's
+			await handleSurface(s, surface);
+			// A signed-out login this turn hit goes on the object it was about, as a
+			// scheduled run's does - else only a chat line says why the work stopped.
+			const dead = takeCredentialIssues(s.agentId);
+			if (dead.length > 0) await badgeSignedOut(surface.objectId, dead).catch(() => {});
+		});
 	}
 
 	/** Wait for the agent's turn slot; the holder's drain wakes us before it yields. */
