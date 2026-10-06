@@ -26,8 +26,10 @@ Everything in Roostr is an object: a note, a task, an email, a person, an agent,
 
 ## 4. Computers
 
-- A **computer** (a Computer object) is a machine running Roostr: the engine (`glon-odin serve`) and the harness (`bun run serve` in `harness/`). The harness is what runs agents and repeats.
-- Without a computer, Roostr still stores and syncs objects, but nothing acts: no agent answers, nothing repeats.
+- A **computer** (a Computer object) is a machine running Roostr: the store (`glon-odin serve`), sync, and the harness - the part that runs agents and repeats.
+- **Run it as a service.** In the Roostr repo's `harness/` folder: `bun run service install` (add `--web <path to the website repo>` to also run the local web app). It starts everything at login (macOS) or boot (Linux), restarts a program that crashes, and writes a crash - which program, how it ended, its last output - as the Computer object's Error. The Computer's **Starts automatically** box is ticked while the service runs it.
+- **After pulling new code or rebuilding the engine: `bun run service restart`** (in `harness/`) - the running programs keep the old code until then. `bun run service logs` follows every program's output (macOS log file: `~/Library/Logs/Roostr/roostr.log`); `bun run service uninstall` stops and removes it. Never start a second store, sync or harness by hand next to the service - the harness and sync refuse a second copy on one computer.
+- Without a computer, Roostr still stores and syncs objects, but nothing acts: no agent answers, nothing repeats. An agent whose computer is off simply doesn't answer - check that computer first when an agent goes quiet.
 - A computer can have **capabilities**: installed software from the catalog (for example headless Chrome for `web_fetch`, Google Workspace for Gmail). Each capability object says whether it works on that computer (active, needs_auth, missing, broken...). A Skill with a `key` needs that capability on the agent's computer.
 
 ## 5. Agents
@@ -48,7 +50,7 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 
 ### Lifecycle
 
-1. **Made**: from the space's Agent template ("+ New agent" in a picker, or New object -> Agent). The template supplies the prompt, model, tools and credentials.
+1. **Made**: from the space's Agent template ("+ New agent" in a picker - named right there - or New object -> Agent). The template supplies the prompt, model, tools and credentials. Made from an object's Agent row, it also starts with that object's tags (an agent made on a Team task is Customer: Team); made from a cell or the new-row line of a query's table, it starts with the query's filter values.
 2. **Placed**: its Served by names a computer. That computer's harness adopts it within seconds - no restart. Change Served by and it moves; the old computer lets go.
 3. **Invited**: an object's **Agent** property is its guest list. An agent only ever works on objects that list it (and on its own page). Nothing answers an object uninvited.
 4. **Woken**: a person (or another agent) @-mentions it in the object's chat, or a Repeat on an object it is on fires. A chat post with no @ wakes nobody.
@@ -67,9 +69,12 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 
 - **Repeat** (on any object): every N minutes, hours, days, weeks, months or years, with times and days. Each occurrence fires once, on the computer serving the object (its own Served by, else the first agent on it that has one).
 - **What fires**: the object's first served agent gets a message with the object's page as instructions and one turn. With no agent, the object's chat gets a reminder and its Error property says it has no agent.
-- **Finishing**: a day-or-longer repeat waits until its run is marked done (`occurrence_complete`, or a person ticking Done). Minute and hour repeats complete themselves after each run.
+- **Finishing**: a day-or-longer repeat waits until its run is marked done (`occurrence_complete`, or a person ticking Done). Minute and hour repeats complete themselves after each run. Call `occurrence_complete` only when the object's instructions say the run is done - and say plainly what blocks it otherwise.
 - **Check first**: links a Tool that runs before each occurrence, without a model. An empty result (nothing, `[]`, `{}`) ends the run there - no turn, no cost. A non-empty result is put in front of the agent's instructions. Use it for "only wake the agent when there is something new".
-- **Runs**: each run is recorded on the object. A failing run sets its Error property; the next clean run clears it.
+- **One run at a time**: while any run of an object is in progress (shown as "Running now on <computer>" under Repeat, on every device), another Run now is refused and an occurrence that comes due waits, firing when the run ends.
+- **Run now** (in the Repeat editor, from any device): the computer that serves the object starts a run right away. While an occurrence is **open** - it fired and never finished - the button is **Retry run**: it reruns that occurrence, and finishing it moves the schedule on. Otherwise it is an extra run outside the schedule (it must not call `occurrence_complete`). **Skip this run** finishes an open occurrence without doing it, as ticking Done does.
+- **Stuck runs**: an occurrence still open when the next one would be due shows on the object's Error - "run never finished: the <when> run is still open… It is waiting for a reply from <agent> (runs on <computer>)" or the last chat message - and under Repeat as "Stuck since …". The schedule waits for a person: fix the cause, then Retry run or Skip this run. The Error clears once the run finishes.
+- **Runs**: each run is recorded on the object. A failing run sets its Error property, and so does a signed-out login any turn on the object hits; the next clean run clears it.
 
 ## 7. Jev Skills (typed scores by Jev)
 
@@ -121,8 +126,9 @@ These are enforced by the harness for every agent; follow them in any prompt you
 
 ### Reliability
 
-- **Every agent needs Served by and a model key.** Check both first when "it doesn't answer".
-- **Read the Error property.** Failed runs, missing computers, signed-out credentials and broken Tools all show there - fix the cause, the next clean run clears it.
+- **Every agent needs Served by, a running computer and a model key.** Check all three first when "it doesn't answer" - an agent asking another agent waits as long as that agent's computer is off.
+- **Read the Error property** - on the object, its agent and its Computer. Failed runs, stuck runs, missing computers, crashed programs, signed-out credentials and broken Tools all show there - fix the cause, and the next clean run (or Retry run) clears it.
+- **Keep computers on the service** (`bun run service install`), and run `bun run service restart` after every pull or rebuild.
 - **Test on a throwaway object** before pointing a setup at real data, then delete it.
 - **Don't duplicate.** Search (`find`, `space_map`, saved views) before creating types, properties, templates or agents that may already exist.
 - **Name things for people.** Clear names on agents, properties and views; the name is the interface.
@@ -165,3 +171,10 @@ These are enforced by the harness for every agent; follow them in any prompt you
 2. Set Served by; check its System prompt, Model and Credentials (a model key).
 3. Add it to the objects it should work on.
 4. @-mention it once to confirm it answers.
+
+### Keep a computer running Roostr
+
+1. In the Roostr repo: build the engine (`odin build src -out:glon-odin -o:speed`), then `cd harness && bun install`.
+2. `bun run service install` (`--web <path to the website repo>` to serve the local web app too). Its Computer object now shows Starts automatically.
+3. After every `git pull` or rebuild: `bun run service restart`.
+4. Something wrong: `bun run service logs`, and the Computer object's Error.
