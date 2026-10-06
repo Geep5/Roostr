@@ -171,23 +171,43 @@ export function occurrenceGap(rule: Record<string, ValueJSON>): number | null {
 }
 
 /** The newest message in an object's chat - usually what stopped the run. */
-function lastChatLine(obj: ObjectJSON): string {
-	let best = { ts: -1, text: "" };
+function lastChatLine(obj: ObjectJSON): { author: string; text: string } {
+	let best = { ts: -1, author: "", text: "" };
 	for (const b of obj.blocks) {
 		const m = b.content.custom?.meta;
 		if (b.content.custom?.contentType !== "chat" || !m?.text || m.author === "scheduler") continue;
 		const ts = Number(m.ts ?? 0);
-		if (ts > best.ts) best = { ts, text: m.text };
+		if (ts > best.ts) best = { ts, author: m.author ?? "", text: m.text };
 	}
-	return best.text.replace(/\s+/g, " ").trim().slice(0, 140);
+	return { author: best.author, text: best.text.replace(/\s+/g, " ").trim() };
+}
+
+/**
+ * Whom a stuck run waits on: an agent the last message @-mentions (one of
+ * the object's guests, not its author) - "Marco Dev Bot (runs on
+ * geepOmenComp)" - else "".
+ */
+async function waitingOn(obj: ObjectJSON, last: { author: string; text: string }): Promise<string> {
+	for (const id of guestAgents(obj.fields)) {
+		if (id === last.author) continue;
+		const agent = await fetchObject(id).catch(() => null);
+		const name = agent ? str(agent.fields, "name") : "";
+		if (!name || !last.text.includes(`@${name}`)) continue;
+		const pin = str(agent!.fields, "served_by");
+		const machine = pin ? (await queryAll({ type: "machine" })).find((m) => str(m.fields, "machine_id") === pin) : undefined;
+		return machine ? `${name} (runs on ${str(machine.fields, "name")})` : name;
+	}
+	return "";
 }
 
 /**
  * A day-or-longer occurrence that fired but is still open once the next one
  * would have been due is stuck: the schedule waits on it for good. Its
- * object's Error says so - when, and the last thing said in its chat - and a
- * person decides (fix the cause, tick Done). Cleared once it finishes. Only
- * this badge is touched: another Error (a person's, a signed-out login) stays.
+ * object's Error says so - when, whom it waits on (an agent the last message
+ * asked) or else the last thing said in its chat - and how to fix it: Retry
+ * run (Run now on an open occurrence retries it) or Skip this run. Cleared
+ * once it finishes. Only this badge is touched: another Error (a person's, a
+ * signed-out login) stays.
  */
 export async function flagStuckRuns(now = Date.now()): Promise<number> {
 	let stuck = 0;
@@ -202,10 +222,12 @@ export async function flagStuckRuns(now = Date.now()): Promise<number> {
 			stuck += 1;
 			const when = new Date(d.next).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 			const last = lastChatLine(obj);
-			const next = `${STUCK_BADGE}the ${when} run is still open, so this hasn't run since.${last ? ` Last message: "${last}".` : ""} Fix that, then tick Done to finish it - the next run follows.`.slice(0, 300);
+			const waiting = last.text ? await waitingOn(obj, last) : "";
+			const why = waiting ? ` It is waiting for a reply from ${waiting}.` : last.text ? ` Last message: "${last.text.slice(0, 120)}".` : "";
+			const next = `${STUCK_BADGE}the ${when} run is still open, so this hasn't run since.${why} Fix that, then Retry run (under Repeat) or Skip this run.`.slice(0, 300);
 			if ((!badge || badge.startsWith(STUCK_BADGE)) && badge !== next) {
 				await setField(d.id, "error", sv(next));
-				console.log(`[schedule] "${str(obj.fields, "name")}" (${d.id.slice(0, 8)}) stuck since ${when}`);
+				console.log(`[schedule] "${str(obj.fields, "name")}" (${d.id.slice(0, 8)}) stuck since ${when}${waiting ? `, waiting for ${waiting}` : ""}`);
 			}
 		} else if (badge.startsWith(STUCK_BADGE)) {
 			await deleteField(d.id, "error");
@@ -292,7 +314,7 @@ async function fire(): Promise<void> {
 			// Turns run for as long as the agent needs; the next due object
 			// must not wait on them. `fired_for` is already committed, so a
 			// re-arm mid-turn cannot fire this occurrence twice.
-			void runExclusive(d, me, false).catch((err) => {
+			void runExclusive(d, me, "scheduled").catch((err) => {
 				// Deleted mid-run: the run has nowhere left to be recorded.
 				if (wasDeleted(err)) console.log(`[schedule] dispatch ${d.id.slice(0, 8)} stopped: ${err.message}`);
 				else console.error(`[schedule] dispatch ${d.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err);
@@ -344,10 +366,17 @@ async function postScheduled(ref: ConvRef, text: string, d: Due, me: string): Pr
 }
 
 /**
+ * Which run this is: the clock's occurrence, a person retrying the open
+ * occurrence that never finished (it may complete it), or an extra run
+ * outside the schedule (it must not).
+ */
+type RunKind = "scheduled" | "retry" | "extra";
+
+/**
  * Tell the owner: an agent gets the instructions and a turn, a person gets
  * a reminder - unless the object's Check first finds nothing to do.
  */
-async function dispatch(d: Due, me: string, manual = false): Promise<void> {
+async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promise<void> {
 	if (!host) return;
 	try {
 		const obj = await fetchObject(d.id);
@@ -380,26 +409,32 @@ async function dispatch(d: Due, me: string, manual = false): Promise<void> {
 			finding = `Check first (${check.name}) found:\n${shown.length > FINDING_CAP ? `${shown.slice(0, FINDING_CAP)}\n… (cut at ${FINDING_CAP} characters)` : shown}`;
 		}
 		if (!owner) {
-			await postScheduled(humanRef(obj.id), manual ? `\u21bb "${name}" was run now` : `\u21bb "${name}" is due (${when})`, d, me);
+			await postScheduled(humanRef(obj.id), kind === "extra" ? `\u21bb "${name}" was run now` : kind === "retry" ? `\u21bb "${name}" (due ${when}) was retried` : `\u21bb "${name}" is due (${when})`, d, me);
 			if (subDaily(obj)) await completeOccurrence(d);
 			console.log(`[schedule] reminded "${name}" (${obj.id.slice(0, 8)}) - no served agent owns it`);
 			return;
 		}
 		const body = objectText(obj).slice(0, 4000);
-		const ending = manual
+		const ending = kind === "extra"
 			? "this is an extra run started by a person with Run now, not a scheduled occurrence - don't call occurrence_complete."
 			: subDaily(obj)
 				? "the scheduler completes this run when your turn ends - don't call occurrence_complete."
 				: `occurrence_complete on object ${obj.id} ends the run when they say it is done.`;
+		const header =
+			kind === "extra"
+				? `Run now of "${name}" (${obj.typeKey || "object"})`
+				: kind === "retry"
+					? `Retry of "${name}" (${obj.typeKey || "object"}): the occurrence due ${when} never finished, and a person pressed Retry - do it again now, from the start`
+					: `Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}`;
 		const frame = [
-			`${manual ? `Run now of "${name}" (${obj.typeKey || "object"})` : `Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}`}. ${finding ? "What its check found, then its instructions" : "Its instructions"} follow; ${ending}`,
+			`${header}. ${finding ? "What its check found, then its instructions" : "Its instructions"} follow; ${ending}`,
 			...(finding ? [finding, "Instructions:"] : []),
 			body || "(this object has no body text)",
 		].join("\n");
 		await postScheduled(owner.conv, frame, d, me);
 		console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) → agent ${owner.agentId.slice(0, 8)}`);
 		takeCredentialIssues(owner.agentId); // a chat turn's leftovers are not this run's
-		const error = await host.turn(owner.agentId, manual ? RUN_NOW_SUFFIX : TURN_SUFFIX);
+		const error = await host.turn(owner.agentId, kind === "extra" ? RUN_NOW_SUFFIX : TURN_SUFFIX);
 		const deadLogins = takeCredentialIssues(owner.agentId);
 		const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: convKey(owner.conv) };
 		if (error) run.error = error;
@@ -431,19 +466,23 @@ const RUN_ACTIVE_KEY = "run_active";
 const running = new Set<string>();
 
 /** Mark the run on the object, run it, then clear the mark and look again for what waited on it. */
-async function runExclusive(d: Due, me: string, manual: boolean): Promise<void> {
+async function runExclusive(d: Due, me: string, kind: RunKind): Promise<void> {
 	const gen = generation;
 	running.add(d.id);
 	try {
-		await setField(d.id, RUN_ACTIVE_KEY, { mapValue: { entries: { at: { intValue: Date.now() }, machine: sv(me), manual: { boolValue: manual } } } }).catch(() => {});
-		await dispatch(d, me, manual);
+		await setField(d.id, RUN_ACTIVE_KEY, { mapValue: { entries: { at: { intValue: Date.now() }, machine: sv(me), manual: { boolValue: kind !== "scheduled" } } } }).catch(() => {});
+		await dispatch(d, me, kind);
 	} finally {
 		// A run that outlived its scheduler (tests reset it) neither frees nor re-arms the new one.
 		if (gen === generation) {
 			running.delete(d.id);
 			await deleteField(d.id, RUN_ACTIVE_KEY).catch(() => {});
 			// An occurrence that came due mid-run was held back: fire it now (unless reset meanwhile).
-			if (gen === generation) void arm();
+			if (gen === generation) {
+				void arm();
+				// The Error says where things stand now - stuck, waiting on whom, or fine.
+				void flagStuckRuns().catch(() => {});
+			}
 		}
 	}
 }
@@ -451,9 +490,11 @@ async function runExclusive(d: Due, me: string, manual: boolean): Promise<void> 
 /**
  * A Run now request on `obj` (its `run_now` field, written by any device):
  * the computer that serves the object claims it - deletes the request - and
- * starts one extra run, exactly as an occurrence runs (Check first, the
- * agent's turn with the page as instructions, the run record) but outside
- * the schedule: nothing is fired or completed. A request while a run is in
+ * starts a run exactly as an occurrence runs (Check first, the agent's turn
+ * with the page as instructions, the run record). While an occurrence is
+ * open (fired, never finished) that run is a Retry of it - finishing it
+ * moves the schedule on, which is how a stuck object is fixed; otherwise
+ * it is an extra run outside the schedule. A request while a run is in
  * progress is dropped; the app shows Running… and offers no Run now then.
  */
 export async function handleRunRequest(obj: ObjectJSON): Promise<void> {
@@ -469,9 +510,12 @@ export async function handleRunRequest(obj: ObjectJSON): Promise<void> {
 	try {
 		await deleteField(obj.id, RUN_REQUEST_KEY);
 		const me = await machineId();
-		console.log(`[schedule] run now of "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)})`);
-		// No `next` to match: completeOccurrence leaves the real occurrence alone.
-		void runExclusive({ id: obj.id, next: -1, firedFor: undefined }, me, true).catch((err) => console.error(`[schedule] run now ${obj.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
+		const due = dueOf(obj);
+		const open = !!due && due.firedFor === due.next && !subDaily(obj);
+		console.log(`[schedule] ${open ? "retry" : "run now"} of "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)})`);
+		// A retry is the open occurrence itself; an extra run has no `next` to match, so it completes nothing.
+		const d: Due = open ? due! : { id: obj.id, next: -1, firedFor: undefined };
+		void runExclusive(d, me, open ? "retry" : "extra").catch((err) => console.error(`[schedule] run now ${obj.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
 	} catch (err) {
 		running.delete(obj.id);
 		throw err;
