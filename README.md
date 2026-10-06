@@ -22,18 +22,35 @@ durable outbox and no account at all.
 
 ```bash
 odin build src -out:glon-odin -o:speed
+cd harness && bun install
+
+# Keep Roostr running: the store, sync and harness start at boot (Linux) or
+# login (macOS) and come back when one crashes.
+bun run service install            # --web ../../RoostrWebsite runs the local web app too
+bun run service logs               # follow every program; also: restart, uninstall
+bun run pair                       # a fresh one-use pairing code, shown in the logs
+
+# Or by hand, in separate terminals; sync does not require an agent harness:
 ./glon-odin serve            # API on http://127.0.0.1:7333 (GLON_DATA=~/.glon)
 ./glon-odin list             # object summaries
 ./glon-odin dump <objectId>  # computed state as JSON (parity testing)
-
-# In separate terminals; sync does not require an agent harness:
-cd harness && bun install && bun run sync
+cd harness && bun run sync
 cd harness && bun run serve        # optional: agents and machine integrations
 
 # The single UI source is the sibling RoostrWebsite repository:
 cd ../RoostrWebsite && npm install && npm run dev:local
 # Open http://127.0.0.1:5190/app and pair with the code in the daemon terminal.
 ```
+
+The service (`harness/src/service.ts`) is a systemd user unit on Linux
+(`roostr.service`, started at boot by lingering) or a LaunchAgent on macOS
+(`app.roostr`). Both run one supervisor (`harness/src/supervisor.ts`) that
+starts each program, restarts one that exits (1 s, doubling to a minute while
+it keeps dying), and writes a crash - which program, how it ended, its last
+output - as the Error on this computer's Computer object. A crash loop is one
+Error with a count; clearing it starts the count over. The Computer's
+**Starts automatically** box is ticked while the service runs it. The harness
+and sync each refuse a second copy on the same computer.
 
 ### Toolchain
 
@@ -411,7 +428,7 @@ Agents set and clear the rule with `object_set_repeat` / `object_clear_repeat`
 (the Repeat cell's own actions) and finish an occurrence with
 `occurrence_complete`; a recurring object is never `done`. Missed
 occurrences (sleep, downtime) fire once on the next start. To keep it
-running, see `harness/launchd/`.
+running, install the service (`bun run service install`, see Run).
 
 Agent writes land where a human sees them: `object_set_field` accepts only a
 property that exists in the space, in that property's type, and replies with

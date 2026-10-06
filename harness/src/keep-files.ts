@@ -11,12 +11,11 @@
  */
 
 import { existsSync, readdirSync } from "node:fs";
-import { bv, createObject, flag, iv, list, lv, queryAll, str, sv, type QueryRow } from "./api";
+import { flag, list, queryAll, str, type QueryRow } from "./api";
 import { BlobUnavailable, FILE_TYPE, blobDir, ensureBlob, filePeerRunning } from "./files";
-import { MACHINE_TYPE } from "./machine";
+import { KEEP_ALL_KEY, MACHINE_TYPE } from "./machine";
 import { machineId } from "./roster";
 
-export const KEEP_ALL_KEY = "keep_all_files";
 const RETRY_FIRST_MS = 10 * 60_000;
 const RETRY_MAX_MS = 6 * 60 * 60_000;
 /** Slow sweep: picks up files whose wait ran out, and anything an event missed. */
@@ -62,30 +61,6 @@ export function keepAllPlan(files: QueryRow[], me: string, held: Set<string>, ba
 		const wait = backoff.get(hash);
 		return wait && wait.at > now && wait.holders === holders.toSorted().join(",") ? [] : [{ hash, holders }];
 	});
-}
-
-/** The checkbox, seeded once in every space that holds a Computer object (like the credential properties). */
-export async function seedKeepAllProperty(): Promise<number> {
-	const spaces = new Set((await queryAll({ type: MACHINE_TYPE })).map((m) => str(m.fields, "channel")).filter(Boolean));
-	const seeded = new Set((await queryAll({ type: "relation" })).filter((r) => str(r.fields, "key") === KEEP_ALL_KEY).map((r) => str(r.fields, "channel")));
-	let made = 0;
-	for (const space of spaces) {
-		if (seeded.has(space)) continue;
-		await createObject("Keep every file", "relation", {
-			channel: sv(space),
-			key: sv(KEEP_ALL_KEY),
-			name: sv("Keep every file"),
-			format: sv("checkbox"),
-			iconEmoji: sv("🗄️"),
-			hidden: bv(false),
-			readOnly: bv(false),
-			maxCount: iv(0),
-			options: lv([]),
-			bundled: bv(false),
-		});
-		made += 1;
-	}
-	return made;
 }
 
 const backoff = new Map<string, Backoff>();

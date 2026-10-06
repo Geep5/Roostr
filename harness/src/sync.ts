@@ -6,6 +6,9 @@
 // First: private extensions (harness/private/) register their seeds before anything reads them.
 import "./extensions";
 import { startNostrSync } from "./nostrsync";
+import { holdSingleInstance } from "./single-instance";
+
+await holdSingleInstance("sync");
 
 try {
 	await startNostrSync();

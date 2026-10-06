@@ -6,6 +6,7 @@
 	"scripts": {
 		"serve": "bun run src/index.ts serve",
 		"sync": "bun run src/sync.ts",
+		"service": "bun run src/service.ts",
 		"pair": "bun run src/pair.ts",
 		"check": "bunx tsc --noEmit"
 	},

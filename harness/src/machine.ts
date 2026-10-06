@@ -14,16 +14,17 @@
  * A machine always serves its own `machine` object, so a human can address
  * any machine through that object's discussion.
  *
- * Nothing here is liveness. The machine object carries `machine_id` and
- * `name` (hostname) - durable facts, each written only when it changes, so
- * restarts are free. What the machine can DO is no longer a field here: it
- * is the capability objects (type `capability`, capabilities.ts) that name
- * it as `served_by` with status `active`.
+ * Nothing here is liveness. The machine object carries `machine_id`, `name`
+ * (hostname) and `autostart` (started by the OS service, `bun run service`)
+ * - durable facts, each written only when it changes, so restarts are free.
+ * What the machine can DO is no longer a field here: it is the capability
+ * objects (type `capability`, capabilities.ts) that name it as `served_by`
+ * with status `active`.
  */
 
 import { execSync } from "node:child_process";
 import { hostname, platform } from "node:os";
-import { createObject, queryAll, servingFor, setField, str, sv, type Serving, type ValueJSON } from "./api";
+import { bv, createObject, flag, iv, lv, queryAll, servingFor, setField, str, sv, type QueryRow, type Serving, type ValueJSON } from "./api";
 import { machineId } from "./roster";
 import { agentSubject } from "./conv";
 
@@ -45,6 +46,46 @@ function stableHostName(): string {
 }
 
 export const MACHINE_TYPE = "machine";
+/** "Keep every file": this computer holds every File's bytes (keep-files.ts). */
+export const KEEP_ALL_KEY = "keep_all_files";
+/** "Starts automatically": the OS service runs Roostr here (service.ts), so it comes back after a crash or a reboot. */
+export const AUTOSTART_KEY = "autostart";
+
+/** Started by the OS service: the supervisor's unit sets ROOSTR_SERVICE, and every program it runs inherits it. */
+const startsAutomatically = (): boolean => !!process.env.ROOSTR_SERVICE;
+
+/** A Computer's own checkboxes: `readOnly` ones are facts the computer writes about itself. */
+const COMPUTER_PROPERTIES = [
+	{ key: KEEP_ALL_KEY, name: "Keep every file", iconEmoji: "🗄️", readOnly: false },
+	{ key: AUTOSTART_KEY, name: "Starts automatically", iconEmoji: "🔁", readOnly: true },
+];
+
+/** The Computer checkboxes, seeded once in every space that holds a Computer object (like the credential properties). */
+export async function seedComputerProperties(): Promise<number> {
+	const spaces = new Set((await queryAll({ type: MACHINE_TYPE })).map((m) => str(m.fields, "channel")).filter(Boolean));
+	const relations = await queryAll({ type: "relation" });
+	let made = 0;
+	for (const prop of COMPUTER_PROPERTIES) {
+		const seeded = new Set(relations.filter((r) => str(r.fields, "key") === prop.key).map((r) => str(r.fields, "channel")));
+		for (const space of spaces) {
+			if (seeded.has(space)) continue;
+			await createObject(prop.name, "relation", {
+				channel: sv(space),
+				key: sv(prop.key),
+				name: sv(prop.name),
+				format: sv("checkbox"),
+				iconEmoji: sv(prop.iconEmoji),
+				hidden: bv(false),
+				readOnly: bv(prop.readOnly),
+				maxCount: iv(0),
+				options: lv([]),
+				bundled: bv(false),
+			});
+			made += 1;
+		}
+	}
+	return made;
+}
 
 const TTL_MS = 20_000;
 
@@ -123,18 +164,26 @@ export function agentRunsOn(serving: Serving, agentPin: string): string {
 	return serving.reason === "self" ? serving.machineId : agentPin;
 }
 
+/** This computer's own Computer object, once registered. */
+export async function ownMachine(): Promise<QueryRow | undefined> {
+	const id = await machineId();
+	return (await queryAll({ type: MACHINE_TYPE })).find((m) => str(m.fields, "machine_id") === id);
+}
+
 /**
  * Register this machine: create its object on first call, keep `name` at
- * the hostname. Capabilities no longer ride on the machine object - the
- * capability objects that name it as `served_by` carry them.
+ * the hostname and `autostart` at how this harness was started.
+ * Capabilities no longer ride on the machine object - the capability
+ * objects that name it as `served_by` carry them.
  */
 export async function publishMachine(): Promise<void> {
 	const id = await machineId();
 	const host = stableHostName();
+	const autostart = startsAutomatically();
 	try {
-		const mine = (await queryAll({ type: MACHINE_TYPE })).find((m) => str(m.fields, "machine_id") === id);
+		const mine = await ownMachine();
 		if (!mine) {
-			await createObject(host, MACHINE_TYPE, { machine_id: sv(id) });
+			await createObject(host, MACHINE_TYPE, { machine_id: sv(id), ...(autostart ? { [AUTOSTART_KEY]: bv(true) } : {}) });
 			console.log(`[harness] registered this machine as "${host}"`);
 			invalidateServing();
 			return;
@@ -145,6 +194,7 @@ export async function publishMachine(): Promise<void> {
 			await setField(mine.id, "name", sv(host));
 			invalidateServing();
 		}
+		if (flag(mine.fields, AUTOSTART_KEY) !== autostart) await setField(mine.id, AUTOSTART_KEY, bv(autostart));
 	} catch (err) {
 		// Registration is what OTHER machines resolve against, never a
 		// precondition for serving here: a daemon that is not up yet must not

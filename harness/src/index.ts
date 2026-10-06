@@ -27,10 +27,11 @@ import { capabilities } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tool-harness";
 import { startAuthServer } from "./authserver";
 import { FILE_TYPE, startFilePeer } from "./files";
-import { KEEP_ALL_SWEEP_MS, keepAllFiles, seedKeepAllProperty } from "./keep-files";
+import { KEEP_ALL_SWEEP_MS, keepAllFiles } from "./keep-files";
+import { holdSingleInstance } from "./single-instance";
 import { machineId, readRoster, setEnabled } from "./roster";
 import { vanishOnRelays } from "./nostrsync";
-import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishMachine, serverOf, servesHere } from "./machine";
+import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishMachine, seedComputerProperties, serverOf, servesHere } from "./machine";
 import { CAPABILITY_TYPE } from "./capabilities";
 import { SKILLS_KEY, machineSkillKeys } from "./skills";
 import { TOOLS_KEY, ensureBuiltinTools, ensureBuiltinToolsEverywhere, linkList } from "./tool-objects";
@@ -286,6 +287,8 @@ async function handleSurface(s: Served, surface: ConvRef): Promise<boolean> {
 }
 
 async function serve(): Promise<void> {
+	// First, before any boot work: a second copy would answer every agent twice.
+	await holdSingleInstance("harness");
 	const inboxOwner = `${await machineId()}:${crypto.randomUUID()}`;
 	setCapabilityRequestOwner(inboxOwner);
 	await publishMachine(); // register this machine before serving resolves against the roster
@@ -304,8 +307,8 @@ async function serve(): Promise<void> {
 	// own recipe - before the check below reads those recipes.
 	console.log("[harness] credential seeds:", JSON.stringify(await seedCredentials()));
 	await refreshCredentials();
-	// The Computer page's "Keep every file" checkbox, in every space with computers.
-	console.log("[harness] keep-every-file property:", JSON.stringify({ seeded: await seedKeepAllProperty() }));
+	// The Computer page's "Keep every file" and "Starts automatically" checkboxes, in every space with computers.
+	console.log("[harness] computer properties:", JSON.stringify({ seeded: await seedComputerProperties() }));
 	// Jev Skills' Answer / Writes to properties in every space; the retired Judge type and properties removed.
 	console.log("[harness] jev seeds:", JSON.stringify(await seedJev()));
 	const migration = await migrateExchanges({ apply: true });
