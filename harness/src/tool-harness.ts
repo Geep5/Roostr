@@ -25,6 +25,7 @@ import { credentialActions, credentialApis } from "./extensions";
 import { queryPostgres, rowLimit, urlSecrets, type SqlResult } from "./sql";
 import { fileHoldup, skillReady } from "./skillmgr";
 import { listSkills } from "./skills";
+import { scoreWithSkill } from "./jev";
 import type { HarnessServe } from "./tool-host";
 import type { AskMessage, CredentialAnswer, HarnessApi, HarnessMethod, ShellRun } from "./tool-sdk";
 import type { ToolContext } from "./tools";
@@ -297,6 +298,17 @@ export function harnessFor(ctx: ToolContext): HarnessServe {
 			}
 		},
 		skills: () => listSkills(ctx.agentId, ctx.toolset?.granted),
+		// A Jev Skill this agent may use (its Skills list, as listed to it), with its own TypeSafe credential.
+		jev: async ([rawSkill, rawIds]) => {
+			const want = textArg(rawSkill, "skill").trim().toLowerCase();
+			if (!Array.isArray(rawIds)) throw new Error("objectIds must be a list of ids");
+			const ids = rawIds.map((id) => textArg(id, "object id"));
+			if (!ctx.agentId) throw new Error("Jev Skills run for an agent: its Skills and its TypeSafe credential");
+			const listed = await listSkills(ctx.agentId, ctx.toolset?.granted);
+			const hit = listed.find((s) => s.id === want || s.name.toLowerCase() === want);
+			if (!hit) throw new Error(`no Skill "${textArg(rawSkill, "skill")}" in your Skills - your Jev Skills are listed there`);
+			return scoreWithSkill(await fetchObject(hit.id), ids, ctx.agentId);
+		},
 		capabilities: () => fetchCapabilities(),
 		requestCapability: async ([capabilityObjectId, operation, text]) => {
 			const agent = await fetchObject(ctx.agentId);

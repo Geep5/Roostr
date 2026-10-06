@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { foundIds, isEmptyResult, resetScheduler, startScheduler, waitForTurnEnd } from "./schedule";
+import { isEmptyResult, resetScheduler, startScheduler, waitForTurnEnd } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -278,11 +278,4 @@ test("a check that finds something puts it in the turn's frame ahead of the inst
 	expect(text.indexOf("Refund please")).toBeLessThan(text.indexOf("Triage each new email."));
 	// A minute repeat: the scheduler completes the run itself once the turn ends.
 	expect(calls.some((c) => c.body.action === "occurrence_complete")).toBe(true);
-});
-
-test("a check's finds are the ids it lists, from a value or its JSON text; anything else names none", () => {
-	expect(foundIds([{ id: "a", subject: "x" }, { id: "b" }, { subject: "no id" }, "c"])).toEqual(["a", "b"]);
-	expect(foundIds('[{"id":"a"}]')).toEqual(["a"]);
-	expect(foundIds("3 new emails")).toEqual([]);
-	expect(foundIds({ id: "a" })).toEqual([]);
 });

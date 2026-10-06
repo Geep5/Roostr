@@ -29,6 +29,7 @@ import { STYLE, appendMarkdown, inlineMarks, type Mark } from "./markdown";
 import * as memory from "./memory";
 import { describeRepeat, localClock } from "./repeat";
 import { objectText, type SkillListing } from "./skills";
+import type { ScoreRow } from "./jev";
 import { assertInSpace, buildNeighborhood, buildSpaceMap, defaultSpaceId, relationDefs, savedViewBody, spaceFilterFor, typeDefs, type RelDef, type TypeDef } from "./spacemap";
 import { bodyBlocks, isAgentAuthor, type BodyLine } from "./surfaces";
 
@@ -142,6 +143,7 @@ export interface HarnessApi {
 	credentialAct(service: string, action: string, input: Record<string, unknown>): Promise<CredentialActResult>;
 	credentialSql(service: string, sql: string, options: CredentialSqlOptions): Promise<CredentialSqlResult>;
 	skills(): Promise<SkillListing[]>;
+	jev(skill: string, objectIds: string[]): Promise<ScoreRow[]>;
 	capabilities(): Promise<CapabilityRow[]>;
 	requestCapability(capabilityObjectId: string, operation: string, text: string): Promise<SentMessage>;
 	ask(message: AskMessage): Promise<SentMessage>;
@@ -245,6 +247,8 @@ export interface Roostr {
 	credentials: RoostrCredentials;
 	/** The skills this agent may read: its own and the shared ones, narrowed by its Skills; machine skills only while working here, and only with the shell. */
 	skills(): Promise<SkillListing[]>;
+	/** Run one of the agent's Jev Skills (a Skill with an Answer) on objects: Jev's answer becomes the Skill's property on each, with how sure. Uses the agent's TypeSafe credential. */
+	jev(skill: string, objectIds: string[]): Promise<ScoreRow[]>;
 	/** Every computer's capabilities (one catalog skill on one computer) with their status. */
 	capabilities(): Promise<CapabilityRow[]>;
 	/** Ask a capability's computer for a setup or maintenance operation (skill.install, skill.check, ...) on the agent's behalf; a person there approves it before anything runs. */
@@ -370,6 +374,7 @@ export function createRoostr(context: ToolRunContext, touched: Set<string>, harn
 			sql: (service, sql, options = {}) => sdkCall(() => harness("credentialSql", [service, sql, options])),
 		},
 		skills: () => sdkCall(() => harness("skills", [])),
+		jev: (skill, objectIds) => sdkCall(() => harness("jev", [skill, objectIds])),
 		capabilities: () => sdkCall(() => harness("capabilities", [])),
 		requestCapability: (capabilityObjectId, operation, text) => sdkCall(() => harness("requestCapability", [capabilityObjectId, operation, text])),
 		ask: (message) => sdkCall(() => harness("ask", [message])),

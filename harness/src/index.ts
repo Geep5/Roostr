@@ -21,7 +21,7 @@ import { spawnSubagent } from "./spawn";
 import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./credential-objects";
 import { installGwsAs } from "./google-credentials";
 import { fillCredential, seedCredentials } from "./credential-seeds";
-import { judgeOnChange, seedJudges, sweepJudges } from "./judges";
+import { seedJev } from "./jev";
 import { seedGuide } from "./guide";
 import { capabilities } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tool-harness";
@@ -305,8 +305,8 @@ async function serve(): Promise<void> {
 	await refreshCredentials();
 	// The Computer page's "Keep every file" checkbox, in every space with computers.
 	console.log("[harness] keep-every-file property:", JSON.stringify({ seeded: await seedKeepAllProperty() }));
-	// The Judge type and its Answer / Runs on / Writes to properties, in every space.
-	console.log("[harness] judge seeds:", JSON.stringify(await seedJudges()));
+	// Jev Skills' Answer / Writes to properties in every space; the retired Judge type and properties removed.
+	console.log("[harness] jev seeds:", JSON.stringify(await seedJev()));
 	const migration = await migrateExchanges({ apply: true });
 	console.log("[harness] exchange migration:", JSON.stringify(migration));
 	// bound_object -> object.agent, after the exchange migration has read
@@ -832,8 +832,6 @@ async function serve(): Promise<void> {
 		// A File appeared or gained a holder, or a computer's "Keep every
 		// file" flipped: a computer that keeps every file fetches what it lacks.
 		if (obj.typeKey === FILE_TYPE || obj.typeKey === MACHINE_TYPE) keepAllFiles();
-		// Judges: an object listing some is scored when it changes; a Judge's own edit re-scores what lists it.
-		if (!obj.deleted) judgeOnChange(obj);
 		if (obj.typeKey === CREDENTIAL_TYPE) {
 			// Service just set on a blank credential: take its template, then check it.
 			void fillCredential(obj)
@@ -910,9 +908,6 @@ async function serve(): Promise<void> {
 	}, 15_000);
 	await scanMailboxes();
 	console.log("[harness] SSE connected; serving.");
-	// Anything listing a Judge that changed while this harness was down, then a slow safety net for missed events.
-	void sweepJudges().catch((err) => console.error("[judges] sweep:", err instanceof Error ? err.message : err));
-	setInterval(() => void sweepJudges().catch((err) => console.error("[judges] sweep:", err instanceof Error ? err.message : err)), 10 * 60_000);
 
 	// The clock: fires occurrences due now (missed while down) and arms for
 	// the next. Only for objects this machine serves - the gate is inside.

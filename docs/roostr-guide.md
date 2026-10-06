@@ -8,7 +8,7 @@ Everything in Roostr is an object: a note, a task, an email, a person, an agent,
 
 ## 2. Objects
 
-- **Type**: what kind of object it is (Note, Task, Page, Email, Human, Agent, Judge...). A space can have its own types. A type's layout decides the page: a task-layout type has a Done checkbox.
+- **Type**: what kind of object it is (Note, Task, Page, Email, Human, Agent, Skill...). A space can have its own types. A type's layout decides the page: a task-layout type has a Done checkbox.
 - **Body**: lines of text, each a block: paragraph, heading, bullet, numbered item, checkbox, quote, code, toggle, link card, file. Blocks nest.
 - **Properties**: named fields defined once per space (a "relation": key, name, format) and set per object. Formats: text, number, date, checkbox, status (one option), tag (many options), object (links to other objects), url, email, phone, file. Set only properties that exist; create a new one only when none fits, because everyone in the space sees it.
 - **Links**: an object-format property (Agent, Credentials, a "Project" field) or a link card in the body. Prefer a property when the link is a fact you will filter or sort by.
@@ -26,7 +26,7 @@ Everything in Roostr is an object: a note, a task, an email, a person, an agent,
 
 ## 4. Computers
 
-- A **computer** (a Computer object) is a machine running Roostr: the engine (`glon-odin serve`) and the harness (`bun run serve` in `harness/`). The harness is what runs agents, repeats and Judges.
+- A **computer** (a Computer object) is a machine running Roostr: the engine (`glon-odin serve`) and the harness (`bun run serve` in `harness/`). The harness is what runs agents and repeats.
 - Without a computer, Roostr still stores and syncs objects, but nothing acts: no agent answers, nothing repeats.
 - A computer can have **capabilities**: installed software from the catalog (for example headless Chrome for `web_fetch`, Google Workspace for Gmail). Each capability object says whether it works on that computer (active, needs_auth, missing, broken...). A Skill with a `key` needs that capability on the agent's computer.
 
@@ -71,14 +71,13 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 - **Check first**: links a Tool that runs before each occurrence, without a model. An empty result (nothing, `[]`, `{}`) ends the run there - no turn, no cost. A non-empty result is put in front of the agent's instructions. Use it for "only wake the agent when there is something new".
 - **Runs**: each run is recorded on the object. A failing run sets its Error property; the next clean run clears it.
 
-## 7. Judges (typed scores by Jev)
+## 7. Jev Skills (typed scores by Jev)
 
-- A **Judge** is an object that asks TypeSafe's Jev one question about other objects and writes the answer as a property. Its name is that property ("Spam meter" writes "Spam meter").
+- A **Jev Skill** is a Skill with an **Answer** (Score, Choice or Yes or no). It is one question TypeSafe's Jev answers about objects - in about a second, cheaply, with how sure it is - and the answer is written as a property: its **Writes to**, else the Skill's name ("Spam meter" writes "Spam meter").
 - **Its page is the question**: paragraphs are the instructions; a numbered list is a Score's levels (2 to 10, lowest first); a bulleted list is a Choice's options (`Name: what it means`); `Yes: ...` / `No: ...` lines describe a Yes/No.
-- **Its properties**: Answer (Score, Choice or Yes or no) and Credentials (a TypeSafe credential with an API key). It runs on the computer keeping that credential unless its Served by says otherwise.
-- **Using it**: add the Judge to an object's **Judges** property. The object is scored within seconds and again whenever its content changes. The value shows how sure Jev was ("9 · 97% sure"); "Ask again" re-scores.
-- Scores are ordinary properties: filter, sort and build queries on them ("Emails where Spam meter >= 8").
-- An importer Tool can put Judges on everything it creates (for example an email import with an "Add judges" setting), so items arrive already scored, before the agent's turn.
+- **Using it**: an agent with the Skill in its Skills runs it with `jev_score(skill, object_ids)` - many objects in one call - paying with the TypeSafe credential in its own Credentials. It gets back each object's value, the answer in words and how sure, and can act on them in the same turn. Code Tools call `roostr.jev(skill, ids)`.
+- **When**: whenever the agent's instructions say so - typically a line on a repeating task's page ("First, score every email in the list with your Spam meter skill"). Nothing re-scores on its own: an object is scored when an agent runs the Skill on it, or when a person clicks the value's "Ask again".
+- Scores are ordinary properties: filter, sort and build queries on them ("Emails where Spam meter >= 8"). Next to the value: how sure Jev was ("9 · 97% sure") and which Skill and agent set it.
 
 ## 8. Credentials
 
@@ -110,13 +109,13 @@ These are enforced by the harness for every agent; follow them in any prompt you
 - **Instructions live on the work.** Put a recurring job's steps on the repeating object's page, not in the agent's system prompt. The prompt says who the agent is; the object says what to do this time.
 - **Make the work visible as objects.** Imported email, tickets, leads: one object each, with properties (status, owner, scores). People can then see, sort, query and fix them.
 - **Use properties for anything you will filter on.** Status, Done, scores, owner. Text in the body is for reading, properties are for deciding.
-- **Use templates for anything made more than twice.** A template keeps every new one consistent (properties, Judges, agents, body).
+- **Use templates for anything made more than twice.** A template keeps every new one consistent (properties, agents, body).
 - **Give people a saved view of the result.** Every automated pipeline should end in a Query someone can open ("Support Emails not done").
 
 ### Keeping it cheap and calm
 
 - **Check first before waking an agent.** A Tool that returns `[]` when there is nothing new costs nothing; a model turn every 5 minutes does.
-- **Judges before agents.** Use a Judge (fast, cheap, typed) to score or classify; let the agent act on the score instead of re-reading everything.
+- **Score with Jev, decide with the agent.** A Jev Skill (fast, cheap, typed) scores or classifies many objects at once; the agent acts on the scores instead of reading and judging each one itself.
 - **Pick the slowest Repeat that is fast enough.** Hourly is usually plenty; minute repeats are for genuinely live work.
 - **Minimal Tools.** Give `shell_exec` only to agents that need a computer; give credentials only to agents that use them.
 
@@ -141,16 +140,16 @@ These are enforced by the harness for every agent; follow them in any prompt you
 ### An inbox that imports and triages
 
 1. A Google account credential for the mailbox, connected on the computer that will run it.
-2. A Task "Check support inbox" with Repeat every 5-15 minutes and Check first = an import Tool (one that reads the mailbox, creates one Email object per thread and returns the new ones, `[]` when none). Its settings (mailbox, agents and Judges to add to each email) are properties on the task.
-3. Agent: a triage agent on the task; the task's page says how to triage (close spam, tag the support agent).
+2. A Task "Check support inbox" with Repeat every 5-15 minutes and Check first = an import Tool (one that reads the mailbox, creates one Email object per thread and returns the new ones, `[]` when none). Its settings (mailbox, agents to add to each email) are properties on the task.
+3. Agent: a triage agent on the task, with Jev Skills such as Spam meter in its Skills and a TypeSafe credential. The task's page says how to triage: first score the new emails, then close spam and tag the support agent on real questions.
 4. A Query "Support Emails not done" for people.
 
-### Score objects with a Judge
+### Score objects with a Jev Skill
 
-1. Make a TypeSafe credential with the API key.
-2. New object -> Judge. Name it after the property (e.g. "Urgency"); Answer = Score; Credentials = the TypeSafe credential.
+1. Make a TypeSafe credential with the API key and add it to the agent's Credentials.
+2. New object -> Skill. Name it after the property (e.g. "Urgency"); set Answer = Score (Writes to, if the property should have another name); a one-line description says what it scores.
 3. Write the question and a numbered list of levels on its page.
-4. Add the Judge to objects' Judges (or to an importer's Add judges, or a template).
+4. Add the Skill to the agent's Skills, and say on its task's page when to run it.
 5. Build a Query on the new property.
 
 ### Give an agent a login

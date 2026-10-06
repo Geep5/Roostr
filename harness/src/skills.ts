@@ -77,6 +77,8 @@ export interface SkillListing {
 	description: string;
 	/** Owning agent id, or "" for a global skill every agent sees. */
 	owner: string;
+	/** A Jev Skill (it has an Answer): run with jev_score, not read. */
+	jev?: boolean;
 }
 
 /**
@@ -119,6 +121,7 @@ export async function listSkills(agentId?: string, granted?: ReadonlySet<string>
 			owner: str(r.fields, "agent"),
 			key: str(r.fields, "key"),
 			always: str(r.fields, "seed_key") === GUIDE_SEED_KEY,
+			jev: r.fields["jev_answer"] !== undefined,
 		}))
 		.filter((s) => {
 			// Someone else's playbook: invisible, whoever is asking.
@@ -134,7 +137,7 @@ export async function listSkills(agentId?: string, granted?: ReadonlySet<string>
 /** Prompt section: descriptions only (OMP system-prompt.md:88-93). */
 export function skillsPromptSection(skills: SkillListing[]): string {
 	if (skills.length === 0) return "";
-	const lines = skills.map((s) => `- ${s.name}: ${s.description}`);
+	const lines = skills.map((s) => `- ${s.name}: ${s.description}${s.jev ? " (a Jev Skill: run it on objects with jev_score - it fills the property and says how sure)" : ""}`);
 	return `<skills>\nReusable skills. When a task matches one, call skill_read BEFORE starting to load its full instructions:\n${lines.join("\n")}\n</skills>`;
 }
 

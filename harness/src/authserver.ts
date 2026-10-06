@@ -13,7 +13,7 @@ import { readRoster } from "./roster";
 import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
 import { CredentialError, checkCredential, connectCredential, disconnectCredential, type CredentialRow } from "./credential-objects";
-import { judgeObjects } from "./judges";
+import { scoreAgain } from "./jev";
 import { ensureBlob, blobDir, mimeOf, storeUpload } from "./files";
 import { apiFetch, authorizeLocalRequest, localCors, localPreflight, sessionOrigin, validLocalHost } from "./local-api-auth";
 import { loadIdentity, type SpaceJoinLink } from "./nostrsync";
@@ -204,14 +204,17 @@ export function startAuthServer(served: Set<string>): void {
 						throw error;
 					}
 				}
-				// "Ask again": one Judge scores one object now, changed or not. Any computer
-				// can answer: the TypeSafe key rides on the synced credential.
-				if (req.method === "POST" && url.pathname === "/judges/again") {
+				// "Ask again": the Jev Skill and agent that set a value run it on the object once
+				// more. Any computer can answer: the agent's TypeSafe key rides on its synced credential.
+				if (req.method === "POST" && url.pathname === "/jev/again") {
 					if (authorization.role !== "ui") return json({ error: "A paired app is required." }, 403);
-					const body = (await req.json().catch(() => null)) as { judge?: unknown; object?: unknown } | null;
-					if (typeof body?.judge !== "string" || !body.judge || typeof body.object !== "string" || !body.object) return json({ error: "judge and object are required." }, 400);
-					const run = await judgeObjects(body.judge, [body.object], true);
-					return run.firstError ? json({ error: run.firstError }, 400) : json({ judged: run.judged });
+					const body = (await req.json().catch(() => null)) as { object?: unknown; key?: unknown } | null;
+					if (typeof body?.object !== "string" || !body.object || typeof body.key !== "string" || !body.key) return json({ error: "object and key are required." }, 400);
+					try {
+						return json(await scoreAgain(body.object, body.key));
+					} catch (error) {
+						return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+					}
 				}
 				if (req.method === "GET" && url.pathname === "/auth/status") {
 					return json(await authStatus());

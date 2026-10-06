@@ -54,6 +54,7 @@ import * as spawn from "./tool-code/spawn";
 import * as sql_query from "./tool-code/sql_query";
 import * as submit_result from "./tool-code/submit_result";
 import * as web_fetch from "./tool-code/web_fetch";
+import * as jev_score from "./tool-code/jev_score";
 
 /** One shipped tool as its Tool object starts out. */
 export interface ShippedCode {
@@ -121,6 +122,7 @@ const FILES: ReadonlyArray<[string, { description: string; inputs: string }]> = 
 	["credential_fetch", credential_fetch],
 	["sql_query", sql_query],
 	["web_fetch", web_fetch],
+	["jev_score", jev_score],
 	["capability_list", capability_list],
 	["capability_request", capability_request],
 	["agent_ask", agent_ask],
