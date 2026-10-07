@@ -14,8 +14,8 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 	const answer = await roostr.credentials.sql("postgres", sql, { credential, maxRows });
 	if (!answer.ok) return `error: ${answer.error}`;
 	if (answer.columns.length === 0) return "No rows.";
-	// The harness keeps 8 KB of a tool's answer: rows past that are dropped here and counted, so the model knows to narrow.
-	const budget = 7600;
+	// The harness keeps 256 KB of a tool's answer (types.ts TOOL_RESULT_TRUNCATE): rows past that are dropped here and counted, so the model knows to narrow.
+	const budget = 250_000;
 	const lines = [JSON.stringify(answer.columns)];
 	let size = lines[0].length;
 	let shown = 0;

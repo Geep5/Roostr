@@ -11,7 +11,14 @@ export const BLOCK_TOOL_USE = "tool_use";
 export const BLOCK_TOOL_RESULT = "tool_result";
 export const BLOCK_COMPACTION = "compaction_summary";
 
-export const TOOL_RESULT_TRUNCATE = 8192;
+/** The most of one tool result the model sees and the transcript keeps (~64k tokens). */
+export const TOOL_RESULT_TRUNCATE = 256 * 1024;
+
+/** A tool result cut to TOOL_RESULT_TRUNCATE, saying how much was dropped so the model narrows instead of trusting a partial answer. */
+export function truncateToolResult(content: string): string {
+	if (content.length <= TOOL_RESULT_TRUNCATE) return content;
+	return `${content.slice(0, TOOL_RESULT_TRUNCATE)}\n[truncated: ${content.length - TOOL_RESULT_TRUNCATE} more characters - narrow the request]`;
+}
 export const SUMMARY_MAX_TOKENS = 2048;
 export const SUMMARY_TOOL_RESULT_CAP = 2000;
 

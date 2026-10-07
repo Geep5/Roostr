@@ -22,7 +22,7 @@ import type { ToolRun } from "./tool-host";
 import { coerceToolInput } from "./tool-input";
 import { SHIPPED_TOOLS, runObjectTool, type ObjectTool } from "./tool-runtime";
 import { TOOL_EDIT_REFUSAL, TOOL_TYPE } from "./tool-sdk";
-import { TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
+import { truncateToolResult, type ToolDef } from "./types";
 
 export interface ToolContext {
 	agentId: string;
@@ -336,7 +336,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>,
 		const run = await runObjectToolFor(tool, coerceToolInput(tool.def, input), ctx);
 		if (!run.ok) return { content: `error: ${tool.builtin ? run.error : `${name} failed: ${run.error}`}`, isError: true };
 		const content = typeof run.value === "string" ? run.value : JSON.stringify(run.value);
-		return { content: content.slice(0, TOOL_RESULT_TRUNCATE), isError: false };
+		return { content: truncateToolResult(content), isError: false };
 	} catch (err) {
 		return { content: `error: ${err instanceof Error ? err.message : String(err)}`, isError: true };
 	}

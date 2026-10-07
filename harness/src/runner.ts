@@ -25,7 +25,7 @@ import { checkProjectFolder, workspaceAt, workspacePromptSection, workspaceSumma
 import { genesisCalls, genesisFingerprint, lastGenesis } from "./genesis";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
-import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TOOL_RESULT_TRUNCATE, type ToolDef } from "./types";
+import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, truncateToolResult, type ToolDef } from "./types";
 import { knowledgeBaseRows, kbPromptSection } from "./kb";
 
 /**
@@ -93,7 +93,7 @@ async function persistToolResult(ref: ConvRef, toolUseId: string, content: strin
 		content: {
 			custom: {
 				contentType: BLOCK_TOOL_RESULT,
-				meta: { tool_use_id: toolUseId, content: content.slice(0, TOOL_RESULT_TRUNCATE), is_error: String(isError), ts: String(Date.now()) },
+				meta: { tool_use_id: toolUseId, content: truncateToolResult(content), is_error: String(isError), ts: String(Date.now()) },
 			},
 		},
 	});
