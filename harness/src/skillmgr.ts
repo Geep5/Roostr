@@ -90,14 +90,16 @@ export const CATALOG: CatalogEntry[] = [
 			"Run the JS as the body of an async function (Runtime.evaluate with awaitPromise and returnByValue) so it can `await` and `return`; print a returned string as-is and anything else as JSON; " +
 			"if it throws, print the exception to stderr and exit 1. With --wait MS, keep the page open MS milliseconds after printing the result before closing, so a navigation the JS started (a form submit) finishes and its cookies land in the profile. " +
 			"ALWAYS end by sending Browser.close over the still-open DevTools WebSocket and waiting for Chrome to exit (kill it after 10 s), on success and on error alike - never close the WebSocket or kill Chrome first: without Browser.close the profile loses its new cookies and storage. " +
-			"If Chrome cannot start because the profile is in use, exit 1 saying another browserless run holds that profile. Give up the whole run after 120 s. " +
+			"Only one run may use a profile at a time, and a second run must WAIT, never fail: before launching Chrome, claim <dir>/.browserless.lock by creating it exclusively (flag wx) with this process id; while another live process holds it, retry every 500 ms for up to 120 s (then exit 1 saying another browserless run holds that profile); a lock whose process is gone is stale - remove it and claim it; remove the lock when the run ends, however it ends. Give up the whole run after 120 s of its own work. " +
 			"Do not start any long-running service. " +
 			"Verify all of these yourself before finishing, and fix the script if any of them is slow or hangs: " +
 			"`time browserless https://example.com | head -3` (must finish in a few seconds), " +
 			"`browserless https://example.com | wc -c` (must be non-empty), `browserless --help`, " +
 			"`browserless --eval 'return document.title' https://example.com` (prints Example Domain), " +
 			"`browserless --profile bltest --eval 'document.cookie = \"k=kept; max-age=3600\"; localStorage.setItem(\"k\", \"kept\"); return \"set\"' https://example.com` then `browserless --profile bltest --eval 'return document.cookie + \" \" + localStorage.getItem(\"k\")' https://example.com` (prints k=kept kept - then delete ~/.browserless/profiles/bltest), " +
-			"and `browserless --eval 'throw new Error(\"boom\")' https://example.com` (exits 1 and leaves no Chrome running). " +
+			"`browserless --eval 'throw new Error(\"boom\")' https://example.com` (exits 1 and leaves no Chrome running), " +
+			"two runs on one profile at once - `browserless --profile bltest --wait 6000 --eval 'return 1' https://example.com & sleep 0.5; browserless --profile bltest --eval 'return 2' https://example.com; wait` - must print both 1 and 2 (the second waits for the first), " +
+			"and with a stale lock - `echo 999999 > ~/.browserless/profiles/bltest/.browserless.lock` then `browserless --profile bltest --eval 'return 3' https://example.com` - must print 3 (then delete ~/.browserless/profiles/bltest). " +
 			"Finish only when `command -v browserless` succeeds.",
 		uninstallPrompt:
 			"Remove the `browserless` command from this Mac: find it with `command -v browserless` and delete that file and the eval-mode JavaScript file installed next to it " +
@@ -112,10 +114,21 @@ export const CATALOG: CatalogEntry[] = [
 			"Signing in yourself: use one --profile per site and account (e.g. `--profile example-com-alice`). The profile keeps cookies and storage between runs, so sign in once and later runs are already signed in. Check first whether the page is signed in; only fill the login form when it is not.\n" +
 			"Filling a form from --eval: set an input with the native setter so the site's framework sees it - `const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(input, 'text'); input.dispatchEvent(new Event('input', { bubbles: true }));`. A submit usually navigates away, which ends your JS mid-await: schedule the click (`setTimeout(() => button.click(), 0)`), return right away, and run with `--wait 8000` so the sign-in lands in the profile. Then check with a second call.\n" +
 			"Reading a signed-in site's own API: `fetch` from --eval runs as the signed-in page, with its cookies and origin.\n" +
-			"One run at a time per profile. Never print a password in chat or on an object; a site's own login (a skill or your system prompt) says where it lives.\n" +
+			"Runs on one profile queue by themselves: a second run waits (up to 2 minutes) for the first to finish, so never retry or sleep around a busy profile yourself. Never print a password in chat or on an object; a site's own login (a skill or your system prompt) says where it lives.\n" +
 			"For a login a person signed in through Connect, use credential_fetch and credential_action with the Credential in your Credentials property instead.\n" +
 			"Prefer plain curl for static pages: this launches a browser per call.",
 		legacySkillBodies: [
+			"Web pages through this machine's headless Chrome.\n" +
+				"Every agent has the `web_fetch` tool — that renders a page logged out, brokered by the harness; just call it with a URL.\n" +
+				"Agents with shell access can run the `browserless` command directly:\n" +
+				"`browserless <url>` prints the rendered DOM; `browserless --screenshot out.png <url>` and `browserless --pdf out.pdf <url>` capture the page. These run logged out.\n" +
+				"`browserless [--profile <name>] [--wait <ms>] --eval '<js>' <url>` opens the page, runs the JavaScript in it (an async function body: `await` and `return` work) and prints what it returns (a string as-is, anything else as JSON). --wait keeps the page open that long afterwards.\n" +
+				"Signing in yourself: use one --profile per site and account (e.g. `--profile example-com-alice`). The profile keeps cookies and storage between runs, so sign in once and later runs are already signed in. Check first whether the page is signed in; only fill the login form when it is not.\n" +
+				"Filling a form from --eval: set an input with the native setter so the site's framework sees it - `const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(input, 'text'); input.dispatchEvent(new Event('input', { bubbles: true }));`. A submit usually navigates away, which ends your JS mid-await: schedule the click (`setTimeout(() => button.click(), 0)`), return right away, and run with `--wait 8000` so the sign-in lands in the profile. Then check with a second call.\n" +
+				"Reading a signed-in site's own API: `fetch` from --eval runs as the signed-in page, with its cookies and origin.\n" +
+				"One run at a time per profile. Never print a password in chat or on an object; a site's own login (a skill or your system prompt) says where it lives.\n" +
+				"For a login a person signed in through Connect, use credential_fetch and credential_action with the Credential in your Credentials property instead.\n" +
+				"Prefer plain curl for static pages: this launches a browser per call.",
 			"Web pages through this machine's headless Chrome.\n" +
 				"Every agent has the `web_fetch` tool — that IS this capability, brokered by the harness; just call it with a URL.\n" +
 				"Agents with shell access can also run the `browserless` command directly for screenshots/PDFs.\n" +
