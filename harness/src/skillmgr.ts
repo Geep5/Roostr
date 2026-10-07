@@ -40,6 +40,8 @@ export interface CatalogEntry {
 	authHint?: string;
 	/** Agent-facing skill body: the Skill object's page until someone edits it. */
 	skillBody: string;
+	/** Earlier catalog bodies: a Skill page still holding one verbatim (never edited) is upgraded to `skillBody`. */
+	legacySkillBodies?: string[];
 }
 
 /** The built-in catalog; private extensions (extensions.ts) append their own entries at load. */
@@ -47,14 +49,18 @@ export const CATALOG: CatalogEntry[] = [
 	{
 		key: "browserless",
 		name: "Headless Chrome",
-		description: "Render pages, screenshots, and PDFs in headless Chrome; use machine credential profiles when a task needs a signed-in account.",
+		description: "Render pages, screenshots, and PDFs in headless Chrome, and run JavaScript in a page with a kept profile - which is how an agent signs in to a site itself.",
 		// Two traps, both learned the hard way. The npm package named
 		// `browserless` is a Puppeteer *library* with no `bin`, so installing
 		// it can never satisfy `command -v browserless`. And a throwaway
 		// --user-data-dir makes Chrome finish the page but never exit: the DOM
 		// lands on stdout complete, then the command hangs until something
 		// kills it. `--headless=new` already runs in its own `Chrome-headless`
-		// profile, separate from the human's, so no profile flag is wanted.
+		// profile, separate from the human's, so the render modes pass no
+		// profile flag. The --eval mode is different: it drives Chrome over
+		// the DevTools protocol and always ends with Browser.close, which both
+		// exits Chrome and flushes the profile - so a kept --profile holds a
+		// sign-in from one run to the next.
 		installPrompt:
 			"Put a `browserless` command on PATH on this Mac that drives the locally installed Chrome in headless mode. " +
 			"Do NOT `npm install -g browserless` — that package is a library with no executable, so the check would keep failing. " +
@@ -73,24 +79,52 @@ export const CATALOG: CatalogEntry[] = [
 			"Behaviour: `browserless <url>` prints the rendered DOM (--dump-dom); " +
 			"`browserless --screenshot <file> <url>` writes a PNG (--screenshot=FILE --window-size=1280,900); " +
 			"`browserless --pdf <file> <url>` writes a PDF (--print-to-pdf=FILE); `browserless --help` prints this usage. " +
+			"Also add an eval mode, `browserless [--profile <name>] [--wait <ms>] --eval '<js>' <url>`, which opens the page, runs the JavaScript in it and prints the result. " +
+			"It needs the Chrome DevTools Protocol over a WebSocket, which a shell script cannot speak: write this mode as a JavaScript file run by `bun` or by `node` 22+ (whichever is on PATH; both have a global WebSocket and fetch), " +
+			"with no npm packages, installed next to the script and called from it. Exactly: " +
+			"with --profile NAME the Chrome user data dir is ~/.browserless/profiles/NAME (create it; keep it between runs so sign-ins persist); without --profile it is a fresh temp dir removed afterwards. " +
+			"Delete a stale DevToolsActivePort file in that dir, launch Chrome with --headless=new --disable-gpu --no-first-run --no-default-browser-check --window-size=1280,900 --remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --user-data-dir=<dir> about:blank (stderr to /dev/null), " +
+			"read the port from <dir>/DevToolsActivePort, and attach to the page target from http://127.0.0.1:<port>/json/list. " +
+			"Before navigating, call Network.setUserAgentOverride with Browser.getVersion's userAgent with 'HeadlessChrome' replaced by 'Chrome' (sites refuse the headless one). " +
+			"Navigate to <url>, wait for Page.loadEventFired (at most 30 s), then 2 s more for the page's scripts. " +
+			"Run the JS as the body of an async function (Runtime.evaluate with awaitPromise and returnByValue) so it can `await` and `return`; print a returned string as-is and anything else as JSON; " +
+			"if it throws, print the exception to stderr and exit 1. With --wait MS, keep the page open MS milliseconds after printing the result before closing, so a navigation the JS started (a form submit) finishes and its cookies land in the profile. " +
+			"ALWAYS end by sending Browser.close over the still-open DevTools WebSocket and waiting for Chrome to exit (kill it after 10 s), on success and on error alike - never close the WebSocket or kill Chrome first: without Browser.close the profile loses its new cookies and storage. " +
+			"If Chrome cannot start because the profile is in use, exit 1 saying another browserless run holds that profile. Give up the whole run after 120 s. " +
 			"Do not start any long-running service. " +
 			"Verify all of these yourself before finishing, and fix the script if any of them is slow or hangs: " +
 			"`time browserless https://example.com | head -3` (must finish in a few seconds), " +
-			"`browserless https://example.com | wc -c` (must be non-empty), and `browserless --help`. " +
+			"`browserless https://example.com | wc -c` (must be non-empty), `browserless --help`, " +
+			"`browserless --eval 'return document.title' https://example.com` (prints Example Domain), " +
+			"`browserless --profile bltest --eval 'document.cookie = \"k=kept; max-age=3600\"; localStorage.setItem(\"k\", \"kept\"); return \"set\"' https://example.com` then `browserless --profile bltest --eval 'return document.cookie + \" \" + localStorage.getItem(\"k\")' https://example.com` (prints k=kept kept - then delete ~/.browserless/profiles/bltest), " +
+			"and `browserless --eval 'throw new Error(\"boom\")' https://example.com` (exits 1 and leaves no Chrome running). " +
 			"Finish only when `command -v browserless` succeeds.",
 		uninstallPrompt:
-			"Remove the `browserless` wrapper script from this Mac: find it with `command -v browserless` and delete that file " +
-			"(it is a small shell script this machine wrote, not a package). Finish when `command -v browserless` fails.",
+			"Remove the `browserless` command from this Mac: find it with `command -v browserless` and delete that file and the eval-mode JavaScript file installed next to it " +
+			"(small scripts this machine wrote, not a package). Leave ~/.browserless/profiles alone: it holds sign-ins. Finish when `command -v browserless` fails.",
 		checkCmd: "command -v browserless",
 		skillBody:
 			"Web pages through this machine's headless Chrome.\n" +
-			"Every agent has the `web_fetch` tool — that IS this capability, brokered by the harness; just call it with a URL.\n" +
-			"Agents with shell access can also run the `browserless` command directly for screenshots/PDFs.\n" +
-			"Use it when a page needs JavaScript to render (SPAs, dashboards) and plain curl returns an empty shell.\n" +
-			"`browserless <url>` prints the rendered DOM; `browserless --screenshot out.png <url>` and `browserless --pdf out.pdf <url>` capture the page.\n" +
-			"It runs in Chrome's own headless profile, never signed in as the human — expect logged-out pages.\n" +
-			"For a task that needs an account, do NOT use browserless. Read logged-in pages with credential_fetch and act with credential_action, both through a Credential the agent lists in its Credentials property.\n" +
+			"Every agent has the `web_fetch` tool — that renders a page logged out, brokered by the harness; just call it with a URL.\n" +
+			"Agents with shell access can run the `browserless` command directly:\n" +
+			"`browserless <url>` prints the rendered DOM; `browserless --screenshot out.png <url>` and `browserless --pdf out.pdf <url>` capture the page. These run logged out.\n" +
+			"`browserless [--profile <name>] [--wait <ms>] --eval '<js>' <url>` opens the page, runs the JavaScript in it (an async function body: `await` and `return` work) and prints what it returns (a string as-is, anything else as JSON). --wait keeps the page open that long afterwards.\n" +
+			"Signing in yourself: use one --profile per site and account (e.g. `--profile example-com-alice`). The profile keeps cookies and storage between runs, so sign in once and later runs are already signed in. Check first whether the page is signed in; only fill the login form when it is not.\n" +
+			"Filling a form from --eval: set an input with the native setter so the site's framework sees it - `const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(input, 'text'); input.dispatchEvent(new Event('input', { bubbles: true }));`. A submit usually navigates away, which ends your JS mid-await: schedule the click (`setTimeout(() => button.click(), 0)`), return right away, and run with `--wait 8000` so the sign-in lands in the profile. Then check with a second call.\n" +
+			"Reading a signed-in site's own API: `fetch` from --eval runs as the signed-in page, with its cookies and origin.\n" +
+			"One run at a time per profile. Never print a password in chat or on an object; a site's own login (a skill or your system prompt) says where it lives.\n" +
+			"For a login a person signed in through Connect, use credential_fetch and credential_action with the Credential in your Credentials property instead.\n" +
 			"Prefer plain curl for static pages: this launches a browser per call.",
+		legacySkillBodies: [
+			"Web pages through this machine's headless Chrome.\n" +
+				"Every agent has the `web_fetch` tool — that IS this capability, brokered by the harness; just call it with a URL.\n" +
+				"Agents with shell access can also run the `browserless` command directly for screenshots/PDFs.\n" +
+				"Use it when a page needs JavaScript to render (SPAs, dashboards) and plain curl returns an empty shell.\n" +
+				"`browserless <url>` prints the rendered DOM; `browserless --screenshot out.png <url>` and `browserless --pdf out.pdf <url>` capture the page.\n" +
+				"It runs in Chrome's own headless profile, never signed in as the human — expect logged-out pages.\n" +
+				"For a task that needs an account, do NOT use browserless. Read logged-in pages with credential_fetch and act with credential_action, both through a Credential the agent lists in its Credentials property.\n" +
+				"Prefer plain curl for static pages: this launches a browser per call.",
+		],
 	},
 	{
 		key: "google",
@@ -246,7 +280,8 @@ const addBody = (id: string, text: string) => mutate("block_add", { object_id: i
  * Converge the key's shared Skill object (seeded at boot, catalog-seeds.ts):
  * a missing one is created with the catalog name, description and body. An
  * older one gains its `key` and the global scope, a name still equal to its
- * key becomes the catalog name, and an empty page gets the catalog body;
+ * key becomes the catalog name, and an empty page - or one still holding an
+ * earlier catalog body verbatim, never edited - gets the catalog body;
  * everything else is the user's to edit. `rows` are the vault's skill
  * objects. Returns whether it wrote.
  */
@@ -264,8 +299,12 @@ export async function upsertSkillObject(entry: CatalogEntry, rows: QueryRow[]): 
 	if (str(hit.fields, "key") !== entry.key) await fix("key", entry.key);
 	if (str(hit.fields, "scope") !== GLOBAL_SCOPE) await fix("scope", GLOBAL_SCOPE);
 	if (str(hit.fields, "name") === entry.key && entry.name !== entry.key) await fix("name", entry.name);
-	if (objectText(await fetchObject(hit.id)).trim() === "") {
+	const page = objectText(await fetchObject(hit.id)).trim();
+	if (page === "") {
 		await addBody(hit.id, entry.skillBody);
+		wrote = true;
+	} else if (entry.legacySkillBodies?.some((body) => body.trim() === page)) {
+		await setSkillPrompt(entry.key, entry.skillBody);
 		wrote = true;
 	}
 	return wrote;

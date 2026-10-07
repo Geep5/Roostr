@@ -109,6 +109,9 @@ function daemon(initial: ObjectJSON[]) {
 				case "block_add":
 					o!.blocks.push({ id: body.block.id ?? `blk-${++n}`, childrenIds: [], content: body.block.content });
 					break;
+				case "block_remove":
+					o!.blocks = o!.blocks.filter((b) => b.id !== body.block_id);
+					break;
 				case "delete":
 					o!.deleted = true;
 					break;
@@ -167,6 +170,18 @@ test("an older skill object is adopted, never duplicated, and its page stays the
 	expect(browserless.map((s) => s.id)).toEqual(["old-browserless"]);
 	expect(old.fields.name?.stringValue).toBe(CATALOG.find((c) => c.key === "browserless")!.name);
 	expect(old.blocks.map((b) => b.content.text?.text)).toEqual(["my own notes"]);
+});
+
+test("a Skill page still holding an earlier catalog body is upgraded; an edited one is left alone", async () => {
+	const entry = CATALOG.find((c) => c.key === "browserless")!;
+	const untouched = object("old-browserless", "skill", { key: sv("browserless"), name: sv(entry.name) }, [entry.legacySkillBodies![0]]);
+	const vault = daemon([object(SPACE, "channel", {}), ...bundled, untouched]);
+	await seedCatalog();
+	expect(untouched.blocks.map((b) => b.content.text?.text)).toEqual([entry.skillBody]);
+
+	untouched.blocks = [{ id: "edited", childrenIds: [], content: { text: { text: `${entry.legacySkillBodies![0]}\nMy own line.`, style: 0 } } }];
+	await seedCatalog();
+	expect(untouched.blocks.map((b) => b.content.text?.text)).toEqual([`${entry.legacySkillBodies![0]}\nMy own line.`]);
 });
 
 test("a kind template is re-seeded only while nobody has edited it", async () => {

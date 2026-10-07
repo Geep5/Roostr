@@ -88,7 +88,8 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 
 - A **Credential** object is one login: an API key, a bot token, a database URL, a browser sign-in, a Google account. Its **Served by** is the computer that keeps and checks it; its Status says whether it works (Connected, Signed out - reconnect, Broken...).
 - Keys pasted into a credential are readable by members of its space. Browser sign-ins are kept on its computer.
-- Only a person can sign in: **Connect** opens the sign-in window on the credential's computer. An agent can create the credential and ask a person to press Connect; it cannot do the sign-in itself.
+- A Credential's browser sign-in is done by a person: **Connect** opens the sign-in window on the credential's computer. An agent can create the credential and ask a person to press Connect; it cannot do that sign-in itself.
+- An agent can sign in to a site on its own with Headless Chrome: `browserless --profile <name> --eval '<js>' <url>` runs JavaScript in the page with a Chrome profile kept on its computer, so it fills the login form once and later runs stay signed in (the Headless Chrome skill says how). The login it types comes from its own instructions - a system prompt or a skill only it can read.
 - An agent uses a credential only if its Credentials property lists it. Having the credential is the permission; what to do with it is in the agent's instructions.
 
 ## 9. Tools and Skills
