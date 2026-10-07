@@ -5,7 +5,7 @@
  * submit_result tool and persisted on the subagent object.
  */
 
-import { choice, createObject, fetchObject, iv, setField, str, sv } from "./api";
+import { choice, createObject, deleteField, fetchObject, iv, setField, str, sv } from "./api";
 import { promptFor } from "./prompts";
 import { runTurn } from "./runner";
 import { MAX_SPAWN_DEPTH, SPAWN_CONCURRENCY } from "./types";
@@ -80,6 +80,10 @@ export async function spawnSubagent(task: string, templateName: string, parentCt
 			spawn_template: sv(template.name),
 			model: sv(model),
 			...(parent.fields["prompt"] ? { prompt: parent.fields["prompt"] } : {}),
+			// Its parent's logins: the model key first of all. Without them a
+			// helper fell back to the computer's own Claude login - an expired
+			// one failed every spawn while its parent's key worked.
+			...(parent.fields["credentials"] ? { credentials: parent.fields["credentials"] } : {}),
 			...(str(parent.fields, "channel") ? { channel: sv(str(parent.fields, "channel")) } : {}),
 		});
 
@@ -90,21 +94,45 @@ export async function spawnSubagent(task: string, templateName: string, parentCt
 		// same id.
 		const conv = await agentThread(await fetchObject(id));
 		await postTo(conv, task); // the task is the first user message
-		const finalText = await runTurn(id, conv, {
-			template: template.name,
-			depth: parentCtx.depth + 1,
-			spawn: template.name === "task" ? spawnSubagent : undefined,
-			submitResult: (content) => {
-				submitted = content;
-			},
-			systemSuffix: template.systemSuffix,
-		});
+		let finalText: string;
+		try {
+			finalText = await runTurn(id, conv, {
+				template: template.name,
+				depth: parentCtx.depth + 1,
+				spawn: template.name === "task" ? spawnSubagent : undefined,
+				submitResult: (content) => {
+					submitted = content;
+				},
+				systemSuffix: template.systemSuffix,
+			});
+		} catch (err) {
+			// The parent may work around it; the person still sees why, on the object.
+			const why = err instanceof Error ? err.message : String(err);
+			if (parentCtx.boundObject) await badgeHelperFailure(parentCtx.boundObject, why).catch(() => {});
+			throw err;
+		}
 
 		const result = submitted || finalText || "(subagent produced no result)";
 		await setField(id, "submitted_result", sv(result.slice(0, 8192)));
 		await setField(id, "submitted_at", iv(Date.now()));
+		if (parentCtx.boundObject) await clearHelperFailure(parentCtx.boundObject).catch(() => {});
 		return result;
 	} finally {
 		semaphore.release();
 	}
+}
+
+/** Error-badge prefix for a helper agent (spawn) that failed on an object. */
+const HELPER_BADGE = "helper agent failed: ";
+
+/** Put the helper's failure on the object the turn was about - unless it carries another Error. */
+async function badgeHelperFailure(objectId: string, why: string): Promise<void> {
+	const current = str((await fetchObject(objectId)).fields, "error");
+	const next = `${HELPER_BADGE}${why}`.slice(0, 300);
+	if ((!current || current.startsWith(HELPER_BADGE)) && current !== next) await setField(objectId, "error", sv(next));
+}
+
+/** A helper that worked clears what a failed one wrote. */
+async function clearHelperFailure(objectId: string): Promise<void> {
+	if (str((await fetchObject(objectId)).fields, "error").startsWith(HELPER_BADGE)) await deleteField(objectId, "error");
 }
