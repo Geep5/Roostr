@@ -174,7 +174,10 @@ properties you'd click in the UI. There is no setup wizard and no `kind` field.
   (`GET :7334/machine` → `id`), not a link to its Computer object.
 - **`prompt`** (link → `system_prompt` object): its standing prompt and
   model. Edit or point at a different prompt object.
-- **`model`** (select): per-agent override of the prompt's model.
+- **`model`** (select): per-agent override of the prompt's model. The options
+  are fixed in the engine (`BUNDLED_RELATIONS` in `core/mutate.odin`; every
+  device re-applies them when it seeds a space): `claude-opus-5-5`,
+  `claude-sonnet-4-5`, `kimi-k3`.
 - **`skills`** (links → `skill` objects): the skills it uses - a property of
   the agent, not of the objects it works on. A skill is instructions the agent
   reads; a catalog skill (one with a `key`, like browserless or google) is also
