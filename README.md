@@ -170,7 +170,8 @@ curl http://127.0.0.1:7333/api/events -H "Authorization: Bearer $TOK"
 An agent is a blank object you configure by setting its properties — the same
 properties you'd click in the UI. There is no setup wizard and no `kind` field.
 
-- **`served_by`** (link → `machine` object): the computer it runs on.
+- **`served_by`** (text): the computer it runs on - that computer's `machine_id`
+  (`GET :7334/machine` → `id`), not a link to its Computer object.
 - **`prompt`** (link → `system_prompt` object): its standing prompt and
   model. Edit or point at a different prompt object.
 - **`model`** (select): per-agent override of the prompt's model.
@@ -180,7 +181,7 @@ properties you'd click in the UI. There is no setup wizard and no `kind` field.
   software, so the agent's computer must have it working or the agent holds.
 - **`credentials`** (links → `credential` objects): the logins it may act with.
 
-To make a working agent: create the object, set `served_by` to a machine and
+To make a working agent: create the object, set `served_by` to a machine_id and
 `prompt` to a `system_prompt` object. The machine it names adopts it on sight.
 An agent with no `served_by` runs nowhere; the engine writes `no machine serves
 this agent: …` on its `error` property until one is set.
