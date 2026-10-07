@@ -83,6 +83,7 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 - **Using it**: an agent with the Skill in its Skills runs it with `jev_score(skill, object_ids)` - many objects in one call - paying with the TypeSafe credential in its own Credentials. It gets back each object's value, the answer in words and how sure, and can act on them in the same turn. Code Tools call `roostr.jev(skill, ids)`.
 - **When**: whenever the agent's instructions say so, or automatically on arrival: an object with a Check first lists Jev Skills in its **Score with**, and everything the check brings in is scored with them before its agent's turn (paid with that agent's TypeSafe credential). Otherwise nothing re-scores on its own: a person can click the value's "Ask again".
 - Scores are ordinary properties: filter, sort and build queries on them ("Emails where Spam meter >= 8"). Next to the value: how sure Jev was ("9 · 97% sure") and which Skill and agent set it.
+- **What Jev reads**: the object's name, body and plain properties - not checkboxes, dates, links or files. A signal Jev should weigh (subscribed, paid) must be text, a number or a status on the object.
 - **Acting on scores**: a saved Query does it - its filters are the condition ("Emails where Spam meter >= 8") and its action properties the action (see Queries that act).
 
 ### Queries that act
