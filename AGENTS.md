@@ -77,9 +77,16 @@ Rules that keep it working for the people using it:
 - **Agents are objects too**: change one by editing its properties (System prompt, Model, Credentials, Tools, Skills, Served by), not code.
 - **Test on a throwaway object**, then delete it.
 
+Skills, machine software and recurring work:
+
+- **An agent's Skills property is a whitelist** once it lists anything: a new skill stays invisible to that agent until it is added there. A skill only one agent should see (its private playbook) carries that agent's id in its `agent` field.
+- **Machine software (a catalog skill with a `key`, like `browserless`) is installed per computer, by a person.** The first time, that computer has no Capability object for it, so there is no Install button: create one (`type_key` `capability`, fields `key`, `served_by` = the machine_id, `status` `missing`), then in the web app paired with that computer open it → Status → **Install** → **Approve**. An installer agent writes the software from the catalog spec; `active` only means the check command passed, so run the command yourself before relying on it.
+- **Recurring work is a Repeat on the object, never a property.** From the API: `{"action":"repeat_set","object_id":"<id>","rule":{"freq":"minute","interval":10,"weekdays":[],"monthly":"date","tz":"<IANA zone>","window":[0,1439]},"now_ms":<now>,"tz_offset_min":<offset>}` (agents use `object_set_repeat`). Run now = `set_field` `run_now` to `{"mapValue":{"entries":{"at":{"intValue":<now>}}}}`. The run's steps are the object's page; the agent's reply lands in its own transcript, problems on the object's `error`.
+
 ## 4. Changing Roostr's code
 
 - Engine (Odin, `core/`, `src/`): `odin test core && odin test src`, then `odin build src -out:glon-odin -o:speed`.
 - Harness (Bun, `harness/`): `bun test` and `npx tsc --noEmit -p .`.
 - Then `bun run service restart`. The web app lives in the sibling RoostrWebsite repository.
 - When behaviour changes, update `docs/roostr-guide.md` (and the website's `/guide` page, its people version).
+- Commit only what helps any Roostr deployment. Anything naming one account, person, login or site's workflow lives in the account as objects (skills, prompts, tasks), or, when it must be a file, in the gitignored `harness/private/<name>/` extension (README, "What only one deployment needs").
