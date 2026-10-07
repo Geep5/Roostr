@@ -18,6 +18,11 @@ rides relays. Native and browser builds run the same Odin domain engine —
 the browser gets it as WebAssembly, so the web view works offline with a
 durable outbox and no account at all.
 
+**How Roostr works** - objects, agents, repeats, credentials, best practices
+and recipes - is in [`docs/roostr-guide.md`](docs/roostr-guide.md). Agents
+working on a Roostr machine (Claude Code, Codex, …) start at
+[`AGENTS.md`](AGENTS.md).
+
 ## Run
 
 ```bash
