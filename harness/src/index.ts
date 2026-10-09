@@ -47,13 +47,9 @@ import { migrateExchanges } from "./migrate-exchanges";
 import { migrateAgentLists, migrateBoundAgents, migrateSpaceComputers, migrateSpaceDefaults } from "./migrate-bound";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
-<<<<<<< Updated upstream
 import { arm as armScheduler, handleRunRequest, RUN_REQUEST_KEY, startScheduler } from "./schedule";
-import { badgeSignedOut, takeCredentialIssues } from "./credential-issues";
-=======
-import { arm as armScheduler, startScheduler } from "./schedule";
 import { startGmailPush } from "./gmail-push";
->>>>>>> Stashed changes
+import { badgeSignedOut, takeCredentialIssues } from "./credential-issues";
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);

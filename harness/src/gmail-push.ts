@@ -196,7 +196,7 @@ async function listen(subscription: string, state: { inboxes: Inbox[]; stop: Abo
 			await google(reader.mailbox, `https://pubsub.googleapis.com/v1/${subscription}:acknowledge`, { ackIds: received.map((m) => m.ackId) }, signal);
 			for (const inbox of state.inboxes) {
 				if (!changed.has(inbox.mailbox)) continue;
-				void runNow(inbox.id, `new mail in ${inbox.mailbox}`).catch((err) => console.error(`[gmail-push] run ${inbox.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
+				runNow(inbox.id, `new mail in ${inbox.mailbox}`);
 			}
 		} catch (err) {
 			if (signal.aborted) return;
