@@ -257,8 +257,8 @@ export const setField = (id: string, key: string, value: ValueJSON) =>
 
 export const deleteField = (id: string, key: string) => mutate("delete_field", { object_id: id, key });
 
-export const createObject = async (name: string, typeKey: string, fields?: Record<string, ValueJSON>) =>
-	(await mutate("create", { name, type_key: typeKey, fields })) as { id: string };
+export const createObject = async (name: string, typeKey: string, fields?: Record<string, ValueJSON>, id?: string) =>
+	(await mutate("create", { name, type_key: typeKey, fields, ...(id ? { id } : {}) })) as { id: string; existed?: boolean };
 
 /**
  * Append a chat message block; `asAuthor` attributes it to the agent.

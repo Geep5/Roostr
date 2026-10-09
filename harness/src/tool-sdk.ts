@@ -216,8 +216,13 @@ export interface Roostr {
 	neighborhood(id: string): Promise<string>;
 	/** The query that runs a saved view (a query or collection) exactly as the app does; null for an empty collection. */
 	viewQuery(view: ObjectJSON): Promise<Record<string, unknown> | null>;
-	/** A new object; it lands in this tool's space unless `fields.channel` says otherwise. */
-	create(name: string, typeKey: string, fields?: Record<string, ValueJSON>): Promise<{ id: string }>;
+	/**
+	 * A new object; it lands in this tool's space unless `fields.channel` says otherwise.
+	 * `opts.id` fixes its id (letters, digits, - _ . :): derived from a source - a Gmail
+	 * thread - two computers importing it at once write one object. An id that already
+	 * exists changes nothing and answers `existed: true`.
+	 */
+	create(name: string, typeKey: string, fields?: Record<string, ValueJSON>, opts?: { id?: string }): Promise<{ id: string; existed?: boolean }>;
 	setField(id: string, key: string, value: ValueJSON): Promise<Record<string, unknown>>;
 	deleteField(id: string, key: string): Promise<Record<string, unknown>>;
 	/** Any engine mutation (`/api/mutate`), e.g. ("block_add", {object_id, block}). */
@@ -313,10 +318,10 @@ export function createRoostr(context: ToolRunContext, touched: Set<string>, harn
 		spaceMap: () => sdkCall(() => buildSpaceMap(context.channelId)),
 		neighborhood: (id) => sdkCall(() => buildNeighborhood(id, context.channelId)),
 		viewQuery: (view) => sdkCall(async () => savedViewBody(view, context.channelId, await relationDefs(context.channelId))),
-		create: (name, typeKey, fields = {}) =>
+		create: (name, typeKey, fields = {}, opts = {}) =>
 			sdkCall(async () => {
 				if (typeKey === TOOL_TYPE) throw new Error(TOOL_EDIT_REFUSAL);
-				const created = await createObject(name, typeKey, fields.channel || !context.channelId ? fields : { ...fields, channel: { stringValue: context.channelId } });
+				const created = await createObject(name, typeKey, fields.channel || !context.channelId ? fields : { ...fields, channel: { stringValue: context.channelId } }, opts.id);
 				notTools.add(created.id);
 				return created;
 			}),

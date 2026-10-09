@@ -124,7 +124,39 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 	case "create":
 		type_key := json_str(parsed, "type_key")
 		if type_key == "" do type_key = "note"
-		id := mutation_id(&plan, input)
+		// A caller-chosen id makes creation idempotent across machines: an
+		// importer that derives the id from its source (a Gmail thread) and
+		// runs on two computers at once writes ONE object - concurrent
+		// creates merge in the object's DAG, and blocks added under fixed
+		// ids are skipped on replay when already there. Create-if-absent:
+		// an id this replica already holds (live or binned) changes nothing
+		// and answers `existed`, so a late create never resets its fields.
+		id := json_str(parsed, "id")
+		if id != "" {
+			if len(id) > 128 do return plan, "id longer than 128 characters"
+			for c in id {
+				if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.' || c == ':') do return plan, "id may hold only letters, digits and - _ . :"
+			}
+			Ctx :: struct {
+				id:    string,
+				found: ^bool,
+			}
+			found := false
+			ctx := Ctx{id, &found}
+			mutation_with_states(input.states, proc(states: map[string]^Object_State, user: rawptr) {
+				c := cast(^Ctx)user
+				_, c.found^ = states[c.id]
+			}, &ctx)
+			if found {
+				extra := jobj()
+				extra["id"] = json.String(strings.clone(id, context.temp_allocator))
+				extra["existed"] = json.Boolean(true)
+				plan.result = extra
+				return plan, ""
+			}
+		} else {
+			id = mutation_id(&plan, input)
+		}
 		ops := make([dynamic]Operation, context.temp_allocator)
 		append(&ops, Operation{kind = .Object_Create, type_key = type_key})
 		name := json_str(parsed, "name")
