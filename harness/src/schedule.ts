@@ -85,8 +85,9 @@ function subDaily(obj: ObjectJSON): boolean {
 	return freq === "minute" || freq === "hour";
 }
 
-/** Complete the occurrence that fired, unless the run already did (an agent's occurrence_complete). */
+/** Complete the occurrence that fired, unless the run already did (an agent's occurrence_complete). A pushed run has no occurrence. */
 async function completeOccurrence(d: Due): Promise<void> {
+	if (d.next === undefined) return;
 	const now = await fetchObject(d.id);
 	if (now.fields["repeat"]?.mapValue?.entries?.["next"]?.intValue !== d.next) return;
 	await mutate("occurrence_complete", { object_id: d.id, ...localClock() });
@@ -101,11 +102,47 @@ async function clearRunBadge(obj: ObjectJSON, alsoNoAgent: boolean): Promise<voi
 /** setTimeout's ceiling; longer waits re-arm when it elapses. */
 const MAX_DELAY_MS = 2 ** 31 - 1;
 
-/** A scheduled object's clock fields. */
+/** A run's object and, for a clock-fired run, the occurrence it fires (undefined: a pushed run). */
 interface Due {
 	id: string;
-	next: number;
+	next: number | undefined;
 	firedFor: number | undefined;
+}
+/** A recurring object's clock: always has an occurrence. */
+interface ClockDue extends Due {
+	next: number;
+}
+
+/** Runs per object, chained: a pushed run and a clock run never import the same mail twice at once. */
+const runChains = new Map<string, Promise<void>>();
+/** Objects with a pushed run queued but not started: more pushes meanwhile ride on it. */
+const pushQueued = new Set<string>();
+
+function serialized(id: string, work: () => Promise<void>): Promise<void> {
+	const run = (runChains.get(id) ?? Promise.resolve()).then(work, work);
+	const tail = run.catch(() => {});
+	runChains.set(id, tail);
+	void tail.then(() => {
+		if (runChains.get(id) === tail) runChains.delete(id);
+	});
+	return run;
+}
+
+/**
+ * Run an object now, outside its clock - a push said its source changed
+ * (gmail-push.ts). Same path as an occurrence (Check first, then a turn
+ * only when it found something) but no occurrence fires or completes.
+ * Pushes that arrive while one is queued coalesce into it.
+ */
+export function runNow(objectId: string, why: string): Promise<void> {
+	if (pushQueued.has(objectId)) return Promise.resolve();
+	pushQueued.add(objectId);
+	return serialized(objectId, async () => {
+		pushQueued.delete(objectId);
+		const me = await machineId();
+		console.log(`[schedule] ${objectId.slice(0, 8)} run now: ${why}`);
+		await dispatch({ id: objectId, next: undefined, firedFor: undefined }, me);
+	});
 }
 
 let host: ScheduleHost | null = null;
@@ -118,7 +155,7 @@ let firing = false;
 let generation = 0;
 
 /** `repeat.next` / `repeat.fired_for`, or null when the object does not repeat. */
-function dueOf(row: { id: string; fields: Record<string, ValueJSON> }): Due | null {
+function dueOf(row: { id: string; fields: Record<string, ValueJSON> }): ClockDue | null {
 	const entries = row.fields["repeat"]?.mapValue?.entries;
 	const next = entries?.["next"]?.intValue;
 	if (next === undefined) return null;
@@ -126,11 +163,11 @@ function dueOf(row: { id: string; fields: Record<string, ValueJSON> }): Due | nu
 }
 
 /** Every recurring object this machine serves, with its clock. */
-async function recurringMine(): Promise<Due[]> {
+async function recurringMine(): Promise<ClockDue[]> {
 	const rows: QueryRow[] = await queryAll({ filters: [{ key: "repeat", condition: "exists" }] });
-	const dues = rows.map(dueOf).filter((d): d is Due => d !== null);
+	const dues = rows.map(dueOf).filter((d): d is ClockDue => d !== null);
 	await primeServing(dues.map((d) => d.id));
-	const out: Due[] = [];
+	const out: ClockDue[] = [];
 	for (const d of dues) if (await servesHere(d.id)) out.push(d);
 	return out;
 }
@@ -250,10 +287,15 @@ export function resetScheduler(): void {
 	arming = false;
 	armAgain = false;
 	firing = false;
+<<<<<<< Updated upstream
 	running.clear();
 	generation += 1;
 	clearInterval(stuckTimer);
 	stuckTimer = undefined;
+=======
+	runChains.clear();
+	pushQueued.clear();
+>>>>>>> Stashed changes
 }
 
 /**
@@ -314,7 +356,11 @@ async function fire(): Promise<void> {
 			// Turns run for as long as the agent needs; the next due object
 			// must not wait on them. `fired_for` is already committed, so a
 			// re-arm mid-turn cannot fire this occurrence twice.
+<<<<<<< Updated upstream
 			void runExclusive(d, me, "scheduled").catch((err) => {
+=======
+			void serialized(d.id, () => dispatch(d, me)).catch((err) => {
+>>>>>>> Stashed changes
 				// Deleted mid-run: the run has nowhere left to be recorded.
 				if (wasDeleted(err)) console.log(`[schedule] dispatch ${d.id.slice(0, 8)} stopped: ${err.message}`);
 				else console.error(`[schedule] dispatch ${d.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err);
@@ -359,7 +405,7 @@ async function postScheduled(ref: ConvRef, text: string, d: Due, me: string): Pr
 		content: {
 			custom: {
 				contentType: "chat",
-				meta: { author: "scheduler", text, ts: String(Date.now()), origin: "schedule", origin_object: d.id, occurrence: String(d.next), fired_by: me },
+				meta: { author: "scheduler", text, ts: String(Date.now()), origin: "schedule", origin_object: d.id, occurrence: d.next === undefined ? "push" : String(d.next), fired_by: me },
 			},
 		},
 	});
@@ -381,7 +427,7 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 	try {
 		const obj = await fetchObject(d.id);
 		const name = str(obj.fields, "name") || "(untitled)";
-		const when = new Date(d.next).toLocaleString();
+		const when = new Date(d.next ?? Date.now()).toLocaleString();
 		const owner = await ownerOf(obj);
 		const checkId = linkIds(obj.fields, "check_first")[0];
 		let finding = "";
@@ -409,7 +455,13 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 			finding = `Check first (${check.name}) found:\n${shown.length > FINDING_CAP ? `${shown.slice(0, FINDING_CAP)}\n… (cut at ${FINDING_CAP} characters)` : shown}`;
 		}
 		if (!owner) {
+<<<<<<< Updated upstream
 			await postScheduled(humanRef(obj.id), kind === "extra" ? `\u21bb "${name}" was run now` : kind === "retry" ? `\u21bb "${name}" (due ${when}) was retried` : `\u21bb "${name}" is due (${when})`, d, me);
+=======
+			// A push with no agent to tell: the check already did the work.
+			if (d.next === undefined) return;
+			await postScheduled(humanRef(obj.id), `\u21bb "${name}" is due (${when})`, d, me);
+>>>>>>> Stashed changes
 			if (subDaily(obj)) await completeOccurrence(d);
 			console.log(`[schedule] reminded "${name}" (${obj.id.slice(0, 8)}) - no served agent owns it`);
 			return;
@@ -427,7 +479,13 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 					? `Retry of "${name}" (${obj.typeKey || "object"}): the occurrence due ${when} never finished, and a person pressed Retry - do it again now, from the start`
 					: `Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}`;
 		const frame = [
+<<<<<<< Updated upstream
 			`${header}. ${finding ? "What its check found, then its instructions" : "Its instructions"} follow; ${ending}`,
+=======
+			d.next === undefined
+				? `Run of "${name}" (${obj.typeKey || "object"}) started now because its source changed (a push), not by its clock - don't call occurrence_complete. ${finding ? "What its check found, then its instructions" : "Its instructions"} follow.`
+				: `Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}. ${finding ? "What its check found, then its instructions" : "Its instructions"} follow; ${ending}`,
+>>>>>>> Stashed changes
 			...(finding ? [finding, "Instructions:"] : []),
 			body || "(this object has no body text)",
 		].join("\n");

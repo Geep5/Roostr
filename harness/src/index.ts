@@ -47,8 +47,13 @@ import { migrateExchanges } from "./migrate-exchanges";
 import { migrateAgentLists, migrateBoundAgents, migrateSpaceComputers, migrateSpaceDefaults } from "./migrate-bound";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
+<<<<<<< Updated upstream
 import { arm as armScheduler, handleRunRequest, RUN_REQUEST_KEY, startScheduler } from "./schedule";
 import { badgeSignedOut, takeCredentialIssues } from "./credential-issues";
+=======
+import { arm as armScheduler, startScheduler } from "./schedule";
+import { startGmailPush } from "./gmail-push";
+>>>>>>> Stashed changes
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);
@@ -944,6 +949,8 @@ async function serve(): Promise<void> {
 			return driveScheduled(s, systemSuffix);
 		},
 	});
+	// Push, not polling, for inboxes: new mail runs its inbox object at once.
+	startGmailPush();
 
 	// Discord channels are surfaces too: one poller per served agent whose
 	// prompt talks to Discord, following `served` as agents come and go. The

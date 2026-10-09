@@ -38,5 +38,10 @@ LOWER="$(printf '%s' "$ACCOUNT" | tr '[:upper:]' '[:lower:]')"
 ROOSTR="${GLON_DATA:-$HOME/.glon}/google/$LOWER.json"
 if [[ "${1:-}" != "auth" && -f "$ROOSTR" ]]; then
   export GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE="$ROOSTR"
+elif [[ "${1:-}" != "auth" && ! -f "$DIR/credentials.enc" ]]; then
+  # No sign-in for this account here: gws would quietly fall back to the
+  # computer's default Google account and read the wrong mailbox.
+  echo "gws-as: no sign-in for $ACCOUNT on this computer (no Roostr credential written here, no local 'gws-as $ACCOUNT auth login')" >&2
+  exit 3
 fi
 exec gws "$@"
