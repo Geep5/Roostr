@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseQuestion, verdictOf } from "./jev";
+import { levelActions, parseQuestion, verdictOf } from "./jev";
 
 test("a Score's numbered list becomes its levels, lowest first, and the paragraphs its instructions", () => {
 	const q = parseQuestion("How hostile is this email?\nCount slurs as the worst.\n1. None\n2. Rude\n3. Hateful", "score");
@@ -42,4 +42,17 @@ test("a Score answer lands on the page's numbering (Jev counts from 0, the list 
 test("Yes/No is ticked from 50% up and keeps the probability, not a confidence", () => {
 	expect(verdictOf({ type: "noul", noul: 0.5 })).toEqual({ value: { boolValue: true }, text: "yes", probability: 0.5 });
 	expect(verdictOf({ type: "noul", noul: 0.49 }).value).toEqual({ boolValue: false });
+});
+
+test("a Score level's → actions are Roostr's: left out of Jev's question, parsed per level (several, comma-separated)", () => {
+	const page = "Is this spam?\n1. A real person\n2. Marketing → set Priority: Low\n3. Spam -> bin, tag @Support Bot";
+	expect(parseQuestion(page, "score")).toEqual({ type: "score", instructions: "Is this spam?", criteria: ["A real person", "Marketing", "Spam"] });
+	const actions = levelActions(page);
+	expect(actions.get(1)).toBeUndefined();
+	expect(actions.get(2)).toEqual([{ kind: "set", property: "Priority", value: "Low" }]);
+	expect(actions.get(3)).toEqual([{ kind: "bin" }, { kind: "tag", agent: "Support Bot" }]);
+});
+
+test("an action Roostr doesn't know names its level", () => {
+	expect(() => levelActions("Q?\n1. Fine\n2. Bad → explode")).toThrow(/level 2 says "→ explode"/);
 });
