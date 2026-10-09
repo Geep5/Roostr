@@ -45,6 +45,7 @@ import { objectText } from "./skills";
 import { linkIds, runToolObject } from "./tool-objects";
 import { localClock } from "./repeat";
 import { SCORE_WITH_KEY, scoreWithSkill } from "./jev";
+import { runViewActions } from "./view-actions";
 
 /** The object ids a check's result names: a list of `{id}` (or JSON text of one). */
 export function foundIds(value: unknown): string[] {
@@ -420,36 +421,42 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 			}
 			// Score with: the Jev Skills that grade each object the check
 			// brought in, before the agent sees them - paid with the owner
-			// agent's TypeSafe credential. A level may act (jev.ts); what it
-			// binned is left out of what the agent is shown.
+			// agent's TypeSafe credential. Then the acting queries run
+			// (view-actions.ts), so what one bins is left out of what the
+			// agent is shown.
 			let value = check.value;
 			const skillIds = linkIds(obj.fields, SCORE_WITH_KEY);
 			const ids = foundIds(value);
-			if (skillIds.length > 0 && ids.length > 0) {
-				const problems: string[] = [];
-				const binned = new Set<string>();
-				if (!owner) problems.push("Score with needs an agent on this object (its TypeSafe credential pays for the scores)");
-				else {
-					for (const skillId of skillIds) {
-						try {
-							const rows = await scoreWithSkill(await fetchObject(skillId), ids.filter((id) => !binned.has(id)), owner.agentId);
-							for (const row of rows) {
-								if (row.acted?.includes("bin")) binned.add(row.id);
-								if (row.error && row.error !== "deleted") problems.push(`${row.name || row.id.slice(0, 8)}: ${row.error}`);
+			if (ids.length > 0) {
+				if (skillIds.length > 0) {
+					const problems: string[] = [];
+					if (!owner) problems.push("Score with needs an agent on this object (its TypeSafe credential pays for the scores)");
+					else {
+						for (const skillId of skillIds) {
+							try {
+								const rows = await scoreWithSkill(await fetchObject(skillId), ids, owner.agentId);
+								for (const row of rows) if (row.error && row.error !== "deleted") problems.push(`${row.name || row.id.slice(0, 8)}: ${row.error}`);
+							} catch (err) {
+								problems.push(err instanceof Error ? err.message : String(err));
 							}
-						} catch (err) {
-							problems.push(err instanceof Error ? err.message : String(err));
 						}
 					}
+					if (problems.length > 0) await setField(obj.id, "error", sv(`scoring failed: ${problems.join("; ")}`.slice(0, 300)));
+					else if (str(obj.fields, "error").startsWith("scoring failed:")) await deleteField(obj.id, "error");
 				}
-				if (problems.length > 0) await setField(obj.id, "error", sv(`scoring failed: ${problems.join("; ")}`.slice(0, 300)));
-				else if (str(obj.fields, "error").startsWith("scoring failed:")) await deleteField(obj.id, "error");
-				if (Array.isArray(value)) value = value.filter((item) => !(item && typeof item === "object" && "id" in item && binned.has(String(item.id))));
-				if (binned.size > 0) console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) - Score with binned ${binned.size}`);
-				if (isEmptyResult(value)) {
-					await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, result: `nothing left after scoring (${binned.size} binned)` } });
-					await completeOccurrence(d);
-					return;
+				const binned = await runViewActions().catch((err) => {
+					console.error(`[schedule] view actions for "${name}":`, err instanceof Error ? err.message : err);
+					return new Set<string>();
+				});
+				const gone = ids.filter((id) => binned.has(id));
+				if (gone.length > 0) {
+					if (Array.isArray(value)) value = value.filter((item) => !(item && typeof item === "object" && "id" in item && binned.has(String(item.id))));
+					console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) - queries binned ${gone.length} of what it found`);
+					if (isEmptyResult(value)) {
+						await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, result: `nothing left (${gone.length} binned by queries)` } });
+						await completeOccurrence(d);
+						return;
+					}
 				}
 			}
 			const shown = typeof value === "string" ? value : JSON.stringify(value, null, 1);

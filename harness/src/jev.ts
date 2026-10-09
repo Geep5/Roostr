@@ -20,7 +20,7 @@
  * agent set it, when, and how sure Jev was (the row's "94% sure"; "Ask
  * again" re-runs it).
  */
-import { chatPost, createObject, fetchObject, guestAgents, plainValue, queryAll, setField, str, sv, bv, mutate, type ObjectJSON, type ValueJSON } from "./api";
+import { createObject, fetchObject, plainValue, queryAll, setField, str, sv, bv, mutate, type ObjectJSON, type ValueJSON } from "./api";
 import { agentCredential } from "./credential-objects";
 import { objectText } from "./skills";
 import { relationDefs } from "./spacemap";
@@ -98,7 +98,7 @@ function optionsValue(key: string, options: Array<[text: string, color: string]>
 	};
 }
 
-function relationFields(space: string, key: string, name: string, format: string, emoji: string, options: Array<[string, string]>): Record<string, ValueJSON> {
+export function relationFields(space: string, key: string, name: string, format: string, emoji: string, options: Array<[string, string]>): Record<string, ValueJSON> {
 	return {
 		channel: sv(space),
 		key: sv(key),
@@ -133,50 +133,8 @@ function splitOption(item: string): [string, string | null] {
 	return m ? [m[1].trim(), m[2].trim()] : [item.trim(), null];
 }
 
-/** A Score level's own words, without its `→ actions`. */
-const ARROW = /\s*(?:→|->)\s*/;
-
-/** What a Score level does to an object scored at it. */
-export type LevelAction =
-	| { kind: "bin" }
-	| { kind: "done" }
-	| { kind: "set"; property: string; value: string }
-	| { kind: "tag"; agent: string };
-
-function parseAction(level: number, raw: string): LevelAction {
-	const text = raw.trim();
-	if (/^bin$/i.test(text)) return { kind: "bin" };
-	if (/^(mark\s+)?done$/i.test(text)) return { kind: "done" };
-	const set = text.match(/^set\s+(.+?)\s*:\s*(.+)$/i);
-	if (set) return { kind: "set", property: set[1].trim(), value: set[2].trim() };
-	const tag = text.match(/^tag\s+@?(.+)$/i);
-	if (tag) return { kind: "tag", agent: tag[1].trim() };
-	throw new Error(`level ${level} says "→ ${text}" - the actions are: bin, done, set <Property>: <value>, tag @<Agent>`);
-}
-
-/**
- * A Score's per-level actions: a numbered level may end in `→ action,
- * action` (or `->`). Level numbers count from 1, as the page does. Throws
- * a sentence naming the level when an action isn't one Roostr knows.
- */
-export function levelActions(text: string): Map<number, LevelAction[]> {
-	const out = new Map<number, LevelAction[]>();
-	let level = 0;
-	for (const raw of text.split("\n")) {
-		const num = raw.trim().match(/^\d+\.\s+(.+)$/);
-		if (!num) continue;
-		level += 1;
-		const [, ...rest] = num[1].split(ARROW);
-		if (rest.length === 0) continue;
-		const actions = rest.join(" ").split(",").map((a) => a.trim()).filter(Boolean).map((a) => parseAction(level, a));
-		if (actions.length > 0) out.set(level, actions);
-	}
-	return out;
-}
-
 /**
  * The Jev question a Skill's page asks (its text as `objectText` lines).
- * A Score level's `→ actions` are Roostr's, not Jev's: they are left out.
  * Throws a sentence the agent can relay when the page can't be one.
  */
 export function parseQuestion(text: string, kind: AnswerKind): JevQuestion {
@@ -188,7 +146,7 @@ export function parseQuestion(text: string, kind: AnswerKind): JevQuestion {
 		const line = raw.trim();
 		if (!line) continue;
 		const num = line.match(/^\d+\.\s+(.+)$/);
-		if (num) { numbered.push(num[1].split(ARROW)[0].trim()); continue; }
+		if (num) { numbered.push(num[1].trim()); continue; }
 		const bullet = line.match(/^- (?!\[[ x]\] )(.+)$/);
 		if (bullet) { bullets.push(bullet[1].trim()); continue; }
 		const yn = kind === "yes_no" ? line.match(/^(yes|no)\s*[:\-–—]\s*(.+)$/i) : null;
@@ -336,73 +294,17 @@ async function serial<T>(key: string, fn: () => Promise<T>): Promise<T> {
 	}
 }
 
-/** Writes the answer and its note; returns the level last acted on for this property (kept in the note). */
-async function writeVerdict(objectId: string, key: string, by: { skill: string; agent: string }, verdict: Verdict): Promise<number | undefined> {
-	return await serial(objectId, async () => {
+async function writeVerdict(objectId: string, key: string, by: { skill: string; agent: string }, verdict: Verdict): Promise<void> {
+	await serial(objectId, async () => {
 		await setField(objectId, key, verdict.value);
 		const now = await fetchObject(objectId);
 		const entries = { ...(now.fields[JUDGED_FIELD]?.mapValue?.entries ?? {}) };
-		const before = entries[key]?.mapValue?.entries ?? {};
 		const note: Record<string, ValueJSON> = { skill: sv(by.skill), agent: sv(by.agent), at: { intValue: Date.now() } };
 		if (verdict.confidence !== undefined) note.confidence = { floatValue: verdict.confidence };
 		if (verdict.probability !== undefined) note.probability = { floatValue: verdict.probability };
-		if (before["acted_level"]) note.acted_level = before["acted_level"];
-		if (before["acted"]) note.acted = before["acted"];
 		entries[key] = { mapValue: { entries: note } };
 		await setField(objectId, JUDGED_FIELD, { mapValue: { entries } });
-		return before["acted_level"]?.intValue;
 	});
-}
-
-// ── Acting on a level ────────────────────────────────────────────
-
-/** A `set` action's text as the property's value. */
-function valueFor(format: string, text: string): ValueJSON {
-	if (format === "number") {
-		const n = Number(text);
-		if (!Number.isFinite(n)) throw new Error(`"${text}" is not a number`);
-		return { floatValue: n };
-	}
-	if (format === "checkbox") return bv(/^(yes|true|on|1|checked)$/i.test(text));
-	if (format === "tag") return { valuesValue: { items: [sv(text)] } };
-	if (["status", "shorttext", "text", "longtext", "url", "email", "phone"].includes(format)) return sv(text);
-	throw new Error(`a level can't set a ${format} property`);
-}
-
-/**
- * Do what a Score level says to the object scored at it: set, done and tag
- * first, bin last. A tag adds the agent to the object's guests and the note
- * line @-mentions it, which wakes it there. Returns what was done, in words.
- */
-async function actOnLevel(obj: ObjectJSON, actions: LevelAction[], said: string): Promise<{ done: string[]; binned: boolean }> {
-	const space = str(obj.fields, "channel");
-	const done: string[] = [];
-	const mentions: string[] = [];
-	for (const action of actions) {
-		if (action.kind === "done") {
-			await setField(obj.id, "done", bv(true));
-			done.push("done");
-		} else if (action.kind === "set") {
-			const rel = [...(await relationDefs(space)).values()].find((r) => r.name.toLowerCase() === action.property.toLowerCase());
-			if (!rel) throw new Error(`set ${action.property}: no property by that name in this space`);
-			await setField(obj.id, rel.key, valueFor(rel.format, action.value));
-			done.push(`${rel.name}: ${action.value}`);
-		} else if (action.kind === "tag") {
-			const agents = (await queryAll({ type: "agent", filters: [{ key: "channel", condition: "equal", value: space }] })).filter((a) => !str(a.fields, "spawn_parent"));
-			const agent = agents.find((a) => str(a.fields, "name").toLowerCase() === action.agent.toLowerCase());
-			if (!agent) throw new Error(`tag @${action.agent}: no agent by that name in this space`);
-			const guests = guestAgents(obj.fields);
-			if (!guests.includes(agent.id)) {
-				await setField(obj.id, "agent", { valuesValue: { items: [...guests, agent.id].map((targetId) => ({ linkValue: { relationKey: "agent", targetId } })) } });
-			}
-			mentions.push(`@${str(agent.fields, "name")}`);
-		}
-	}
-	const binned = actions.some((a) => a.kind === "bin");
-	// One line on the object's chat says what happened and why - and wakes a tagged agent.
-	await chatPost(obj.id, [said, "→", [...done, ...(binned ? ["binned"] : []), ...mentions].join(", ")].join(" "), "scheduler");
-	// Binning is the caller's last step, after it has noted the level acted on.
-	return { done: [...done, ...(binned ? ["bin"] : []), ...mentions.map((m) => `tag ${m}`)], binned };
 }
 
 // ── Scoring ──────────────────────────────────────────────────────
@@ -420,8 +322,6 @@ export interface ScoreRow {
 	confidence?: number;
 	probability?: number;
 	error?: string;
-	/** What the score's level did, in words ("bin", "tag @Support"). */
-	acted?: string[];
 }
 
 async function eachLimited<T>(items: T[], fn: (item: T) => Promise<void>): Promise<void> {
@@ -441,7 +341,6 @@ export async function scoreWithSkill(skill: ObjectJSON, objectIds: string[], age
 	const kind = answerKind(skill.fields);
 	if (!kind) throw new Error(`"${str(skill.fields, "name")}" is not a Jev Skill - it has no Answer (Score, Choice or Yes or no)`);
 	const question = parseQuestion(objectText(skill), kind);
-	const actionsByLevel = kind === "score" ? levelActions(objectText(skill)) : new Map<number, LevelAction[]>();
 	const cred = await agentCredential(await fetchObject(agentId), "typesafe");
 	const apiKey = cred.keys?.["api_key"];
 	if (!apiKey) throw new Error(`the TypeSafe credential "${cred.row.name}" has no API key yet`);
@@ -461,31 +360,8 @@ export async function scoreWithSkill(skill: ObjectJSON, objectIds: string[], age
 			const key = await keys.get(space)!;
 			const answers = await jevAsk(apiKey, scoredState(obj, await relsBySpace.get(space)!), { [key]: question });
 			const verdict = verdictOf(answers[key]);
-			const actedLevel = await writeVerdict(id, key, { skill: skill.id, agent: agentId }, verdict);
+			await writeVerdict(id, key, { skill: skill.id, agent: agentId }, verdict);
 			rows[i] = { ...rows[i], property, value: plainValue(verdict.value), answer: verdict.text, confidence: verdict.confidence, probability: verdict.probability };
-			// A level acts once per object: the same level again (Ask again, or
-			// a person restored what it binned) does nothing more; a new level acts.
-			const level = question.type === "score" ? Math.min(question.criteria.length, Math.max(1, Math.round(Number(plainValue(verdict.value))))) : 0;
-			const actions = actionsByLevel.get(level);
-			if (actions && actedLevel !== level) {
-				try {
-					const result = await actOnLevel(obj, actions, `${str(skill.fields, "name")} ${verdict.text}`);
-					rows[i].acted = result.done;
-					// Noted before any bin: a person who restores it overrules this level for good.
-					await serial(id, async () => {
-						const now = await fetchObject(id);
-						const entries = { ...(now.fields[JUDGED_FIELD]?.mapValue?.entries ?? {}) };
-						const note = { ...(entries[key]?.mapValue?.entries ?? {}), acted_level: { intValue: level }, acted: sv(result.done.join(", ")) };
-						entries[key] = { mapValue: { entries: note } };
-						await setField(id, JUDGED_FIELD, { mapValue: { entries } });
-					});
-					if (result.binned) await mutate("delete", { object_id: id });
-				} catch (err) {
-					const failure = `${str(skill.fields, "name")} level ${level} action failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
-					await setField(id, "error", sv(failure)).catch(() => {});
-					rows[i].error = failure;
-				}
-			}
 		} catch (err) {
 			rows[i] = { ...rows[i], error: err instanceof Error ? err.message : String(err) };
 		}

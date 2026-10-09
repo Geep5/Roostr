@@ -82,7 +82,13 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 - **Its page is the question**: paragraphs are the instructions; a numbered list is a Score's levels (2 to 10, lowest first); a bulleted list is a Choice's options (`Name: what it means`); `Yes: ...` / `No: ...` lines describe a Yes/No.
 - **Using it**: an agent with the Skill in its Skills runs it with `jev_score(skill, object_ids)` - many objects in one call - paying with the TypeSafe credential in its own Credentials. It gets back each object's value, the answer in words and how sure, and can act on them in the same turn. Code Tools call `roostr.jev(skill, ids)`.
 - **When**: whenever the agent's instructions say so, or automatically on arrival: an object with a Check first lists Jev Skills in its **Score with**, and everything the check brings in is scored with them before its agent's turn (paid with that agent's TypeSafe credential). Otherwise nothing re-scores on its own: a person can click the value's "Ask again".
-- **Levels that act**: a Score level may end in `→` actions - `bin`, `done`, `set <Property>: <value>`, `tag @<Agent>`, several separated by commas (`9. Spam → bin`). When an object is scored at that level the actions run once, and its chat gets one line saying what and why; what a level binned is never shown to the agent. Scored at the same level again - or restored from the bin by a person - it is left alone. A failing action shows on the object's Error.
+- **Acting on scores**: a saved Query does it - its filters are the condition ("Emails where Spam meter >= 8") and its action properties the action (see Queries that act).
+
+### Queries that act
+
+- A Query with **Move to bin**, **Mark done**, **Tag agents** (agents added to the object and @-mentioned in its chat, which wakes them) or **Set property** + **Set value** does that to everything it matches - including what already matched when you switched it on. Open the query to see exactly what it acts on.
+- Each object is acted on once per query: it keeps which queries acted on it, so restoring it from the bin (or unticking Done) overrules that query for it for good. Every action leaves one line in the object's chat ("binned by \"Spam to bin\"").
+- It runs on the query's computer: its Served by, else its Agent's. A query nobody runs, or an action that fails, shows on the query's Error. It acts within seconds of a change, and inbox imports run it before the agent's turn, so what it bins is never shown to the agent.
 - Scores are ordinary properties: filter, sort and build queries on them ("Emails where Spam meter >= 8"). Next to the value: how sure Jev was ("9 · 97% sure") and which Skill and agent set it.
 
 ## 8. Credentials

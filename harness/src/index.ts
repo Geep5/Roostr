@@ -22,6 +22,7 @@ import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./cre
 import { installGwsAs } from "./google-credentials";
 import { fillCredential, seedCredentials } from "./credential-seeds";
 import { seedJev } from "./jev";
+import { nudgeViewActions, startViewActions } from "./view-actions";
 import { seedGuide } from "./guide";
 import { capabilities } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tool-harness";
@@ -312,6 +313,8 @@ async function serve(): Promise<void> {
 	console.log("[harness] computer properties:", JSON.stringify({ seeded: await seedComputerProperties() }));
 	// Jev Skills' Answer / Writes to properties in every space; the retired Judge type and properties removed.
 	console.log("[harness] jev seeds:", JSON.stringify(await seedJev()));
+	// Queries that act (Move to bin, Mark done, Tag agents, Set property): their properties, then a first run.
+	await startViewActions();
 	const migration = await migrateExchanges({ apply: true });
 	console.log("[harness] exchange migration:", JSON.stringify(migration));
 	// bound_object -> object.agent, after the exchange migration has read
@@ -906,7 +909,10 @@ async function serve(): Promise<void> {
 		void publishSystemSnapshot(s.agentId, s.conv);
 		void drive(s, humanRef(s.conv.objectId));
 	}
-	subscribe((objectId) => void route(objectId), () => {
+	subscribe((objectId) => {
+		void route(objectId);
+		nudgeViewActions();
+	}, () => {
 		void scanMailboxes().catch((error) => console.error("[harness] mailbox catch-up:", error));
 	});
 	// Live work, not only what the index already holds: a full rescan on a
