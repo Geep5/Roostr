@@ -28,7 +28,7 @@
  * from the scheduler right after a Check first's finds are scored, so what
  * a query bins is never shown to the agent.
  */
-import { chatPost, deleteField, fetchObject, guestAgents, mutate, queryAll, setField, str, sv, bv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { chatPost, deleteField, fetchObject, guestAgents, markSystem, mutate, queryAll, setField, str, sv, bv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { relationFields } from "./jev";
 import { primeServing, serverOf, servesHere } from "./machine";
 import { relationDefs, savedViewBody } from "./spacemap";
@@ -50,7 +50,8 @@ export async function seedViewActions(): Promise<number> {
 	let made = 0;
 	const [spaces, relations, types] = await Promise.all([queryAll({ type: "channel" }), queryAll({ type: "relation" }), queryAll({ type: "type" })]);
 	for (const space of spaces) {
-		const have = new Set(relations.filter((r) => str(r.fields, "channel") === space.id).map((r) => str(r.fields, "key")));
+		const own = relations.filter((r) => str(r.fields, "channel") === space.id);
+		const have = new Set(own.map((r) => str(r.fields, "key")));
 		const agentType = types.find((t) => str(t.fields, "key") === "agent" && (str(t.fields, "channel") === space.id || t.fields["bundled"]?.boolValue === true));
 		const wanted: Array<[key: string, name: string, format: string, emoji: string]> = [
 			[BIN_KEY, "Move to bin", "checkbox", "🗑️"],
@@ -59,6 +60,7 @@ export async function seedViewActions(): Promise<number> {
 			[SET_PROPERTY_KEY, "Set property", "shorttext", "✏️"],
 			[SET_VALUE_KEY, "Set value", "shorttext", "✏️"],
 		];
+		for (const r of own) if (wanted.some(([key]) => key === str(r.fields, "key"))) await markSystem(r);
 		for (const [key, name, format, emoji] of wanted) {
 			if (have.has(key)) continue;
 			const fields = relationFields(space.id, key, name, format, emoji, []);

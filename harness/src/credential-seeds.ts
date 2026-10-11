@@ -13,7 +13,7 @@
  *   template in the credential's space onto it (else the code seed).
  */
 
-import { bv, createObject, iv, lv, mutate, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
+import { bv, createObject, iv, lv, markSystem, mutate, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
 import { CREDENTIAL_TYPE, pinOf } from "./credential-objects";
 import { machineId } from "./roster";
 import { CREDENTIAL_SEEDS, credentialProperties, KEY_PREFIX, legacyKeyName, optionKeys, recipeFieldKeys, recipeHash, recipeMissing, seedFor, seedRecipeFields } from "./credentials";
@@ -77,7 +77,10 @@ export async function seedCredentials(): Promise<{ properties: number; templates
 	// Properties first: a credential's fields show only through them.
 	const relations = await queryAll({ type: "relation" });
 	for (const space of spaces) {
-		const have = new Set(relations.filter((r) => str(r.fields, "channel") === space.id).map((r) => str(r.fields, "key")));
+		const own = relations.filter((r) => str(r.fields, "channel") === space.id);
+		const have = new Set(own.map((r) => str(r.fields, "key")));
+		const seedKeys = new Set(credentialProperties().map((p) => p.key));
+		for (const r of own) if (seedKeys.has(str(r.fields, "key"))) await markSystem(r);
 		for (const p of credentialProperties()) {
 			if (have.has(p.key)) continue;
 			await createObject(p.name, "relation", {
@@ -91,6 +94,7 @@ export async function seedCredentials(): Promise<{ properties: number; templates
 				maxCount: iv(0),
 				options: lv([]),
 				bundled: bv(false),
+				system: bv(true),
 			});
 			out.properties += 1;
 		}

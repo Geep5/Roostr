@@ -20,7 +20,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { ObjectJSON, QueryRow } from "./api";
-import { createObject, fetchObject, queryAll, str, sv } from "./api";
+import { createObject, fetchObject, markSystem, queryAll, str, sv } from "./api";
 import { serializeBody } from "./surfaces";
 import { appendMarkdown } from "./markdown";
 
@@ -73,10 +73,14 @@ export function parseKbFile(file: string, content: string): ParsedEntry[] {
 
 export async function seedKbType(space: string): Promise<void> {
 	const types = await queryAll({ type: "type" });
-	if (!types.some((t) => str(t.fields, "key") === KB_TYPE && str(t.fields, "channel") === space)) {
-		await createObject("Knowledge Base Entry", "type", { key: sv(KB_TYPE), name: sv("Knowledge Base Entry"), iconEmoji: sv("📚"), layout: sv("page"), channel: sv(space) });
+	const kbTypes = types.filter((t) => str(t.fields, "key") === KB_TYPE && str(t.fields, "channel") === space);
+	for (const t of kbTypes) await markSystem(t);
+	if (kbTypes.length === 0) {
+		await createObject("Knowledge Base Entry", "type", { key: sv(KB_TYPE), name: sv("Knowledge Base Entry"), iconEmoji: sv("📚"), layout: sv("page"), channel: sv(space), system: { boolValue: true } });
 	}
-	const have = new Set((await queryAll({ type: "relation" })).filter((r) => str(r.fields, "channel") === space).map((r) => str(r.fields, "key")));
+	const own = (await queryAll({ type: "relation" })).filter((r) => str(r.fields, "channel") === space);
+	for (const r of own) if (KB_PROPERTIES.some((p) => p.key === str(r.fields, "key"))) await markSystem(r);
+	const have = new Set(own.map((r) => str(r.fields, "key")));
 	for (const p of KB_PROPERTIES) {
 		if (have.has(p.key)) continue;
 		await createObject(p.name, "relation", {
@@ -96,6 +100,7 @@ export async function seedKbType(space: string): Promise<void> {
 				},
 			},
 			bundled: { boolValue: false },
+			system: { boolValue: true },
 		});
 	}
 }

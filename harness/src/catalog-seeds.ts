@@ -15,7 +15,7 @@
  * The retired `descriptor` cards these replaced are vanished.
  */
 
-import { bv, createObject, deleteField, iv, lv, mutate, plainValue, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
+import { bv, createObject, deleteField, iv, lv, markSystem, mutate, plainValue, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
 import { PROMPT_SEEDS, ensureSystemPrompt, type AgentKindEntry } from "./prompts";
 import { CATALOG, upsertSkillObject } from "./skillmgr";
 import { SKILL_TYPE, SKILLS_KEY } from "./skills";
@@ -97,7 +97,10 @@ export async function seedCatalog(): Promise<void> {
 	const spaces = await queryAll({ type: "channel" });
 	const relations = await queryAll({ type: "relation" });
 	for (const space of spaces) {
-		const have = new Set(relations.filter((r) => str(r.fields, "channel") === space.id).map((r) => str(r.fields, "key")));
+		const own = relations.filter((r) => str(r.fields, "channel") === space.id);
+		const have = new Set(own.map((r) => str(r.fields, "key")));
+		const seedKeys = new Set(PROMPT_SEEDS.flatMap((s) => s.fields.map((f) => f.key)));
+		for (const r of own) if (seedKeys.has(str(r.fields, "key"))) await markSystem(r);
 		for (const f of PROMPT_SEEDS.flatMap((s) => s.fields)) {
 			if (have.has(f.key)) continue;
 			await createObject(f.label, "relation", {
@@ -112,6 +115,7 @@ export async function seedCatalog(): Promise<void> {
 				maxCount: iv(1),
 				options: lv([]),
 				bundled: bv(false),
+				system: bv(true),
 			});
 			have.add(f.key);
 			out.properties += 1;

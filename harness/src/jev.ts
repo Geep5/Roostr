@@ -20,7 +20,7 @@
  * agent set it, when, and how sure Jev was (the row's "94% sure"; "Ask
  * again" re-runs it).
  */
-import { createObject, fetchObject, plainValue, queryAll, setField, str, sv, bv, mutate, type ObjectJSON, type ValueJSON } from "./api";
+import { createObject, fetchObject, markSystem, plainValue, queryAll, setField, str, sv, bv, mutate, type ObjectJSON, type ValueJSON } from "./api";
 import { agentCredential } from "./credential-objects";
 import { objectText } from "./skills";
 import { relationDefs } from "./spacemap";
@@ -62,6 +62,7 @@ export async function seedJev(): Promise<{ properties: number; retired: number }
 	for (const space of spaces) {
 		const mine = relations.filter((r) => str(r.fields, "channel") === space.id && r.fields["bundled"]?.boolValue !== true);
 		const have = new Set(mine.map((r) => str(r.fields, "key")));
+		for (const r of mine) if ([ANSWER_KEY, WRITES_KEY, SCORE_WITH_KEY].includes(str(r.fields, "key"))) await markSystem(r);
 		if (!have.has(ANSWER_KEY)) {
 			await createObject("Answer", "relation", relationFields(space.id, ANSWER_KEY, "Answer", "status", "⚖️", ANSWERS.map(([text, , color]) => [text, color])));
 			out.properties += 1;
@@ -110,6 +111,7 @@ export function relationFields(space: string, key: string, name: string, format:
 		maxCount: { intValue: format === "status" ? 1 : 0 },
 		options: optionsValue(key, options),
 		bundled: bv(false),
+		system: bv(true),
 	};
 }
 

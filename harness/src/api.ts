@@ -257,6 +257,17 @@ export const setField = (id: string, key: string, value: ValueJSON) =>
 
 export const deleteField = (id: string, key: string) => mutate("delete_field", { object_id: id, key });
 
+/**
+ * Mark a harness-seeded property/type `system: true` (the app will not delete it).
+ * Engine built-ins (`bundled`) and already-marked rows are left alone. Returns whether it wrote.
+ */
+export async function markSystem(row: { id: string; fields: Record<string, ValueJSON> }): Promise<boolean> {
+	if (flag(row.fields, "bundled") || flag(row.fields, "system")) return false;
+	await setField(row.id, "system", bv(true));
+	row.fields["system"] = bv(true);
+	return true;
+}
+
 export const createObject = async (name: string, typeKey: string, fields?: Record<string, ValueJSON>, id?: string) =>
 	(await mutate("create", { name, type_key: typeKey, fields, ...(id ? { id } : {}) })) as { id: string; existed?: boolean };
 

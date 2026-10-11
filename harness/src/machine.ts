@@ -24,7 +24,7 @@
 
 import { execSync } from "node:child_process";
 import { hostname, platform } from "node:os";
-import { bv, createObject, flag, iv, lv, queryAll, servingFor, setField, str, sv, type QueryRow, type Serving, type ValueJSON } from "./api";
+import { bv, createObject, flag, iv, lv, markSystem, queryAll, servingFor, setField, str, sv, type QueryRow, type Serving, type ValueJSON } from "./api";
 import { machineId } from "./roster";
 import { agentSubject } from "./conv";
 
@@ -66,7 +66,9 @@ export async function seedComputerProperties(): Promise<number> {
 	const relations = await queryAll({ type: "relation" });
 	let made = 0;
 	for (const prop of COMPUTER_PROPERTIES) {
-		const seeded = new Set(relations.filter((r) => str(r.fields, "key") === prop.key).map((r) => str(r.fields, "channel")));
+		const mine = relations.filter((r) => str(r.fields, "key") === prop.key && spaces.has(str(r.fields, "channel")));
+		for (const r of mine) await markSystem(r);
+		const seeded = new Set(mine.map((r) => str(r.fields, "channel")));
 		for (const space of spaces) {
 			if (seeded.has(space)) continue;
 			await createObject(prop.name, "relation", {
@@ -80,6 +82,7 @@ export async function seedComputerProperties(): Promise<number> {
 				maxCount: iv(0),
 				options: lv([]),
 				bundled: bv(false),
+				system: bv(true),
 			});
 			made += 1;
 		}
