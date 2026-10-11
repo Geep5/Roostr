@@ -39,6 +39,8 @@ const BASE_KIND = 31078;
 const BASE_PART_KIND = 1080;
 /** Once bases exist, history walks start this long before the newest base. */
 const BASE_FLOOR_SLACK_S = 86_400;
+/** A computer compacts any object still without a base once its oldest change is this old, whoever serves it. */
+const UNBASED_FALLBACK_MS = 12 * 3_600_000;
 /** What the live subscription, the watchdog and catch-up read: deltas, legacy checkpoints, bases and their parts. */
 const LIVE_KINDS = [CHANGE_KIND, CHECKPOINT_KIND, BASE_KIND, BASE_PART_KIND];
 /** NIP-59 gift wrap: space-key invites and join requests, addressed by npub. */
@@ -480,6 +482,8 @@ interface BaseRow {
 	orphan: number;
 	stale: number;
 	pending: number;
+	/** unix ms of the oldest live change (0 when none). */
+	oldestMs: number;
 	compact: boolean;
 	reason: string;
 }
@@ -1039,8 +1043,16 @@ export async function startNostrSync(): Promise<void> {
 	// we own) and current after the import, it is our relay copy at that
 	// address - what compaction supersedes and deletes later.
 
-	/** The newest base opened (created_at, seconds): bounds history walks. */
-	let newestBaseAt = 0;
+	/** Per stream ("" = personal, else the space id): the newest base opened (created_at, seconds). Bounds that stream's history walk only. */
+	const newestBaseAt = new Map<string, number>();
+	function noteBaseAt(stream: string, createdAt: number): void {
+		newestBaseAt.set(stream, Math.max(newestBaseAt.get(stream) ?? 0, createdAt));
+	}
+	/** Since for a stream's history walk: its newest base minus a day; 0 (whole stream) while it holds no base. Never global: an unbased object of one stream may be older than another stream's bases. */
+	function streamFloor(stream: string): number {
+		const at = newestBaseAt.get(stream) ?? 0;
+		return at > 0 ? Math.max(0, at - BASE_FLOOR_SLACK_S) : 0;
+	}
 	/** Completed base chunk groups -> their import row, so republished parts join the copy. */
 	const baseGroups = new Map<string, ImportedBase>();
 
@@ -1060,7 +1072,7 @@ export async function startNostrSync(): Promise<void> {
 		const provenance = space ? { spaceId: space.spaceId, keyId: space.keyId, signer } : undefined;
 		const res = await localPost<{ rejected: number; items: ImportedBase[] }>("/api/bases", { bases: [b64], provenance });
 		if (res.rejected > 0) throw new Error("Base import rejected");
-		newestBaseAt = Math.max(newestBaseAt, createdAt);
+		noteBaseAt(space?.spaceId ?? "", createdAt);
 		const row = res.items[0];
 		if (!row) return undefined;
 		if (row.current && signer === id!.pk && (!space || (space.owner ?? id!.pk) === id!.pk)) {
@@ -1500,7 +1512,11 @@ export async function startNostrSync(): Promise<void> {
 	 * (pre-migration) by full backwards pagination.
 	 */
 	async function backfillSpaceTags(tags: string[]): Promise<void> {
-		if (tags.length === 0) return;
+		// One space at a time: each stream has its own floor.
+		for (const tag of tags) await backfillSpaceTag(tag);
+	}
+	async function backfillSpaceTag(tag: string): Promise<void> {
+		const tags = [tag];
 		const fetched = await fetchBases([{ kinds: [BASE_KIND], "#h": tags }]);
 		const since = fetched.count > 0 ? Math.max(0, fetched.newestAt - BASE_FLOOR_SLACK_S) : 0;
 		const filters: Filter[] = [{ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": tags, since }, { kinds: [DELETE_KIND], "#h": tags }];
@@ -1986,8 +2002,8 @@ export async function startNostrSync(): Promise<void> {
 		dirty = true;
 	}
 
-	/** One object: make sure its current base is out, finish a pending cleanup, compact when due. True = built. */
-	async function compactObject(objectId: string, row: BaseRow, space: SharedSpace | null): Promise<boolean> {
+	/** One object: make sure its current base is out, finish a pending cleanup, compact when due (or forced: the unbased fallback). True = built. */
+	async function compactObject(objectId: string, row: BaseRow, space: SharedSpace | null, force = false): Promise<boolean> {
 		const scope = space ? `${space.spaceId}/${space.keyId}` : "";
 		const copy = state.bases![objectId];
 		const pending = state.compactions![objectId];
@@ -2001,8 +2017,8 @@ export async function startNostrSync(): Promise<void> {
 			if (!current || !(await publishBase(objectId, current.b64, space))) return false;
 		}
 		if (pending) await cleanupCompaction(objectId, space, row);
-		if (!row.compact) return false;
-		const built = await localPost<BuiltBase>("/api/bases/build", { objectId });
+		if (!row.compact && !force) return false;
+		const built = await localPost<BuiltBase>("/api/bases/build", force ? { objectId, force: true } : { objectId });
 		if (!built.compact || !built.b64 || !built.hash) return false;
 		const epoch = built.epoch ?? 1;
 		// An unfinished cleanup of the base this one builds on rides along: those deltas are folded in the chain.
@@ -2024,7 +2040,12 @@ export async function startNostrSync(): Promise<void> {
 	 * GLON_STATE_SYNC_COMPACT=1 (replaces the 1079 checkpoint loop): rebase
 	 * orphans, then for every object compacted here that the core says is due,
 	 * build the next base, publish it and clean up. Shared spaces: only spaces
-	 * this identity owns.
+	 * this identity owns. Unbased fallback: every object with no base whose
+	 * oldest change is older than UNBASED_FALLBACK_MS gets its epoch-1 base
+	 * here, whoever serves it - fresh devices walk a stream only from its
+	 * newest base minus a day, so an object left unbased (its computer
+	 * offline, or not upgraded yet) would be cut off. Concurrent epoch-1
+	 * bases from two computers resolve by the current-base rule.
 	 */
 	let compactBusy = false;
 	async function compactionPass(): Promise<void> {
@@ -2038,8 +2059,9 @@ export async function startNostrSync(): Promise<void> {
 				const space = sharedSpaces.get(spaceMap.get(objectId) ?? "") ?? null;
 				if (space && (space.owner ?? id!.pk) !== id!.pk) continue; // the owner's computer compacts its space
 				try {
-					if (!(await compactsHere(objectId))) continue;
-					if (await compactObject(objectId, row, space)) built++;
+					const fallback = !row.hash && row.oldestMs > 0 && Date.now() - row.oldestMs > UNBASED_FALLBACK_MS;
+					if (!fallback && !(await compactsHere(objectId))) continue;
+					if (await compactObject(objectId, row, space, fallback)) built++;
 				} catch (err) {
 					console.error(`[sync] compaction failed for ${objectId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
 				}
@@ -2157,14 +2179,22 @@ export async function startNostrSync(): Promise<void> {
 		console.error("[sync] base list failed:", err instanceof Error ? err.message : err);
 		return {} as Record<string, BaseRow>;
 	});
-	for (const row of Object.values(heldBases)) if (row.hash) newestBaseAt = Math.max(newestBaseAt, Math.floor(row.createdAt / 1000));
+	const streamOf = (objectId: string): string => {
+		const spaceId = spaceMap.get(objectId) ?? "";
+		return sharedSpaces.has(spaceId) ? spaceId : "";
+	};
+	for (const [objectId, row] of Object.entries(heldBases)) if (row.hash) noteBaseAt(streamOf(objectId), Math.floor(row.createdAt / 1000));
 	// No base anywhere (a pre-migration vault): today's full walk, unchanged.
 	// Bases exist: history is never walked from zero again - deltas come by
 	// #b, objects without a base by their own stream, the rest since the
-	// newest base minus a day.
-	const bounded = newestBaseAt > 0;
+	// newest base minus a day. That floor is per stream (personal, each
+	// space): a stream holding no base is walked whole, so an object whose
+	// computer has not compacted yet is never cut off by another stream's bases.
+	const bounded = newestBaseAt.size > 0;
+	const personalFloor = streamFloor("");
 	if (bounded) {
-		historyFloor = Math.max(0, newestBaseAt - BASE_FLOOR_SLACK_S);
+		// Live subscriptions and catch-up span every stream: the lowest floor.
+		historyFloor = Math.min(personalFloor, ...[...sharedSpaces.keys()].map(streamFloor));
 		if (state.replaySince !== undefined && state.replaySince < historyFloor) state.replaySince = historyFloor;
 	}
 	const manifest = await localManifest();
@@ -2183,17 +2213,20 @@ export async function startNostrSync(): Promise<void> {
 	state.sharedQueued = {};
 	state.checkpoints = {};
 	const backfillById = new Map<string, Event>();
-	const backfillFilters: Filter[] = [{ kinds: [CHANGE_KIND, CHECKPOINT_KIND], authors: [id.pk], ...(bounded ? { since: historyFloor } : {}) }];
-	// The space streams, and every kind 5 over them: an owner's space-deletion signal (they are few).
-	if (spaceTags.length > 0) backfillFilters.push({ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": spaceTags, ...(bounded ? { since: historyFloor } : {}) }, { kinds: [DELETE_KIND], "#h": spaceTags });
+	const sinceOf = (floor: number): { since?: number } => (floor > 0 ? { since: floor } : {});
+	const backfillFilters: Filter[] = [{ kinds: [CHANGE_KIND, CHECKPOINT_KIND], authors: [id.pk], ...sinceOf(personalFloor) }];
+	// The space streams, each from its own floor, and every kind 5 over them: an owner's space-deletion signal (they are few).
+	for (const space of sharedSpaces.values()) backfillFilters.push({ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": [space.spaceTag], ...sinceOf(streamFloor(space.spaceId)) });
+	if (spaceTags.length > 0) backfillFilters.push({ kinds: [DELETE_KIND], "#h": spaceTags });
 	if (bounded) {
 		const hashes = Object.values(heldBases).map((row) => row.hash).filter((hash) => hash !== "");
 		for (let i = 0; i < hashes.length; i += HTAG_BATCH) backfillFilters.push({ kinds: [CHANGE_KIND], "#b": hashes.slice(i, i + HTAG_BATCH) });
 		// Objects with no base yet replay from genesis: their whole stream. The
 		// vanish ledger never gets a base, so its stream is always read whole.
-		const unbased = [...new Set([...Object.keys(manifest), ...Object.keys(heldBases), VANISH_LOG_ID])].filter((objectId) => !heldBases[objectId]?.hash);
+		// A stream walked whole already carries them.
+		const unbased = [...new Set([...Object.keys(manifest), ...Object.keys(heldBases), VANISH_LOG_ID])].filter((objectId) => !heldBases[objectId]?.hash && streamFloor(streamOf(objectId)) > 0);
 		const tags = unbased.map((objectId) => {
-			const space = sharedSpaces.get(spaceMap.get(objectId) ?? "");
+			const space = sharedSpaces.get(streamOf(objectId));
 			return space ? blindShared(space.keyHex, objectId) : blindObjectId(id, objectId);
 		});
 		for (let i = 0; i < tags.length; i += HTAG_BATCH) backfillFilters.push({ kinds: [CHANGE_KIND, CHECKPOINT_KIND], "#h": tags.slice(i, i + HTAG_BATCH) });
@@ -2201,7 +2234,7 @@ export async function startNostrSync(): Promise<void> {
 	const backfillScan = beginReplayScan(historyFloor);
 	const backfillComplete = await scanRelayHistory(pool, id.relays, backfillFilters, (event) => backfillById.set(event.id, event));
 	const backfill = [...backfillById.values()].filter((event) => event.kind !== BASE_KIND && event.kind !== BASE_PART_KIND);
-	console.log(`[sync] backfill: ${backfill.length} event(s) from relays${bounded ? ` (bases held: since ${historyFloor}, deltas by base tag)` : ""}`);
+	console.log(`[sync] backfill: ${backfill.length} event(s) from relays${bounded ? ` (bases held: personal since ${personalFloor}, ${[...sharedSpaces.keys()].filter((s) => streamFloor(s) === 0).length}/${sharedSpaces.size} space(s) whole, deltas by base tag)` : ""}`);
 	// Route every event through the chunk-aware path (sorted so multi-part
 	// groups assemble in one pass); onRelayEvent advances the cursor.
 	// Checkpoints first so an object renders from its cache while its

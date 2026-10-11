@@ -44,6 +44,8 @@ let basePosts: Array<{ path: string; body: Record<string, unknown> }>;
 let baseReply: (path: string, body: Record<string, unknown>) => Response;
 /** Every item POSTed to /api/changes (string, or {b64, b}). */
 let changeImports: unknown[];
+/** POST /api/serving answers by object id (machine.ts serverOf); unlisted objects are unserved. */
+let servingRows: Record<string, unknown>;
 
 function event(part: string, created_at: number, chunk?: [string, number, number], kind = 1078): Event {
 	return finalizeEvent({ kind, created_at, tags: chunk ? [["c", chunk[0], String(chunk[1]), String(chunk[2])]] : [], content: nip44.encrypt(part, conversationKey) }, sk);
@@ -128,6 +130,7 @@ beforeEach(async () => {
 	basePosts = [];
 	baseReply = (path) => (path === "/api/bases" ? Response.json({ rejected: 0, items: [] }) : new Response("not found", { status: 404 }));
 	changeImports = [];
+	servingRows = {};
 	const interval = spyOn(globalThis, "setInterval").mockImplementation(((callback: () => void, ms: number) => {
 		intervals.push({ callback, ms });
 		return 1;
@@ -154,7 +157,7 @@ beforeEach(async () => {
 		if (heldFor) return Response.json({ objectId: heldFor[1], bases: heldBases[heldFor[1]] ?? [] });
 		// Machine roster and serving (machine.ts): no machines, nothing pinned - this computer compacts unserved objects.
 		if (url.endsWith("/api/query")) return Response.json({ total: 0, records: [] });
-		if (url.endsWith("/api/serving")) return Response.json({});
+		if (url.endsWith("/api/serving")) return Response.json(Object.fromEntries(Object.entries(servingRows).filter(([objectId]) => (JSON.parse(String(init?.body)).objectIds as string[]).includes(objectId))));
 		const perObject = url.match(/\/api\/changes\/([^/]+)$/);
 		if (perObject) return Response.json({ changes: localChangeRows[perObject[1]] ?? [] });
 		if (url.endsWith("/api/checkpoints") && init?.method === "POST") return importCheckpoint(JSON.parse(String(init.body)));
@@ -721,6 +724,21 @@ test("with no base anywhere the full history walk is unchanged (dual read)", asy
 	expect(filters.some((f) => f["#b"])).toBe(false);
 });
 
+test("the history floor is per stream: a space holding no base is walked whole while the personal stream has bases", async () => {
+	// Rollout / offline-computer gap: a global floor cut off every unbased object older than the newest base of ANY stream.
+	await keyring({ joined: { key: KEY_A, owner: admin } });
+	spaceObjects = { joined: spaceWithMembers("joined", [admin, pk]) };
+	objectRows = [{ id: "theirs", channelId: "joined" }];
+	history = [baseEvent("QkFTRQ==", 1_000_000)];
+	baseRows = { obj: baseRow(H1, { createdAt: 1_000_000_000 }) };
+	await startNostrSync();
+	const floor = 1_000_000 - 86_400;
+	expect(filters).toContainEqual(expect.objectContaining({ kinds: [1078, 1079], authors: [pk], since: floor }));
+	const space = filters.filter((f) => f.kinds?.includes(1078) && f["#h"]?.includes(blind(KEY_A, "space:joined")));
+	expect(space.length).toBeGreaterThan(0);
+	for (const filter of space) expect(filter.since ?? 0).toBe(0);
+});
+
 test("only live deltas are published, each with the base it was written on; covered, stale and orphan changes never go out", async () => {
 	baseRows = { obj: baseRow(H1) };
 	localChangeRows = {
@@ -875,6 +893,29 @@ test("a compaction pass paces its bases: no two relay events go out without the 
 		const next = n + 1 < bases.length ? bases[n + 1] : sequence.length;
 		expect(sequence.slice(at + 1, next)).toContain("wait 120");
 	}
+});
+
+test("the unbased fallback: a pass compacts an unbased object over 12 h old that another computer serves, never a younger one", async () => {
+	process.env.GLON_STATE_SYNC_COMPACT = "1";
+	const now = Date.now();
+	const elsewhere = { machineId: "other-computer", reason: "self", skills: [], candidates: [] };
+	servingRows = { oldOrphan: elsewhere, youngOrphan: elsewhere, servedOld: elsewhere };
+	baseRows = {
+		oldOrphan: baseRow("", { live: 3, oldestMs: now - 13 * 3_600_000 }),
+		youngOrphan: baseRow("", { live: 3, oldestMs: now - 11 * 3_600_000 }),
+		// Has a base: the serving computer's due rules stand.
+		servedOld: baseRow(H1, { live: 3, oldestMs: now - 30 * 3_600_000 }),
+	};
+	baseReply = (path, body) => {
+		if (path === "/api/bases/build") return Response.json({ objectId: body.objectId, compact: true, reason: "forced", b64: "TkVX", hash: H2, epoch: 1, prevBase: "", folded: [] });
+		if (path === "/api/bases/seal") return Response.json({ hash: H2, objectId: "oldOrphan", epoch: 1, d: "dd", gid: "", event: { kind: 31078, content: "x", tags: [["d", "dd"]] }, parts: [] });
+		return Response.json({ rejected: 0, items: [] });
+	};
+	realTimers();
+	await startNostrSync();
+	await until(() => published.some((item) => item.kind === 31078));
+	await settle();
+	expect(basePosts.filter((post) => post.path === "/api/bases/build").map((post) => post.body)).toEqual([{ objectId: "oldOrphan", force: true }]);
 });
 
 test("the pre-migration sweep dry run counts what an epoch-1 base folded and deletes nothing", async () => {

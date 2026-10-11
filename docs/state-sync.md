@@ -141,6 +141,17 @@ web app and iOS never compact. A vault with no computer: objects keep
 replaying their live deltas from the base (still bounded by the last
 compaction) until a computer runs.
 
+Unbased fallback: in every compaction pass a computer also compacts
+(epoch 1) **every object with no base whose oldest change is older than
+12 h**, whoever serves it, in every stream it may compact (personal;
+a shared space only when this identity owns it). Served objects with a
+base keep the rules below. Why: a fresh device walks each stream only from
+its newest base minus a day (Sync on a device), so an object nobody bases -
+its serving computer offline for more than a day, or not upgraded yet
+during rollout - would otherwise drop out of every fresh replica once its
+events age past that window. Two computers building the epoch-1 base
+concurrently resolve by the current-base rule.
+
 When: an object whose live deltas number >= 20, or total >= 48 KiB of
 change bytes, or the oldest live delta is older than 24 h. Checked every
 10 minutes and after startup reconcile (the existing checkpoint loop).
@@ -220,11 +231,16 @@ space objects). `b` is taken from a 1078 only as 64-char lowercase hex.
    Every object renders from its base as soon as it lands.
 2. **Live deltas.** For objects whose base is held: reconcile
    `{kinds:[1078], #b:[...current base hashes]}` in batches, plus deltas of
-   objects with no base (`#h` object tags, or `since` the newest base's
-   `created_at` minus 1 day as a bounded fallback when a relay lacks NIP-77).
+   objects with no base (`#h` object tags), plus each stream `since` its
+   own floor. Streams are the personal stream (`authors:[me]`) and each
+   shared space stream (`#h` space tag); a stream's floor is the newest
+   base `created_at` among that stream's bases minus 1 day, and a stream
+   holding no base is walked whole (since 0) exactly as before. Never a
+   global floor: one stream's bases say nothing about another stream's
+   unbased objects (a space whose owner's computer has not compacted yet).
 3. **Live subscription** as today (`since = cursor+1`) on 1078, 31078,
    1080, 5.
-4. Never walks history from event zero again.
+4. Never walks a stream holding a base from event zero again.
 
 Hosts: daemon + harness (`glonOdin`), web (`RoostrWebsite/src/lib/engine`),
 iOS (`RoostrIOS/Sources/RoostrSync`). The core (`core/`, shared via WASM
@@ -337,9 +353,10 @@ HTTP (POSTs are service-only, like `/api/checkpoints`):
   history walk exactly as before. Otherwise the walk is bounded: live deltas
   by `#b` (batches of 100 hashes), the whole stream of every local object
   without a base and of the vanish ledger (which never gets one), and our
-  and the space streams `since` the newest base minus a day. The live
+  stream and each space stream `since` that stream's own newest base minus a
+  day - a stream with no base held is walked whole. The live
   subscription, watchdog and catch-up read 1078, 1079, 31078, 1080 (and 5)
-  and never ask for less than that floor. The persisted published set is
+  and never ask for less than the lowest stream floor. The persisted published set is
   kept in bounded mode (folded deltas are gone from the relays on purpose).
   REQ paging stands in for NIP-77 reconciliation (one 31078 per object).
 - Deltas go out with `["b", <base>]` from the daemon's `b`; only `live`
@@ -354,7 +371,9 @@ HTTP (POSTs are service-only, like `/api/checkpoints`):
   computer compacts - `servesHere`, or, for an object nobody serves (no
   pin, no agent), the roster's smallest machine id, so every object gets a
   base; shared spaces only when this identity owns the space - that the
-  daemon reports due: build, seal (parts first, then the 31078), and once
+  daemon reports due, plus (unbased fallback) every object with no base
+  whose oldest change is older than 12 h whoever serves it, built with
+  `force`: build, seal (parts first, then the 31078), and once
   every relay accepted every event NIP-09: the folded deltas (`e`, k 1078,
   ≤ 254 per request; event ids from what was imported or published, else
   read back from the previous base's `#b` stream) and our previous copies
