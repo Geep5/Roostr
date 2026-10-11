@@ -118,7 +118,8 @@ GET  /api/objects/{id}       computed object state
 GET  /api/relations          relation definitions
 GET  /api/channels           channels (spaces) with pins + members
 POST /api/query              {filters, sorts, textQuery, setId, type, limit, offset}
-POST /api/mutate             {action, ...} — create, block_add/update/move/remove,
+POST /api/mutate             {action, ...} — create (optionally with its body),
+                             blocks_append, block_add/update/move/remove,
                              block_set_attrs, set_field, delete, channel_*
 GET  /api/events             SSE: {"objectId"} per committed change
 ```
@@ -161,9 +162,35 @@ curl -X POST http://127.0.0.1:7333/api/mutate -H "Authorization: Bearer $TOK" \
 curl -X POST http://127.0.0.1:7333/api/mutate -H "Authorization: Bearer $TOK" \
   -d '{"action":"create","name":"My task","type_key":"task","fields":{"channel":{"stringValue":"<spaceId>"}}}'
 
+# Create an object with its whole body in ONE change (one relay event): each
+# block has a caller-chosen id; `parent` (an earlier block's id) nests it as
+# that block's last child, no parent appends it to the root. The tree comes
+# from `parent` alone, so `childrenIds` stays empty.
+curl -X POST http://127.0.0.1:7333/api/mutate -H "Authorization: Bearer $TOK" \
+  -d '{"action":"create","id":"import-123","name":"Notes","type_key":"page",
+       "fields":{"channel":{"stringValue":"<spaceId>"}},
+       "blocks":[{"id":"t","childrenIds":[],"content":{"text":{"text":"Details","style":10}}},
+                 {"id":"t.1","parent":"t","childrenIds":[],"content":{"text":{"text":"inside the toggle","style":0}}}]}'
+
+# Append blocks (and set fields) on an existing object, also as one change.
+# Blocks the object already holds are skipped ({added, skipped}); an append
+# that is already fully applied commits nothing.
+curl -X POST http://127.0.0.1:7333/api/mutate -H "Authorization: Bearer $TOK" \
+  -d '{"action":"blocks_append","object_id":"import-123","fields":{"tag":{"valuesValue":{"items":[{"stringValue":"imported"}]}}},
+       "blocks":[{"id":"p","childrenIds":[],"content":{"text":{"text":"more","style":0}}}]}'
+
 # Watch changes (SSE, one {"objectId"} per commit)
 curl http://127.0.0.1:7333/api/events -H "Authorization: Bearer $TOK"
 ```
+
+Importers: `create` with `blocks` and `blocks_append` each commit one Change,
+so an object costs one relay event instead of one per block. A Change must fit
+one relay part (`WIRE_CHUNK_CHARS` of base64, ~29 KB encoded): a larger one is
+refused with `change too large: …` and the caller splits the body - `create`
+with the first blocks, then `blocks_append` the rest. With a caller-chosen
+`id`, a repeated `create` answers `existed` and writes nothing, and
+`created_at` (unix ms, not in the future) back-dates the object's createdAt to
+the source's creation time.
 
 ### Configuring an agent through properties
 

@@ -182,10 +182,67 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 			for op in ops do if op.kind == .Field_Set do append(&created, Value_Entry{key = op.key, value = op.value})
 			if op, needed := agent_error_op(created); needed do append(&ops, op)
 		}
+		// The body rides in the same Change: one event creates the whole object.
+		blocks_json, has_blocks := json_field(parsed, "blocks")
+		if has_blocks {
+			_, _, berr := append_batch_blocks(&plan, input, &ops, blocks_json, map[string]bool{})
+			if berr != "" do return plan, berr
+		}
 		mutation_add(&plan, input, id, ops[:])
+		// Back-dating: an imported object keeps its source's creation time.
+		// createdAt is the timestamp of the Change holding Object_Create
+		// (dag.odin replay_apply), so only a caller-chosen id - an import -
+		// may set it, and never into the future.
+		if created_at, has_created := json_int(parsed, "created_at"); has_created {
+			if json_str(parsed, "id") == "" do return plan, "created_at needs a caller-chosen id"
+			if created_at <= 0 || created_at > input.timestamp do return plan, "created_at must be a past unix-ms time"
+			plan.changes[len(plan.changes) - 1].timestamp = created_at
+		}
+		if has_blocks {
+			if err := mutation_size_guard(plan.changes[len(plan.changes) - 1]); err != "" do return plan, err
+		}
 		extra := jobj()
 		extra["id"] = json.String(strings.clone(id, context.temp_allocator))
 		plan.result = extra
+		return plan, ""
+
+	// Append a block tree (and set fields) on an existing object as ONE
+	// Change - an importer's merge, or the continuation of a create whose
+	// body did not fit one change. Blocks the object already holds are
+	// skipped, so a resumed append writes only what is missing and a fully
+	// applied one commits nothing.
+	case "blocks_append":
+		object_id := json_str(parsed, "object_id")
+		if object_id == "" do return plan, "object_id required"
+		Probe :: struct {
+			id:    string,
+			found: bool,
+		}
+		probe := Probe{id = object_id}
+		mutation_with_states(input.states, proc(states: map[string]^Object_State, user: rawptr) {
+			p := cast(^Probe)user
+			st, ok := states[p.id]
+			p.found = ok && !st.deleted
+		}, &probe)
+		if !probe.found do return plan, "object not found"
+		ops := make([dynamic]Operation, context.temp_allocator)
+		if fields, ok := json_field(parsed, "fields"); ok {
+			for e in fields_from_json(fields, context.temp_allocator) do append(&ops, Operation{kind = .Field_Set, key = e.key, value = e.value})
+		}
+		added, skipped := 0, 0
+		if blocks_json, ok := json_field(parsed, "blocks"); ok {
+			berr: string
+			added, skipped, berr = append_batch_blocks(&plan, input, &ops, blocks_json, object_block_ids(input.states, object_id))
+			if berr != "" do return plan, berr
+		}
+		extra := jobj()
+		extra["id"] = json.String(strings.clone(object_id, context.temp_allocator))
+		extra["added"] = json.Integer(i64(added))
+		extra["skipped"] = json.Integer(i64(skipped))
+		plan.result = extra
+		if len(ops) == 0 do return plan, ""
+		mutation_add(&plan, input, object_id, ops[:])
+		if err := mutation_size_guard(plan.changes[len(plan.changes) - 1]); err != "" do return plan, err
 		return plan, ""
 
 	case "block_add":
@@ -1619,6 +1676,78 @@ append_cell_ops :: proc(ops: ^[dynamic]Operation, row_id: string, col_ids: []str
 			position  = POS_INNER,
 		})
 	}
+}
+
+/**
+ * One relay part holds WIRE_CHUNK_CHARS of base64, so a Change that must
+ * travel as a single event encodes to at most 3/4 of that. The host adds
+ * the content address and parent ids after planning; MUTATION_HOST_HEADROOM
+ * keeps room for them (34 bytes each, a handful of heads).
+ */
+MUTATION_HOST_HEADROOM :: 512
+MUTATION_CHANGE_MAX_BYTES :: WIRE_CHUNK_CHARS / 4 * 3 - MUTATION_HOST_HEADROOM
+
+/** Error when `change` would not fit one relay part; "" when it does. */
+mutation_size_guard :: proc(change: Change) -> string {
+	size := len(encode_change(change, false, context.temp_allocator))
+	if size <= MUTATION_CHANGE_MAX_BYTES do return ""
+	return fmt.tprintf("change too large: %d bytes encoded, one change holds at most %d - split the blocks: create with the first part, then blocks_append the rest", size, MUTATION_CHANGE_MAX_BYTES)
+}
+
+/**
+ * `blocks` of `create` / `blocks_append`: an ordered array of BlockJSON, each
+ * with an optional `parent` (the id of an earlier block in the array, or of a
+ * block the object already holds). The tree comes from `parent` alone, so
+ * `childrenIds` must be empty. Each entry becomes one Block_Add in the same
+ * Change: under its parent as the last child (POS_INNER), or appended to the
+ * root. Ids are caller-chosen (a block without one gets a planner id), so a
+ * replayed or concurrent write adds each block once. `existing` holds the
+ * object's block ids: those blocks are skipped, not re-added.
+ */
+append_batch_blocks :: proc(plan: ^Mutation_Plan, input: Mutation_Input, ops: ^[dynamic]Operation, blocks_json: json.Value, existing: map[string]bool) -> (added: int, skipped: int, err: string) {
+	arr, ok := blocks_json.(json.Array)
+	if !ok do return 0, 0, "blocks must be an array"
+	batch := make(map[string]bool, allocator = context.temp_allocator)
+	for item, index in arr {
+		if _, is_obj := item.(json.Object); !is_obj do return added, skipped, fmt.tprintf("blocks[%d] must be an object", index)
+		block := block_from_json(item, context.temp_allocator)
+		if len(block.children_ids) > 0 do return added, skipped, fmt.tprintf("blocks[%d]: give children a parent instead of childrenIds", index)
+		if block.id == "" do block.id = mutation_id(plan, input)
+		if block.id in batch do return added, skipped, fmt.tprintf("blocks[%d]: duplicate block id %q", index, block.id)
+		parent := json_str(item, "parent")
+		if parent != "" && parent not_in batch && parent not_in existing {
+			return added, skipped, fmt.tprintf("blocks[%d]: parent %q is neither an earlier block nor in the object", index, parent)
+		}
+		batch[block.id] = true
+		if block.id in existing {
+			skipped += 1
+			continue
+		}
+		if parent != "" {
+			append(ops, Operation{kind = .Block_Add, block = block, target_id = parent, position = POS_INNER})
+		} else {
+			append(ops, Operation{kind = .Block_Add, block = block})
+		}
+		added += 1
+	}
+	return added, skipped, ""
+}
+
+/** Block ids an object holds now (empty for an unknown object), temp-cloned. */
+object_block_ids :: proc(states: map[string]^Object_State, object_id: string) -> map[string]bool {
+	Ctx :: struct {
+		id:  string,
+		ids: ^map[string]bool,
+	}
+	ids := make(map[string]bool, allocator = context.temp_allocator)
+	ctx := Ctx{object_id, &ids}
+	mutation_with_states(states, proc(states: map[string]^Object_State, user: rawptr) {
+		c := cast(^Ctx)user
+		st, ok := states[c.id]
+		if !ok do return
+		for b in st.blocks do c.ids[strings.clone(b.id, context.temp_allocator)] = true
+	}, &ctx)
+	return ids
 }
 
 Block_Meta :: struct {
