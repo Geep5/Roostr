@@ -685,6 +685,68 @@ query_cache_own :: proc(owner: ^Query_Cached_Object, state: Object_State) -> boo
 	return true
 }
 
+/**
+ * Applies one committed change to its object's cached state in place of the
+ * host re-sending that state. It is the next step of the object's replay only
+ * when it builds on exactly the cached heads (none for a genesis change on an
+ * object the cache lacks): then a new change sorts last in Kahn order, and
+ * replay_apply over the cached state equals a full replay of the history.
+ * Anything else - a remote change the cache has not seen, a newer full upsert,
+ * a legacy in-DAG snapshot, a change not content-addressed - is refused and
+ * the cache left untouched: the host falls back to upserting the state.
+ */
+query_cache_apply :: proc(change: Change) -> bool {
+	if change.object_id == "" || change.has_snapshot do return false
+	digest := sha256(encode_change(change, true, context.temp_allocator))
+	if string(change.id) != string(digest[:]) do return false
+	cached, has_cached := query_cached_objects[change.object_id]
+	parents := make(map[string]bool, allocator = context.temp_allocator)
+	for p in change.parent_ids do parents[hex_id(p, context.temp_allocator)] = true
+	if has_cached {
+		if len(parents) != len(cached.state.heads) do return false
+		for head in cached.state.heads do if !parents[head] do return false
+	} else {
+		if len(parents) > 0 || len(query_cached_objects) >= QUERY_CACHE_MAX_OBJECTS do return false
+	}
+	owner, alloc_error := new(Query_Cached_Object, runtime.default_allocator())
+	if alloc_error != nil do return false
+	owned: bool
+	{
+		scratch: mem.Dynamic_Arena
+		mem.dynamic_arena_init(&scratch, runtime.default_allocator(), runtime.default_allocator())
+		defer mem.dynamic_arena_destroy(&scratch)
+		context.temp_allocator = mem.dynamic_arena_allocator(&scratch)
+		state := Object_State{id = change.object_id, heads = make([dynamic]string, context.temp_allocator)}
+		append(&state.heads, hex_id(change.id, context.temp_allocator))
+		seed: ^Snapshot
+		max_ts: i64 = 0
+		if has_cached {
+			c := &cached.state
+			seed = new_clone(Snapshot{
+				id = c.id, type_key = c.type_key, fields = c.fields, blocks = c.blocks,
+				deleted = c.deleted, created_at = c.created_at, updated_at = c.updated_at,
+			}, context.temp_allocator)
+			max_ts = c.updated_at
+		}
+		applied := change
+		owned = replay_apply(&state, seed, []^Change{&applied}, max_ts, context.temp_allocator) && query_cache_own(owner, state)
+	}
+	if !owned {
+		query_cached_object_destroy(owner)
+		return false
+	}
+	if has_cached {
+		delete_key(&query_cached_objects, change.object_id)
+		delete_key(&query_cached_states, change.object_id)
+		query_cached_object_destroy(cached)
+	}
+	if query_cached_objects == nil do query_cached_objects = make(map[string]^Query_Cached_Object, allocator = runtime.default_allocator())
+	if query_cached_states == nil do query_cached_states = make(map[string]^Object_State, allocator = runtime.default_allocator())
+	query_cached_objects[owner.state.id] = owner
+	query_cached_states[owner.state.id] = &owner.state
+	return true
+}
+
 query_cache_reset :: proc() {
 	query_pending_reset()
 	query_cache_clear()

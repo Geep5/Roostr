@@ -1928,6 +1928,26 @@ mutation_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
   for id in heads do append(&result, json.String(id))
   return json.Array(result), ""
  }
+ // A host's committed changes, applied to the query cache in order instead
+ // of re-sending their objects' states (query_cache_apply). A refused change
+ // leaves its object as cached: the host upserts that state instead.
+ if json_str(payload, "action") == "apply" {
+  value, present := json_field(payload, "changes")
+  array, valid := value.(json.Array)
+  if !present || !valid do return nil, "changes must be an array"
+  applied := make([dynamic]json.Value, context.temp_allocator)
+  refused := make([dynamic]json.Value, context.temp_allocator)
+  for item in array {
+   change, ok := change_from_json(item, context.temp_allocator)
+   if !ok do return nil, "invalid change"
+   id := json.String(hex_id(change.id, context.temp_allocator))
+   append(query_cache_apply(change) ? &applied : &refused, id)
+  }
+  result := jobj()
+  result["applied"] = json.Array(applied)
+  result["refused"] = json.Array(refused)
+  return json.Object(result), ""
+ }
  params, has_params := json_field(payload, "params")
  if !has_params do return nil, "params required"
  obj, ok := params.(json.Object)

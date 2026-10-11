@@ -516,7 +516,16 @@ state_sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		state, has, ok := base_replay(bases, deltas, input.pending, input.legacy, context.temp_allocator)
 		if !has do return nil, ""
 		if !ok do return nil, "replay changes and block references must be acyclic"
-		return object_to_json_value(&state), ""
+		// The heads the state was replayed to, sorted: a host's query upsert
+		// carries them, and the cache applies a later local commit only on
+		// exactly these (query_cache_apply).
+		out := object_to_json_value(&state)
+		heads := make([dynamic]json.Value, 0, len(state.heads), context.temp_allocator)
+		slice.sort(state.heads[:])
+		for head in state.heads do append(&heads, json.String(head))
+		object := out.(json.Object)
+		object["heads"] = json.Array(heads)
+		return object, ""
 	case "rebase":
 		cls := base_classify(bases, deltas, input.pending, context.temp_allocator)
 		if cls.current < 0 do return nil, "rebase needs a base"

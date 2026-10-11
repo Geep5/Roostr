@@ -692,7 +692,13 @@ state_sync_dispatch_json :: proc(t: ^testing.T) {
 
 	state := call(t, "replay_from_base", fields)
 	want, _, _ := base_replay({b1, b2}, deltas, nil, nil)
-	testing.expect_value(t, string(marshal(state)), string(marshal(object_to_json_value(&want))))
+	expected := object_to_json_value(&want).(json.Object)
+	slice.sort(want.heads[:])
+	heads := make([dynamic]json.Value)
+	for head in want.heads do append(&heads, json.String(head))
+	expected["heads"] = json.Array(heads)
+	testing.expect(t, len(heads) > 0, "replay_from_base reports the heads it replayed to")
+	testing.expect_value(t, string(marshal(state)), string(marshal(expected)))
 
 	fields["nowMs"] = json.Integer(30_000)
 	fields["force"] = json.Boolean(true)
