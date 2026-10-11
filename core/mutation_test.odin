@@ -104,3 +104,43 @@ mutation_seed_deletes_retired_types_and_relations :: proc(t: ^testing.T) {
 		testing.expectf(t, deleted[id], "%s is deleted", id)
 	}
 }
+
+// Seeding converges: once a space holds its catalog, another run over the
+// state the last one produced commits nothing. Restricted pickers'
+// object_types and option lists used to be re-set on every run, so every
+// daemon boot and web load re-wrote and re-published them on every space.
+@(test)
+mutation_seed_converges :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	history := make(map[string][dynamic]Change)
+	channel := Object_State{id = "space-aa", type_key = "channel"}
+	request := jobj()
+	request["action"] = json.String("bootstrap_space_defaults")
+	committed: [4]int
+	serial := 0
+	for run in 0 ..< len(committed) {
+		states := make(map[string]^Object_State)
+		states[channel.id] = &channel
+		for id, changes in history {
+			state, ok := compute_state(changes[:])
+			testing.expect(t, ok, id)
+			states[id] = new_clone(state)
+		}
+		plan, err := mutation_plan(json.Object(request), Mutation_Input{states = states, timestamp = i64(1000 + run), author = "alice", id_seed = "seed"})
+		testing.expect_value(t, err, "")
+		committed[run] = len(plan.changes)
+		for change in plan.changes {
+			c := change
+			serial += 1
+			c.id = make([]byte, 32)
+			c.id[0], c.id[1] = byte(serial >> 8), byte(serial)
+			prior := history[c.object_id]
+			c.parent_ids = make([dynamic][]byte)
+			if len(prior) > 0 do append(&c.parent_ids, prior[len(prior) - 1].id)
+			append(&prior, c)
+			history[c.object_id] = prior
+		}
+	}
+	testing.expect(t, committed[0] > 0, "the first run seeds the catalog")
+	for n, i in committed[1:] do testing.expectf(t, n == 0, "run %d committed %d change(s)", i + 2, n)
+}

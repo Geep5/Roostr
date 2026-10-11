@@ -1255,12 +1255,15 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
  */
 mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input, channel_id: string) {
 	Present :: struct {
-		id:        string,
-		name:      string,
-		emoji:     string,
-		format:    string,
-		hidden:    bool,
-		max_count: i64,
+		id:           string,
+		name:         string,
+		emoji:        string,
+		format:       string,
+		hidden:       bool,
+		max_count:    i64,
+		// .None when absent.
+		options:      Value,
+		object_types: Value,
 	}
 	rels := make(map[string]Present)
 	defer delete(rels)
@@ -1292,6 +1295,8 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			if v, ok := fields_get(s.fields, "format"); ok && v.kind == .String do e.format = strings.clone(v.str, context.temp_allocator)
 			if v, ok := fields_get(s.fields, "hidden"); ok && v.kind == .Bool do e.hidden = v.b
 			if v, ok := fields_get(s.fields, "maxCount"); ok && v.kind == .Int do e.max_count = v.i
+			if v, ok := fields_get(s.fields, "options"); ok do e.options = mutation_clone_value(v)
+			if v, ok := fields_get(s.fields, "object_types"); ok do e.object_types = mutation_clone_value(v)
 			if s.type_key == "relation" {
 				if prior, exists := c.rels^[key.str]; !exists || e.id < prior.id do c.rels^[strings.clone(key.str, context.temp_allocator)] = e
 			} else {
@@ -1330,12 +1335,18 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			if e.format != "" && e.format != r.format do append(&ops, Operation{kind = .Field_Set, key = "format", value = string_value(r.format)})
 			if e.hidden != r.hidden do append(&ops, Operation{kind = .Field_Set, key = "hidden", value = bool_value(r.hidden)})
 			if e.max_count != r.max_count do append(&ops, Operation{kind = .Field_Set, key = "maxCount", value = int_value(r.max_count)})
-			if len(r.options) > 0 do append(&ops, Operation{kind = .Field_Set, key = "options", value = options_value(r.options)})
+			// Like every field above, only when it differs: these used to be
+			// set on every run, so each daemon boot and web load re-wrote and
+			// re-published the same values on every space.
+			if len(r.options) > 0 {
+				want := options_value(r.options)
+				if !values_equal(e.options, want) do append(&ops, Operation{kind = .Field_Set, key = "options", value = want})
+			}
 			// Agent, served_by, credentials... pickers are restricted to one
 			// bundled type; older rows predate the restriction and get it here.
 			if target, restricted := bundled_picker_type(r.key); restricted {
-				types_list := []Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))}
-				mutation_add(plan, input, e.id, {Operation{kind = .Field_Set, key = "object_types", value = list_value(types_list)}})
+				want := list_value([]Value{string_value(fmt.tprintf("bundled-type-%s-%s", target, prefix))})
+				if !values_equal(e.object_types, want) do mutation_add(plan, input, e.id, {Operation{kind = .Field_Set, key = "object_types", value = want}})
 			}
 			if len(ops) > 0 do mutation_add(plan, input, e.id, ops[:])
 			continue
