@@ -1805,7 +1805,105 @@ oldest_channel_id :: proc(states: map[string]^Object_State) -> string {
 }
 
 
-// JSON ABI: state and entropy are explicit; no store or host calls occur here.
+/**
+ * The states a mutation plans over.
+ *
+ * `objects` present: the caller's complete snapshot, authoritative (native
+ * harnesses and fixtures). Otherwise the persistent query cache - kept
+ * complete by the host's corpus pushes and query upserts - under an optional
+ * `overlay` of states the host supplies. A request no longer ships the vault:
+ * a one-block edit on a 20k-object vault used to carry every object.
+ *
+ * Every object the params name must resolve. One in neither the overlay nor
+ * the cache, and not in `absent` (ids the host looked up and does not hold),
+ * comes back in `missing` and nothing is planned: the host fetches those
+ * states and retries once with them as overlay, so a stale cache can never
+ * plan a write against a live object as if it did not exist.
+ */
+mutation_states :: proc(payload: json.Value, request: json.Object) -> (states: map[string]^Object_State, err: string, missing: [dynamic]string) {
+	if objects, has_objects := json_field(payload, "objects"); has_objects {
+		array, ok := objects.(json.Array)
+		if !ok do return nil, "objects must be an array", nil
+		states = make(map[string]^Object_State, len(array), context.temp_allocator)
+		err = mutation_parse_states(array, &states)
+		return
+	}
+	states = query_cached_states
+	if overlay_value, has_overlay := json_field(payload, "overlay"); has_overlay {
+		overlay, ok := overlay_value.(json.Array)
+		if !ok do return nil, "overlay must be an array", nil
+		if len(overlay) > 0 {
+			parsed := make(map[string]^Object_State, len(overlay), context.temp_allocator)
+			if err = mutation_parse_states(overlay, &parsed); err != "" do return nil, err, nil
+			// Pointer copies: the cached states themselves are only read.
+			states = make(map[string]^Object_State, len(query_cached_states) + len(parsed), context.temp_allocator)
+			for id, state in query_cached_states do states[id] = state
+			for id, state in parsed do states[id] = state
+		}
+	}
+	absent := make(map[string]bool, context.temp_allocator)
+	if absent_value, has_absent := json_field(payload, "absent"); has_absent {
+		array, ok := absent_value.(json.Array)
+		if !ok do return nil, "absent must be an array", nil
+		for value in array {
+			id, is_string := value.(json.String)
+			if !is_string do return nil, "absent ids must be strings", nil
+			absent[string(id)] = true
+		}
+	}
+	missing = make([dynamic]string, context.temp_allocator)
+	for id in mutation_named_ids(request) {
+		if _, found := states[id]; found || absent[id] || slice.contains(missing[:], id) do continue
+		append(&missing, id)
+	}
+	slice.sort(missing[:])
+	return
+}
+
+@(private = "file")
+mutation_parse_states :: proc(array: json.Array, states: ^map[string]^Object_State) -> string {
+	for item in array {
+		state, valid := object_from_json(item, context.temp_allocator)
+		if !valid do return "invalid object state"
+		if _, exists := states^[state.id]; exists do return "duplicate object state"
+		ptr := new(Object_State, context.temp_allocator)
+		ptr^ = state
+		states^[state.id] = ptr
+	}
+	return ""
+}
+
+/**
+ * Ids of existing objects a request names: its targets, a caller-chosen
+ * create id (whose existence decides `existed`), and a message's endpoints.
+ * Block, table, thread and message ids live inside a named object and are
+ * not object ids.
+ */
+mutation_named_ids :: proc(request: json.Object) -> [dynamic]string {
+	out := make([dynamic]string, context.temp_allocator)
+	for key in ([]string{"id", "object_id", "channel_id", "sender_object_id", "recipient_object_id"}) {
+		if id := json_str(request, key); id != "" do append(&out, id)
+	}
+	if ids, ok := request["object_ids"].(json.Array); ok {
+		for value in ids do if id, is_string := value.(json.String); is_string && id != "" do append(&out, string(id))
+	}
+	walk :: proc(value: json.Value, out: ^[dynamic]string) {
+		#partial switch v in value {
+		case json.Object:
+			for key, child in v {
+				if id, is_string := child.(json.String); is_string && id != "" && (key == "objectId" || key == "agentId") do append(out, string(id))
+				else do walk(child, out)
+			}
+		case json.Array:
+			for child in v do walk(child, out)
+		}
+	}
+	if message, ok := request["message"]; ok do walk(message, &out)
+	return out
+}
+
+// JSON ABI: entropy is explicit; state is the request's or the query cache's
+// (mutation_states). No store or host calls occur here.
 mutation_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
  if _, ok := payload.(json.Object); !ok do return nil, "mutation payload must be an object"
  if json_str(payload, "action") == "heads" {
@@ -1837,18 +1935,14 @@ mutation_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
  request := jobj()
  for k, v in obj do request[k] = v
  request["action"] = json.String(json_str(payload, "action"))
- objects, has_objects := json_field(payload, "objects")
- if !has_objects do return nil, "objects required"
- array, array_ok := objects.(json.Array)
- if !array_ok do return nil, "objects must be an array"
- states := make(map[string]^Object_State, context.temp_allocator)
- for item in array {
-  state, valid := object_from_json(item, context.temp_allocator)
-  if !valid do return nil, "invalid object state"
-  if _, exists := states[state.id]; exists do return nil, "duplicate object state"
-  ptr := new(Object_State, context.temp_allocator)
-  ptr^ = state
-  states[state.id] = ptr
+ states, states_error, missing := mutation_states(payload, json.Object(request))
+ if states_error != "" do return nil, states_error
+ if len(missing) > 0 {
+  ids := make([dynamic]json.Value, 0, len(missing), context.temp_allocator)
+  for id in missing do append(&ids, json.String(id))
+  out := jobj()
+  out["missing"] = json.Array(ids)
+  return json.Object(out), ""
  }
  timestamp, has_timestamp := json_int(payload, "timestamp")
  if !has_timestamp do return nil, "timestamp required"

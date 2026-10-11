@@ -66,6 +66,8 @@ corpus_contract :: proc(t: ^testing.T) {
 	checkpoint_frames_seed_the_tail(t)
 	caches_only_compact_state(t)
 	reset_frees_the_old_snapshot_first(t)
+	// The planner reads this same process-global cache (mutation_cache_test.odin).
+	mutation_cache_contract(t)
 }
 
 /**

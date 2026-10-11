@@ -719,11 +719,14 @@ query_json_depth_ok :: proc(value: json.Value, depth := 0) -> bool {
 query_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	if _, ok := payload.(json.Object); !ok do return nil, "query payload must be an object"
 	if !query_json_depth_ok(payload) do return nil, "query exceeds nesting or numeric limits"
-	body, _ := json_field(payload, "body")
-	if _, ok := body.(json.Object); !ok do return nil, "query body must be an object"
+	// No body: a cache update only (a mutation flushing the host's delta
+	// before it plans over the cache), with no query run over the vault.
+	body, has_body := json_field(payload, "body")
+	if _, ok := body.(json.Object); has_body && !ok do return nil, "query body must be an object"
 	now, has_now := json_int(payload, "nowMs")
 	if !has_now || now < -8_640_000_000_000_000 || now > 8_640_000_000_000_000 do return nil, "query nowMs must be a valid timestamp"
 	if raw, present := json_field(payload, "objects"); present {
+		if !has_body do return nil, "query body must be an object"
 		states := make(map[string]^Object_State, allocator = context.temp_allocator)
 		objects, ok := raw.(json.Array)
 		if !ok || len(objects) > QUERY_CACHE_MAX_OBJECTS do return nil, "query objects must be a bounded array"
@@ -803,6 +806,11 @@ query_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		}
 		query_cached_objects[owner.state.id] = owner
 		query_cached_states[owner.state.id] = &owner.state
+	}
+	if !has_body {
+		out := jobj()
+		out["cached"] = json.Integer(len(query_cached_states))
+		return json.Object(out), ""
 	}
 	return query_result(query_cached_states, body, f64(now)), ""
 }
