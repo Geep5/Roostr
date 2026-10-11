@@ -463,6 +463,7 @@ async function republish(holds: boolean) {
 }
 
 test("the checkpoint pass publishes a moved object's 1079, then deletes the previous copy once the daemon reports the new one held", async () => {
+	process.env.GLON_STATE_SYNC_COMPACT = "0";
 	const old = await republish(true);
 	await until(() => deletions().length > 0);
 	await settle();
@@ -470,6 +471,7 @@ test("the checkpoint pass publishes a moved object's 1079, then deletes the prev
 });
 
 test("a published checkpoint the daemon does not hold never retires the previous copy", async () => {
+	process.env.GLON_STATE_SYNC_COMPACT = "0";
 	await republish(false);
 	await settle();
 	expect(deletions()).toEqual([]);
@@ -763,6 +765,7 @@ test("only live deltas are published, each with the base it was written on; cove
 });
 
 test("orphans are rebased by the daemon and published; a space this identity may not write is left alone", async () => {
+	process.env.GLON_STATE_SYNC_COMPACT = "0";
 	await keyring({ viewed: { key: KEY_A, owner: admin } });
 	spaceObjects = { viewed: spaceWithMembers("viewed", [admin]) };
 	objectRows = [{ id: "shared", channelId: "viewed" }];

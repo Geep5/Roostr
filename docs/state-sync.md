@@ -337,7 +337,7 @@ HTTP (POSTs are service-only, like `/api/checkpoints`):
 | `GET /api/bases` | per object: `hash` (`""` without a base), `epoch`, `createdAt`, `prevBase`, `bases`, `changes`, `live`, `liveBytes`, `oldestMs`, `covered`, `premigrationCovered`, `orphan`, `stale`, `pending`, `compact`, `reason` (core thresholds) |
 | `GET /api/bases/<id>` | held bases newest first `{hash, epoch, createdAt, prevBase, current, b64}` |
 | `POST /api/bases` | import `{bases: [b64], provenance?}` (space bases: owner only, `authorizeBase` rules) → items `{objectId, hash, epoch, createdAt, prevBase, stored, current}` |
-| `POST /api/bases/build` | `{objectId, force?}` → core `compact_plan`; when due the new base is stored (now current) and returned with `folded`. 409 `history incomplete` for an epoch 1 over a DAG with missing parents. 409 `compaction is off on this computer` unless the daemon's environment has `GLON_STATE_SYNC_COMPACT=1` (the supervisor gives daemon and sync the same environment): a base sync never publishes would hold the changes it folded only locally |
+| `POST /api/bases/build` | `{objectId, force?}` → core `compact_plan`; when due the new base is stored (now current) and returned with `folded`. 409 `history incomplete` for an epoch 1 over a DAG with missing parents. 409 `compaction is off on this computer` when the daemon's environment has `GLON_STATE_SYNC_COMPACT=0` (the supervisor gives daemon and sync the same environment): a base sync never publishes would hold the changes it folded only locally |
 | `POST /api/bases/seal` | `{base, conversationKey, space?}` → core `seal_base`; personal bases get the secret from `nostr.json` |
 | `POST /api/bases/rebase` | `{objectId, orphans?}` → rebased changes written (with `.b`, `.local`), orphans archived |
 | `POST /api/bases/covered` | `{objectId, ids}` → `{premigration, covered}` (ids folded by a held epoch-1 base / by any held base) |
@@ -365,7 +365,7 @@ HTTP (POSTs are service-only, like `/api/checkpoints`):
 - Orphans: every pass (and whenever a newer base lands) the daemon rebases
   them - personal objects always, a space's only for a writer of it - and
   the rebased changes are published.
-- Compaction (`GLON_STATE_SYNC_COMPACT=1`, default off; replaces the 1079
+- Compaction (on unless `GLON_STATE_SYNC_COMPACT=0`; replaces the 1079
   checkpoint loop, which otherwise runs as before and skips objects that
   hold a base): at startup and every 10 minutes, for each object this
   computer compacts - `servesHere`, or, for an object nobody serves (no
@@ -388,7 +388,7 @@ HTTP (POSTs are service-only, like `/api/checkpoints`):
   `POST /api/bases/build`.
 - Pre-migration sweep (`GLON_STATE_SYNC_SWEEP_PREMIGRATION`, default off):
   `dry-run` logs how many untagged 1078s an epoch-1 base folded and how many
-  1079s the compacted objects have; `1` (with `GLON_STATE_SYNC_COMPACT=1`)
+  1079s of every object holding a base; `1` (needs compaction on)
   deletes them, per object, until every relay accepted.
 
 ### Files (`harness/src/blossom.ts`, `harness/src/files.ts`)

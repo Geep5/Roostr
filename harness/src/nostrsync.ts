@@ -18,7 +18,7 @@
  * State sync (docs/state-sync.md): bases first (kind 31078 + 1080 parts),
  * then live deltas by #b; once bases exist the history walk is bounded to
  * the newest base minus a day. Orphans are rebased by the daemon and
- * published. Compaction (GLON_STATE_SYNC_COMPACT=1) replaces the 1079
+ * published. Compaction (on unless GLON_STATE_SYNC_COMPACT=0) replaces the 1079
  * checkpoint loop; GLON_STATE_SYNC_SWEEP_PREMIGRATION=1|dry-run sweeps the
  * pre-migration history folded into epoch-1 bases.
  */
@@ -779,8 +779,8 @@ export async function startNostrSync(): Promise<void> {
 		dirty = false;
 	};
 	setInterval(persist, 5000);
-	/** GLON_STATE_SYNC_COMPACT=1: compaction and every deletion it implies; off by default (verify on a copy first). */
-	const COMPACT = process.env.GLON_STATE_SYNC_COMPACT === "1";
+	/** Compaction and every deletion it implies: on unless GLON_STATE_SYNC_COMPACT=0. */
+	const COMPACT = process.env.GLON_STATE_SYNC_COMPACT !== "0";
 	/** GLON_STATE_SYNC_SWEEP_PREMIGRATION: "1" deletes (with COMPACT), "dry-run" only logs counts. */
 	const SWEEP_PREMIGRATION = process.env.GLON_STATE_SYNC_SWEEP_PREMIGRATION === "1" ? "on" : process.env.GLON_STATE_SYNC_SWEEP_PREMIGRATION === "dry-run" ? "dry-run" : "off";
 	/** Once bases exist: the oldest created_at any history walk or subscription asks for (0 = from the start). */
@@ -2047,7 +2047,7 @@ export async function startNostrSync(): Promise<void> {
 	}
 
 	/**
-	 * GLON_STATE_SYNC_COMPACT=1 (replaces the 1079 checkpoint loop): rebase
+	 * Compaction (on unless GLON_STATE_SYNC_COMPACT=0; replaces the 1079 checkpoint loop): rebase
 	 * orphans, then for every object compacted here that the core says is due,
 	 * build the next base, publish it and clean up. Shared spaces: only spaces
 	 * this identity owns. Unbased fallback: every object with no base whose
@@ -2098,7 +2098,7 @@ export async function startNostrSync(): Promise<void> {
 	async function premigrationSweep(): Promise<void> {
 		if (SWEEP_PREMIGRATION === "off" || premigrationBusy) return;
 		if (SWEEP_PREMIGRATION === "on" && !COMPACT) {
-			console.warn("[sync] GLON_STATE_SYNC_SWEEP_PREMIGRATION=1 also needs GLON_STATE_SYNC_COMPACT=1 - nothing deleted");
+			console.warn("[sync] GLON_STATE_SYNC_SWEEP_PREMIGRATION=1 needs compaction on (GLON_STATE_SYNC_COMPACT=0 is set) - nothing deleted");
 			return;
 		}
 		premigrationBusy = true;
@@ -2321,7 +2321,7 @@ export async function startNostrSync(): Promise<void> {
 		await premigrationSweep();
 	};
 	if (COMPACT) {
-		console.log("[sync] compaction on (GLON_STATE_SYNC_COMPACT=1): bases replace checkpoints");
+		console.log("[sync] compaction on: bases replace checkpoints");
 		await compactionPass();
 	} else {
 		await checkpointPass();

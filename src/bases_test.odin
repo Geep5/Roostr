@@ -213,12 +213,11 @@ base_import_and_state :: proc(t: ^testing.T) {
 @(private = "file")
 build_prune_rebase :: proc(t: ^testing.T) {
 	// Compaction off on this computer: no base is built, forced or not - sync would never publish it.
-	os.unset_env("GLON_STATE_SYNC_COMPACT")
+	os.set_env("GLON_STATE_SYNC_COMPACT", "0")
 	off := bases_build(obj({"objectId", json.String("obj-b")}, {"force", json.Boolean(true)}))
 	testing.expect_value(t, off.status, "409 Conflict")
 	testing.expect_value(t, off.error, "compaction is off on this computer")
-	os.set_env("GLON_STATE_SYNC_COMPACT", "1")
-	defer os.unset_env("GLON_STATE_SYNC_COMPACT")
+	os.unset_env("GLON_STATE_SYNC_COMPACT")
 	OBJ :: "obj-b"
 	c1 := commit_name(t, OBJ, "one", create = true)
 	c2 := commit_name(t, OBJ, "two")

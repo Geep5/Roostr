@@ -323,10 +323,10 @@ base); devices fetch bases first and deltas by base tag, and never walk the
 history from zero once bases exist (a vault with no base keeps the full
 walk). A delta written on an older base is rebased by the daemon and
 republished. Computers compact - fold live deltas into the next base and
-delete the folded deltas from the relays - only with
-`GLON_STATE_SYNC_COMPACT=1` (read by the daemon too: it refuses to build
-bases without it); `GLON_STATE_SYNC_SWEEP_PREMIGRATION=dry-run|1`
-counts or deletes the pre-migration history once every device reads bases.
+delete the folded deltas from the relays - unless
+`GLON_STATE_SYNC_COMPACT=0` (read by the daemon too: it then refuses to build
+bases); `GLON_STATE_SYNC_SWEEP_PREMIGRATION=dry-run|1` counts or deletes
+pre-migration history (the Roostr relay was swept on 2026-10-11).
 Each computer keeps every change it held in `GLON_DATA/archive/`.
 Permanent deletion uses the synced `__vanished__`
 ledger plus acknowledged NIP-09 cleanup, not manual file removal.
