@@ -1,5 +1,10 @@
 # Checkpoints: one cached state per object, the DAG stays the truth
 
+> **Superseded by [`docs/state-sync.md`](state-sync.md)** (bases, live
+> deltas, rebase, compaction, Blossom files). Kind-1079 checkpoints keep
+> importing (dual read) until the pre-migration sweep removes them; a
+> computer with `GLON_STATE_SYNC_COMPACT=1` stops publishing them.
+
 Status: core, daemon, harness and browser implemented.
 
 ## The complaint

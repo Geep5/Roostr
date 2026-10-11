@@ -20,7 +20,7 @@ Everything in Roostr is an object: a note, a task, an email, a person, an agent,
 ## 3. Spaces
 
 - A **space** is a shared area: its objects, types, properties, templates, agents and Tools. Each object belongs to one space (its `channel`). A few personal objects belong to no space and are private to one person.
-- A space is **private** (only you) or **shared** (its members). Everything in it is end-to-end encrypted to the space's key and synced over relays; only members can read it. Files go peer to peer.
+- A space is **private** (only you) or **shared** (its members). Everything in it is end-to-end encrypted to the space's key and synced over relays; only members can read it. Each object syncs as its latest saved state plus the edits since, so a new device is up to date quickly. Files are stored encrypted on Roostr's relay (Blossom) and also go peer to peer between computers.
 - Members see the same objects. An agent in one space cannot see or act on another space's objects, and agent pickers offer only the space's own agents. When something "is missing", check which space you are in first.
 - Deleting a space deletes everything in it, for every member.
 
@@ -29,7 +29,7 @@ Everything in Roostr is an object: a note, a task, an email, a person, an agent,
 - A **computer** (a Computer object) is a machine running Roostr: the store (`glon-odin serve`), sync, and the harness - the part that runs agents and repeats. Its harness creates its Computer object the first time it starts; agents run there because their Served by names its `machine_id`. Setting a computer up (build, identity, the service, a model key, the first agent) is done from its terminal - the steps are in the Roostr repo's `AGENTS.md`, "Set up this computer". Join the person's existing account by importing their key first; a fresh install is otherwise a new, empty account.
 - **Run it as a service.** In the Roostr repo's `harness/` folder: `bun run service install` (add `--web <path to the website repo>` to also run the local web app). It starts everything at login (macOS) or boot (Linux), restarts a program that crashes, and writes a crash - which program, how it ended, its last output - as the Computer object's Error. The Computer's **Starts automatically** box is ticked while the service runs it.
 - **After pulling new code or rebuilding the engine: `bun run service restart`** (in `harness/`) - the running programs keep the old code until then. `bun run service logs` follows every program's output (macOS log file: `~/Library/Logs/Roostr/roostr.log`); `bun run service uninstall` stops and removes it. Never start a second store, sync or harness by hand next to the service - the harness and sync refuse a second copy on one computer.
-- Without a computer, Roostr still stores and syncs objects, but nothing acts: no agent answers, nothing repeats. An agent whose computer is off simply doesn't answer - check that computer first when an agent goes quiet.
+- Without a computer, Roostr still stores and syncs objects, but nothing acts: no agent answers, nothing repeats. Computers also fold each object's recent edits into a new saved state now and then; without one, objects still sync, just with more edits to load.
 - A computer can have **capabilities**: installed software from the catalog (for example headless Chrome for `web_fetch`, Google Workspace for Gmail). Each capability object says whether it works on that computer (active, needs_auth, missing, broken...). A Skill with a `key` needs that capability on the agent's computer.
 
 ## 5. Agents

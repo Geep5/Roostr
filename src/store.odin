@@ -37,6 +37,7 @@ Store :: struct {
 	mu:        sync.Mutex,
 	arena:     virtual.Arena, // owns everything reachable from `states`
 	states:    map[string]^core.Object_State,
+	bases:     map[string]Base_Info, // per loaded object, beside states (strings in the arena)
 	dirty:     map[string]bool, // object ids needing an incremental reload
 	live_used: uint, // arena.total_used right after the last full rebuild
 	loaded_at: i64,
@@ -85,9 +86,9 @@ ensure_loaded :: proc() {
 		alloc := virtual.arena_allocator(&g_store.arena)
 		touched := make([dynamic]string, 0, len(g_store.dirty), context.temp_allocator)
 		for object_id in g_store.dirty {
-			dir_path, _ := filepath.join({g_store.root, object_id}, context.temp_allocator)
 			delete_key(&g_store.states, object_id)
-			load_object_dir(dir_path, object_id, alloc)
+			delete_key(&g_store.bases, object_id)
+			load_object_dir(object_id, alloc)
 			append(&touched, strings.clone(object_id, context.temp_allocator))
 		}
 		for k in g_store.dirty do delete(k)
@@ -113,6 +114,8 @@ ensure_loaded :: proc() {
 	_ = virtual.arena_init_growing(&g_store.arena)
 	alloc := virtual.arena_allocator(&g_store.arena)
 	g_store.states = make(map[string]^core.Object_State)
+	if g_store.bases != nil do delete(g_store.bases)
+	g_store.bases = make(map[string]Base_Info)
 	if g_store.dirty != nil {
 		for k in g_store.dirty do delete(k)
 		clear(&g_store.dirty)
@@ -126,16 +129,19 @@ ensure_loaded :: proc() {
 		if eerr == nil {
 			for entry in entries {
 				if entry.type != .Directory || strings.has_prefix(entry.name, ".") do continue
-				load_object_dir(entry.fullpath, entry.name, alloc)
+				load_object_dir(entry.name, alloc)
 			}
 		}
 	}
-	// Objects known only by checkpoint (no change directory yet): a machine
-	// that bootstrapped from the relay's checkpoints and has no tail for them.
+	// Objects known only by checkpoint or base (no change directory yet): a
+	// machine that bootstrapped from the relay and has no tail for them.
 	for object_id in checkpointed_object_ids() {
 		if object_id in g_store.states do continue
-		dir_path, _ := filepath.join({g_store.root, object_id}, context.temp_allocator)
-		load_object_dir(dir_path, object_id, alloc)
+		load_object_dir(object_id, alloc)
+	}
+	for object_id in based_object_ids() {
+		if object_id in g_store.states do continue
+		load_object_dir(object_id, alloc)
 	}
 	// Damage is a standing fact, not a boot event: report everything parked,
 	// so a restart cannot make missing changes look healed.
@@ -168,50 +174,54 @@ count_quarantined :: proc() -> int {
 	}
 	return total
 }
-load_object_dir :: proc(dir_path: string, object_id: string, alloc := context.allocator) {
-	changes := make([dynamic]core.Change, alloc)
-	if dir, derr := os.open(dir_path); derr == nil {
-		defer os.close(dir)
-		files, ferr := os.read_dir(dir, -1, context.temp_allocator)
-		if ferr != nil do return
-		for f in files {
-			if !strings.has_suffix(f.name, ".pb") do continue
-			// A crash used to be able to leave a torn file at a final,
-			// content-addressed name, and nothing here compared the name with
-			// the bytes: the truncated change was replayed as genuine, and an
-			// undecodable one vanished in silence. The filename IS the hash, so
-			// check it, and quarantine whatever fails instead of guessing.
-			data, rerr := os.read_entire_file(f.fullpath, alloc)
-			if rerr != nil {
-				quarantine_change(f.fullpath, object_id, "unreadable")
-				continue
-			}
-			c, cok := core.decode_change(data, alloc)
-			if !cok {
-				quarantine_change(f.fullpath, object_id, "undecodable")
-				continue
-			}
-			if !change_matches_name(c, f.name) {
-				quarantine_change(f.fullpath, object_id, "address mismatch")
-				continue
-			}
-			append(&changes, c)
-		}
-	}
-	// compute_state decides whether the stored checkpoint seeds the replay
-	// (core.checkpoint_for_replay) or IS the history (covered never downloaded).
-	checkpoint: ^core.Checkpoint
-	if cp, ok := load_checkpoint(object_id, alloc); ok do checkpoint = new_clone(cp, alloc)
-	if len(changes) == 0 && checkpoint == nil do return
+/** Load one object into g_store.states / g_store.bases. Caller holds the lock. */
+load_object_dir :: proc(object_id: string, alloc := context.allocator) {
+	h := read_holdings(object_id, alloc, quarantine = true)
+	if len(h.deltas) == 0 && len(h.cps) == 0 && h.legacy == nil do return
 
 	context.allocator = alloc
-	state, ok := core.compute_state(changes[:], alloc, checkpoint)
+	cls := core.base_classify(h.cps, h.deltas[:], h.pending, context.temp_allocator)
+	info := Base_Info{bases = len(h.cps), changes = len(h.deltas)}
+	state: core.Object_State
+	ok: bool
+	live: []core.Change
+	if cls.current >= 0 {
+		// Covered, orphan and stale changes are never replayed.
+		cur := &h.cps[cls.current]
+		live = core.deltas_of(h.deltas[:], cls, .Live, context.temp_allocator)
+		state, ok = core.state_from_base(cur, live, alloc)
+		info.hash = core.hex_id(cur.base_hash[:], alloc)
+		info.epoch = cur.epoch
+		info.created_at = cur.created_at
+		info.prev_base = core.hex_id(cur.prev_base, alloc)
+	} else {
+		// No base: exactly today's replay (compute_state decides whether the
+		// legacy checkpoint seeds it or IS the history).
+		live = holdings_changes(&h)
+		state, ok = core.compute_state(live, alloc, h.legacy)
+	}
 	if !ok do return
+	for class in cls.classes {
+		switch class {
+		case .Live: info.live += 1
+		case .Covered: info.covered += 1
+		case .Premigration_Covered: info.premigration_covered += 1
+		case .Orphan: info.orphan += 1
+		case .Stale: info.stale += 1
+		}
+	}
+	for c in live {
+		info.live_bytes += len(core.encode_change(c, false, context.temp_allocator))
+		if info.oldest_ms == 0 || c.timestamp < info.oldest_ms do info.oldest_ms = c.timestamp
+	}
+	for d in h.deltas do if string(d.change.id) in h.pending do info.pending += 1
 	sp := new(core.Object_State, alloc)
 	sp^ = state
-	// Keys of the map live in the arena too (object_id is arena-allocated via decode).
+	// Map keys live in the arena too (object_id is arena-allocated via decode).
 	g_store.states[state.id] = sp
+	g_store.bases[state.id] = info
 }
+
 
 /** True when `<hex>.pb` is the content address of the change it holds. */
 change_matches_name :: proc(c: core.Change, file_name: string) -> bool {
@@ -277,12 +287,12 @@ commit_change :: proc(c: ^core.Change) -> (string, bool) {
 	full := core.encode_change(c^, allocator = context.temp_allocator)
 	hex_str := string(hex.encode(c.id, context.temp_allocator))
 
-	dir, _ := filepath.join({g_store.root, c.object_id}, context.temp_allocator)
-	os.make_directory(g_store.data_root)
-	os.make_directory(g_store.root)
-	os.make_directory(dir)
-	path, _ := filepath.join({dir, strings.concatenate({hex_str, ".pb"}, context.temp_allocator)}, context.temp_allocator)
+	// Markers before the .pb, so a .pb never exists without them: `.local`
+	// (written here, not yet published) and `.b` = the base it builds on.
+	if !write_change_markers(c.object_id, hex_str, current_base_hex(c.object_id), local = true) do return "", false
+	path := change_file(c.object_id, hex_str, ".pb")
 	if !write_file_durable(path, full) do return "", false
+	archive_link(c.object_id, hex_str, path)
 
 	store_mark_dirty(c.object_id)
 	return strings.clone(hex_str), true

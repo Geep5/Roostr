@@ -317,8 +317,17 @@ templates, capabilities, agents of its kinds) untouched.
 
 Relays transport encrypted changes; local `.pb` files remain canonical.
 `bun run sync` in `harness/` runs synchronization independently of agent work.
-Startup reconciles local history with relay history; merely wiping the relay
-does not reset the dataset. Permanent deletion uses the synced `__vanished__`
+State sync (`docs/state-sync.md`): each object has a **base** (its state at an
+epoch, addressable kind 31078) plus **live deltas** (kind 1078 tagged with the
+base); devices fetch bases first and deltas by base tag, and never walk the
+history from zero once bases exist (a vault with no base keeps the full
+walk). A delta written on an older base is rebased by the daemon and
+republished. Computers compact - fold live deltas into the next base and
+delete the folded deltas from the relays - only with
+`GLON_STATE_SYNC_COMPACT=1`; `GLON_STATE_SYNC_SWEEP_PREMIGRATION=dry-run|1`
+counts or deletes the pre-migration history once every device reads bases.
+Each computer keeps every change it held in `GLON_DATA/archive/`.
+Permanent deletion uses the synced `__vanished__`
 ledger plus acknowledged NIP-09 cleanup, not manual file removal.
 
 Deleting a space vanishes everything in it, not a list: every replica treats
@@ -348,15 +357,19 @@ re-pinning it moves nothing else. An object's own resolution (`core/serving.odin
 its pin, else its first agent's pin, else a machine with its skills) only
 places the object's repeats and inbox recovery. No heartbeats or leases.
 
-Files move peer-to-peer, never through the relay. A `file` object names its
+Files are stored encrypted on Blossom (served by RoostrRelay on the relay's
+origin) and peer-to-peer between computers. A `file` object names its
 bytes by sha256 (`file_hash`, plus `file_size`, `file_mime`, and
-`available_on`: the computers holding a copy). Each harness keeps bytes in
+`available_on`: the computers holding a copy) and, once uploaded, the
+ciphertext (`blob_sha256`, `blob_key`, `blob_url`; 4 MiB AES-256-GCM frames,
+`harness/src/blossom.ts`). Each harness keeps bytes in
 `GLON_DATA/blobs/<sha256>` and serves `POST /files` / `GET /files/<hash>` on
 its loopback port (paired auth). A harness missing the bytes asks a holder over
 a WebRTC data channel (`harness/src/files.ts`, werift); the relay only carries
 the introduction, as owner-signed, self-encrypted ephemeral events (kind 21078).
-Received bytes are verified against the hash. With no holder online the
-File's `error` says so; there is no relay or server fallback. A computer whose
+With no holder online it fetches the File's blob from Blossom. Received bytes
+are verified against the hash; when neither works the File's `error` says so.
+`GLON_BLOSSOM_BACKFILL=1` uploads existing files once. A computer whose
 Computer object has **Keep every file** (`keep_all_files`, a checkbox the
 harness seeds in every space with computers) fetches every File's bytes it
 lacks - when a File appears or changes, on boot, and every ten minutes - one at

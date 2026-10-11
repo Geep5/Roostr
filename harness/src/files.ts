@@ -1,18 +1,20 @@
 /**
- * Peer-to-peer files: a File object (typeKey `file`) names bytes by their
- * sha256 (`file_hash`); every computer keeps its own copy in
- * GLON_DATA/blobs/<hash>, and `available_on` lists the computers holding
- * one. A computer missing the bytes asks a holder directly over a WebRTC
- * data channel; the relay only carries the introduction (offer/answer), as
- * self-encrypted ephemeral events (kind 21078) signed by the owner key every
- * device shares. Bytes never touch the relay. No fallback: if no holder is
- * online the File's `error` says so.
+ * Files: a File object (typeKey `file`) names bytes by their sha256
+ * (`file_hash`); every computer keeps its own copy in GLON_DATA/blobs/<hash>,
+ * and `available_on` lists the computers holding one. A computer missing the
+ * bytes asks a holder directly over a WebRTC data channel; the relay only
+ * carries the introduction (offer/answer), as self-encrypted ephemeral events
+ * (kind 21078) signed by the owner key every device shares. Every upload is
+ * also encrypted and stored on Blossom (`blob_sha256`/`blob_key`/`blob_url`,
+ * see blossom.ts), which is where the browser and the iOS app read files and
+ * where a computer turns when no holder hands the bytes over.
  */
 
 import { mkdirSync, renameSync, rmSync } from "node:fs";
 import { SimplePool, finalizeEvent, nip44, type Event } from "nostr-tools";
 import { RTCPeerConnection, type RTCDataChannel } from "werift";
 import { createObject, deleteField, iv, lv, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { RemoteReadFailed, discoverServer, encryptBlob, fetchFromBlossom, obtainBlob, upload, type BlobRef } from "./blossom";
 import { machines } from "./machine";
 import { dataRoot, loadIdentity, type Identity } from "./nostrsync";
 import { machineId } from "./roster";
@@ -70,20 +72,55 @@ async function markError(hash: string, error: string): Promise<void> {
 	for (const row of await fileObjects(hash)) if (str(row.fields, "error") !== error) await setField(row.id, "error", sv(error));
 }
 
+/** Write bytes into the store under their hash (atomically). */
+async function writeBlob(hash: string, bytes: Uint8Array): Promise<void> {
+	mkdirSync(blobDir(), { recursive: true });
+	if (await hasBlob(hash)) return;
+	const tmp = `${blobPath(hash)}.part-${crypto.randomUUID()}`;
+	await Bun.write(tmp, bytes);
+	renameSync(tmp, blobPath(hash));
+}
+
+// ── Blossom ──────────────────────────────────────────────────────
+
+const servers = new Map<string, Promise<string>>();
+
+/** The Blossom server for these relays, discovered once per process. */
+function blossomServer(relays: string[]): Promise<string> {
+	const key = relays.join(" ");
+	let server = servers.get(key);
+	if (!server) {
+		server = discoverServer(relays);
+		servers.set(key, server);
+	}
+	return server;
+}
+
+/** The Blossom copy a File object records, if any. */
+function blobRef(row: { fields: ObjectJSON["fields"] }): BlobRef | null {
+	const sha256 = str(row.fields, "blob_sha256");
+	const key = str(row.fields, "blob_key");
+	return sha256 && key ? { sha256, key, url: str(row.fields, "blob_url") } : null;
+}
+
+/** Encrypt and upload the bytes; the File fields naming the Blossom copy. */
+async function uploadToBlossom(id: Identity, bytes: Uint8Array, name: string): Promise<Record<string, ValueJSON>> {
+	const { key, cipher } = encryptBlob(bytes);
+	const d = await upload(cipher, name, await blossomServer(id.relays), id);
+	return { blob_sha256: sv(d.sha256), blob_key: sv(Buffer.from(key).toString("hex")), blob_url: sv(d.url) };
+}
+
 /**
- * Keep uploaded bytes: store them under their hash and create the File
- * object in `space`, held by this computer.
+ * Keep uploaded bytes: store them under their hash, put an encrypted copy on
+ * Blossom, and create the File object in `space`, held by this computer. A
+ * failed Blossom upload leaves the file peer-to-peer only (the backfill can
+ * upload it later).
  */
 export async function storeUpload(bytes: Uint8Array, name: string, mime: string, space: string): Promise<{ id: string; hash: string; size: number }> {
 	const hasher = new Bun.CryptoHasher("sha256");
 	hasher.update(bytes);
 	const hash = hasher.digest("hex");
-	mkdirSync(blobDir(), { recursive: true });
-	if (!(await hasBlob(hash))) {
-		const tmp = `${blobPath(hash)}.part-${crypto.randomUUID()}`;
-		await Bun.write(tmp, bytes);
-		renameSync(tmp, blobPath(hash));
-	}
+	await writeBlob(hash, bytes);
 	const fields: Record<string, ValueJSON> = {
 		file_hash: sv(hash),
 		file_size: iv(bytes.byteLength),
@@ -91,8 +128,49 @@ export async function storeUpload(bytes: Uint8Array, name: string, mime: string,
 		available_on: lv([await machineId()]),
 	};
 	if (space) fields.channel = sv(space);
+	const identity = await loadIdentity();
+	if (identity) {
+		try {
+			Object.assign(fields, await uploadToBlossom(identity, bytes, name || "Untitled file"));
+		} catch (err) {
+			console.error(`[files] Blossom upload of ${hash.slice(0, 12)} failed (kept peer-to-peer):`, err instanceof Error ? err.message : err);
+		}
+	}
 	const { id } = await createObject(name || "Untitled file", FILE_TYPE, fields);
 	return { id, hash, size: bytes.byteLength };
+}
+
+/**
+ * One-off: upload every File whose bytes are here but which has no Blossom
+ * copy yet, and record the copy on it. Safe to rerun; Files already on
+ * Blossom are skipped. Runs at file-peer start when GLON_BLOSSOM_BACKFILL=1.
+ */
+export async function runBlossomBackfill(): Promise<{ uploaded: number; missing: number; failed: number }> {
+	const identity = await loadIdentity();
+	if (!identity) throw new Error("No nostr identity to sign Blossom uploads with.");
+	const pending = new Map<string, QueryRow[]>();
+	for (const row of await queryAll({ type: FILE_TYPE })) {
+		const hash = str(row.fields, "file_hash");
+		if (!HASH_RE.test(hash) || str(row.fields, "blob_sha256")) continue;
+		pending.set(hash, [...(pending.get(hash) ?? []), row]);
+	}
+	const counts = { uploaded: 0, missing: 0, failed: 0 };
+	for (const [hash, rows] of pending) {
+		if (!(await hasBlob(hash))) {
+			counts.missing += rows.length;
+			continue;
+		}
+		try {
+			const fields = await uploadToBlossom(identity, new Uint8Array(await Bun.file(blobPath(hash)).arrayBuffer()), rows[0]!.name || "Untitled file");
+			for (const row of rows) for (const [key, value] of Object.entries(fields)) await setField(row.id, key, value);
+			counts.uploaded += rows.length;
+		} catch (err) {
+			counts.failed += rows.length;
+			console.error(`[files] backfill of ${hash.slice(0, 12)} failed:`, err instanceof Error ? err.message : err);
+		}
+	}
+	console.log(`[files] Blossom backfill: ${counts.uploaded} uploaded, ${counts.missing} without local bytes, ${counts.failed} failed`);
+	return counts;
 }
 
 /** The MIME a File object records for these bytes, for serving them. */
@@ -272,9 +350,8 @@ async function fetchFrom(holder: string, hash: string): Promise<void> {
 }
 
 /** Ask each other holder in turn until one hands the bytes over. */
-async function fetchAny(hash: string): Promise<void> {
+async function fetchAny(hash: string, rows: QueryRow[]): Promise<void> {
 	const me = await machineId();
-	const rows = await fileObjects(hash);
 	if (rows.length === 0) throw new Error("No File object names these bytes.");
 	const others = [...new Set(rows.flatMap(holders))].filter((m) => m !== me);
 	if (others.length === 0) throw new BlobUnavailable("No computer holds this file.", []);
@@ -294,17 +371,52 @@ async function fetchAny(hash: string): Promise<void> {
 	throw new BlobUnavailable(`No computer holding this file is online: ${failures.join("; ")}.`, others);
 }
 
+/** Fetch bytes this computer lacks: from a holder, else from Blossom. */
+async function fetchRemote(hash: string): Promise<void> {
+	const rows = await fileObjects(hash);
+	const refs = rows.map(blobRef).filter((r): r is BlobRef => r !== null);
+	try {
+		const from = await obtainBlob(hash, {
+			local: () => hasBlob(hash),
+			peers: () => fetchAny(hash, rows),
+			blossom: refs.length
+				? async () => {
+						const server = await blossomServer((await loadIdentity())?.relays ?? []);
+						let last: unknown;
+						for (const ref of refs) {
+							try {
+								return await fetchFromBlossom(ref, hash, server);
+							} catch (err) {
+								last = err;
+							}
+						}
+						throw last;
+					}
+				: null,
+			store: async (bytes) => {
+				await writeBlob(hash, bytes);
+				await markHeld(hash);
+			},
+		});
+		if (from === "blossom") console.log(`[files] fetched ${hash.slice(0, 12)} from Blossom`);
+	} catch (err) {
+		if (err instanceof RemoteReadFailed && err.peerError instanceof BlobUnavailable) throw new BlobUnavailable(err.message, err.peerError.tried);
+		throw err;
+	}
+}
+
 /**
- * Make sure this computer holds the bytes, fetching them from a computer in
- * `available_on` if not. Throws when no holder answers, recording why as the
- * File's `error` unless `record` is off (background fetches stay quiet).
+ * Make sure this computer holds the bytes: fetched from a computer in
+ * `available_on`, else from the File's Blossom copy. Throws when neither
+ * hands them over, recording why as the File's `error` unless `record` is
+ * off (background fetches stay quiet).
  */
 export async function ensureBlob(hash: string, { record = true }: { record?: boolean } = {}): Promise<void> {
 	if (!HASH_RE.test(hash)) throw new Error("Not a file hash.");
 	if (await hasBlob(hash)) return;
 	let job = inflight.get(hash);
 	if (!job) {
-		job = fetchAny(hash).finally(() => inflight.delete(hash));
+		job = fetchRemote(hash).finally(() => inflight.delete(hash));
 		inflight.set(hash, job);
 	}
 	try {
@@ -322,6 +434,7 @@ export async function startFilePeer(): Promise<void> {
 		console.log("[files] no nostr identity or relays - peer-to-peer files disabled");
 		return;
 	}
+	if (process.env.GLON_BLOSSOM_BACKFILL === "1") void runBlossomBackfill().catch((err) => console.error("[files] Blossom backfill failed:", err instanceof Error ? err.message : err));
 	const pool = new SimplePool();
 	peer = { id, pool, me: await machineId() };
 	pool.subscribeMany(id.relays, { kinds: [SIGNAL_KIND], authors: [id.pk], "#t": [SIGNAL_TAG], since: Math.floor(Date.now() / 1000) - 5 }, {

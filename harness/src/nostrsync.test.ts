@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { finalizeEvent, getPublicKey, nip44, SimplePool, type Event, type Filter } from "nostr-tools";
 import * as api from "./api";
 import * as auth from "./local-api-auth";
-import { startNostrSync, vanishOnRelays } from "./nostrsync";
+import { changeIdOfPart, startNostrSync, vanishOnRelays } from "./nostrsync";
 
 const sk = new Uint8Array(32).fill(1);
 const pk = getPublicKey(sk);
@@ -20,9 +20,11 @@ let incomplete: boolean;
 let beforePage: (() => void) | undefined;
 let liveEvent: (event: Event) => void;
 let liveSubscriptions: number;
+/** Every live subscription filter. */
+let liveFilters: Filter[];
 let importChange: (b64: string) => Promise<Response>;
-/** Local daemon's change manifest (objectId -> change hexes) and each change's bytes. */
-let localChangeRows: Record<string, Array<{ id: string; b64: string }>>;
+/** Local daemon's change manifest (objectId -> change hexes) and each change's bytes (+ state-sync row fields). */
+let localChangeRows: Record<string, Array<{ id: string; b64: string; b?: string; pending?: boolean; class?: string }>>;
 let checkpointRows: Record<string, unknown>;
 let importCheckpoint: (body: { checkpoints: string[]; provenance?: unknown }) => Promise<Response>;
 let buildCheckpoint: (objectId: string) => Promise<Response>;
@@ -35,6 +37,13 @@ let objectRows: Array<{ id: string; typeKey?: string; channelId?: string }>;
 let spaceObjects: Record<string, unknown>;
 let mutations: Array<Record<string, unknown>>;
 let liveDelete: ((event: Event) => void) | undefined;
+/** State-sync daemon fakes: GET /api/bases rows, GET /api/bases/<id> lists, and every POST to /api/bases* or /api/changes/published (path, body). */
+let baseRows: Record<string, Record<string, unknown>>;
+let heldBases: Record<string, Array<{ hash: string; epoch: number; current: boolean; b64: string }>>;
+let basePosts: Array<{ path: string; body: Record<string, unknown> }>;
+let baseReply: (path: string, body: Record<string, unknown>) => Response;
+/** Every item POSTed to /api/changes (string, or {b64, b}). */
+let changeImports: unknown[];
 
 function event(part: string, created_at: number, chunk?: [string, number, number], kind = 1078): Event {
 	return finalizeEvent({ kind, created_at, tags: chunk ? [["c", chunk[0], String(chunk[1]), String(chunk[2])]] : [], content: nip44.encrypt(part, conversationKey) }, sk);
@@ -101,6 +110,7 @@ beforeEach(async () => {
 	incomplete = false;
 	beforePage = undefined;
 	liveSubscriptions = 0;
+	liveFilters = [];
 	importChange = async () => Response.json({ imported: 1, rejected: 0, ids: ["change"] });
 	checkpointRows = {};
 	importCheckpoint = async () => Response.json({ imported: 0, rejected: 1, items: [] });
@@ -113,6 +123,11 @@ beforeEach(async () => {
 	spaceObjects = {};
 	mutations = [];
 	liveDelete = undefined;
+	baseRows = {};
+	heldBases = {};
+	basePosts = [];
+	baseReply = (path) => (path === "/api/bases" ? Response.json({ rejected: 0, items: [] }) : new Response("not found", { status: 404 }));
+	changeImports = [];
 	const interval = spyOn(globalThis, "setInterval").mockImplementation(((callback: () => void, ms: number) => {
 		intervals.push({ callback, ms });
 		return 1;
@@ -123,7 +138,23 @@ beforeEach(async () => {
 	restore.push(() => timeoutMock.mockRestore());
 	const fetch = spyOn(auth, "apiFetch").mockImplementation(async (input, init) => {
 		const url = String(input);
-		if (url.endsWith("/api/changes") && init?.method === "POST") return importChange(JSON.parse(String(init.body)).changes[0]);
+		if (url.endsWith("/api/changes") && init?.method === "POST") {
+			const item = JSON.parse(String(init.body)).changes[0];
+			changeImports.push(item);
+			return importChange(typeof item === "string" ? item : item.b64);
+		}
+		const statePath = url.match(/(\/api\/(?:bases(?:\/(?:build|seal|rebase|covered))?|changes\/published))$/);
+		if (statePath && init?.method === "POST") {
+			const body = JSON.parse(String(init.body));
+			basePosts.push({ path: statePath[1], body });
+			return baseReply(statePath[1], body);
+		}
+		if (url.endsWith("/api/bases")) return Response.json(baseRows);
+		const heldFor = url.match(/\/api\/bases\/([^/]+)$/);
+		if (heldFor) return Response.json({ objectId: heldFor[1], bases: heldBases[heldFor[1]] ?? [] });
+		// Machine roster and serving (machine.ts): no machines, nothing pinned - this computer compacts unserved objects.
+		if (url.endsWith("/api/query")) return Response.json({ total: 0, records: [] });
+		if (url.endsWith("/api/serving")) return Response.json({});
 		const perObject = url.match(/\/api\/changes\/([^/]+)$/);
 		if (perObject) return Response.json({ changes: localChangeRows[perObject[1]] ?? [] });
 		if (url.endsWith("/api/checkpoints") && init?.method === "POST") return importCheckpoint(JSON.parse(String(init.body)));
@@ -165,6 +196,7 @@ beforeEach(async () => {
 	restore.push(() => publish.mockRestore());
 	const live = spyOn(SimplePool.prototype, "subscribeMany").mockImplementation((_relays, filter, callbacks) => {
 		liveSubscriptions++;
+		liveFilters.push(filter);
 		if (filter.kinds?.includes(1078)) liveEvent = (item) => callbacks.onevent?.(item);
 		if (filter.kinds?.includes(5)) liveDelete = (item) => callbacks.onevent?.(item);
 		return { close() {} };
@@ -176,6 +208,8 @@ afterEach(async () => {
 	if (previousRoot === undefined) delete process.env.GLON_DATA;
 	else process.env.GLON_DATA = previousRoot;
 	await rm(root, { recursive: true, force: true });
+	delete process.env.GLON_STATE_SYNC_COMPACT;
+	delete process.env.GLON_STATE_SYNC_SWEEP_PREMIGRATION;
 });
 
 test("complete chunk backfill retires persisted floor and watchdog requests only cursor overlap", async () => {
@@ -596,4 +630,254 @@ test("the sweep splits its deletions so no kind-5 names more than 254 events", a
 	expect(deletions().length).toBe(2);
 	expect(deletions().every((item) => item.tags.filter((tag) => tag[0] === "e").length <= 254)).toBe(true);
 	expect(deleted()).toEqual(new Set(outdated.map((item) => item.id)));
+});
+
+// ── State sync (docs/state-sync.md) ──────────────────────────────
+
+const H1 = "a1".repeat(32);
+const H2 = "b2".repeat(32);
+/** Personal blinding: sha256(secret key bytes || id), 16 hex. */
+function blindPersonal(id: string): string {
+	const hasher = new Bun.CryptoHasher("sha256");
+	hasher.update(sk);
+	hasher.update(id);
+	return hasher.digest("hex").slice(0, 16);
+}
+/** A sealed change part: 0a 20 <id> + a little payload, base64. */
+function changeB64(idByte: number): string {
+	return Buffer.from([0x0a, 0x20, ...new Array(32).fill(idByte), 0x12, 0x03, 0x6f, 0x62, 0x6a]).toString("base64");
+}
+function changeHex(idByte: number): string {
+	return Buffer.from(new Array(32).fill(idByte)).toString("hex");
+}
+function baseEvent(b64: string, created_at: number, objectId = "obj"): Event {
+	return finalizeEvent({ kind: 31078, created_at, tags: [["d", blindPersonal(`base:${objectId}`)], ["h", blindPersonal(objectId)], ["epoch", "1"]], content: nip44.encrypt(b64, conversationKey) }, sk);
+}
+function deltaEvent(b64: string, created_at: number, base?: string): Event {
+	return finalizeEvent({ kind: 1078, created_at, tags: [["h", blindPersonal("obj")], ...(base ? [["b", base]] : [])], content: nip44.encrypt(b64, conversationKey) }, sk);
+}
+/** GET /api/bases row for an object holding base `hash`. */
+function baseRow(hash: string, fields: Record<string, unknown> = {}) {
+	return { hash, epoch: 1, createdAt: 1_000_000_000, prevBase: "", live: 0, orphan: 0, stale: 0, pending: 0, compact: false, reason: "", ...fields };
+}
+
+test("the change id of a sealed part is read from its leading id field", () => {
+	expect(changeIdOfPart(changeB64(7))).toBe(changeHex(7));
+	expect(changeIdOfPart("YWJj")).toBeNull();
+});
+
+test("bases come first; once they exist deltas are read by #b and the history walk and live subscription never start from zero", async () => {
+	const base = baseEvent("QkFTRQ==", 1_000_000);
+	const delta = deltaEvent(changeB64(1), 1_000_100, H1);
+	history = [base, delta];
+	baseReply = (path, body) => {
+		if (path !== "/api/bases") return new Response("unexpected", { status: 500 });
+		expect(body.bases).toEqual(["QkFTRQ=="]);
+		baseRows = { obj: baseRow(H1, { createdAt: 1_000_000_000 }) };
+		return Response.json({ rejected: 0, items: [{ objectId: "obj", hash: H1, epoch: 1, stored: true, current: true }] });
+	};
+	importChange = async () => Response.json({ imported: 1, rejected: 0, ids: [changeHex(1)] });
+	await startNostrSync();
+	const floor = 1_000_000 - 86_400;
+	// Bases first: the first scan asks for our 31078s.
+	expect(filters[0]).toMatchObject({ kinds: [31078], authors: [pk] });
+	expect(filters).toContainEqual(expect.objectContaining({ kinds: [1078], "#b": [H1] }));
+	expect(filters).toContainEqual(expect.objectContaining({ kinds: [1078, 1079], authors: [pk], since: floor }));
+	// Nothing walks our 1078 history from zero; only objects without a base (here the vanish ledger) are read by their own stream.
+	for (const filter of filters.filter((f) => f.kinds?.includes(1078) && f.authors)) expect(filter.since).toBe(floor);
+	expect(filters).toContainEqual(expect.objectContaining({ kinds: [1078, 1079], "#h": [blindPersonal("__vanished__")] }));
+	expect(changeImports).toContainEqual({ b64: changeB64(1), b: H1 });
+	const live = liveFilters.find((f) => f.authors?.includes(pk) && f.kinds?.includes(1078))!;
+	expect(live.kinds).toEqual([1078, 1079, 31078, 1080]);
+	expect(live.since!).toBeGreaterThanOrEqual(floor);
+	const after = (await state()) as unknown as { bases: Record<string, { hash: string; eventIds: string[] }> };
+	expect(after.bases.obj).toMatchObject({ hash: H1, eventIds: [base.id] });
+});
+
+test("a chunked base assembles its 31078 part with its 1080 parts fetched by #c", async () => {
+	const b64 = "QUJDREVGR0hJSktM";
+	const hasher = new Bun.CryptoHasher("sha256");
+	hasher.update(b64);
+	const gid = hasher.digest("hex").slice(0, 16);
+	const head = finalizeEvent({ kind: 31078, created_at: 1_000_000, tags: [["d", "x"], ["h", "y"], ["epoch", "1"], ["c", gid, "0", "2"]], content: nip44.encrypt(b64.slice(0, 8), conversationKey) }, sk);
+	const tail = finalizeEvent({ kind: 1080, created_at: 999_999, tags: [["h", "y"], ["c", gid, "1", "2"]], content: nip44.encrypt(b64.slice(8), conversationKey) }, sk);
+	history = [head, tail];
+	const imported: unknown[] = [];
+	baseReply = (path, body) => {
+		if (path === "/api/bases") imported.push(...(body.bases as unknown[]));
+		return Response.json({ rejected: 0, items: [{ objectId: "obj", hash: H1, epoch: 1, stored: true, current: true }] });
+	};
+	await startNostrSync();
+	expect(filters).toContainEqual(expect.objectContaining({ kinds: [1080], "#c": [gid] }));
+	expect(imported).toEqual([b64]);
+	const after = (await state()) as unknown as { bases: Record<string, { eventIds: string[]; createdAt: number }> };
+	expect(new Set(after.bases.obj.eventIds)).toEqual(new Set([head.id, tail.id]));
+	expect(after.bases.obj.createdAt).toBe(1_000_000);
+});
+
+test("with no base anywhere the full history walk is unchanged (dual read)", async () => {
+	await startNostrSync();
+	expect(filters).toContainEqual({ kinds: [1078, 1079], authors: [pk], until: undefined, limit: 128 });
+	expect(filters.some((f) => f["#b"])).toBe(false);
+});
+
+test("only live deltas are published, each with the base it was written on; covered, stale and orphan changes never go out", async () => {
+	baseRows = { obj: baseRow(H1) };
+	localChangeRows = {
+		obj: [
+			{ id: "c1", b64: "QUJD", b: H1, pending: true, class: "live" },
+			{ id: "c2", b64: "REVG", class: "covered" },
+			{ id: "c3", b64: "R0hJ", b: H1, class: "stale" },
+			{ id: "c4", b64: "SktM", b: H1, class: "orphan" },
+		],
+		plain: [{ id: "c5", b64: "TU5P" }],
+	};
+	realTimers();
+	await startNostrSync();
+	await until(() => published.filter((item) => item.kind === 1078).length === 2);
+	await settle();
+	const out = published.filter((item) => item.kind === 1078);
+	expect(out.map(decrypt).sort()).toEqual(["QUJD", "TU5P"]);
+	expect(out.find((item) => decrypt(item) === "QUJD")!.tags).toContainEqual(["b", H1]);
+	expect(out.find((item) => decrypt(item) === "TU5P")!.tags.some((tag) => tag[0] === "b")).toBe(false);
+	// The daemon stops counting the published change as pending.
+	expect(basePosts).toContainEqual({ path: "/api/changes/published", body: { published: { obj: ["c1"] } } });
+});
+
+test("orphans are rebased by the daemon and published; a space this identity may not write is left alone", async () => {
+	await keyring({ viewed: { key: KEY_A, owner: admin } });
+	spaceObjects = { viewed: spaceWithMembers("viewed", [admin]) };
+	objectRows = [{ id: "shared", channelId: "viewed" }];
+	baseRows = { obj: baseRow(H2, { orphan: 1 }), shared: baseRow(H1, { orphan: 1 }) };
+	baseReply = (path, body) => {
+		if (path !== "/api/bases/rebase") return Response.json({ rejected: 0, items: [] });
+		localChangeRows[body.objectId as string] = [{ id: "r1", b64: "UkVC", b: H2, pending: true, class: "live" }];
+		return Response.json({ objectId: body.objectId, base: H2, changes: [{ orphan: "o1", id: "r1", b64: "UkVC" }] });
+	};
+	realTimers();
+	await startNostrSync();
+	await until(() => published.some((item) => item.kind === 1078 && decrypt(item) === "UkVC"));
+	expect(basePosts.filter((post) => post.path === "/api/bases/rebase").map((post) => post.body)).toEqual([{ objectId: "obj" }]);
+	expect(published.find((item) => item.kind === 1078 && decrypt(item) === "UkVC")!.tags).toContainEqual(["b", H2]);
+});
+
+test("compaction is off by default: nothing is built, sealed or deleted", async () => {
+	baseRows = { obj: baseRow(H1, { compact: true, reason: "deltas", live: 25 }) };
+	realTimers();
+	await startNostrSync();
+	await settle();
+	expect(basePosts.some((post) => post.path === "/api/bases/build" || post.path === "/api/bases/seal")).toBe(false);
+	expect(published.some((item) => item.kind === 5 || item.kind === 31078)).toBe(false);
+});
+
+/** obj holds epoch-1 base H1 (our relay copy: one old event); the daemon builds epoch 2 = H2 folding delta c1. */
+async function compactOnce(options: { space?: boolean } = {}) {
+	process.env.GLON_STATE_SYNC_COMPACT = "1";
+	await writeFile(join(root, "sync-state.json"), JSON.stringify({ version: 1, cursor: 100, published: {}, vanishRequested: {}, bases: { obj: { scope: "", hash: H1, epoch: 1, eventIds: ["0f".repeat(32)], createdAt: 999_000, everywhere: true } } }));
+	const delta = deltaEvent(changeB64(1), 1_000_100, H1);
+	history = [delta];
+	importChange = async () => Response.json({ imported: 1, rejected: 0, ids: [changeHex(1)] });
+	baseRows = { obj: baseRow(H1, { compact: true, reason: "deltas", live: 25 }) };
+	if (options.space) {
+		await keyring({ joined: { key: KEY_A, owner: admin } });
+		spaceObjects = { joined: spaceWithMembers("joined", [admin, pk]) };
+		objectRows = [{ id: "theirs", channelId: "joined" }];
+		baseRows.theirs = baseRow(H1, { compact: true, reason: "deltas", live: 25 });
+	}
+	const d = blindPersonal("base:obj");
+	baseReply = (path, body) => {
+		if (path === "/api/bases/build") return Response.json({ objectId: body.objectId, compact: true, reason: "deltas", b64: "TkVX", hash: H2, epoch: 2, prevBase: H1, folded: [changeHex(1)] });
+		if (path === "/api/bases/seal") {
+			expect(body).toEqual({ base: "TkVX", conversationKey: Buffer.from(conversationKey).toString("hex") });
+			return Response.json({ hash: H2, objectId: "obj", epoch: 2, d, gid: "", event: { kind: 31078, content: nip44.encrypt("TkVX", conversationKey), tags: [["d", d], ["h", blindPersonal("obj")], ["epoch", "2"]] }, parts: [] });
+		}
+		return Response.json({ rejected: 0, items: [] });
+	};
+	realTimers();
+	await startNostrSync();
+	await until(() => published.filter((item) => item.kind === 5).length === 2);
+	await settle();
+	return { delta, d };
+}
+
+test("compaction publishes the next base, then deletes the deltas it folded and the previous base (a dated before the new one)", async () => {
+	const { delta, d } = await compactOnce();
+	const base = published.find((item) => item.kind === 31078)!;
+	expect(decrypt(base)).toBe("TkVX");
+	expect(published.some((item) => item.kind === 1079)).toBe(false);
+	const [folded, superseded] = published.filter((item) => item.kind === 5);
+	expect(folded.tags).toEqual([["e", delta.id], ["k", "1078"]]);
+	expect(superseded.tags).toEqual([["a", `31078:${pk}:${d}`], ["e", "0f".repeat(32)], ["k", "31078"], ["k", "1080"]]);
+	expect(superseded.created_at).toBe(base.created_at - 1);
+	const after = (await state()) as unknown as { bases: Record<string, { hash: string; eventIds: string[]; everywhere: boolean }>; compactions: Record<string, unknown> };
+	expect(after.bases.obj).toMatchObject({ hash: H2, eventIds: [base.id], everywhere: true });
+	expect(after.compactions).toEqual({});
+});
+
+test("a joined space's objects are compacted by its owner's computer, not here", async () => {
+	await compactOnce({ space: true });
+	expect(basePosts.filter((post) => post.path === "/api/bases/build").map((post) => post.body.objectId)).toEqual(["obj"]);
+});
+
+test("a base some relay refused keeps its folded deltas until a later pass gets it everywhere", async () => {
+	process.env.GLON_STATE_SYNC_COMPACT = "1";
+	await writeFile(join(root, "sync-state.json"), JSON.stringify({ version: 1, cursor: 100, published: {}, vanishRequested: {}, bases: { obj: { scope: "", hash: H1, epoch: 1, eventIds: [], createdAt: 999_000, everywhere: true } } }));
+	baseRows = { obj: baseRow(H1, { compact: true, reason: "deltas", live: 25 }) };
+	baseReply = (path, body) => {
+		if (path === "/api/bases/build") return Response.json({ objectId: body.objectId, compact: true, reason: "deltas", b64: "TkVX", hash: H2, epoch: 2, prevBase: H1, folded: [changeHex(1)] });
+		if (path === "/api/bases/seal") return Response.json({ hash: H2, objectId: "obj", epoch: 2, d: "dd", gid: "", event: { kind: 31078, content: "x", tags: [["d", "dd"]] }, parts: [] });
+		return Response.json({ rejected: 0, items: [] });
+	};
+	const publish = spyOn(SimplePool.prototype, "publish").mockImplementation((_relays, item) => {
+		published.push(item);
+		return item.kind === 31078 ? [Promise.resolve(""), Promise.reject(new Error("blocked"))] : [Promise.resolve("")];
+	});
+	restore.push(() => publish.mockRestore());
+	realTimers();
+	await startNostrSync();
+	await until(() => published.some((item) => item.kind === 31078));
+	await settle();
+	expect(published.some((item) => item.kind === 5)).toBe(false);
+	const after = (await state()) as unknown as { compactions: Record<string, { hash: string; folded: string[] }> };
+	expect(after.compactions.obj).toMatchObject({ hash: H2, folded: [changeHex(1)] });
+});
+
+test("the pre-migration sweep dry run counts what an epoch-1 base folded and deletes nothing", async () => {
+	process.env.GLON_STATE_SYNC_SWEEP_PREMIGRATION = "dry-run";
+	baseRows = { obj: baseRow(H1) };
+	const old = deltaEvent(changeB64(3), 100);
+	const unfolded = deltaEvent(changeB64(4), 101);
+	const checkpoint = finalizeEvent({ kind: 1079, created_at: 102, tags: [["h", blindPersonal("obj")]], content: nip44.encrypt("Q1A=", conversationKey) }, sk);
+	history = [old, unfolded, checkpoint];
+	baseReply = (path, body) => {
+		if (path === "/api/bases/covered") {
+			expect(new Set(body.ids as string[])).toEqual(new Set([changeHex(3), changeHex(4)]));
+			return Response.json({ premigration: [changeHex(3)], covered: [changeHex(3)] });
+		}
+		return Response.json({ rejected: 0, items: [] });
+	};
+	const log = spyOn(console, "log");
+	restore.push(() => log.mockRestore());
+	realTimers();
+	await startNostrSync();
+	await until(() => log.mock.calls.some((call) => String(call[0]).includes("pre-migration sweep (dry run)")));
+	expect(log.mock.calls.map((call) => String(call[0]))).toContain("[sync] pre-migration sweep (dry run): 1 change(s) and 1 checkpoint event(s) across 1 object(s) would be deleted");
+	expect(published.some((item) => item.kind === 5)).toBe(false);
+});
+
+test("the pre-migration sweep deletes folded untagged deltas and checkpoints only with compaction on", async () => {
+	process.env.GLON_STATE_SYNC_SWEEP_PREMIGRATION = "1";
+	process.env.GLON_STATE_SYNC_COMPACT = "1";
+	baseRows = { obj: baseRow(H1) };
+	const old = deltaEvent(changeB64(3), 100);
+	const tagged = deltaEvent(changeB64(5), 103, H1);
+	const checkpoint = finalizeEvent({ kind: 1079, created_at: 102, tags: [["h", blindPersonal("obj")]], content: nip44.encrypt("Q1A=", conversationKey) }, sk);
+	history = [old, tagged, checkpoint];
+	baseReply = (path) => (path === "/api/bases/covered" ? Response.json({ premigration: [changeHex(3)], covered: [changeHex(3)] }) : Response.json({ rejected: 0, items: [] }));
+	realTimers();
+	await startNostrSync();
+	await until(() => deletions().length === 1);
+	await settle();
+	expect(deleted()).toEqual(new Set([checkpoint.id, old.id]));
+	expect((await state()) as unknown as { premigrationSwept: Record<string, true> }).toMatchObject({ premigrationSwept: { obj: true } });
 });

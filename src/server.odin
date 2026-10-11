@@ -284,6 +284,22 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 		handle_changes_get(sock, req.path[len("/api/changes/"):])
 	case req.method == "POST" && req.path == "/api/changes":
 		handle_changes_import(sock, req.body)
+	case req.method == "POST" && req.path == "/api/changes/published":
+		handle_changes_published(sock, req.body)
+	case req.method == "GET" && req.path == "/api/bases":
+		handle_bases_list(sock)
+	case req.method == "GET" && strings.has_prefix(req.path, "/api/bases/"):
+		handle_bases_get(sock, req.path[len("/api/bases/"):])
+	case req.method == "POST" && req.path == "/api/bases":
+		handle_bases_import(sock, req.body)
+	case req.method == "POST" && req.path == "/api/bases/build":
+		handle_bases_build(sock, req.body)
+	case req.method == "POST" && req.path == "/api/bases/seal":
+		handle_bases_seal(sock, req.body)
+	case req.method == "POST" && req.path == "/api/bases/rebase":
+		handle_bases_rebase(sock, req.body)
+	case req.method == "POST" && req.path == "/api/bases/covered":
+		handle_bases_covered(sock, req.body)
 	case req.method == "GET" && req.path == "/api/checkpoints":
 		handle_checkpoints_list(sock)
 	case req.method == "POST" && req.path == "/api/checkpoints/build":

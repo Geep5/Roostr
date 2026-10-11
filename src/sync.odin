@@ -5,12 +5,14 @@ import "../core"
 // Change export/import — the wire surface the nostr sync daemon rides.
 //
 //   GET  /api/changes              → {objectId: [hexIds]} manifest
-//   GET  /api/changes/<objectId>   → {changes: [{id, b64}]}
-//   POST /api/changes              → service-only {changes: [b64…],
+//   GET  /api/changes/<objectId>   → {changes: [{id, b64, b?, pending?, class?}]}
+//   POST /api/changes              → service-only {changes: [b64 | {b64, b?}…],
 //                                    provenance?: {spaceId,keyId,signer}};
 //                                    shared imports verify installed authority
 //                                    before content-addressed writes. Omitting
 //                                    provenance is the trusted personal path.
+//                                    `b` writes the .b sidecar; a change held
+//                                    only in archive/ is skipped, never revived.
 //
 // Import bypasses commit_change on purpose: these changes already carry
 // their identity (id = sha256(encode with id zeroed)); recomputing parents
@@ -21,7 +23,6 @@ import "core:encoding/hex"
 import "core:encoding/json"
 import "core:net"
 import "core:os"
-import "core:path/filepath"
 import "core:strings"
 import "core:slice"
 import "core:sync"
@@ -123,36 +124,47 @@ handle_changes_get :: proc(sock: net.TCP_Socket, object_id: string) {
 		respond_error(sock, "bad object id")
 		return
 	}
-	if object_id in vanished_ids() {
-		// A peer must not be able to pull a vanished object back out of us.
-		out := core.jobj()
-		out["objectId"] = json.String(object_id)
-		out["changes"] = json.Array(make([dynamic]json.Value, context.temp_allocator))
-		respond_json(sock, json.Object(out))
-		return
-	}
-	dir_path, _ := filepath.join({g_store.root, object_id}, context.temp_allocator)
+	respond_json(sock, changes_rows(object_id))
+}
+
+/**
+ * Working-set rows {id, b64, b?, pending?, class?}: `b` from the sidecar,
+ * `pending` when written here and not yet published, `class` (core
+ * classification) only when the object holds a base. Files that do not
+ * decode to their own address are not offered.
+ */
+changes_rows :: proc(object_id: string) -> json.Value {
 	arr := make([dynamic]json.Value, context.temp_allocator)
-	dir, derr := os.open(dir_path)
-	if derr == nil {
-		defer os.close(dir)
-		files, ferr := os.read_dir(dir, -1, context.temp_allocator)
-		if ferr == nil {
-			for f in files {
-				if !strings.has_suffix(f.name, ".pb") do continue
-				data, rerr := os.read_entire_file(f.fullpath, context.temp_allocator)
-				if rerr != nil do continue
-				o := core.jobj()
-				o["id"] = json.String(f.name[:len(f.name) - 3])
-				o["b64"] = json.String(base64.encode(data, allocator = context.temp_allocator))
-				append(&arr, json.Object(o))
+	// A peer must not be able to pull a vanished object back out of us.
+	if object_id not_in vanished_ids() {
+		h := read_holdings(object_id, context.temp_allocator)
+		cls: core.Classification
+		classified := len(h.cps) > 0
+		if classified do cls = core.base_classify(h.cps, h.deltas[:], h.pending, context.temp_allocator)
+		for &d, i in h.deltas {
+			o := core.jobj()
+			o["id"] = json.String(core.hex_id(d.change.id, context.temp_allocator))
+			o["b64"] = json.String(base64.encode(h.raw[i], allocator = context.temp_allocator))
+			if d.tagged do o["b"] = json.String(core.hex_id(d.b[:], context.temp_allocator))
+			if string(d.change.id) in h.pending do o["pending"] = json.Boolean(true)
+			if classified {
+				class: string
+				switch cls.classes[i] {
+				case .Live: class = "live"
+				case .Covered: class = "covered"
+				case .Premigration_Covered: class = "premigrationCovered"
+				case .Orphan: class = "orphan"
+				case .Stale: class = "stale"
+				}
+				o["class"] = json.String(class)
 			}
+			append(&arr, json.Object(o))
 		}
 	}
 	out := core.jobj()
 	out["objectId"] = json.String(object_id)
 	out["changes"] = json.Array(arr)
-	respond_json(sock, json.Object(out))
+	return json.Object(out)
 }
 
 handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
@@ -165,17 +177,20 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 		respond_error(sock, "bad json")
 		return
 	}
+	result := changes_import(parsed)
+	if result.error != "" {
+		respond_error(sock, result.error, result.status)
+		return
+	}
+	respond_json(sock, result.out)
+}
+
+changes_import :: proc(parsed: json.Value) -> Op_Result {
 	changes_json, ok := core.json_field(parsed, "changes")
 	arr, aok := changes_json.(json.Array)
-	if !ok || !aok {
-		respond_error(sock, "changes array required")
-		return
-	}
+	if !ok || !aok do return {error = "changes array required", status = "400 Bad Request"}
 	provenance, shared, valid_provenance := shared_provenance_parse(parsed)
-	if !valid_provenance {
-		respond_error(sock, "invalid shared provenance", "403 Forbidden")
-		return
-	}
+	if !valid_provenance do return {error = "invalid shared provenance", status = "403 Forbidden"}
 
 	imported := 0
 	skipped := 0
@@ -189,12 +204,21 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 	ids := make([dynamic]json.Value, context.temp_allocator)
 
 	for item in arr {
-		s, sok := item.(json.String)
-		if !sok {
+		// A bare base64 string, or {b64, b?} where b is the base hash hex the
+		// change's event carried in its ["b", …] tag.
+		text, b_hex: string
+		#partial switch v in item {
+		case json.String:
+			text = string(v)
+		case json.Object:
+			text = core.json_str(item, "b64")
+			b_hex = core.json_str(item, "b")
+		}
+		if text == "" || b_hex != "" && !hash_hex_valid(b_hex) {
 			rejected += 1
 			continue
 		}
-		data, derr := base64.decode(string(s), allocator = context.temp_allocator)
+		data, derr := base64.decode(text, allocator = context.temp_allocator)
 		if derr != nil {
 			rejected += 1
 			continue
@@ -250,20 +274,28 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 			continue
 		}
 		hex_str := string(hex.encode(c.id, context.temp_allocator))
-		dir, _ := filepath.join({g_store.root, c.object_id}, context.temp_allocator)
-		path, _ := filepath.join({dir, strings.concatenate({hex_str, ".pb"}, context.temp_allocator)}, context.temp_allocator)
+		path := change_file(c.object_id, hex_str, ".pb")
 		if os.exists(path) {
+			// A held change learns the base its event named.
+			if b_hex != "" && !os.exists(change_file(c.object_id, hex_str, ".b")) && write_change_markers(c.object_id, hex_str, b_hex, false) {
+				store_mark_dirty(c.object_id)
+				touched[strings.clone(c.object_id, context.temp_allocator)] = true
+			}
 			skipped += 1
 			append(&ids, json.String(hex_str))
 			continue
 		}
-		os.make_directory(g_store.data_root)
-		os.make_directory(g_store.root)
-		os.make_directory(dir)
-		if os.write_entire_file(path, data) != nil {
+		// Never resurrect: a change pruned or rebased here stays in the archive.
+		if os.exists(archive_file(c.object_id, hex_str, ".pb")) {
+			skipped += 1
+			append(&ids, json.String(hex_str))
+			continue
+		}
+		if !write_change_markers(c.object_id, hex_str, b_hex, false) || os.write_entire_file(path, data) != nil {
 			rejected += 1
 			continue
 		}
+		archive_link(c.object_id, hex_str, path)
 		imported += 1
 		append(&ids, json.String(hex_str))
 		// The next item must see accepted creates, membership removals and
@@ -273,10 +305,8 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 		touched[strings.clone(c.object_id, context.temp_allocator)] = true
 	}
 
-	if imported > 0 {
-		// Each successful write was invalidated before validating its successor.
-		for object_id in touched do sse_broadcast(object_id)
-	}
+	// Each successful write was invalidated before validating its successor.
+	for object_id in touched do sse_broadcast(object_id)
 
 	out := core.jobj()
 	out["ok"] = json.Boolean(true)
@@ -285,5 +315,5 @@ handle_changes_import :: proc(sock: net.TCP_Socket, body: []byte) {
 	out["rejected"] = json.Integer(i64(rejected))
 	out["dropped"] = json.Integer(i64(dropped))
 	out["ids"] = json.Array(ids)
-	respond_json(sock, json.Object(out))
+	return {out = json.Object(out)}
 }

@@ -1,7 +1,8 @@
 # State sync: bases, live deltas, rebase, Blossom files
 
-Status: specified; supersedes the "replay everything" contract of
-`docs/checkpoint-sync.md` once every host ships it.
+Status: core, daemon and harness implemented (compaction and deletions
+behind flags, see "Computers"); web and iOS in progress. Supersedes the
+"replay everything" contract of `docs/checkpoint-sync.md`.
 
 ## Why
 
@@ -284,6 +285,100 @@ Decisions (RoostrRelay implementation):
    every computer pulled and restarted) -> computers sweep pre-migration
    1078/1079 events from Roostr's relay.
 5. Then imports (Anytype) publish epoch-1 bases directly.
+
+## Computers: daemon and harness
+
+### Daemon (`src/bases.odin`, `src/store.odin`, `src/sync.odin`)
+
+Disk (`<GLON_DATA>`):
+
+- `bases/<objectId>/<hash>.pb` - every held base, bytes as received, named
+  by `base_hash` (damage goes to `bases/.quarantine/`). Retention after any
+  base lands: the current base, up to 3 ancestors through `prev_base`,
+  same-epoch siblings, and every epoch-1 base (the pre-migration sweep reads
+  its `covered_ids`); older ones are deleted. Dropping an ancestor only ever
+  turns what it folded into *stale*, never *orphan* (core Decisions).
+- `changes/<objectId>/<hex>.b` - the base hash the change's event carried
+  (imports) or the object's current base at commit time (local commits);
+  `<hex>.local` - written here and not yet confirmed published: the core's
+  `pending`. Both are written before the `.pb`.
+- `archive/<objectId>/` - the local archive: every change written into
+  `changes/` is hard-linked here (copy when linking fails); a change leaving
+  the working set (covered by a strict ancestor of the current base, or a
+  rebased orphan, `<hex>.rebased` naming its replacement) stays here. Never
+  published or read for sync; an import never brings an archived change back
+  into `changes/`. Vanish purges `bases/<id>` and `archive/<id>` too.
+
+Object state everywhere (objects API, queries, the state cache) is the core's
+base replay: current base + live deltas, or every change (over a legacy 1079
+checkpoint) when no base is held. The legacy `/api/checkpoints` endpoints are
+unchanged.
+
+HTTP (POSTs are service-only, like `/api/checkpoints`):
+
+| Endpoint | Does |
+|---|---|
+| `GET /api/bases` | per object: `hash` (`""` without a base), `epoch`, `createdAt`, `prevBase`, `bases`, `changes`, `live`, `liveBytes`, `oldestMs`, `covered`, `premigrationCovered`, `orphan`, `stale`, `pending`, `compact`, `reason` (core thresholds) |
+| `GET /api/bases/<id>` | held bases newest first `{hash, epoch, createdAt, prevBase, current, b64}` |
+| `POST /api/bases` | import `{bases: [b64], provenance?}` (space bases: owner only, `authorizeBase` rules) → items `{objectId, hash, epoch, createdAt, prevBase, stored, current}` |
+| `POST /api/bases/build` | `{objectId, force?}` → core `compact_plan`; when due the new base is stored (now current) and returned with `folded`. 409 `history incomplete` for an epoch 1 over a DAG with missing parents |
+| `POST /api/bases/seal` | `{base, conversationKey, space?}` → core `seal_base`; personal bases get the secret from `nostr.json` |
+| `POST /api/bases/rebase` | `{objectId, orphans?}` → rebased changes written (with `.b`, `.local`), orphans archived |
+| `POST /api/bases/covered` | `{objectId, ids}` → `{premigration, covered}` (ids folded by a held epoch-1 base / by any held base) |
+| `POST /api/changes/published` | `{published: {objectId: [hex]}}` clears `.local` |
+| `GET /api/changes/<id>` | rows add `b`, `pending`, and `class` (`live`/`covered`/`premigrationCovered`/`orphan`/`stale`) when a base is held |
+| `POST /api/changes` | items may be `{b64, b}`: `b` is stored with the change |
+
+### Harness (`harness/src/nostrsync.ts`)
+
+- Startup: bases first (`{kinds:[31078], authors:[me]}` + each space stream
+  by `#h`, then their 1080 parts by `#c`), imported through the chunk-aware
+  path. No base on the relays or held (pre-migration vault): the full
+  history walk exactly as before. Otherwise the walk is bounded: live deltas
+  by `#b` (batches of 100 hashes), the whole stream of every local object
+  without a base and of the vanish ledger (which never gets one), and our
+  and the space streams `since` the newest base minus a day. The live
+  subscription, watchdog and catch-up read 1078, 1079, 31078, 1080 (and 5)
+  and never ask for less than that floor. The persisted published set is
+  kept in bounded mode (folded deltas are gone from the relays on purpose).
+  REQ paging stands in for NIP-77 reconciliation (one 31078 per object).
+- Deltas go out with `["b", <base>]` from the daemon's `b`; only `live`
+  (or unclassified) working-set changes are published. A published pending
+  change is confirmed to the daemon.
+- Orphans: every pass (and whenever a newer base lands) the daemon rebases
+  them - personal objects always, a space's only for a writer of it - and
+  the rebased changes are published.
+- Compaction (`GLON_STATE_SYNC_COMPACT=1`, default off; replaces the 1079
+  checkpoint loop, which otherwise runs as before and skips objects that
+  hold a base): at startup and every 10 minutes, for each object this
+  computer compacts - `servesHere`, or, for an object nobody serves (no
+  pin, no agent), the roster's smallest machine id, so every object gets a
+  base; shared spaces only when this identity owns the space - that the
+  daemon reports due: build, seal (parts first, then the 31078), and once
+  every relay accepted every event NIP-09: the folded deltas (`e`, k 1078,
+  ≤ 254 per request; event ids from what was imported or published, else
+  read back from the previous base's `#b` stream) and our previous copies
+  at the address (`a` = `31078:<pubkey>:<d>` dated one second before the new
+  base so it survives, plus `e` for their events, k 31078/1080). Epoch 1
+  deletes nothing: what it folded is pre-migration. The cleanup is
+  persisted (`compactions` in `sync-state.json`) and retried until every
+  relay accepted it; if another base wins first it is dropped, deleting
+  nothing.
+- Pre-migration sweep (`GLON_STATE_SYNC_SWEEP_PREMIGRATION`, default off):
+  `dry-run` logs how many untagged 1078s an epoch-1 base folded and how many
+  1079s the compacted objects have; `1` (with `GLON_STATE_SYNC_COMPACT=1`)
+  deletes them, per object, until every relay accepted.
+
+### Files (`harness/src/blossom.ts`, `harness/src/files.ts`)
+
+An upload is encrypted (fresh key, 4 MiB AES-256-GCM frames, nonce = frame
+index big-endian) and PUT to the Blossom server - `GLON_BLOSSOM_URL`, else
+the first configured relay whose NIP-11 lists `blossom`, else
+`https://roostr-relay.fly.dev` - with a kind-24242 authorization; the File
+gets `blob_sha256`, `blob_key`, `blob_url`. A failed upload leaves the File
+peer-to-peer only. Reading: local store, then peers, then Blossom (decrypt,
+check `file_hash`, keep locally). `GLON_BLOSSOM_BACKFILL=1` uploads every
+local File lacking `blob_sha256` once at file-peer start.
 
 ## Core API
 
