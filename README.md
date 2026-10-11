@@ -324,7 +324,8 @@ history from zero once bases exist (a vault with no base keeps the full
 walk). A delta written on an older base is rebased by the daemon and
 republished. Computers compact - fold live deltas into the next base and
 delete the folded deltas from the relays - only with
-`GLON_STATE_SYNC_COMPACT=1`; `GLON_STATE_SYNC_SWEEP_PREMIGRATION=dry-run|1`
+`GLON_STATE_SYNC_COMPACT=1` (read by the daemon too: it refuses to build
+bases without it); `GLON_STATE_SYNC_SWEEP_PREMIGRATION=dry-run|1`
 counts or deletes the pre-migration history once every device reads bases.
 Each computer keeps every change it held in `GLON_DATA/archive/`.
 Permanent deletion uses the synced `__vanished__`

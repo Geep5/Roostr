@@ -337,7 +337,7 @@ HTTP (POSTs are service-only, like `/api/checkpoints`):
 | `GET /api/bases` | per object: `hash` (`""` without a base), `epoch`, `createdAt`, `prevBase`, `bases`, `changes`, `live`, `liveBytes`, `oldestMs`, `covered`, `premigrationCovered`, `orphan`, `stale`, `pending`, `compact`, `reason` (core thresholds) |
 | `GET /api/bases/<id>` | held bases newest first `{hash, epoch, createdAt, prevBase, current, b64}` |
 | `POST /api/bases` | import `{bases: [b64], provenance?}` (space bases: owner only, `authorizeBase` rules) → items `{objectId, hash, epoch, createdAt, prevBase, stored, current}` |
-| `POST /api/bases/build` | `{objectId, force?}` → core `compact_plan`; when due the new base is stored (now current) and returned with `folded`. 409 `history incomplete` for an epoch 1 over a DAG with missing parents |
+| `POST /api/bases/build` | `{objectId, force?}` → core `compact_plan`; when due the new base is stored (now current) and returned with `folded`. 409 `history incomplete` for an epoch 1 over a DAG with missing parents. 409 `compaction is off on this computer` unless the daemon's environment has `GLON_STATE_SYNC_COMPACT=1` (the supervisor gives daemon and sync the same environment): a base sync never publishes would hold the changes it folded only locally |
 | `POST /api/bases/seal` | `{base, conversationKey, space?}` → core `seal_base`; personal bases get the secret from `nostr.json` |
 | `POST /api/bases/rebase` | `{objectId, orphans?}` → rebased changes written (with `.b`, `.local`), orphans archived |
 | `POST /api/bases/covered` | `{objectId, ids}` → `{premigration, covered}` (ids folded by a held epoch-1 base / by any held base) |
@@ -382,7 +382,10 @@ HTTP (POSTs are service-only, like `/api/checkpoints`):
   deletes nothing: what it folded is pre-migration. The cleanup is
   persisted (`compactions` in `sync-state.json`) and retried until every
   relay accepted it; if another base wins first it is dropped, deleting
-  nothing.
+  nothing. Every pass also publishes any held current base the relays lack
+  (no recorded relay copy of that hash, or its own compaction not yet out everywhere) for
+  every object, compacted here or not - e.g. one built by hand with
+  `POST /api/bases/build`.
 - Pre-migration sweep (`GLON_STATE_SYNC_SWEEP_PREMIGRATION`, default off):
   `dry-run` logs how many untagged 1078s an epoch-1 base folded and how many
   1079s the compacted objects have; `1` (with `GLON_STATE_SYNC_COMPACT=1`)

@@ -2002,20 +2002,30 @@ export async function startNostrSync(): Promise<void> {
 		dirty = true;
 	}
 
-	/** One object: make sure its current base is out, finish a pending cleanup, compact when due (or forced: the unbased fallback). True = built. */
-	async function compactObject(objectId: string, row: BaseRow, space: SharedSpace | null, force = false): Promise<boolean> {
+	/**
+	 * Make sure the object's current base is out: one built here (by this
+	 * pass, or POST /api/bases/build by hand) but not (everywhere) on the
+	 * relays yet, or one that must go out under a space key now. Runs for
+	 * every object, not only those compacted here: a held base nobody
+	 * publishes holds the changes it folded only locally. False = not out.
+	 */
+	async function publishHeldBase(objectId: string, row: BaseRow, space: SharedSpace | null): Promise<boolean> {
 		const scope = space ? `${space.spaceId}/${space.keyId}` : "";
 		const copy = state.bases![objectId];
 		const pending = state.compactions![objectId];
-		// A base built here but not (everywhere) out yet, or one that must go out under a space key now.
-		if (row.hash && (copy?.hash !== row.hash || copy.scope !== scope || (pending?.hash === row.hash && !copy.everywhere))) {
-			const res = await apiFetch(`${API}/api/bases/${objectId}`);
-			if (!res.ok) throw new Error(`Base read failed: ${res.status}`);
-			// Daemon response (src/bases.odin GET /api/bases/<objectId>).
-			const held = (await res.json()) as { bases: HeldBase[] };
-			const current = held.bases.find((base) => base.current);
-			if (!current || !(await publishBase(objectId, current.b64, space))) return false;
-		}
+		if (!row.hash || (copy?.hash === row.hash && copy.scope === scope && !(pending?.hash === row.hash && !copy.everywhere))) return true;
+		const res = await apiFetch(`${API}/api/bases/${objectId}`);
+		if (!res.ok) throw new Error(`Base read failed: ${res.status}`);
+		// Daemon response (src/bases.odin GET /api/bases/<objectId>).
+		const held = (await res.json()) as { bases: HeldBase[] };
+		const current = held.bases.find((base) => base.current);
+		return !!current && (await publishBase(objectId, current.b64, space));
+	}
+
+	/** One object: make sure its current base is out, finish a pending cleanup, compact when due (or forced: the unbased fallback). True = built. */
+	async function compactObject(objectId: string, row: BaseRow, space: SharedSpace | null, force = false): Promise<boolean> {
+		const pending = state.compactions![objectId];
+		if (!(await publishHeldBase(objectId, row, space))) return false;
 		if (pending) await cleanupCompaction(objectId, space, row);
 		if (!row.compact && !force) return false;
 		const built = await localPost<BuiltBase>("/api/bases/build", force ? { objectId, force: true } : { objectId });
@@ -2060,7 +2070,10 @@ export async function startNostrSync(): Promise<void> {
 				if (space && (space.owner ?? id!.pk) !== id!.pk) continue; // the owner's computer compacts its space
 				try {
 					const fallback = !row.hash && row.oldestMs > 0 && Date.now() - row.oldestMs > UNBASED_FALLBACK_MS;
-					if (!fallback && !(await compactsHere(objectId))) continue;
+					if (!fallback && !(await compactsHere(objectId))) {
+						await publishHeldBase(objectId, row, space);
+						continue;
+					}
 					if (await compactObject(objectId, row, space, fallback)) built++;
 				} catch (err) {
 					console.error(`[sync] compaction failed for ${objectId.slice(0, 8)}:`, err instanceof Error ? err.message : err);

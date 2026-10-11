@@ -11,7 +11,8 @@ package glon
 //   GET  /api/bases/<objectId>    → {objectId, current, bases: [{hash, epoch, createdAt, prevBase, current, b64}]}
 //   POST /api/bases               → service-only {bases: [b64…], provenance?} → {ok, imported, skipped,
 //                                    rejected, dropped, items: [{objectId, hash, epoch, prevBase, stored, current}]}
-//   POST /api/bases/build         → service-only {objectId, force?} → compaction plan (+ the stored base)
+//   POST /api/bases/build         → service-only {objectId, force?} → compaction plan (+ the stored base);
+//                                    409 unless GLON_STATE_SYNC_COMPACT=1 (the supervisor's environment)
 //   POST /api/bases/seal          → service-only {base, conversationKey, space?} → core seal_base output
 //   POST /api/bases/rebase        → service-only {objectId, orphans?} → {objectId, base, changes: [{orphan, id, b64}]}
 //   POST /api/bases/covered       → service-only {objectId, ids} → {premigration: [hex], covered: [hex]}
@@ -565,9 +566,13 @@ bases_import :: proc(parsed: json.Value) -> Op_Result {
 /**
  * POST /api/bases/build: core compaction planner over what is held. The
  * vanish ledger is never compacted (no daemon imports its base, so folding
- * its deltas would lose it): it answers 400 like a bad id.
+ * its deltas would lose it): it answers 400 like a bad id. Refused (409)
+ * unless compaction is on here (GLON_STATE_SYNC_COMPACT=1, the environment
+ * the supervisor gives the daemon and sync alike): a base built where sync
+ * never publishes it would hold the changes it folded only locally.
  */
 bases_build :: proc(parsed: json.Value) -> Op_Result {
+	if os.get_env_alloc("GLON_STATE_SYNC_COMPACT", context.temp_allocator) != "1" do return fail("compaction is off on this computer", "409 Conflict")
 	object_id := core.json_str(parsed, "objectId")
 	force, _ := core.json_bool(parsed, "force")
 	if !object_id_safe(object_id) || object_id == VANISH_LOG_ID do return fail("bad object id")

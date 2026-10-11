@@ -918,6 +918,26 @@ test("the unbased fallback: a pass compacts an unbased object over 12 h old that
 	expect(basePosts.filter((post) => post.path === "/api/bases/build").map((post) => post.body)).toEqual([{ objectId: "oldOrphan", force: true }]);
 });
 
+test("a held current base the relays lack goes out even when another computer compacts the object; nothing is built for it", async () => {
+	// Built here by hand (POST /api/bases/build): unpublished, the change it folded would exist only in this local base.
+	process.env.GLON_STATE_SYNC_COMPACT = "1";
+	servingRows = { theirs: { machineId: "other-computer", reason: "self", skills: [], candidates: [] } };
+	baseRows = { theirs: baseRow(H2, { epoch: 2, prevBase: H1, compact: true, reason: "deltas", live: 25 }) };
+	heldBases = { theirs: [{ hash: H2, epoch: 2, current: true, b64: "TkVX" }] };
+	baseReply = (path) => {
+		if (path === "/api/bases/seal") return Response.json({ hash: H2, objectId: "theirs", epoch: 2, d: "dd", gid: "", event: { kind: 31078, content: "x", tags: [["d", "dd"]] }, parts: [] });
+		return Response.json({ rejected: 0, items: [] });
+	};
+	realTimers();
+	await startNostrSync();
+	await until(() => published.some((item) => item.kind === 31078));
+	await settle();
+	expect(basePosts.filter((post) => post.path === "/api/bases/seal").map((post) => post.body.base)).toEqual(["TkVX"]);
+	expect(basePosts.some((post) => post.path === "/api/bases/build")).toBe(false);
+	const after = (await state()) as unknown as { bases: Record<string, { hash: string; everywhere: boolean }> };
+	expect(after.bases.theirs).toMatchObject({ hash: H2, everywhere: true });
+});
+
 test("the pre-migration sweep dry run counts what an epoch-1 base folded and deletes nothing", async () => {
 	process.env.GLON_STATE_SYNC_SWEEP_PREMIGRATION = "dry-run";
 	baseRows = { obj: baseRow(H1) };
