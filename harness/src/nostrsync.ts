@@ -1864,7 +1864,10 @@ export async function startNostrSync(): Promise<void> {
 	/**
 	 * Seal through the core (via the daemon) and publish the parts before the
 	 * 31078. Records our relay copy; true only when every relay accepted every
-	 * event - the condition for deleting anything the base folded.
+	 * event - the condition for deleting anything the base folded. Every event
+	 * is followed by PUBLISH_SPACING_MS, the last one too: a compaction pass
+	 * publishes one base after another, and RoostrRelay refuses more than 30
+	 * events a second per connection ("rate-limited: too many events").
 	 */
 	async function publishBase(objectId: string, b64: string, space: SharedSpace | null): Promise<boolean> {
 		const sealed = await localPost<SealedBase>("/api/bases/seal", {
@@ -1876,9 +1879,12 @@ export async function startNostrSync(): Promise<void> {
 		const eventIds: string[] = [];
 		let everywhere = true;
 		let createdAt = 0;
-		for (const [i, template] of templates.entries()) {
+		for (const template of templates) {
 			const event = finalizeEvent({ kind: template.kind, tags: template.tags, content: template.content, created_at: Math.floor(Date.now() / 1000) }, id!.sk);
 			const results = await Promise.allSettled(pool.publish(id!.relays, event));
+			const { promise, resolve } = Promise.withResolvers<void>();
+			setTimeout(resolve, PUBLISH_SPACING_MS);
+			await promise;
 			if (!results.some((result) => result.status === "fulfilled")) {
 				console.error(`[sync] base for ${objectId.slice(0, 8)} refused by every relay; retried next pass`);
 				return false;
@@ -1886,11 +1892,6 @@ export async function startNostrSync(): Promise<void> {
 			if (results.length !== id!.relays.length || results.some((result) => result.status === "rejected")) everywhere = false;
 			eventIds.push(event.id);
 			if (template.kind === BASE_KIND) createdAt = event.created_at;
-			if (i < templates.length - 1) {
-				const { promise, resolve } = Promise.withResolvers<void>();
-				setTimeout(resolve, PUBLISH_SPACING_MS);
-				await promise;
-			}
 		}
 		recordBaseCopy(objectId, { scope: space ? `${space.spaceId}/${space.keyId}` : "", hash: sealed.hash, epoch: sealed.epoch, eventIds, createdAt, everywhere });
 		const pending = state.compactions![objectId];

@@ -842,6 +842,41 @@ test("a base some relay refused keeps its folded deltas until a later pass gets 
 	expect(after.compactions.obj).toMatchObject({ hash: H2, folded: [changeHex(1)] });
 });
 
+test("a compaction pass paces its bases: no two relay events go out without the publish spacing between them", async () => {
+	// RoostrRelay refuses more than 30 events a second per connection; a pass over a whole vault built and
+	// published one base after another unpaced and most were "rate-limited: too many events".
+	process.env.GLON_STATE_SYNC_COMPACT = "1";
+	baseRows = { a: baseRow("", { compact: true, reason: "age", live: 1 }), b: baseRow("", { compact: true, reason: "age", live: 1 }), c: baseRow("", { compact: true, reason: "age", live: 1 }) };
+	baseReply = (path, body) => {
+		if (path === "/api/bases/build") return Response.json({ objectId: body.objectId, compact: true, reason: "age", b64: Buffer.from(String(body.objectId)).toString("base64"), hash: String(body.objectId).repeat(64), epoch: 1, prevBase: "", folded: [] });
+		if (path === "/api/bases/seal") {
+			const objectId = Buffer.from(String(body.base), "base64").toString();
+			return Response.json({ hash: objectId.repeat(64), objectId, epoch: 1, d: objectId, gid: "", event: { kind: 31078, content: "x", tags: [["d", objectId]] }, parts: [] });
+		}
+		return Response.json({ rejected: 0, items: [] });
+	};
+	const sequence: string[] = [];
+	timeoutMock.mockImplementation(((callback: () => void, ms?: number) => {
+		sequence.push(`wait ${ms}`);
+		return realSetTimeout(callback, 0);
+	}) as unknown as typeof setTimeout);
+	const publish = spyOn(SimplePool.prototype, "publish").mockImplementation((_relays, item) => {
+		published.push(item);
+		if (item.kind === 31078) sequence.push("base");
+		return [Promise.resolve("")];
+	});
+	restore.push(() => publish.mockRestore());
+	await startNostrSync();
+	await until(() => published.filter((item) => item.kind === 31078).length === 3);
+	await settle();
+	const bases = sequence.flatMap((step, i) => (step === "base" ? [i] : []));
+	expect(bases).toHaveLength(3);
+	for (const [n, at] of bases.entries()) {
+		const next = n + 1 < bases.length ? bases[n + 1] : sequence.length;
+		expect(sequence.slice(at + 1, next)).toContain("wait 120");
+	}
+});
+
 test("the pre-migration sweep dry run counts what an epoch-1 base folded and deletes nothing", async () => {
 	process.env.GLON_STATE_SYNC_SWEEP_PREMIGRATION = "dry-run";
 	baseRows = { obj: baseRow(H1) };
