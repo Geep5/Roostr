@@ -30,6 +30,7 @@ const COVERAGE: Record<string, Coverage> = {
 	block_update: { tools: ["object_edit_block", "object_check", "object_set_block_style"] },
 	block_move: { tools: ["object_move_block"] },
 	block_remove: { tools: ["object_remove_blocks"] },
+	blocks_append: { reason: "bulk path for importers (a body as one change); agents add blocks with object_add_text / object_add_link" },
 	block_set_attrs: { reason: "gap: line alignment and background colour - cosmetic, not yet an agent tool" },
 	table_create: { reason: TABLES },
 	table_row_add: { reason: TABLES },
