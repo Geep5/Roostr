@@ -96,6 +96,42 @@ whose target is gone appends (existing `place()`), an update/remove of a
 missing block is a no-op. Concurrent edits are therefore applied one after
 the other instead of merged character by character - accepted trade-off.
 
+### Decisions (core)
+
+Where the text above left room, `core/state_sync.odin` reads it
+conservatively:
+
+- **`base_hash`** is sha256 of the base bytes *as received* with any field 8
+  removed - never a re-encoding - so a field a newer writer adds still counts.
+- **Covered** means in `covered_ids` of the current base *or of any held
+  ancestor reached through `prev_base`*. `covered_ids` only lists one
+  compaction's fold, so checking the current base alone would call a delta
+  folded two compactions ago an orphan and re-apply its (older) ops.
+- **Live by descent** applies whatever the `b` tag says (or its absence): a
+  change whose parents are all base heads or live deltas was written on
+  this state, so it is replayed as is. This keeps pre-upgrade clients
+  (no `b` tag) working on top of a base, and a delta written on a losing
+  concurrent base that only built on what the winner also holds needs no
+  rebase. A change with no parents is never live by descent.
+- **Stale** (fifth class): not live, not covered, and the device cannot
+  prove no base folded it, because a base newer than the one it was written
+  on is missing from the held chain (bases are replaced at their address,
+  so a device offline across two compactions never sees the middle one).
+  Stale changes are neither replayed nor rebased. Decidable (→ orphan) when:
+  written on chain epoch `e` and every chain base from `e+1` is held; on a
+  held sibling base of epoch `e` and every chain base from `e` is held;
+  pre-migration or on an unknown base and the chain is held back to epoch 1;
+  or the host lists it as `pending` (never published - no compactor can have
+  seen it). Rebasing a folded change would silently revert later edits;
+  stale only ever hides something another device already handled.
+- **Pre-migration covered**: an untagged change in the epoch-1 base's
+  `covered_ids` (what the pre-migration sweep may delete).
+- **Rebase of several orphans**: all orphans of an object are rebased in one
+  call against the same live heads, in Kahn order; an orphan whose parent is
+  also being rebased additionally names that parent's *rebased* id, so a
+  chain of orphans stays a chain. Parents are sorted bytewise (= hex order).
+  The rebased change carries no legacy in-DAG snapshot.
+
 ## Compaction
 
 Who: the **computer that serves the object** (`harness/src/machine.ts
@@ -126,6 +162,18 @@ every device picks the same current base (rule above); deltas the losing
 base folded that the winner did not are orphans relative to the winner
 and get rebased. Nothing is lost.
 
+Decisions (core): the thresholds (`COMPACT_MIN_DELTAS` 20,
+`COMPACT_MIN_BYTES` 48 KiB of encoded change protobuf, `COMPACT_MAX_AGE_MS`
+24 h) apply to epoch 1 too - pre-migration objects are old, so the age rule
+makes them due at once, while objects created after the last base wait like
+any other; `force` compacts anything with a live delta (imports, manual
+migration). Epoch 1 over a legacy 1079 checkpoint folds the checkpoint's
+`covered_ids` plus exactly the tail the replay applied. Orphans and stale
+changes are never folded (the plan reports their counts: rebase first).
+`created_at` = the host's `nowMs`. A delta only the losing base folded that
+builds solely on the winner's heads is live by descent rather than an
+orphan: same state, no new id.
+
 ## Wire format
 
 All content is NIP-44 v2 with the existing keys (personal conversation key;
@@ -153,6 +201,16 @@ never ride in events: they go to Blossom.
 
 Kind 1079 checkpoints are retired; readers keep importing them until the
 pre-migration sweep removes them.
+
+Decisions (core): the 31078 event carries part 0 (`["c", gid, "0", n]`) and
+the 1080 events parts 1..n-1; every part carries the same `h` tags and
+`owner` as the base (deletion consent, as on 1078). Ingest keys the 31078
+and its 1080 parts as one chunk group of kind 31078, and such groups retire
+like checkpoint groups (a superseded base's parts may be gone for good). A
+1080 without a `c` tag, or a 31078 whose content is not a base of epoch >= 1,
+is not an item. Ingest does not check the `d` tag: authenticity comes from
+the key the content opened under plus the signer rule (`authorizeBase` for
+space objects). `b` is taken from a 1078 only as 64-char lowercase hex.
 
 ## Sync on a device
 
@@ -200,6 +258,22 @@ files work everywhere.
 The server list is the user's BUD-03 kind-10063 event, defaulting to the
 RoostrRelay origin (`https://roostr-relay.fly.dev`).
 
+Decisions (RoostrRelay implementation):
+
+- Uploader claims live in `blobs/<sha256>.meta` sidecars, not SQLite (the
+  relay's store is its own event log; no SQLite dependency was added).
+- Same bytes uploaded by several pubkeys keep one blob with one claim each;
+  `DELETE` drops the caller's claim (403 if it has none) and the bytes go
+  with the last claim. `GET /list/<pk>` must be signed by `<pk>`.
+- Auth `created_at` may be up to 60 s ahead (device clock skew); an
+  `expiration` tag is required. With an empty static allowlist the relay
+  is open, so any signer may upload, as with events.
+- Uploads require `Content-Length` (chunked is 411); `X-SHA-256` disagreeing
+  with the body is 409; an `x` tag not covering the body hash is 401.
+  `HEAD /upload` (BUD-06) preflights with `X-SHA-256`/`X-Content-Length`.
+- Descriptor `url` is `<proto>://<Host>/<sha256>` (no extension; blobs are
+  ciphertext), or `BLOSSOM_PUBLIC_URL/<sha256>` when that is set.
+
 ## Rollout
 
 1. Core + tests; relay (31078/1080 acceptance, `#b`/`#c` indexing, Blossom).
@@ -210,3 +284,134 @@ RoostrRelay origin (`https://roostr-relay.fly.dev`).
    every computer pulled and restarted) -> computers sweep pre-migration
    1078/1079 events from Roostr's relay.
 5. Then imports (Anytype) publish epoch-1 bases directly.
+
+## Core API
+
+Every host reaches these through the existing core boundary:
+`dispatch("sync", {action, ...})` (WASM `core_execute`, the xcframework, the
+native daemon). Implementation: `core/state_sync.odin` (classification,
+replay, rebase, planner), `core/wire.odin` (sealing), `core/sync_session.odin`
+(ingest), `core/authority.odin` (authorization). Errors come back as the
+usual dispatch error string. Hex ids/hashes below are abbreviated.
+
+Shared request fields:
+
+- `bases`: base64 `Checkpoint` protobufs (epoch >= 1) the device holds for
+  ONE object - the current one and any superseded ones still held (holding
+  more of the chain makes more orphans decidable, see Decisions).
+- `changes`: `ChangeJSON` (as `codec`/`replay` use) plus `"b": "<hex>"` when
+  the change's event carried a `b` tag (absent = pre-migration).
+- `pending`: hex ids of changes this device has never published.
+- `checkpoint`: a legacy kind-1079 checkpoint (base64), only used when
+  there is no base (exactly like `replay`).
+
+All bases and changes must belong to one object.
+
+### `base_decode`
+
+```json
+{"action":"base_decode","base":"CgVvYmotMRIg…"}
+→ {"objectId":"obj-1","hash":"5e50…","epoch":2,"prevBase":"a1b2…","createdAt":1760000000000,
+   "headIds":["f315…"],"covered":3,"coveredIds":["…","…","…"],"state":{ObjectJSON}}
+```
+
+### `base_current`
+
+```json
+{"action":"base_current","bases":["…","…"]}
+→ {"index":1,"hash":"5e50…","epoch":2}          // null when no base
+```
+
+### `classify`
+
+```json
+{"action":"classify","bases":["…"],"changes":[{…,"b":"5e50…"},{…}],"pending":["9f0c…"]}
+→ {"base":{"hash":"5e50…","epoch":2},            // null: no base, every change is live
+   "live":["…"],"covered":["…"],"premigrationCovered":["…"],
+   "orphan":["…"],"stale":["…"],"liveHeads":["…"]}
+```
+
+Hosts replay `live`, rebase `orphan`, may archive `covered` /
+`premigrationCovered`, and keep `stale` archived (never replay, never publish).
+
+### `replay_from_base`
+
+```json
+{"action":"replay_from_base","bases":["…"],"changes":[…],"pending":[…],"checkpoint":null}
+→ {ObjectJSON with heads}                        // null when nothing is held
+```
+
+Current base state + live deltas in Kahn order; with no base, identical to
+`replay` over every held change.
+
+### `rebase`
+
+```json
+{"action":"rebase","bases":["…"],"changes":[…],"pending":[…],"orphans":["…"]}
+→ {"base":"5e50…",
+   "changes":[{"orphan":"7d1e…","id":"c09a…","change":{ChangeJSON},"bytes":"CiDA…"}]}
+```
+
+`orphans` is optional (default: every orphan). Output is in publish order.
+Publish each through the outbox with `base` = the returned hash
+(`outbox_enqueue {pending: {…, base}}` or `wire seal {…, base}` add
+`["b", hash]`), then mark the orphan rebased locally. Two devices with the
+same holdings produce the same ids.
+
+### `compact_plan`
+
+```json
+{"action":"compact_plan","bases":["…"],"changes":[…],"nowMs":1760000000000,
+ "pending":[…],"checkpoint":null,"force":false}
+→ {"compact":true,"reason":"deltas","live":20,"liveBytes":5120,"oldestMs":1759990000000,
+   "orphans":0,"stale":0,
+   "base":"CgVvYmo…","hash":"77aa…","epoch":3,"prevBase":"5e50…","folded":["…"]}
+```
+
+`reason`: `deltas` | `bytes` | `age` | `forced` | `""`. `base`, `hash`,
+`epoch`, `prevBase`, `folded` only when `compact`. After publishing the base
+(below) to every relay, delete the `folded` deltas and the previous base.
+
+### `seal_base` (also `dispatch("wire", {action:"seal_base"})`)
+
+```json
+{"action":"seal_base","base":"CgVvYmo…","conversationKey":"02…",
+ "secret":"01…"}                                // or "space":{"keyHex","spaceId","owner"}
+→ {"hash":"77aa…","objectId":"obj-1","epoch":3,"d":"3b9e…","gid":"b68d…",
+   "event":{"kind":31078,"content":"…","tags":[["d","3b9e…"],["h","5f9c…"],["epoch","3"],["c","b68d…","0","2"]]},
+   "parts":[{"kind":1080,"content":"…","tags":[["h","5f9c…"],["c","b68d…","1","2"]]}]}
+```
+
+Sign and publish every `parts` event before `event`. `gid` is `""` and
+`parts` empty for a single-part base (no `c` tag).
+
+### Deltas on a base
+
+`wire seal` and `outbox_enqueue` accept `base` (hex): the sealed 1078 parts
+carry `["b", base]`.
+
+### Ingest
+
+`ingest` now also takes kinds 31078 and 1080. A completed base yields
+
+```json
+{"item":{"bytes":"<base64 Checkpoint>","base":{"objectId":"obj-1","hash":"77aa…","epoch":3,
+  "prevBase":"5e50…","createdAt":…,"headIds":["…"],"covered":20},
+  "chunkKey":"…","provenance":{"spaceId","keyId","signer"}}}
+```
+
+(`chunkKey` when split, `provenance` for space objects; settle it like a
+checkpoint group). A 1078 item carries `"b":"<hex>"` when its event had one;
+hosts must store it with the change and pass it back in `changes[].b`.
+
+### `authorizeBase`
+
+```json
+{"action":"authorizeBase","base":"CgVvYmo…",
+ "provenance":{"spaceId":"space-1","keyId":1,"signer":"abab…"},
+ "space":{"spaceId":"space-1","keyId":1,"owner":"abab…"},"trustedSpace":null,"existing":null}
+→ {"ok":false,"reason":"only the space owner may publish bases"}
+```
+
+Same rules as `authorizeCheckpoint` (owner only, state scoped to the space,
+type unchanged); a base of epoch 0 is refused.

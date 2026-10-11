@@ -105,6 +105,8 @@ wire_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		return json.String(wire_blind(prefix, json_str(payload, "id"), context.temp_allocator)), ""
 	case "seal":
 		return wire_seal(payload)
+	case "seal_base":
+		return wire_seal_base(payload)
 	case "open":
 		key, ok := hex_bytes(json_str(payload, "conversationKey"))
 		if !ok do return nil, "invalid conversationKey hex"
@@ -130,10 +132,12 @@ blind_prefix :: proc(payload: json.Value) -> ([]byte, bool) {
 	return nil, false
 }
 
-// {change: base64, conversationKey: hex, secret?: hex | space?: {keyHex, spaceId, owner?}, objectId, nonce?}
+// {change: base64, conversationKey: hex, secret?: hex | space?: {keyHex, spaceId, owner?}, objectId, base?: hex, nonce?}
 // → {gid, parts: [{content, tags}]}. Hosts sign each part as a kind-1078 event.
 // A space owner (hex) rides as ["owner", hex]: the author's consent that the
 // owner may delete this event from the relay when the space is deleted.
+// `base` is the hash of the base the delta was written on: ["b", hex]
+// (docs/state-sync.md); without it the delta is pre-migration.
 wire_seal :: proc(payload: json.Value) -> (json.Value, string) {
 	change := json_str(payload, "change")
 	if change == "" do return nil, "seal needs change base64"
@@ -143,43 +147,108 @@ wire_seal :: proc(payload: json.Value) -> (json.Value, string) {
 	if !nok do return nil, "invalid nonce hex"
 	object_id := json_str(payload, "objectId")
 	if object_id == "" do return nil, "seal needs objectId"
+	tags, _, err := wire_stream_tags(payload, object_id)
+	if err != "" do return nil, err
+	if base := json_str(payload, "base"); base != "" {
+		if !is_hex_pubkey(base) do return nil, "base must be a 64-char lowercase hex hash"
+		append(&tags, tag("b", base))
+	}
+	gid, parts, serr := wire_seal_parts(change, key, nonce, tags[:], nil)
+	if serr != "" do return nil, serr
+	out := jobj()
+	out["gid"] = json.String(gid)
+	out["parts"] = json.Array(parts)
+	return json.Object(out), ""
+}
 
-	tags := make([dynamic]json.Value, context.temp_allocator)
+// The stream tags every sealed event of `object_id` carries - object `h`
+// (plus the space-wide `h` and `owner` for shared objects) - and the
+// blinding prefix behind them (raw secret, or the space key's hex text).
+wire_stream_tags :: proc(payload: json.Value, object_id: string) -> (tags: [dynamic]json.Value, prefix: []byte, err: string) {
+	tags = make([dynamic]json.Value, context.temp_allocator)
 	if space, present := json_field(payload, "space"); present {
 		key_hex, space_id := json_str(space, "keyHex"), json_str(space, "spaceId")
-		if key_hex == "" || space_id == "" do return nil, "space needs keyHex and spaceId"
-		append(&tags, tag("h", wire_blind(transmute([]byte)key_hex, object_id, context.temp_allocator)))
-		append(&tags, tag("h", wire_blind(transmute([]byte)key_hex, fmt.tprintf("space:%s", space_id), context.temp_allocator)))
+		if key_hex == "" || space_id == "" do return tags, nil, "space needs keyHex and spaceId"
+		prefix = transmute([]byte)key_hex
+		append(&tags, tag("h", wire_blind(prefix, object_id, context.temp_allocator)))
+		append(&tags, tag("h", wire_blind(prefix, fmt.tprintf("space:%s", space_id), context.temp_allocator)))
 		if owner := strings.to_lower(json_str(space, "owner"), context.temp_allocator); owner != "" {
-			if !is_hex_pubkey(owner) do return nil, "space owner must be a hex pubkey"
+			if !is_hex_pubkey(owner) do return tags, nil, "space owner must be a hex pubkey"
 			append(&tags, tag("owner", owner))
 		}
-	} else {
-		secret, sok := hex_bytes(json_str(payload, "secret"))
-		if !sok || len(secret) != 32 do return nil, "seal needs secret hex or space"
-		append(&tags, tag("h", wire_blind(secret, object_id, context.temp_allocator)))
+		return tags, prefix, ""
 	}
+	secret, sok := hex_bytes(json_str(payload, "secret"))
+	if !sok || len(secret) != 32 do return tags, nil, "seal needs secret hex or space"
+	append(&tags, tag("h", wire_blind(secret, object_id, context.temp_allocator)))
+	return tags, secret, ""
+}
 
-	count := (len(change) + WIRE_CHUNK_CHARS - 1) / WIRE_CHUNK_CHARS
-	if count > WIRE_MAX_CHUNKS do return nil, "change exceeds chunk limit"
-	gid := count > 1 ? wire_group_id(change, context.temp_allocator) : ""
-	parts := make([dynamic]json.Value, context.temp_allocator)
+// Split base64 `text` into WIRE_CHUNK_CHARS parts, each NIP-44 sealed and
+// tagged `tags` (+ ["c", gid, i, n] when split). `first_tags`, when given,
+// replace `tags` on part 0 (a base's addressable event carries d/epoch).
+wire_seal_parts :: proc(text: string, key, nonce: []byte, tags: []json.Value, first_tags: []json.Value) -> (gid: string, parts: [dynamic]json.Value, err: string) {
+	count := (len(text) + WIRE_CHUNK_CHARS - 1) / WIRE_CHUNK_CHARS
+	if count > WIRE_MAX_CHUNKS do return "", nil, "change exceeds chunk limit"
+	gid = count > 1 ? wire_group_id(text, context.temp_allocator) : ""
+	parts = make([dynamic]json.Value, context.temp_allocator)
 	for index in 0 ..< count {
 		start := index * WIRE_CHUNK_CHARS
-		end := min(start + WIRE_CHUNK_CHARS, len(change))
-		content, eok := nip44_encrypt(change[start:end], key, nonce, context.temp_allocator)
-		if !eok do return nil, "nip44 encrypt rejected part"
+		end := min(start + WIRE_CHUNK_CHARS, len(text))
+		content, eok := nip44_encrypt(text[start:end], key, nonce, context.temp_allocator)
+		if !eok do return "", nil, "nip44 encrypt rejected part"
 		part_tags := make([dynamic]json.Value, context.temp_allocator)
-		append(&part_tags, ..tags[:])
+		append(&part_tags, ..(index == 0 && first_tags != nil ? first_tags : tags))
 		if gid != "" do append(&part_tags, tag("c", gid, fmt.tprintf("%d", index), fmt.tprintf("%d", count)))
 		part := jobj()
 		part["content"] = json.String(content)
 		part["tags"] = json.Array(part_tags)
 		append(&parts, json.Object(part))
 	}
+	return gid, parts, ""
+}
+
+// {base: base64 Checkpoint (epoch >= 1), conversationKey, secret? | space?: {keyHex, spaceId, owner?}, nonce?}
+// → {hash, objectId, epoch, d, gid, event: {kind: 31078, content, tags}, parts: [{kind: 1080, content, tags}]}.
+// Part 0 rides in the addressable 31078 event (d, h…, owner?, epoch, c?);
+// parts 1..n-1 are kind-1080 events (h…, owner?, c) the host publishes
+// BEFORE the 31078 so a reader of the base can always fetch them by #c.
+wire_seal_base :: proc(payload: json.Value) -> (json.Value, string) {
+	text := json_str(payload, "base")
+	bytes, bok := bytes_from_base64(text, context.temp_allocator)
+	if !bok do return nil, "seal_base needs base base64"
+	base, dok := decode_checkpoint(bytes, context.temp_allocator)
+	if !dok do return nil, "invalid protobuf base"
+	if base.epoch < 1 do return nil, "a base has epoch >= 1"
+	key, ok := hex_bytes(json_str(payload, "conversationKey"))
+	if !ok || len(key) != NIP44_KEY_SIZE do return nil, "invalid conversationKey hex"
+	nonce, nok := optional_hex(payload, "nonce")
+	if !nok do return nil, "invalid nonce hex"
+	tags, prefix, err := wire_stream_tags(payload, base.object_id)
+	if err != "" do return nil, err
+	d := wire_blind(prefix, fmt.tprintf("base:%s", base.object_id), context.temp_allocator)
+	first := make([dynamic]json.Value, context.temp_allocator)
+	append(&first, tag("d", d))
+	append(&first, ..tags[:])
+	append(&first, tag("epoch", fmt.tprintf("%d", base.epoch)))
+	gid, parts, serr := wire_seal_parts(text, key, nonce, tags[:], first[:])
+	if serr != "" do return nil, serr == "change exceeds chunk limit" ? "base exceeds chunk limit" : serr
+	event := parts[0].(json.Object)
+	event["kind"] = json.Integer(SYNC_BASE_KIND)
+	rest := make([dynamic]json.Value, context.temp_allocator)
+	for part in parts[1:] {
+		p := part.(json.Object)
+		p["kind"] = json.Integer(SYNC_BASE_PART_KIND)
+		append(&rest, json.Object(p))
+	}
 	out := jobj()
+	out["hash"] = json.String(hex_id(base.base_hash[:], context.temp_allocator))
+	out["objectId"] = json.String(base.object_id)
+	out["epoch"] = json.Integer(base.epoch)
+	out["d"] = json.String(d)
 	out["gid"] = json.String(gid)
-	out["parts"] = json.Array(parts)
+	out["event"] = json.Object(event)
+	out["parts"] = json.Array(rest)
 	return json.Object(out), ""
 }
 

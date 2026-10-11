@@ -823,7 +823,18 @@ compute_state :: proc(changes: []Change, allocator := context.allocator, checkpo
 			start_idx = snapshot_idx + 1
 		}
 	}
+	if !replay_apply(&state, seed, sorted[start_idx:], max_ts, allocator) do return state, false
+	return state, true
+}
 
+/**
+ * Apply `sorted` (already in Kahn order) on top of `seed` (nil = empty
+ * object). `state` arrives with id and heads set; fields, blocks, type and
+ * timestamps are filled here. False when a block op makes the tree cyclic.
+ */
+replay_apply :: proc(state: ^Object_State, seed: ^Snapshot, sorted: []^Change, max_ts_in: i64, allocator := context.allocator) -> bool {
+	max_ts := max_ts_in
+	if state.fields == nil do state.fields = make([dynamic]Value_Entry, allocator)
 	initial_blocks: []Block
 	if seed != nil {
 		state.type_key = seed.type_key
@@ -835,7 +846,7 @@ compute_state :: proc(changes: []Change, allocator := context.allocator, checkpo
 	}
 
 	t := tree_build(initial_blocks, allocator)
-	if !replay_tree_valid(&t) do return state, false
+	if !replay_tree_valid(&t) do return false
 	// Deprecated Snapshot.content → __content__ block.
 	if seed != nil && len(seed.content) > 0 && "__content__" not_in t.by_id {
 		b := new(Block, allocator)
@@ -849,8 +860,7 @@ compute_state :: proc(changes: []Change, allocator := context.allocator, checkpo
 		append(&t.root_ids, b.id)
 	}
 
-	for i in start_idx ..< len(sorted) {
-		change := sorted[i]
+	for change in sorted {
 		if change.timestamp > max_ts do max_ts = change.timestamp
 
 		row_counts := capture_row_counts(&t)
@@ -877,7 +887,7 @@ compute_state :: proc(changes: []Change, allocator := context.allocator, checkpo
 				state.deleted = true
 			case .Block_Add:
 				apply_block_add(&t, op, op_key, allocator)
-				if !replay_tree_valid(&t) do return state, false
+				if !replay_tree_valid(&t) do return false
 				touched = true
 			case .Block_Remove:
 				remove_subtree(&t, op.block_id)
@@ -889,7 +899,7 @@ compute_state :: proc(changes: []Change, allocator := context.allocator, checkpo
 				// Same post-op cycle check as Block_Add: a move can also
 				// corrupt the tree (e.g. duplicated child refs), and boot
 				// replay must reject it instead of serializing a cycle.
-				if !replay_tree_valid(&t) do return state, false
+				if !replay_tree_valid(&t) do return false
 				touched = true
 			case .Block_Set_Align:
 				if b, ok := t.by_id[op.block_id]; ok do b.align = op.align
@@ -903,5 +913,5 @@ compute_state :: proc(changes: []Change, allocator := context.allocator, checkpo
 
 	state.blocks = tree_serialize(&t, allocator)
 	state.updated_at = max_ts
-	return state, true
+	return true
 }

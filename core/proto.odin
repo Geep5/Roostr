@@ -152,14 +152,21 @@ Change :: struct {
 }
 
 // A computed state plus the exact change ids folded into it. Never a Change:
-// it lives beside the DAG (checkpoints/<objectId>.pb, kind 1079), so no peer
-// has to store one per compaction pass. docs/checkpoint-sync.md.
+// it lives beside the DAG. Epoch 0 (fields 6/7 absent) is a legacy kind-1079
+// replay cache (docs/checkpoint-sync.md); epoch >= 1 is a state-sync BASE
+// (kind 31078, docs/state-sync.md) whose covered_ids are the deltas folded
+// since prev_base.
 Checkpoint :: struct {
 	object_id:   string,
 	head_ids:    [dynamic][]byte,
 	covered_ids: [dynamic][]byte,
 	state:       Snapshot,
 	created_at:  i64,
+	epoch:       i64,    // field 6; 0 = legacy checkpoint
+	prev_base:   []byte, // field 7; sha256 of the previous base, empty at epoch 1
+	// Field 8, never serialized: sha256 of the encoding with field 8 absent.
+	// Set by decode_checkpoint and base_finalize; zero until then.
+	base_hash:   [32]byte,
 }
 
 // ── Wire reader ──────────────────────────────────────────────────────
@@ -734,6 +741,10 @@ decode_checkpoint :: proc(data: []byte, allocator := context.allocator) -> (Chec
 			cp.state = decode_snapshot(read_bytes(&r), allocator)
 		case 5:
 			cp.created_at = as_i64(read_varint(&r))
+		case 6:
+			cp.epoch = as_i64(read_varint(&r))
+		case 7:
+			cp.prev_base = read_bytes(&r)
 		case:
 			skip_field(&r, tag & 7)
 		}
@@ -741,7 +752,32 @@ decode_checkpoint :: proc(data: []byte, allocator := context.allocator) -> (Chec
 	if r.err || cp.object_id == "" || cp.state.id != cp.object_id do return {}, false
 	for id in cp.head_ids do if len(id) != 32 do return {}, false
 	for id in cp.covered_ids do if len(id) != 32 do return {}, false
+	if cp.epoch < 0 || len(cp.prev_base) != 0 && len(cp.prev_base) != 32 do return {}, false
+	cp.base_hash = base_hash_of(data)
 	return cp, true
+}
+
+/**
+ * sha256 of a base's protobuf with any field 8 (base_hash) removed. Hashes the
+ * bytes as received, never a re-encoding, so a field a newer writer added
+ * still counts towards the identity every replica computes.
+ */
+base_hash_of :: proc(data: []byte) -> [32]byte {
+	r := Reader{data = data}
+	kept := make([dynamic]byte, 0, len(data), context.temp_allocator)
+	stripped := false
+	for r.pos < len(r.data) && !r.err {
+		start := r.pos
+		tag := read_varint(&r)
+		skip_field(&r, tag & 7)
+		if r.err do break
+		if tag >> 3 == 8 {
+			stripped = true
+			continue
+		}
+		append(&kept, ..data[start:r.pos])
+	}
+	return sha256(stripped ? kept[:] : data)
 }
 
 // ── Wire writer ──────────────────────────────────────────────────────
@@ -1063,6 +1099,8 @@ encode_checkpoint :: proc(cp: Checkpoint, allocator := context.allocator) -> []b
 	write_len_prefixed(&w, 4, sw.buf[:])
 	delete(sw.buf)
 	write_i64_field(&w, 5, cp.created_at)
+	write_i64_field(&w, 6, cp.epoch)
+	if len(cp.prev_base) > 0 do write_len_prefixed(&w, 7, cp.prev_base)
 	return w.buf[:]
 }
 
@@ -1118,7 +1156,7 @@ wire_field :: proc(message: Wire_Message, field: u64) -> (wire: u64, nested: Wir
 	case .Change:
 		switch field { case 1, 2, 3, 6: case 4: nested = .Operation; case 5: wire = 0; case 7: nested = .Snapshot; case: known = false }
 	case .Checkpoint:
-		switch field { case 1, 2, 3: case 4: nested = .Snapshot; case 5: wire = 0; case: known = false }
+		switch field { case 1, 2, 3, 7: case 4: nested = .Snapshot; case 5, 6: wire = 0; case: known = false }
 	case .Operation:
 		switch field {
 		case 1: nested = .Create

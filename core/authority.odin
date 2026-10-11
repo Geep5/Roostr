@@ -12,6 +12,7 @@ package core
 
 import "core:encoding/base64"
 import "core:encoding/json"
+import "core:fmt"
 import "core:strings"
 
 VANISH_LOG_ID :: "__vanished__"
@@ -195,29 +196,30 @@ authorize_shared_change :: proc(c: ^Change, p: Shared_Provenance, space: Shared_
 }
 
 /**
- * A checkpoint bypasses per-op authority, so only the space OWNER's are
- * accepted, and the folded state must be scoped to the space it arrived
+ * A checkpoint or base bypasses per-op authority, so only the space OWNER's
+ * are accepted, and the folded state must be scoped to the space it arrived
  * through: an owner of space A must not be able to overwrite an object that
- * lives elsewhere by wrapping a checkpoint in A's key.
+ * lives elsewhere by wrapping a checkpoint in A's key. `what` names the kind
+ * in reasons ("checkpoint" for kind 1079, "base" for kind 31078).
  */
 authorize_shared_checkpoint :: proc(cp: ^Checkpoint, p: Shared_Provenance, space: Shared_Space,
-	trusted_space: ^Object_State, existing: ^Object_State) -> (ok: bool, reason: string) {
+	trusted_space: ^Object_State, existing: ^Object_State, what := "checkpoint") -> (ok: bool, reason: string) {
 	if p.space_id == "" || p.space_id != space.space_id || p.key_id != space.key_id do return false, "provenance does not match the installed space key"
 	if !is_hex_pubkey(p.signer) do return false, "signer is not a hex pubkey"
-	if space.owner == "" || p.signer != space.owner do return false, "only the space owner may publish checkpoints"
+	if space.owner == "" || p.signer != space.owner do return false, fmt.tprintf("only the space owner may publish %ss", what)
 	if trusted_space != nil && (trusted_space.type_key != "channel" || trusted_space.id != space.space_id || trusted_space.deleted) {
 		return false, "space object is not a live channel"
 	}
 	if cp.object_id == "" || cp.object_id == VANISH_LOG_ID do return false, "object id is not shareable"
 	snap := &cp.state
-	if snap.type_key == "" || snap.type_key == VANISH_LOG_TYPE do return false, "checkpoint does not describe a shareable object"
+	if snap.type_key == "" || snap.type_key == VANISH_LOG_TYPE do return false, fmt.tprintf("%s does not describe a shareable object", what)
 	if cp.object_id == space.space_id {
-		if snap.type_key != "channel" do return false, "space checkpoint is not a channel"
+		if snap.type_key != "channel" do return false, fmt.tprintf("space %s is not a channel", what)
 	} else if snap.type_key == "channel" || field_string(snap.fields, "channel") != space.space_id {
-		return false, "checkpoint is not scoped to the space"
+		return false, fmt.tprintf("%s is not scoped to the space", what)
 	}
 	if existing != nil {
-		if existing.type_key != snap.type_key do return false, "checkpoint changes the object type"
+		if existing.type_key != snap.type_key do return false, fmt.tprintf("%s changes the object type", what)
 		if cp.object_id != space.space_id && field_string(existing.fields, "channel") != space.space_id do return false, "existing object belongs to another scope"
 	}
 	return true, ""
@@ -288,17 +290,24 @@ change_vanished_by :: proc(vanished: map[string]Vanish_Entry, c: ^Change, existi
 
 sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	switch json_str(payload, "action") {
-	case "authorize", "authorizeCheckpoint":
-		is_checkpoint := json_str(payload, "action") == "authorizeCheckpoint"
+	case "authorize", "authorizeCheckpoint", "authorizeBase":
+		// authorizeCheckpoint: {checkpoint: base64}; authorizeBase: {base:
+		// base64, epoch >= 1}; authorize: {change: ChangeJSON}. Plus
+		// {provenance: {spaceId, keyId, signer}, space: {spaceId, keyId, owner},
+		// trustedSpace?, existing?} → {ok, reason}. Only the space owner may
+		// publish a checkpoint or a base of a space object.
+		action := json_str(payload, "action")
+		is_checkpoint := action != "authorize"
 		change: Change
 		checkpoint: Checkpoint
 		if is_checkpoint {
-			// {checkpoint: base64 bytes}
-			raw, derr := base64.decode(json_str(payload, "checkpoint"), allocator = context.temp_allocator)
-			if derr != nil do return nil, "invalid checkpoint base64"
+			field := action == "authorizeBase" ? "base" : "checkpoint"
+			raw, derr := base64.decode(json_str(payload, field), allocator = context.temp_allocator)
+			if derr != nil do return nil, fmt.tprintf("invalid %s base64", field)
 			cok: bool
 			checkpoint, cok = decode_checkpoint(raw, context.temp_allocator)
-			if !cok do return nil, "invalid checkpoint bytes"
+			if !cok do return nil, fmt.tprintf("invalid %s bytes", field)
+			if action == "authorizeBase" && checkpoint.epoch < 1 do return nil, "a base has epoch >= 1"
 		} else {
 			change_value, _ := json_field(payload, "change")
 			cok: bool
@@ -318,7 +327,7 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		ok: bool
 		reason: string
 		if is_checkpoint {
-			ok, reason = authorize_shared_checkpoint(&checkpoint, provenance, space, trusted, existing)
+			ok, reason = authorize_shared_checkpoint(&checkpoint, provenance, space, trusted, existing, action == "authorizeBase" ? "base" : "checkpoint")
 		} else {
 			ok, reason = authorize_shared_change(&change, provenance, space, trusted, existing)
 		}
@@ -404,7 +413,8 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		return json.Boolean(true), ""
 	// ── Outbox (sync_outbox.odin) ──
 	case "outbox_enqueue":
-		// {pending: {key, objectId, changeId, bytes: base64, spaceId?, keyId?, hasEvents}} → {queued, reason?, pending}
+		// {pending: {key, objectId, changeId, bytes: base64, spaceId?, keyId?, hasEvents, base?: hex}} → {queued, reason?, pending}
+		// `base` = hash of the base the delta was written on; sealed as ["b", base].
 		if !sync_session.active do return nil, "no sync session"
 		pending, present := json_field(payload, "pending")
 		if !present do return nil, "outbox_enqueue needs pending"
@@ -449,6 +459,9 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		out := jobj()
 		out["pending"] = json.Integer(i64(outbox_pending()))
 		return json.Object(out), ""
+	// ── State sync: bases, classification, rebase, compaction (state_sync.odin) ──
+	case "base_decode", "base_current", "classify", "replay_from_base", "rebase", "compact_plan", "seal_base":
+		return state_sync_dispatch(payload)
 	}
 	return nil, "unknown sync action"
 }

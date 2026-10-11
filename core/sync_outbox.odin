@@ -22,6 +22,7 @@ Outbox_Item :: struct {
 	space_id:   string, // "" for the personal obligation
 	key_hex:    string, // space key captured at enqueue, as the browser did
 	owner:      string, // space owner captured with the key: the relay-deletion consent tag
+	base:       string, // hex hash of the base the delta was written on → ["b", base]; "" = pre-migration
 	key_id:     i64,
 	has_events: bool, // host holds signed ciphertext; never re-seal
 	attempts:   int,
@@ -38,6 +39,7 @@ outbox_item_free :: proc(item: ^Outbox_Item) {
 	delete(item.space_id, base)
 	delete(item.key_hex, base)
 	delete(item.owner, base)
+	delete(item.base, base)
 }
 
 outbox_clear :: proc() {
@@ -71,6 +73,8 @@ outbox_enqueue :: proc(pending: json.Value) -> (Outbox_Enqueue, string) {
 	if key == "" || change == "" || object_id == "" || change_id == "" do return .Queued, "pending needs key, objectId, changeId and bytes"
 	if outbox_find(key) >= 0 do return .Already_Queued, ""
 	has_events, _ := json_bool(pending, "hasEvents")
+	base_hash := json_str(pending, "base")
+	if base_hash != "" && !is_hex_pubkey(base_hash) do return .Queued, "pending base must be a 64-char lowercase hex hash"
 	space_id := json_str(pending, "spaceId")
 	key_id, _ := json_int(pending, "keyId")
 	key_hex, owner := "", ""
@@ -87,6 +91,7 @@ outbox_enqueue :: proc(pending: json.Value) -> (Outbox_Enqueue, string) {
 		space_id = strings.clone(space_id, base),
 		key_hex = strings.clone(key_hex, base),
 		owner = strings.clone(owner, base),
+		base = strings.clone(base_hash, base),
 		key_id = key_id,
 		has_events = has_events,
 	})
@@ -118,6 +123,7 @@ outbox_next :: proc(now_ms: i64) -> (item: json.Value, wait_ms: i64, err: string
 			seal := jobj()
 			seal["change"] = json.String(candidate.change)
 			seal["objectId"] = json.String(candidate.object_id)
+			if candidate.base != "" do seal["base"] = json.String(candidate.base)
 			if candidate.space_id != "" {
 				seal["conversationKey"] = json.String(candidate.key_hex)
 				space := jobj()

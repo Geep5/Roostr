@@ -1,7 +1,8 @@
 package core
 
-// Receive-side sync session: turns verified kind-1078 (change) and kind-1079
-// (checkpoint) relay events into importable items. Owns chunk-group
+// Receive-side sync session: turns verified kind-1078 (change), kind-1079
+// (legacy checkpoint), kind-31078 (base) and kind-1080 (base part) relay
+// events into importable items. Owns chunk-group
 // reassembly, the cursor high-water
 // mark and replay-group bookkeeping, and reports replay faults the host
 // must fold into its history floor. Like the query cache it persists across
@@ -19,6 +20,10 @@ import "core:strings"
 
 SYNC_CHANGE_KIND :: 1078
 SYNC_CHECKPOINT_KIND :: 1079
+// State sync (docs/state-sync.md): a base is addressable; parts 2..n of a
+// split base are regular kind-1080 events sharing the base's chunk group.
+SYNC_BASE_KIND :: 31078
+SYNC_BASE_PART_KIND :: 1080
 // NIP-09 deletion. One carrying a space's stream tag, signed by the space's
 // owner, is that space's deletion: the relay drops the stream and every
 // member's replicas vanish the space.
@@ -215,11 +220,13 @@ digits :: proc(s: string) -> (int, bool) {
 	return n, true
 }
 
-// One verified kind-1078/1079 event → at most one importable item. Mirrors the
-// former RelaySync.eventToChange step for step; see the ingest response
-// contract in sync_dispatch. A checkpoint item carries `checkpoint` instead
-// of `change`; the HOST decides whether its signer may checkpoint the object
-// (self for personal objects, the space owner for shared ones). A verified
+// One verified kind-1078/1079/31078/1080 event → at most one importable item.
+// Mirrors the former RelaySync.eventToChange step for step; see the ingest
+// response contract in sync_dispatch. A checkpoint item carries `checkpoint`
+// and a base item `base` instead of `change`; the HOST decides whether its
+// signer may checkpoint/base the object (self for personal objects, the space
+// owner for shared ones: authorizeCheckpoint / authorizeBase). A change item
+// carries `b` when its event named the base it was written on. A verified
 // kind-5 only ever reports a space its owner deleted.
 sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 	kind, _ := json_int(event, "kind")
@@ -227,7 +234,7 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 		r.space_vanished = sync_space_deleted(event)
 		return
 	}
-	if kind != SYNC_CHANGE_KIND && kind != SYNC_CHECKPOINT_KIND do return
+	if kind != SYNC_CHANGE_KIND && kind != SYNC_CHECKPOINT_KIND && kind != SYNC_BASE_KIND && kind != SYNC_BASE_PART_KIND do return
 	tags := json_array(event, "tags")
 	if h, ok := event_tag(tags, "h"); ok do r.h_tag = tag_string(h, 1)
 	pubkey := json_str(event, "pubkey")
@@ -258,6 +265,8 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 	chunk_tags := 0
 	for tag in tags do if arr, ok := tag.(json.Array); ok && tag_string(arr, 0) == "c" do chunk_tags += 1
 	if chunk_tags > 1 do return
+	// A base part only exists as a piece of a split base.
+	if kind == SYNC_BASE_PART_KIND && chunk_tags == 0 do return
 	if created_at > sync_session.cursor do sync_session.cursor = created_at
 
 	full := part
@@ -276,10 +285,12 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 		}
 		space_id, key_id := "", i64(0)
 		if space != nil do space_id, key_id = space.space_id, space.key_id
-		// Kind last so sync_retire can tell checkpoint groups apart; older
-		// persisted 4-element keys parse as change groups.
+		// Kind last so sync_retire can tell checkpoint/base groups apart; older
+		// persisted 4-element keys parse as change groups. A base's 31078
+		// event and its 1080 parts share one group, keyed as the base kind.
+		group_kind := kind == SYNC_BASE_PART_KIND ? i64(SYNC_BASE_KIND) : kind
 		key_parts := make([dynamic]json.Value, context.temp_allocator)
-		append(&key_parts, json.String(pubkey), json.String(space_id), json.Integer(key_id), json.String(gid), json.Integer(kind))
+		append(&key_parts, json.String(pubkey), json.String(space_id), json.Integer(key_id), json.String(gid), json.Integer(group_kind))
 		key := sync_intern(string(marshal(json.Array(key_parts))))
 		if key in sync_session.imported_groups || key in sync_session.importing_groups do return
 		if sync_replay_group_note(key, created_at) do r.replay_changed = true
@@ -347,6 +358,17 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 		summary["covered"] = json.Integer(i64(len(cp.covered_ids)))
 		summary["hash"] = json.String(checkpoint_hash(bytes, context.temp_allocator))
 		item["checkpoint"] = json.Object(summary)
+	} else if kind == SYNC_BASE_KIND || kind == SYNC_BASE_PART_KIND {
+		bytes, bok := bytes_from_base64(full, context.temp_allocator)
+		base: Checkpoint
+		cok := false
+		if bok do base, cok = decode_checkpoint(bytes, context.temp_allocator)
+		if gid != "" && wire_group_id(full, context.temp_allocator) != gid || !cok || base.epoch < 1 {
+			r.decode_failure = true
+			sync_fault(&r, replay_at)
+			return
+		}
+		item["base"] = base_summary_json(&base)
 	} else {
 		verify := jobj()
 		verify["bytes"] = json.String(full)
@@ -358,6 +380,7 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 			return
 		}
 		item["change"], _ = json_field(verified, "change")
+		if b, tagged := event_tag(tags, "b"); tagged && is_hex_pubkey(tag_string(b, 1)) do item["b"] = json.String(tag_string(b, 1))
 	}
 	if chunk_key != "" do sync_session.importing_groups[chunk_key] = true
 	if chunk_key != "" do item["chunkKey"] = json.String(chunk_key)
@@ -407,23 +430,24 @@ sync_settle :: proc(chunk_key: string, imported: bool) -> (changed: bool) {
 	return false
 }
 
-// True for a group key naming kind-1079 chunks (see sync_ingest key layout).
+// True for a group key naming kind-1079 or base (31078/1080) chunks: a
+// superseded checkpoint or base can lose its parts to NIP-09 for good.
 sync_key_is_checkpoint :: proc(key: string) -> bool {
 	parsed, err := json.parse(transmute([]byte)key, allocator = context.temp_allocator, parse_integers = true)
 	if err != nil do return false
 	parts, ok := parsed.(json.Array)
 	if !ok || len(parts) < 5 do return false
 	kind, kok := parts[4].(json.Integer)
-	return kok && kind == SYNC_CHECKPOINT_KIND
+	return kok && (kind == SYNC_CHECKPOINT_KIND || kind == SYNC_BASE_KIND)
 }
 
 // A history scan from `since` finished on every relay without completing
-// these CHECKPOINT groups: the publisher superseded that checkpoint and
-// NIP-09 took its chunks, so the parts will never arrive and the newer
-// checkpoint already covers the object. Keeping the obligation would
-// re-scan forever. Change groups are never retired: a change no relay
-// returned is missing data, and the floor must stay until a covering
-// repair. Groups still being imported are the host's to settle.
+// these CHECKPOINT or BASE groups: the publisher superseded that checkpoint
+// (or compacted past that base) and NIP-09 took its chunks, so the parts
+// will never arrive and the newer one already covers the object. Keeping the
+// obligation would re-scan forever. Change groups are never retired: a change
+// no relay returned is missing data, and the floor must stay until a
+// covering repair. Groups still being imported are the host's to settle.
 sync_retire :: proc(since: i64) -> (changed: bool) {
 	obligations := make([dynamic]string, context.temp_allocator)
 	for key, at in sync_session.replay_groups do if at >= since && key not_in sync_session.importing_groups && sync_key_is_checkpoint(key) do append(&obligations, key)
