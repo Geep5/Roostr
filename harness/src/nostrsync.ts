@@ -2089,8 +2089,10 @@ export async function startNostrSync(): Promise<void> {
 
 	/**
 	 * Rollout step 4, explicit and default off: once every device reads bases,
-	 * delete the untagged 1078s an epoch-1 base folded and every 1079 of the
-	 * objects compacted here. "dry-run" only logs the counts.
+	 * delete the untagged 1078s an epoch-1 base folded and every 1079 of every
+	 * object holding a base, whichever computer compacts it: only covered
+	 * events go, all signed by this identity, so one computer can finish the
+	 * whole vault. "dry-run" only logs the counts.
 	 */
 	let premigrationBusy = false;
 	async function premigrationSweep(): Promise<void> {
@@ -2106,7 +2108,6 @@ export async function startNostrSync(): Promise<void> {
 				if (!row.hash || vanished.has(objectId) || objectId === VANISH_LOG_ID || state.premigrationSwept![objectId]) continue;
 				const space = sharedSpaces.get(spaceMap.get(objectId) ?? "") ?? null;
 				if (space && (space.owner ?? id!.pk) !== id!.pk) continue;
-				if (!(await compactsHere(objectId))) continue;
 				objectByTag.set(space ? blindShared(space.keyHex, objectId) : blindObjectId(id!, objectId), objectId);
 			}
 			const tags = [...objectByTag.keys()];
