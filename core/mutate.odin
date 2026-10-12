@@ -91,6 +91,7 @@ list_value :: proc(items: []Value, allocator := context.temp_allocator) -> Value
 mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Plan, string) {
  plan, err := mutation_plan_action(parsed, input)
  if err != "" do return plan, err
+ if links_err := mutation_sync_links(&plan, input); links_err != "" do return plan, links_err
  vanished := vanished_from_ledger(input.states[VANISH_LOG_ID])
  for &change in plan.changes {
   gone := change_vanished_by(vanished, &change, input.states[change.object_id])
@@ -99,6 +100,123 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
   return plan, fmt.tprintf("space %q was deleted - nothing can be written into it", gone)
  }
  return plan, ""
+}
+
+/**
+ * An object's hidden `links` property mirrors its body: the targets of its
+ * link blocks (custom "link", meta.target) and file blocks (custom "file",
+ * meta.fileId), in block-tree order, each once. Backlinks and the graph read
+ * it, so every change that touches blocks carries the matching Field_Set
+ * (or Field_Delete when the body links nothing) - whichever host or
+ * importer wrote the blocks. A change whose result already matches gains
+ * nothing.
+ */
+LINKS_KEY :: "links"
+
+block_link_target :: proc(b: Block) -> string {
+	if !block_links(b.content) do return ""
+	key := b.content.custom.content_type == "link" ? "target" : "fileId"
+	for p in b.content.custom.meta do if p.key == key do return p.value
+	return ""
+}
+
+body_link_targets :: proc(blocks: []Block) -> [dynamic]string {
+	out := make([dynamic]string, context.temp_allocator)
+	for b in blocks {
+		target := block_link_target(b)
+		if target != "" && !slice.contains(out[:], target) do append(&out, target)
+	}
+	return out
+}
+
+@(private = "file")
+links_field_targets :: proc(fields: []Value_Entry) -> (targets: [dynamic]string, present: bool) {
+	targets = make([dynamic]string, context.temp_allocator)
+	for e in fields {
+		if e.key != LINKS_KEY do continue
+		present = true
+		if e.value.kind == .Link && e.value.link_target != "" do append(&targets, e.value.link_target)
+		for item in e.value.items do if item.kind == .Link && item.link_target != "" do append(&targets, item.link_target)
+	}
+	return
+}
+
+@(private = "file")
+block_links :: proc(b: Block_Content) -> bool {
+	return b.kind == .Custom && (b.custom.content_type == "link" || b.custom.content_type == "file")
+}
+
+mutation_sync_links :: proc(plan: ^Mutation_Plan, input: Mutation_Input) -> string {
+	for i in 0 ..< len(plan.changes) {
+		change := &plan.changes[i]
+		touches := false
+		// Adds of plain blocks and updates between plain contents keep the
+		// body's targets as they are: compare against the stored body
+		// without replaying it (chat posts land here on long threads).
+		neutral := true
+		for op in change.ops {
+			#partial switch op.kind {
+			case .Block_Add:
+				touches = true
+				if block_links(op.block.content) do neutral = false
+			case .Block_Update:
+				touches = true
+				if block_links(op.content) do neutral = false
+			case .Block_Remove, .Block_Move:
+				touches = true
+				neutral = false
+			}
+		}
+		if !touches do continue
+		for prev in plan.changes[:i] do if prev.object_id == change.object_id do neutral = false
+		stored := input.states[change.object_id]
+		if neutral && stored != nil {
+			for op in change.ops do if op.kind == .Block_Update {
+				for b in stored.blocks do if b.id == op.block_id && block_links(b.content) do neutral = false
+			}
+		}
+
+		body: [dynamic]string
+		current: [dynamic]string
+		present: bool
+		if neutral {
+			if stored != nil do body = body_link_targets(stored.blocks[:])
+			else do body = make([dynamic]string, context.temp_allocator)
+			fields := make([dynamic]Value_Entry, context.temp_allocator)
+			if stored != nil do for e in stored.fields do if e.key == LINKS_KEY do append(&fields, e)
+			for op in change.ops {
+				#partial switch op.kind {
+				case .Field_Set: if op.key == LINKS_KEY do fields_set(&fields, op.key, op.value)
+				case .Field_Delete: if op.key == LINKS_KEY do fields_delete(&fields, op.key)
+				}
+			}
+			current, present = links_field_targets(fields[:])
+		} else {
+			seed: ^Snapshot
+			snapshot: Snapshot
+			if stored != nil {
+				snapshot = Snapshot{id = stored.id, type_key = stored.type_key, fields = stored.fields, blocks = stored.blocks, deleted = stored.deleted, created_at = stored.created_at, updated_at = stored.updated_at}
+				seed = &snapshot
+			}
+			sorted := make([dynamic]^Change, context.temp_allocator)
+			for &prev in plan.changes[:i + 1] do if prev.object_id == change.object_id do append(&sorted, &prev)
+			state := Object_State{id = change.object_id}
+			// A plan that makes the tree cyclic is refused at commit; leave it alone.
+			if !replay_apply(&state, seed, sorted[:], 0, context.temp_allocator) do continue
+			body = body_link_targets(state.blocks[:])
+			current, present = links_field_targets(state.fields[:])
+		}
+		if slice.equal(body[:], current[:]) && (len(body) > 0 || !present) do continue
+		if len(body) == 0 {
+			append(&change.ops, Operation{kind = .Field_Delete, key = LINKS_KEY})
+		} else {
+			items := make([dynamic]Value, context.temp_allocator)
+			for target in body do append(&items, Value{kind = .Link, link_target = target, link_relation = LINKS_KEY})
+			append(&change.ops, Operation{kind = .Field_Set, key = LINKS_KEY, value = list_value(items[:])})
+		}
+		if err := mutation_size_guard(change^); err != "" do return err
+	}
+	return ""
 }
 
 mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Plan, string) {
