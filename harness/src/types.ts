@@ -12,7 +12,6 @@ export const BLOCK_TOOL_RESULT = "tool_result";
 export const BLOCK_COMPACTION = "compaction_summary";
 
 export const TOOL_RESULT_TRUNCATE = 8192;
-export const SUMMARY_TEMPERATURE = 0.3;
 export const SUMMARY_MAX_TOKENS = 2048;
 export const SUMMARY_TOOL_RESULT_CAP = 2000;
 

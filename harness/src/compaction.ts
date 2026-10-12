@@ -20,7 +20,6 @@ import {
 	DEFAULT_KEEP_RECENT_TOKENS,
 	DEFAULT_RESERVE_TOKENS,
 	SUMMARY_MAX_TOKENS,
-	SUMMARY_TEMPERATURE,
 	SUMMARY_TOOL_RESULT_CAP,
 	type AnthropicContent,
 	type ClassifiedItem,
@@ -214,7 +213,6 @@ export async function doCompact(agentId: string, ref: ConvRef, view: Conversatio
 		turns: [{ role: "user", content: buildSummaryPrompt(toCompact, prior?.summary ?? "", extractionRan) }],
 		tools: [],
 		maxTokens: SUMMARY_MAX_TOKENS,
-		temperature: SUMMARY_TEMPERATURE,
 		apiKey,
 	});
 
