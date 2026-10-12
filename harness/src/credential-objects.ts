@@ -14,7 +14,9 @@
  * everyone to see, and the first time it meets cookies signed in on another
  * computer it tries them on the site before calling them connected. One
  * writer per credential outside a sign-in, so two computers never fight
- * over its status. Disconnect stops a sign-in in progress and forgets this
+ * over its status. Check, pressed on any device, writes `check_requested`;
+ * the computer serving it runs the live check and stamps `checked_at`.
+ * Disconnect stops a sign-in in progress and forgets this
  * computer's local Google sign-in; the login saved on the credential stays
  * and keeps being used until the site refuses it.
  */
@@ -272,18 +274,59 @@ async function servedState(row: CredentialRow, me: string, force = false): Promi
 }
 
 /**
- * A sign-in is running for this credential - here, or on another computer
- * that wrote `connecting` - and owns its status until it finishes (or
- * SIGN_IN_MS passes): the refresh leaves it alone, so a Reconnect never
- * reads "Connected" off the old login mid-sign-in.
+ * On a credential: a person pressed Check (epoch ms, the asking device's
+ * clock), on any device. The computer serving it runs the live check and
+ * stamps `checked_at`, which is the answer every device waits for; the
+ * request stays as the record of when it was asked.
  */
-function signInRunning(row: CredentialRow): boolean {
-	return windows.has(row.id) || googleLogins.has(row.id) || (row.status === "connecting" && Date.now() - (num(row.fields, "checked_at") ?? 0) < SIGN_IN_MS);
+export const CHECK_REQUEST_KEY = "check_requested";
+
+/**
+ * The Check asked for that the computer serving the credential has not
+ * answered (0 = none): newer than `checked_at`, and not the one it last
+ * answered (`answered`) - a device clock running ahead of this one's would
+ * otherwise keep a request newer than every answer.
+ */
+export function pendingCheck(fields: Record<string, ValueJSON>, answered = 0): number {
+	const at = num(fields, CHECK_REQUEST_KEY) ?? 0;
+	return at > (num(fields, "checked_at") ?? 0) && at !== answered ? at : 0;
+}
+
+/**
+ * What a refresh does with a credential this computer serves (`here`: a
+ * sign-in window or Google sign-in for it runs on this computer; `answered`:
+ * the request this computer answered last):
+ * - `answer`: a Check was asked for while a sign-in runs here - its window
+ *   stays open; the answer is its `connecting` status, stamped;
+ * - `check`: a Check was asked for - the live check runs now, even while
+ *   another computer's sign-in is marked running (the request is newer than
+ *   its start: the person says they finished signing in);
+ * - `leave`: a sign-in owns the status until it finishes (or SIGN_IN_MS
+ *   passes) - here, or on another computer that wrote `connecting` - so a
+ *   Reconnect never reads "Connected" off the old login mid-sign-in;
+ * - `refresh`: the usual quiet refresh.
+ */
+export function refreshPlan(fields: Record<string, ValueJSON>, status: string, here: boolean, answered = 0, now = Date.now()): "answer" | "check" | "leave" | "refresh" {
+	const asked = pendingCheck(fields, answered) > 0;
+	if (here) return asked ? "answer" : "leave";
+	if (asked) return "check";
+	return status === "connecting" && now - (num(fields, "checked_at") ?? 0) < SIGN_IN_MS ? "leave" : "refresh";
+}
+
+/** The Check request this computer answered (or is answering) last, by credential id: each is answered once, overlapping refreshes included. */
+const answeredChecks = new Map<string, number>();
+
+/** Run the live check a person asked for (any device's Check, or this computer's POST /credentials/check) and stamp `checked_at`. */
+async function checkNow(row: CredentialRow, me: string): Promise<CredentialRow> {
+	// A sign-in running here owns the status: the answer is that it is still waiting, its window left open.
+	if (windows.has(row.id) || googleLogins.has(row.id)) return publishState(row, true, { status: "connecting", auth: "", error: signInText.get(row.id) ?? row.error });
+	return publishState(row, true, await servedState(row, me, true));
 }
 
 /**
  * Re-read the credentials this computer looks after and write any status
- * that changed. Boot, every credential change and a slow timer call it.
+ * that changed - and answer any Check asked for since the last one. Boot,
+ * every credential change and a slow timer call it.
  */
 export async function refreshCredentials(): Promise<CredentialRow[]> {
 	const me = await machineId();
@@ -292,7 +335,19 @@ export async function refreshCredentials(): Promise<CredentialRow[]> {
 		rows
 			.filter((r) => r.servedBy === me)
 			.map(async (r) => {
-				if (signInRunning(r)) return r;
+				const plan = refreshPlan(r.fields, r.status, windows.has(r.id) || googleLogins.has(r.id), answeredChecks.get(r.id));
+				if (plan === "leave") return r;
+				if (plan !== "refresh") {
+					const request = pendingCheck(r.fields);
+					answeredChecks.set(r.id, request);
+					try {
+						return await checkNow(r, me);
+					} catch (err) {
+						// Not answered: the next refresh tries it again.
+						if (answeredChecks.get(r.id) === request) answeredChecks.delete(r.id);
+						throw err;
+					}
+				}
 				const row = r.service === GOOGLE_SERVICE || r.service === POSTGRES_SERVICE ? r : await renewSession(await convertLegacySession(r, me), me);
 				return publishState(row, false, await servedState(row, me));
 			}),
@@ -425,11 +480,11 @@ export async function connectCredential(id: string): Promise<CredentialRow> {
  * Check a credential now, on the computer serving it, and stamp
  * `checked_at`: a browser sign-in's cookies are tried on the site, a Google
  * credential's refresh token on Google, a PostgreSQL one connects and runs
- * `select 1`.
+ * `select 1`. The same check a Check asked for from any device runs
+ * (`check_requested`, refreshCredentials).
  */
 export async function checkCredential(id: string): Promise<CredentialRow> {
-	const kept = await keptHere(id);
-	const row = await publishState(kept, true, await servedState(kept, await machineId(), true));
+	const row = await checkNow(await keptHere(id), await machineId());
 	mine = [...mine.filter((c) => c.id !== row.id), row];
 	return row;
 }

@@ -307,7 +307,15 @@ the session cookie leaves the credential Signed out with "<site> didn't accept
 the login made on <computer>; sign in on <served-by computer> instead" - the
 values stay. `/credentials/check` (try the cookies on the site now; a Google
 account's refresh token is exchanged with Google) runs only on the serving
-computer; another computer gets a 409 naming it. `/credentials/disconnect`
+computer; another computer gets a 409 naming it. Any device can ask for the
+same check without a harness of its own: it writes `check_requested` (epoch
+ms) on the credential, and the serving computer's refresh (it runs on every
+credential change) runs the check for a request newer than `checked_at` -
+once per request, even while another computer's sign-in shows `connecting`
+(the person says they finished) - and stamps `checked_at`, the answer the app
+waits for. A sign-in window open on the serving computer itself is left open;
+the answer is its `connecting` status. The request stays on the credential.
+`/credentials/disconnect`
 stops a sign-in running on that computer and removes its local gws sign-in -
 the login saved on the credential stays and keeps being used until the site
 refuses it; clear its Cookie / key properties to remove it. Keys need no
