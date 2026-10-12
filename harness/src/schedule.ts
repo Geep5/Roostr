@@ -497,7 +497,9 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 		const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: convKey(owner.conv) };
 		if (error) run.error = error;
 		else if (deadLogins.length > 0) run.error = credentialBadge(deadLogins);
-		await mutate("run_record", { object_id: obj.id, run });
+		// The run's record lives on the repeat rule: an object run only by pushes has none. Its
+		// failing record threw past the Error badge below - a failed push run showed nowhere.
+		if (obj.fields.repeat) await mutate("run_record", { object_id: obj.id, run });
 		// The error badge: a failed run sets it, and so does a run that hit a
 		// signed-out credential (the turn itself "succeeds" - the agent just
 		// says why it couldn't); a clean run clears what either wrote (or the
