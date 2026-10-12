@@ -64,6 +64,19 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 			if (agent?.typeKey !== "agent") return `error: nothing written. "${aid}" is not an agent object.`;
 		}
 		value = strings([...new Set([...roostr.guests(obj.fields), ...adding])]);
+	} else if (key === "served_by") {
+		// Served by holds the Computer's machine_id as text - what the engine
+		// resolves and the Properties pane shows - never a list or a link. An
+		// agent may name the Computer by its object id or by its machine id.
+		const t = raw.trim();
+		const machines = await roostr.query({ type: "machine" });
+		const machineIdOf = (row: { fields: Record<string, ValueJSON> }) => row.fields["machine_id"]?.stringValue ?? "";
+		const hit = machines.find((m) => m.id === t) ?? machines.find((m) => machineIdOf(m) === t);
+		if (!hit || !machineIdOf(hit)) {
+			const known = machines.map((m) => `${m.fields["name"]?.stringValue || "Computer"} (machine id ${machineIdOf(m)})`).join(", ");
+			return `error: nothing written. "${raw}" is not a Computer. Computers: ${known || "none"}.`;
+		}
+		value = { stringValue: machineIdOf(hit) };
 	} else {
 		const typed = typedValue(def.format);
 		if ("error" in typed) return `error: nothing written. ${def.name}: ${typed.error}.`;

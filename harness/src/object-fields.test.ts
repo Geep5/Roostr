@@ -53,7 +53,8 @@ const relation = (key: string, name: string, format: string, extra: Record<strin
 	mailbox: [],
 });
 
-const RELATIONS = [relation("done", "Done", "checkbox"), relation("dueDate", "Due date", "date"), relation("createdDate", "Created date", "date", { readOnly: { boolValue: true } })];
+const RELATIONS = [relation("done", "Done", "checkbox"), relation("dueDate", "Due date", "date"), relation("createdDate", "Created date", "date", { readOnly: { boolValue: true } }), relation("served_by", "Served by", "object")];
+const MACHINES: ObjectJSON[] = [{ id: "computer-obj", typeKey: "machine", fields: { name: { stringValue: "Sharky's Mac Studio" }, machine_id: { stringValue: "820d3a06" } }, blocks: [], deleted: false, createdAt: 0, updatedAt: 0, mailbox: [] }];
 
 const typeRow = (key: string, name: string): ObjectJSON => ({
 	id: `type-${key}`,
@@ -85,7 +86,7 @@ function daemon(task: ObjectJSON) {
 		if (url.pathname === "/api/channels") return Response.json([{ id: "space" }]);
 		if (url.pathname === "/api/query") {
 			const body = JSON.parse(String(init?.body));
-			const records = body.type === "relation" ? RELATIONS : body.type === "type" ? TYPES : [];
+			const records = body.type === "relation" ? RELATIONS : body.type === "type" ? TYPES : body.type === "machine" ? MACHINES : [];
 			return Response.json({ records, total: records.length });
 		}
 		if (url.pathname === "/api/mutate") {
@@ -178,6 +179,19 @@ test("a valid write reports the value as the human now sees it", async () => {
 	const result = await call("object_set_field", { id: "task", key: "done", value: "true" });
 	expect(result).toBe("Done is now: checked");
 	expect(t.fields.done).toEqual({ boolValue: true });
+});
+
+test("served_by is stored as the Computer's machine id text, named by object id or machine id", async () => {
+	// An agent once wrote ["820d3a06…"] (a list): the Properties pane, which reads text, showed no computer.
+	const t = task();
+	const mutations = daemon(t);
+	expect(await call("object_set_field", { id: "task", key: "served_by", value: "computer-obj" })).toBe("Served by is now: 820d3a06");
+	expect(t.fields.served_by).toEqual({ stringValue: "820d3a06" });
+	expect(await call("object_set_field", { id: "task", key: "served_by", value: "820d3a06" })).toBe("Served by is now: 820d3a06");
+	const refused = await call("object_set_field", { id: "task", key: "served_by", value: "sharky" });
+	expect(refused).toStartWith("error: nothing written");
+	expect(refused).toContain("Sharky's Mac Studio (machine id 820d3a06)");
+	expect(mutations.length).toBe(2);
 });
 
 test("object_set_repeat writes the real rule and reads it back in the Repeat cell's words", async () => {
