@@ -1275,6 +1275,9 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// An agent's checkout on the machine that serves it: the harness works
 	// in this folder.
 	{"repo_path", "shorttext", "Project folder", "📁", false, false, 1, {}},
+	// The color an agent's chat bubbles take (a #RRGGBB hex; blank = the
+	// default grey). The chat picks readable text for it.
+	{"chat_color", "shorttext", "Chat color", "🎨", false, false, 1, {}},
 	// The object's guest list: agents a human (or one of those agents) may
 	// address here with @. Rendered as a link badge; its picker is limited to
 	// the space's agent type. Nothing answers an object without being on it.
