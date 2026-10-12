@@ -240,8 +240,11 @@ export interface Roostr {
 	/** Whether a message's author is an agent (an agent id) rather than a person (a key). */
 	isAgentAuthor(author: string): boolean;
 	memory: RoostrMemory;
-	/** `gws-as <mailbox> <args...>` on this computer, its JSON output parsed. */
-	gws(mailbox: string, args: string[]): Promise<unknown>;
+	/**
+	 * `gws-as <mailbox> <args...>` on this computer, its JSON output parsed.
+	 * `cwd`: the folder it runs in - gws saves `-o` downloads only inside it.
+	 */
+	gws(mailbox: string, args: string[], options?: { cwd?: string }): Promise<unknown>;
 	/** Notes for the harness log (stderr); never part of the result. */
 	log(...args: unknown[]): void;
 	// ── Asked of the harness (HarnessApi) ──
@@ -361,9 +364,9 @@ export function createRoostr(context: ToolRunContext, touched: Set<string>, harn
 			listMilestones: (status) => sdkCall(() => memory.listMilestones(owner, status)),
 			recall: (args) => sdkCall(() => memory.recall(owner, args)),
 		},
-		gws: (mailbox, args) =>
+		gws: (mailbox, args, options) =>
 			sdkCall(async () => {
-				const proc = Bun.spawn([GWS_AS, mailbox, ...args], { stdout: "pipe", stderr: "pipe" });
+				const proc = Bun.spawn([GWS_AS, mailbox, ...args], { stdout: "pipe", stderr: "pipe", ...(options?.cwd ? { cwd: options.cwd } : {}) });
 				const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
 				if ((await proc.exited) !== 0) throw new Error(`gws-as ${mailbox} ${args.slice(0, 3).join(" ")}: ${(err || out).trim().slice(0, 300)}`);
 				return JSON.parse(out);
