@@ -266,12 +266,24 @@ test("object_add_property creates a visible property keyed like the app's, once"
 test("object_clear_field empties a property and refuses the ones with their own rules", async () => {
 	const t = task({ dueDate: { intValue: 1 } });
 	const mutations = daemon(t);
-	for (const key of ["agent", "repeat", "createdDate", "priority"]) {
+	for (const key of ["repeat", "createdDate", "priority"]) {
 		expect((await call("object_clear_field", { key }))).toStartWith("error: nothing cleared");
 	}
 	expect(mutations).toEqual([]);
 	expect((await call("object_clear_field", { key: "dueDate" }))).toBe("Due date is now empty.");
 	expect(t.fields.dueDate).toBeUndefined();
+});
+
+test("object_clear_field takes named agents off the guest list, or all of them, and refuses ones not on it", async () => {
+	const agents = (...ids: string[]): ValueJSON => ({ valuesValue: { items: ids.map((s) => ({ stringValue: s })) } });
+	const t = task({ agent: agents("grant-email", "space-agent", "don-agent") });
+	const mutations = daemon(t);
+	expect(await call("object_clear_field", { key: "agent", value: "nobody" })).toStartWith("error: nothing removed");
+	expect(mutations).toEqual([]);
+	expect(await call("object_clear_field", { key: "agent", value: "grant-email" })).toBe("Agent is now: space-agent, don-agent");
+	expect(t.fields.agent).toEqual(agents("space-agent", "don-agent"));
+	expect(await call("object_clear_field", { key: "agent" })).toBe("Agent is now: (empty)");
+	expect(t.fields.agent).toBeUndefined();
 });
 
 test("object_set_type retypes to a space type and never into or out of infrastructure", async () => {
