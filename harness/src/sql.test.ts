@@ -224,13 +224,17 @@ test("object_get on a credential never shows its secrets", async () => {
 		key_url: { stringValue: DEAD_URL },
 		key_empty: { stringValue: "" },
 		key_fields: { stringValue: "x,url,empty" },
-		session: { stringValue: '[{"name":"sid","value":"sess-abcdef123456"}]' },
+		session: { stringValue: '[{"name":"sid","value":"sess-legacy-123456"}]' },
+		cookie_sid: { stringValue: "sess-abcdef123456" },
+		cookie_meta: { stringValue: '{"signedInOn":"m","at":0,"cookies":[{"key":"cookie_sid","name":"sid","domain":"a.test","path":"/","secure":true,"httpOnly":true,"expires":-1}]}' },
 		secret: { stringValue: '{"apiKey":"legacy-key-987654"}' },
 	});
 	server([agentWith("cred"), cred]);
 	const roostr = roostrFor(ctx);
 	const shown = String(await objectGet({ id: "cred" }, roostr));
-	for (const secret of ["hunter2", PASSWORD, "sess-abcdef123456", "legacy-key-987654"]) expect(shown).not.toContain(secret);
+	for (const secret of ["hunter2", PASSWORD, "sess-abcdef123456", "sess-legacy-123456", "legacy-key-987654"]) expect(shown).not.toContain(secret);
+	expect(shown).toContain('"cookie_sid": "[secret]"');
+	expect(shown).toContain("cookie_meta");
 	expect(shown).toContain('"key_x": "[secret]"');
 	expect(shown).toContain('"key_empty": ""');
 	expect(shown).toContain('"key_fields": "x,url,empty"');

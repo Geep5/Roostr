@@ -13,7 +13,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ObjectJSON, ValueJSON } from "./api";
-import { credentialSession } from "./credentials";
+import { credentialSession, sessionFields } from "./credentials";
 import { registerExtension, type Extension } from "./extensions";
 import credentialAction from "./tool-code/credential_action";
 import credentialFetch from "./tool-code/credential_fetch";
@@ -98,7 +98,7 @@ function credential(service: string, cookies = [{ name: "credentials", value: en
 		login_url: { stringValue: "https://acme.example/login" },
 		session_host: { stringValue: "acme.example" },
 		session_cookie: { stringValue: "credentials" },
-		session: { stringValue: JSON.stringify(cookies) },
+		...sessionFields(cookies, "machine-a"),
 		status: { stringValue: "active" },
 	});
 }

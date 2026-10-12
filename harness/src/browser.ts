@@ -1,10 +1,11 @@
 /**
  * Minimal Chrome DevTools Protocol driver for credential-backed browser
  * work. A Credential's signed-in session travels as its cookies (the
- * credential object's `session` property): sign-in exports them from the
- * headed login window, and every later action injects them into a fresh,
- * throwaway headless Chrome - so any computer can act with the login.
- * Agents receive only page text, never the cookies.
+ * credential's `cookie_*` properties, credentials.ts): sign-in exports them
+ * from the headed login window on whichever computer it ran, and every later
+ * action injects them into a fresh, throwaway headless Chrome - so any
+ * computer can act with the login. Agents receive only page text, never the
+ * cookies.
  */
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { Database } from "bun:sqlite";
@@ -20,6 +21,8 @@ const DEFAULT_TIMEOUT_MS = 60_000;
  */
 const THROWAWAY_STORE = ["--use-mock-keychain", "--password-store=basic"];
 const PAGE_TEXT_LIMIT = 14_000;
+/** Where a site sends a signed-out session instead of the page asked for. */
+export const LOGIN_WALL = /login|signin|sign-in|onboarding|checkpoint|authwall/i;
 
 interface Target {
 	id: string;
@@ -183,9 +186,11 @@ function pageTextExpression(): string {
  * Run a JavaScript snippet in a throwaway headless Chrome carrying the
  * credential's session cookies and return the page after it. `arrived` is
  * false when the site sent the page elsewhere (a login wall): the action is
- * then NOT run, and the page returned is where it ended up.
+ * then NOT run, and the page returned is where it ended up. `cookies` is
+ * every cookie the browser held at the end - a site that refuses a login
+ * usually clears its session cookie.
  */
-export async function credentialPageAction(cookies: SessionCookie[], url: string, actionJs: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<{ title: string; url: string; text: string; actionResult: string; arrived: boolean }> {
+export async function credentialPageAction(cookies: SessionCookie[], url: string, actionJs: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<{ title: string; url: string; text: string; actionResult: string; arrived: boolean; cookies: SessionCookie[] }> {
 	const chrome = chromeBinary();
 	if (!chrome) throw new Error("no Chrome/Chromium/Brave binary found");
 	const home = mkdtempSync(join(tmpdir(), "roostr-cdp-home-"));
@@ -222,7 +227,8 @@ export async function credentialPageAction(cookies: SessionCookie[], url: string
 		await sleep(1_000);
 		const state = JSON.parse(String(await evaluate(cdp, pageTextExpression()))) as { title: string; url: string; text: string };
 		if (!state.text) state.text = `NO TEXT title=${state.title} url=${state.url} requested=${url}`;
-		return { ...state, actionResult, arrived };
+		const after = (await cdp.call<{ cookies: SessionCookie[] }>("Network.getAllCookies")).cookies;
+		return { ...state, actionResult, arrived, cookies: after };
 	} finally {
 		clearTimeout(timeout);
 		cdp?.close();

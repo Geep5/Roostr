@@ -13,8 +13,11 @@
  * - keys: every field named `key_<name>` is one pasted key (`key_token`,
  *   `key_api_key`, ...). Its property is the key's label; the credential
  *   needs exactly the key fields present on it (templates carry them empty).
- * - `session`: a browser sign-in's cookies as a JSON array. The computer in
- *   `served_by` opens the headed sign-in window and exports them; every
+ * - cookies: a browser sign-in's cookies, one property each - `cookie_<name>`
+ *   holds that cookie's value - plus `cookie_meta` (JSON: the computer the
+ *   sign-in was made on and each cookie's domain, path and flags), so the
+ *   cookies can be re-created faithfully. Connect on ANY of the person's
+ *   computers opens the headed sign-in window there and saves them; every
  *   later action injects them into a throwaway headless Chrome (browser.ts).
  *
  * CREDENTIAL_SEEDS only start things: the harness seeds one Credential
@@ -27,7 +30,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { str, type ValueJSON } from "./api";
-import type { SessionCookie } from "./browser";
+import { LOGIN_WALL, type SessionCookie } from "./browser";
 
 export interface PasswordField {
 	key: string;
@@ -109,7 +112,7 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 	{
 		key: "google-account",
 		label: "Google Workspace",
-		note: "A Google account (Gmail, Calendar, Drive) for agents, through `gws-as <account> …`. Account is the email. Set Served by to the computer that should open the Google sign-in, then press Connect in the credential's Status; Roostr stores the sign-in here and every computer uses it.",
+		note: "A Google account (Gmail, Calendar, Drive) for agents, through `gws-as <account> …`. Account is the email. Set Served by to the computer that keeps it, then press Connect in the credential's Status on any of your computers: the Google sign-in opens there, Roostr stores it here and every computer uses it.",
 		passwordFields: [
 			{ key: "client_id", label: "OAuth client ID", secret: false },
 			{ key: "client_secret", label: "OAuth client secret", secret: true },
@@ -273,7 +276,13 @@ export function credentialProperties(): Array<{ key: string; name: string; forma
 		// One per distinct seed key; the first seed's label names it ("API key").
 		...unique(CREDENTIAL_SEEDS.flatMap((s) => s.passwordFields ?? [])).map((f) => ({ key: `${KEY_PREFIX}${f.key}`, name: f.label, format: "shorttext", emoji: "🔑" })),
 		...unique(CREDENTIAL_SEEDS.flatMap((s) => s.options ?? [])).map((o) => ({ key: o.key, name: o.label, format: "shorttext", emoji: "⚙️" })),
+		{ key: COOKIE_META, name: "Cookie details", format: "longtext", emoji: "🍪" },
 	];
+}
+
+/** The property a saved cookie's value shows through: `cookie_auth_token` → "Cookie auth_token". */
+export function cookieProperty(key: string, cookieName: string): { key: string; name: string; format: string; emoji: string } {
+	return { key, name: `Cookie ${cookieName}`, format: "shorttext", emoji: "🍪" };
 }
 
 // ── Keeping secrets from the model ──────────────────────────────
@@ -303,15 +312,16 @@ export function blankSecretsDeep(value: unknown, secrets: string[]): unknown {
 
 /**
  * An object as tool code and the model may see it: a Credential's secret
- * fields - its keys (`key_*`), its browser `session`, the pre-property
- * `secret` - read "[secret]" when they hold anything (an empty one stays
- * empty, so an unfilled key still shows as unfilled). Any other object is
- * returned as it is. The daemon and the website keep the real values.
+ * fields - its keys (`key_*`), its saved cookies (`cookie_*`; `cookie_meta`
+ * holds no values and stays), the pre-property `session` and `secret` -
+ * read "[secret]" when they hold anything (an empty one stays empty, so an
+ * unfilled key still shows as unfilled). Any other object is returned as it
+ * is. The daemon and the website keep the real values.
  */
 export function hideCredentialSecrets<T extends { typeKey: string; fields: Record<string, ValueJSON> }>(obj: T): T {
 	if (obj.typeKey !== "credential") return obj;
 	const secret = Object.entries(obj.fields)
-		.filter(([k, v]) => (k === "session" || k === "secret" || (k.startsWith(KEY_PREFIX) && k.length > KEY_PREFIX.length && k !== LEGACY_KEY_LIST)) && v.stringValue !== "" && Object.keys(v).length > 0)
+		.filter(([k, v]) => (k === LEGACY_SESSION || k === "secret" || isCookieValueKey(k) || (k.startsWith(KEY_PREFIX) && k.length > KEY_PREFIX.length && k !== LEGACY_KEY_LIST)) && v.stringValue !== "" && Object.keys(v).length > 0)
 		.map(([k]) => k);
 	if (secret.length === 0) return obj;
 	return { ...obj, fields: { ...obj.fields, ...Object.fromEntries(secret.map((k) => [k, { stringValue: SECRET_SHOWN }])) } };
@@ -322,14 +332,138 @@ export function legacyKeyName(key: string): string {
 	return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 }
 
-/** A credential's browser session cookies, or [] when it has none. */
-export function credentialSession(fields: Record<string, ValueJSON>): SessionCookie[] {
+// ── A browser sign-in's cookies, as properties ──────────────────
+
+/** Fields named `cookie_<name>` hold one saved cookie's value each. */
+export const COOKIE_PREFIX = "cookie_";
+/** Where each saved cookie came from and how to re-create it (JSON, SessionMeta). */
+export const COOKIE_META = "cookie_meta";
+/** The pre-property shape: every cookie as one JSON array. Converted on the serving computer (credential-objects.ts), never read otherwise. */
+export const LEGACY_SESSION = "session";
+
+/** One saved cookie, without its value: the value is the `key` field's. */
+export interface CookieMeta {
+	key: string;
+	name: string;
+	domain: string;
+	path: string;
+	secure: boolean;
+	httpOnly: boolean;
+	expires: number;
+	sameSite?: string;
+}
+
+/** `cookie_meta`: the computer (machine_id) the sign-in was made on, when, and each cookie. */
+export interface SessionMeta {
+	signedInOn: string;
+	at: number;
+	cookies: CookieMeta[];
+}
+
+/** A cookie value's field (not `cookie_meta`). */
+export function isCookieValueKey(key: string): boolean {
+	return key.startsWith(COOKIE_PREFIX) && key.length > COOKIE_PREFIX.length && key !== COOKIE_META;
+}
+
+/** The cookie value fields a credential carries. */
+export function cookieValueKeys(fields: Record<string, ValueJSON>): string[] {
+	return Object.keys(fields).filter(isCookieValueKey);
+}
+
+/**
+ * The field a cookie's value goes in: `cookie_` + its name in lower-case
+ * letters, digits and `_`. A name that comes out the same as one already
+ * `taken` (two cookies named alike on different domains, `Foo` and `foo`)
+ * gets `_2`, `_3`, ...
+ */
+export function cookieFieldKey(name: string, taken: Set<string>): string {
+	const base = `${COOKIE_PREFIX}${name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "cookie"}`;
+	let key = base;
+	for (let n = 2; taken.has(key); n++) key = `${base}_${n}`;
+	return key;
+}
+
+/**
+ * A sign-in's cookies as the fields a credential stores: one `cookie_<name>`
+ * per cookie holding its value, and `cookie_meta` describing them all and
+ * naming the computer (`signedInOn`, a machine_id) the sign-in was made on.
+ */
+export function sessionFields(cookies: SessionCookie[], signedInOn: string, at = Date.now()): Record<string, ValueJSON> {
+	const taken = new Set<string>([COOKIE_META]);
+	const out: Record<string, ValueJSON> = {};
+	const meta: SessionMeta = { signedInOn, at, cookies: [] };
+	for (const c of cookies) {
+		const key = cookieFieldKey(c.name, taken);
+		taken.add(key);
+		out[key] = { stringValue: c.value };
+		meta.cookies.push({ key, name: c.name, domain: c.domain, path: c.path, secure: c.secure, httpOnly: c.httpOnly, expires: c.expires, ...(c.sameSite ? { sameSite: c.sameSite } : {}) });
+	}
+	out[COOKIE_META] = { stringValue: JSON.stringify(meta, null, 1) };
+	return out;
+}
+
+/** A credential's `cookie_meta`, or null when it has none (or it is unreadable). */
+export function sessionMeta(fields: Record<string, ValueJSON>): SessionMeta | null {
 	try {
-		const parsed = JSON.parse(str(fields, "session") || "[]") as unknown;
+		const parsed = JSON.parse(str(fields, COOKIE_META) || "null") as Partial<SessionMeta> | null;
+		if (!parsed || !Array.isArray(parsed.cookies)) return null;
+		return { signedInOn: typeof parsed.signedInOn === "string" ? parsed.signedInOn : "", at: typeof parsed.at === "number" ? parsed.at : 0, cookies: parsed.cookies };
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * A credential's browser session cookies, re-created from its `cookie_*`
+ * values and `cookie_meta`; [] when it has none. A cookie whose value field
+ * was removed is left out.
+ */
+export function credentialSession(fields: Record<string, ValueJSON>): SessionCookie[] {
+	const out: SessionCookie[] = [];
+	for (const m of sessionMeta(fields)?.cookies ?? []) {
+		const value = fields[m.key]?.stringValue;
+		if (value === undefined || !m.name || !m.domain) continue;
+		out.push({ name: m.name, value, domain: m.domain, path: m.path || "/", expires: typeof m.expires === "number" ? m.expires : -1, httpOnly: !!m.httpOnly, secure: !!m.secure, ...(m.sameSite ? { sameSite: m.sameSite } : {}) });
+	}
+	return out;
+}
+
+/** The pre-property `session` JSON array, read only to convert it. */
+export function legacySession(fields: Record<string, ValueJSON>): SessionCookie[] {
+	try {
+		const parsed = JSON.parse(str(fields, LEGACY_SESSION) || "[]") as unknown;
 		return Array.isArray(parsed) ? (parsed as SessionCookie[]) : [];
 	} catch {
 		return [];
 	}
+}
+
+/** A fingerprint of the cookies a credential carries (names, values, domains, flags), so a computer can tell when they changed. */
+export function sessionHash(fields: Record<string, ValueJSON>): string {
+	return Bun.hash(JSON.stringify(credentialSession(fields))).toString(16);
+}
+
+/** What the serving computer last found when it tried a credential's cookies (session-checks.json). */
+export interface SessionCheck {
+	hash: string;
+	accepted: boolean;
+}
+
+/**
+ * What the computer serving a credential (`me`) does with the cookies it
+ * carries, given what it last found (`last`):
+ * - "none": no cookies;
+ * - "use": made on this computer (or before sign-ins named a computer), or
+ *   these exact cookies already worked here;
+ * - "check": a sign-in made on another computer this one has not tried
+ *   yet - try them on the site before calling the credential connected;
+ * - "rejected": these exact cookies were tried here and the site refused them.
+ */
+export function sessionDecision(fields: Record<string, ValueJSON>, me: string, last: SessionCheck | undefined): "none" | "use" | "check" | "rejected" {
+	if (credentialSession(fields).length === 0) return "none";
+	if (last && last.hash === sessionHash(fields)) return last.accepted ? "use" : "rejected";
+	const from = sessionMeta(fields)?.signedInOn ?? "";
+	return !from || from === me ? "use" : "check";
 }
 
 /**
@@ -348,6 +482,17 @@ export function sessionSignedIn(cookies: SessionCookie[], recipe: Recipe): boole
 export function serviceCookies(cookies: SessionCookie[], recipe: Recipe): SessionCookie[] {
 	const host = recipe.sessionCookie?.host.replace(/^www\./, "");
 	return host ? cookies.filter((c) => c.domain.replace(/^\./, "").endsWith(host)) : [];
+}
+
+/**
+ * Whether a site kept a login it was handed: the page it ended on (the
+ * site's front page, opened with the credential's cookies) is no login wall,
+ * and the service's session cookie is still there and unexpired - a site
+ * that refuses a session cookie usually clears it.
+ */
+export function sessionAccepted(page: { url: string; title: string; arrived: boolean; cookies: SessionCookie[] }, recipe: Recipe): boolean {
+	if (!page.arrived && LOGIN_WALL.test(page.url + page.title)) return false;
+	return sessionSignedIn(serviceCookies(page.cookies, recipe), recipe);
 }
 
 // Before Credential objects, each machine kept secrets locally, keyed by

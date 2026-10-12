@@ -2,13 +2,20 @@
  * Google accounts as Roostr Credentials (service "google-account").
  *
  * A gws sign-in is three strings - the OAuth client id and secret and a
- * refresh token, what `gws auth export --unmasked` prints - so it can live on
- * the Credential object like any pasted key, and any computer can use it:
+ * refresh token, what `gws auth export --unmasked` prints - so it lives on
+ * the Credential object like any pasted key (`key_client_id`,
+ * `key_client_secret`, `key_refresh_token`), and any computer can use it:
  *
- *  - import: an account signed in locally (`gws-as <email> auth login`, run
- *    by the credential's Connect, ~/.config/gws/accounts/<email>) is copied
- *    onto that account's Credential when this computer serves it, or onto a
+ *  - connect (credential-objects.ts) runs `gws-as <email> auth login` on
+ *    whichever computer the person pressed Connect on and copies the export
+ *    onto the credential. A computer with no OAuth client of its own signs in
+ *    with the one the credential carries (ensureGoogleClient).
+ *  - import: an account signed in locally (~/.config/gws/accounts/<email>)
+ *    is copied onto that account's Credential when this computer serves it
+ *    and the credential has no working sign-in (importReplaces), or onto a
  *    new one in the default space when there is none.
+ *  - check: Google is asked to exchange the refresh token for an access
+ *    token (googleSignInWorks) - nothing local needed.
  *  - materialize: for every Google credential an agent served here lists,
  *    write `<GLON_DATA>/google/<email>.json` (0600, authorized_user) and
  *    remove files for accounts no longer listed. `gws-as <email>` prefers
@@ -25,7 +32,7 @@ import { pinOf } from "./credential-objects";
 
 export const GOOGLE_SERVICE = "google-account";
 const KEYS = ["client_id", "client_secret", "refresh_token"] as const;
-type SignIn = Record<(typeof KEYS)[number], string>;
+export type SignIn = Record<(typeof KEYS)[number], string>;
 
 const accountsDir = (): string => process.env.GOOGLE_WORKSPACE_ACCOUNTS_DIR ?? join(homedir(), ".config", "gws", "accounts");
 export const googleFilesDir = (): string => join(process.env.GLON_DATA ?? join(homedir(), ".glon"), "google");
@@ -62,6 +69,61 @@ async function defaultSpace(): Promise<string> {
 }
 
 /**
+ * Whether a local sign-in replaces the one a credential carries: always
+ * when it carries none; never when they are the same; otherwise only while
+ * the credential's is not working (`status` not active, no sign-in under
+ * way) - a sign-in made on another computer is never overwritten by an
+ * older local one.
+ */
+export function importReplaces(stored: SignIn | null, local: SignIn, status: string): boolean {
+	if (!stored) return true;
+	if (KEYS.every((k) => stored[k] === local[k])) return false;
+	return status !== "active" && status !== "connecting";
+}
+
+/**
+ * Make sure `gws-as <email> auth login` has an OAuth client on this
+ * computer: the account's own client_secret.json, the shared one gws-as
+ * copies (~/.config/gws/client_secret.json or the accounts root's), or -
+ * when there is none - one written from the client id and secret the
+ * credential carries from its last sign-in. Returns false when there is
+ * no client to sign in with.
+ */
+export function ensureGoogleClient(email: string, fields: Record<string, ValueJSON>, sharedClient = join(homedir(), ".config", "gws", "client_secret.json")): boolean {
+	const dir = join(accountsDir(), email);
+	if ([join(dir, "client_secret.json"), sharedClient, join(accountsDir(), "client_secret.json")].some((p) => existsSync(p))) return true;
+	const id = str(fields, "key_client_id").trim();
+	const secret = str(fields, "key_client_secret").trim();
+	if (!id || !secret) return false;
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const installed = { client_id: id, client_secret: secret, auth_uri: "https://accounts.google.com/o/oauth2/auth", token_uri: "https://oauth2.googleapis.com/token", redirect_uris: ["http://localhost"] };
+	writeFileSync(join(dir, "client_secret.json"), JSON.stringify({ installed }), { mode: 0o600 });
+	return true;
+}
+
+/**
+ * Ask Google whether a sign-in still works, the way gws uses it: exchange
+ * its refresh token for an access token. true: it works; false: Google
+ * refused it (revoked, expired, wrong client); a string: Google could not
+ * be asked (why).
+ */
+export async function googleSignInWorks(signIn: SignIn, fetchImpl: typeof fetch = fetch): Promise<boolean | string> {
+	try {
+		const res = await fetchImpl("https://oauth2.googleapis.com/token", {
+			method: "POST",
+			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({ client_id: signIn.client_id, client_secret: signIn.client_secret, refresh_token: signIn.refresh_token, grant_type: "refresh_token" }).toString(),
+			signal: AbortSignal.timeout(15_000),
+		});
+		if (res.ok) return true;
+		if (res.status === 400 || res.status === 401) return false;
+		return `Google answered HTTP ${res.status}`;
+	} catch (err) {
+		return err instanceof Error ? err.message : String(err);
+	}
+}
+
+/**
  * Copy this computer's local gws sign-ins onto Google Credentials. Returns
  * the emails written. Idempotent: an unchanged sign-in writes nothing.
  */
@@ -76,11 +138,10 @@ export async function importLocalGoogleAccounts(creds: QueryRow[]): Promise<stri
 		if (!signIn) continue;
 		const existing = google.find((c) => str(c.fields, "account").toLowerCase() === email.toLowerCase());
 		if (existing) {
-			// Only the computer serving the credential writes it - and a
-			// disconnect removed the local sign-in it would come from.
+			// Only the computer serving the credential writes it, and never
+			// over a working sign-in (one made on another computer).
 			if ((await pinOf(existing.fields)) !== me) continue;
-			const stored = signInOf(existing.fields);
-			if (stored && KEYS.every((k) => stored[k] === signIn[k])) continue;
+			if (!importReplaces(signInOf(existing.fields), signIn, str(existing.fields, "status"))) continue;
 			for (const k of KEYS) await setField(existing.id, `key_${k}`, sv(signIn[k]));
 		} else {
 			await createObject(`Google - ${email}`, "credential", {

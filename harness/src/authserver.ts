@@ -188,8 +188,9 @@ export function startAuthServer(served: Set<string>): void {
 						return json({ error: error instanceof Error ? error.message : "Capability approval failed." }, 400);
 					}
 				}
-				// Only the computer a credential's Served by names opens its sign-in
-				// window and writes its status; anyone else gets a 409 naming that computer.
+				// Connect (and Disconnect, which stops a sign-in) run on whichever paired computer is
+				// asked: the sign-in window opens here and the login is saved on the credential. Check
+				// runs only on the computer its Served by names; anyone else gets a 409 naming that computer.
 				const credentialOps: Record<string, (id: string) => Promise<CredentialRow>> = { "/credentials/connect": connectCredential, "/credentials/check": checkCredential, "/credentials/disconnect": disconnectCredential };
 				const credentialOp = req.method === "POST" ? credentialOps[url.pathname] : undefined;
 				if (credentialOp) {

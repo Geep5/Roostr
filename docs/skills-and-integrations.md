@@ -87,20 +87,24 @@ channel}`.
 A Credential is one signed-in identity: service logins (seeded from
 `CREDENTIAL_SEEDS` in `harness/src/credentials.ts`), model logins and Google
 accounts (service `google-account`, `account` = the email). Its secret rides
-on the Credential (`key_*`, `session`) and is materialized only on the
-computer that serves an agent listing it.
+on the Credential (`key_*`; a browser sign-in's `cookie_*` + `cookie_meta`) and
+is materialized only on the computer that serves an agent listing it.
 
-`POST /credentials/connect|check|disconnect` with `{id}` on the computer in
-the Credential's Served by. For a Google account, connect runs `gws-as
-<account> auth login` there and imports the sign-in into the `key_*` fields;
-check runs the live `gws-as <account> auth status`; disconnect clears the keys
-and the local account folder so nothing re-imports it.
+`POST /credentials/connect|disconnect` with `{id}` on any paired computer;
+`/credentials/check` on the computer in the Credential's Served by. For a
+Google account, connect runs `gws-as <account> auth login` on the computer it
+was asked on (with the OAuth client the credential carries when that computer
+has none) and saves the export into the `key_*` fields; another computer then
+drops its local copy. Check asks Google to exchange the refresh token.
+Disconnect stops a running sign-in and removes the local account folder; the
+keys on the credential stay.
 
 Tool code never sees those secrets: every object the roostr SDK hands a tool
 (`get`, `getInSpace`, `writable`, `query`) shows a Credential's filled
-`key_*`, `session` and `secret` fields as `[secret]` (`hideCredentialSecrets`
-in `credentials.ts`). Only the harness acts with them. The daemon and the
-website still see the real values.
+`key_*`, `cookie_*`, `session` and `secret` fields as `[secret]`
+(`hideCredentialSecrets` in `credentials.ts`; `cookie_meta` holds no values).
+Only the harness acts with them. The daemon and the website still see the real
+values.
 
 ### PostgreSQL (read-only)
 

@@ -70,6 +70,43 @@ async function convertLegacyKeys(row: QueryRow): Promise<boolean> {
 	return wrote;
 }
 
+type PropertySeed = { key: string; name: string; format: string; emoji: string };
+
+/** One credential property in a space: ordinary (not bundled), system (the app will not delete it), visible. */
+async function createProperty(space: string, p: PropertySeed): Promise<void> {
+	await createObject(p.name, "relation", {
+		channel: sv(space),
+		key: sv(p.key),
+		name: sv(p.name),
+		format: sv(p.format),
+		iconEmoji: sv(p.emoji),
+		hidden: bv(false),
+		readOnly: bv(false),
+		maxCount: iv(0),
+		options: lv([]),
+		bundled: bv(false),
+		system: bv(true),
+	});
+}
+
+/**
+ * Make sure the space has these properties (a saved sign-in's
+ * `cookie_<name>` ones, which depend on the site); missing ones are created.
+ * Returns how many it made.
+ */
+export async function ensureProperties(space: string, props: PropertySeed[]): Promise<number> {
+	if (!space || props.length === 0) return 0;
+	const have = new Set((await queryAll({ type: "relation" })).filter((r) => str(r.fields, "channel") === space).map((r) => str(r.fields, "key")));
+	let made = 0;
+	for (const p of props) {
+		if (have.has(p.key)) continue;
+		await createProperty(space, p);
+		have.add(p.key);
+		made += 1;
+	}
+	return made;
+}
+
 export async function seedCredentials(): Promise<{ properties: number; templates: number; upgraded: number; deduped: number; converted: number; filled: number; cleaned: number }> {
 	const out = { properties: 0, templates: 0, upgraded: 0, deduped: 0, converted: 0, filled: 0, cleaned: 0 };
 	const spaces = await queryAll({ type: "channel" });
@@ -83,19 +120,7 @@ export async function seedCredentials(): Promise<{ properties: number; templates
 		for (const r of own) if (seedKeys.has(str(r.fields, "key"))) await markSystem(r);
 		for (const p of credentialProperties()) {
 			if (have.has(p.key)) continue;
-			await createObject(p.name, "relation", {
-				channel: sv(space.id),
-				key: sv(p.key),
-				name: sv(p.name),
-				format: sv(p.format),
-				iconEmoji: sv(p.emoji),
-				hidden: bv(false),
-				readOnly: bv(false),
-				maxCount: iv(0),
-				options: lv([]),
-				bundled: bv(false),
-				system: bv(true),
-			});
+			await createProperty(space.id, p);
 			out.properties += 1;
 		}
 	}

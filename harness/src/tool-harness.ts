@@ -12,7 +12,7 @@
  * here: a page or an API answer comes back with them blanked out.
  */
 import { fetchObject, setField, str, sv, type AgentEndpoint, type AgentMessage } from "./api";
-import { credentialPageAction } from "./browser";
+import { credentialPageAction, LOGIN_WALL } from "./browser";
 import { fetchCapabilities } from "./capabilities";
 import { requestCapability } from "./capability-messages";
 import { agentSubject } from "./conv";
@@ -36,8 +36,6 @@ const SHELL_STREAM_CAP = 256 * 1024;
 const WEB_PAGE_TIMEOUT_MS = 60_000;
 /** What a tool gets of a rendered page's HTML. */
 const WEB_PAGE_CAP = 2_000_000;
-/** Where a site sends a signed-out session instead of the page asked for. */
-const LOGIN_WALL = /login|signin|sign-in|onboarding|checkpoint|authwall/i;
 const METHODS: Readonly<Record<string, true>> = { GET: true, POST: true, PUT: true, PATCH: true, DELETE: true };
 
 function errorText(error: unknown): string {

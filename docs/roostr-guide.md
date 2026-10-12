@@ -94,8 +94,8 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 ## 8. Credentials
 
 - A **Credential** object is one login: an API key, a bot token, a database URL, a browser sign-in, a Google account. Its **Served by** is the computer that keeps and checks it; its Status says whether it works (Connected, Signed out - reconnect, Broken...).
-- Keys pasted into a credential are readable by members of its space. Browser sign-ins are kept on its computer.
-- A Credential's browser sign-in is done by a person: **Connect** opens the sign-in window on the credential's computer. An agent can create the credential and ask a person to press Connect; it cannot do that sign-in itself.
+- Pasted keys and saved logins are on the credential, readable by everyone in its space; sign in from any of your computers. A browser sign-in is saved as one Cookie property per cookie plus Cookie details; a Google sign-in as its client and refresh-token keys.
+- A Credential's browser or Google sign-in is done by a person: **Connect** opens the sign-in window on the computer the app is paired with, and Roostr hands the login to the credential's Served by computer, which tries it on the site and says so in Error if the site refuses a login made elsewhere. An agent can create the credential and ask a person to press Connect; it cannot do that sign-in itself.
 - An agent can sign in to a site on its own with Headless Chrome: `browserless --profile <name> --eval '<js>' <url>` runs JavaScript in the page with a Chrome profile kept on its computer, so it fills the login form once and later runs stay signed in (the Headless Chrome skill says how). The login it types comes from its own instructions - a system prompt or a skill only it can read.
 - An agent uses a credential only if its Credentials property lists it. Having the credential is the permission; what to do with it is in the agent's instructions.
 

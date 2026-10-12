@@ -283,23 +283,41 @@ with Login page and the signed-in cookie filled in - no code.
 
 Because the object syncs, an agent on any computer can use a credential it
 lists in its `credentials` property - and **everyone in the credential's space
-can read its keys** (and `session`, a browser sign-in's cookies as JSON).
+can read its keys and saved logins**. A browser sign-in is saved as ordinary
+properties: one `cookie_<name>` per cookie (its value; shown masked like a key,
+the editor reveals it) and `cookie_meta` (JSON: the computer the sign-in was
+made on, and each cookie's domain, path, expiry and flags, so it can be
+re-created exactly). A Google account carries `key_client_id`,
+`key_client_secret` and `key_refresh_token` - what `gws auth export` prints.
 Credentials made before keys were properties still carry `key_fields` and
-`secret` for computers on the previous harness; new code reads only `key_*`.
+`secret` for computers on the previous harness; a browser login stored as one
+`session` JSON property is converted to `cookie_*` by the computer serving it.
 
-`served_by` names the computer that looks after it. That computer's harness
-opens the headed sign-in window (`POST /credentials/connect {id}` on :7334),
-saves the service's cookies to `session` the moment the login cookie appears,
-and keeps `status` (`missing` | `connecting` | `active` | `needs_auth` |
-`broken`), `auth`, `error` and `checked_at` true - at boot, on every change,
-and every 5 minutes. `/credentials/check` and `/credentials/disconnect` do the
-rest; another computer gets a 409 naming the one in charge. Keys need no
-computer: you type them into their key properties and the computer marks it active.
+**Sign in anywhere.** Connect (`POST /credentials/connect {id}` on :7334) runs
+on whichever of your computers the app is paired with: it opens the headed
+sign-in window (or gws's Google sign-in) there, saves the login onto the
+credential the moment the login cookie appears, and names that computer in
+`cookie_meta`. `served_by` names the computer that looks after it: it keeps
+`status` (`missing` | `connecting` | `active` | `needs_auth` | `broken`),
+`auth`, `error` and `checked_at` true - at boot, on every change, and every 5
+minutes - and the first time it meets cookies signed in on another computer it
+opens the site with them in a throwaway headless Chrome (remembered by hash in
+`~/.glon/session-checks.json`). A site that sends it to a login wall or clears
+the session cookie leaves the credential Signed out with "<site> didn't accept
+the login made on <computer>; sign in on <served-by computer> instead" - the
+values stay. `/credentials/check` (try the cookies on the site now; a Google
+account's refresh token is exchanged with Google) runs only on the serving
+computer; another computer gets a 409 naming it. `/credentials/disconnect`
+stops a sign-in running on that computer and removes its local gws sign-in -
+the login saved on the credential stays and keeps being used until the site
+refuses it; clear its Cookie / key properties to remove it. Keys need no
+computer: you type them into their key properties and the computer marks it
+active.
 
 Agents use browser credentials through `credential_fetch` (read a page) and
 `credential_action` (act), which inject the cookies into a throwaway headless
-Chrome. A page that lands on a login wall is reported as signed out; nothing is
-done there.
+Chrome on whichever computer runs the agent. A page that lands on a login wall
+is reported as signed out; nothing is done there.
 
 ### Private extensions
 
