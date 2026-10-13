@@ -11,6 +11,7 @@
  * top-level turn, a credential only the agent's own, and its secrets stay
  * here: a page or an API answer comes back with them blanked out.
  */
+import { flagAgent } from "./agent-errors";
 import { fetchObject, setField, str, sv, type AgentEndpoint, type AgentMessage } from "./api";
 import { credentialPageAction, LOGIN_WALL } from "./browser";
 import { fetchCapabilities } from "./capabilities";
@@ -110,6 +111,8 @@ export async function fileCapabilityHoldup(capability: string, error: string, ct
 			/* badge must never break the turn */
 		}
 	}
+	// And on the agent: the one that couldn't do the work.
+	await flagAgent(ctx.agentId, `needs ${capability}: ${error}`);
 }
 
 // ── Credentials ─────────────────────────────────────────────────

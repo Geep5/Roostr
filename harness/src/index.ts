@@ -52,7 +52,8 @@ import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
 import { arm as armScheduler, handleRunRequest, RUN_REQUEST_KEY, startScheduler } from "./schedule";
 import { startGmailPush } from "./gmail-push";
-import { badgeSignedOut, takeCredentialIssues } from "./credential-issues";
+import { badgeSignedOut, credentialBadge, takeCredentialIssues } from "./credential-issues";
+import { beginAgentTurn, flagAgent, settleAgentTurn } from "./agent-errors";
 
 /** Spaces whose defaults this run has seeded (boot: all of them); a space appearing later is seeded once. */
 const spacesSeeded = new Set<string>();
@@ -355,29 +356,9 @@ async function serve(): Promise<void> {
 	let served = await buildServed(agents);
 
 	// `no machine serves this agent` is the engine's own error on an agent
-	// with no served_by (core/agent_serving.odin); markRunError leaves it be.
-	const RUN_FAILED = "run failed: ";
-
-	/**
-	 * A failed turn names its reason on the agent's Error property ("run
-	 * failed: <provider message>"); the next successful turn clears it. Only
-	 * this badge is ours: holdup and unserved errors are never touched, and
-	 * the badge write can never fail the turn it reports on.
-	 */
-	async function markRunError(agentId: string, failure: string): Promise<void> {
-		try {
-			const current = str((await fetchObject(agentId)).fields, "error");
-			const ours = current.startsWith(RUN_FAILED);
-			if (failure) {
-				const next = (RUN_FAILED + failure).slice(0, 300);
-				if ((!current || ours) && current !== next) await setField(agentId, "error", sv(next));
-			} else if (ours) {
-				await deleteField(agentId, "error");
-			}
-		} catch (err) {
-			console.error(`[harness] run error badge failed for ${agentId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
-		}
-	}
+	// with no served_by (core/agent_serving.odin): agent-errors.ts only ever
+	// touches its own badges ("run failed: ", a helper's, a signed-out
+	// login's...), never that one or a person's.
 
 	// ── External responders ─────────────────────────────────────────
 	// Agents another bot answers for: the harness stays silent on every
@@ -652,6 +633,7 @@ async function serve(): Promise<void> {
 		// chat and the agent's Error the moment any event re-checked a surface.
 		const before = agentTurnStatus.get(s.agentId);
 		report("working");
+		beginAgentTurn(s.agentId);
 		let failure = "";
 		try {
 			const ran = await body();
@@ -660,7 +642,7 @@ async function serve(): Promise<void> {
 				else report("idle");
 			} else {
 				report("idle");
-				await markRunError(s.agentId, "");
+				await settleAgentTurn(s.agentId, "");
 			}
 		} catch (err) {
 			// Its object or space was deleted mid-turn: one quiet line, and no badge on an agent that may be gone.
@@ -680,7 +662,7 @@ async function serve(): Promise<void> {
 			}
 			failure = msg.slice(0, 200);
 			report("error", failure);
-			if (!deleted) await markRunError(s.agentId, failure);
+			if (!deleted) await settleAgentTurn(s.agentId, failure);
 		} finally {
 			busy.delete(s.agentId);
 			active.delete(s.agentId);
@@ -729,7 +711,10 @@ async function serve(): Promise<void> {
 			// A signed-out login this turn hit goes on the object it was about, as a
 			// scheduled run's does - else only a chat line says why the work stopped.
 			const dead = takeCredentialIssues(s.agentId);
-			if (dead.length > 0) await badgeSignedOut(surface.objectId, dead).catch(() => {});
+			if (dead.length > 0) {
+				await badgeSignedOut(surface.objectId, dead).catch(() => {});
+				await flagAgent(s.agentId, credentialBadge(dead));
+			}
 		});
 	}
 

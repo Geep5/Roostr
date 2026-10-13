@@ -36,6 +36,7 @@
  * occurrences (sleep, downtime) fire on the next arm, each once.
  */
 
+import { flagAgent } from "./agent-errors";
 import { deleteField, fetchObject, guestAgents, mutate, queryAll, setField, str, sv, wasDeleted, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { addConvBlock, convKey, humanRef, type ConvRef } from "./conv";
 import { CREDENTIAL_BADGE, credentialBadge, takeCredentialIssues } from "./credential-issues";
@@ -441,7 +442,11 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 							}
 						}
 					}
-					if (problems.length > 0) await setField(obj.id, "error", sv(`scoring failed: ${problems.join("; ")}`.slice(0, 300)));
+					if (problems.length > 0) {
+						const text = `scoring failed: ${problems.join("; ")}`.slice(0, 300);
+						await setField(obj.id, "error", sv(text));
+						if (owner) await flagAgent(owner.agentId, text);
+					}
 					else if (str(obj.fields, "error").startsWith("scoring failed:")) await deleteField(obj.id, "error");
 				}
 				const binned = await runViewActions().catch((err) => {
@@ -505,7 +510,10 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 		// says why it couldn't); a clean run clears what either wrote (or the
 		// no-agent badge, once the object names one).
 		if (error) await setField(obj.id, "error", sv(`run failed: ${error}`.slice(0, 300)));
-		else if (deadLogins.length > 0) await setField(obj.id, "error", sv(credentialBadge(deadLogins)));
+		else if (deadLogins.length > 0) {
+			await setField(obj.id, "error", sv(credentialBadge(deadLogins)));
+			await flagAgent(owner.agentId, credentialBadge(deadLogins));
+		}
 		else await clearRunBadge(obj, true);
 		if (subDaily(obj)) await completeOccurrence(d);
 	} finally {

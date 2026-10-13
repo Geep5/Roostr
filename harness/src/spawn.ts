@@ -5,6 +5,7 @@
  * submit_result tool and persisted on the subagent object.
  */
 
+import { flagAgent } from "./agent-errors";
 import { choice, createObject, deleteField, fetchObject, iv, setField, str, sv } from "./api";
 import { runTurn } from "./runner";
 import { MAX_SPAWN_DEPTH, SPAWN_CONCURRENCY } from "./types";
@@ -110,6 +111,7 @@ export async function spawnSubagent(task: string, templateName: string, parentCt
 			// The parent may work around it; the person still sees why, on the object.
 			const why = err instanceof Error ? err.message : String(err);
 			if (parentCtx.boundObject) await badgeHelperFailure(parentCtx.boundObject, why).catch(() => {});
+			await flagAgent(parentCtx.agentId, `${HELPER_BADGE}${why}`);
 			throw err;
 		}
 
