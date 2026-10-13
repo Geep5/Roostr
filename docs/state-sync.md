@@ -132,6 +132,17 @@ conservatively:
   also being rebased additionally names that parent's *rebased* id, so a
   chain of orphans stays a chain. Parents are sorted bytewise (= hex order).
   The rebased change carries no legacy in-DAG snapshot.
+- **One edit, many copies**: the "same change id" promise above only holds
+  for devices that saw the same live heads. Copies made with different heads
+  differ in id, and a copy that lands after the compactor folded another
+  one is an orphan again - rebasing it made yet another copy, which the
+  next compaction orphaned in turn (26k copies of one block_add on a busy
+  agent object). So an edit is identified across copies by its **edit key**
+  - sha256 of the change with only object, author, timestamp and ops - and:
+  an orphan whose edit key matches a live or covered change is **Covered**
+  (already applied; never rebased, never replayed), and copies of one edit
+  among the orphans rebase once (the others map onto that copy for their
+  children's parents).
 
 ## Compaction
 

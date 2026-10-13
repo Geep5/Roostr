@@ -164,7 +164,32 @@ base_classify :: proc(bases: []Checkpoint, deltas: []Delta, pending: map[string]
 			out.classes[i] = decidable ? .Orphan : .Stale
 		}
 	}
+
+	// An orphan whose edit is already live or folded here - another device's
+	// rebased copy of it, or the original of a copy - is applied: Covered.
+	// Rebasing it again made a new copy each time; a busy object compacting
+	// between those copies orphaned every one in turn, without end.
+	orphans := 0
+	for c in out.classes do if c == .Orphan do orphans += 1
+	if orphans == 0 do return out
+	applied := make(map[[32]byte]bool, allocator = context.temp_allocator)
+	for &d, i in deltas do if out.classes[i] == .Live || out.classes[i] == .Covered || out.classes[i] == .Premigration_Covered {
+		applied[edit_key(d.change)] = true
+	}
+	for &d, i in deltas do if out.classes[i] == .Orphan && edit_key(d.change) in applied {
+		out.classes[i] = .Covered
+	}
 	return out
+}
+
+/**
+ * One edit across every rebased copy of it: object, author, timestamp and
+ * ops. A rebase keeps those and replaces only the parents (hence the id) and
+ * drops a legacy in-DAG snapshot, so copies share this key and nothing else does.
+ */
+edit_key :: proc(c: Change) -> [32]byte {
+	bare := Change{object_id = c.object_id, ops = c.ops, timestamp = c.timestamp, author = c.author}
+	return sha256(encode_change(bare, true, context.temp_allocator))
 }
 
 /** The changes of `deltas` classified `class`, input order kept. */
@@ -246,8 +271,15 @@ base_rebase :: proc(base: ^Checkpoint, deltas: []Delta, cls: Classification, onl
 		append(&orphans, d.change)
 	}
 	renamed := make(map[string][]byte, allocator = context.temp_allocator)
+	// Copies of one edit (each device's) rebase once; the rest map onto it.
+	by_edit := make(map[[32]byte][]byte, allocator = context.temp_allocator)
 	out := make([dynamic]Rebased, allocator)
 	for o in topo_sort(orphans[:], context.temp_allocator) {
+		key := edit_key(o^)
+		if kept, dup := by_edit[key]; dup {
+			renamed[string(o.id)] = kept
+			continue
+		}
 		parents := make(map[string]bool, allocator = context.temp_allocator)
 		for k in common do parents[k] = true
 		for p in o.parent_ids do if id, ok := renamed[string(p)]; ok do parents[string(id)] = true
@@ -265,6 +297,7 @@ base_rebase :: proc(base: ^Checkpoint, deltas: []Delta, cls: Classification, onl
 		digest := sha256(encode_change(c, true, context.temp_allocator))
 		c.id = slice.clone(digest[:], allocator)
 		renamed[string(o.id)] = c.id
+		by_edit[key] = c.id
 		append(&out, Rebased{orphan = o.id, change = c})
 	}
 	return out

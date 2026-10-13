@@ -296,6 +296,67 @@ late_orphan_converges_two_devices :: proc(t: ^testing.T) {
 	testing.expect_value(t, field(state, "title"), "C")
 }
 
+// Two devices rebase the same late edit while holding different live
+// deltas, so their copies get different ids. The compactor folds one copy;
+// the other arrives afterwards. It is the same edit (same author, timestamp
+// and ops), already in the state: rebasing it again made a fresh copy that
+// the next compaction orphaned in turn - 26k copies of one block_add on a
+// busy agent object.
+@(test)
+rebased_copy_of_a_folded_edit_is_not_rebased_again :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	c1, c2, c3 := history()
+	b1 := fold(t, nil, {pre(c1), pre(c2), pre(c3)}, 10_000)
+	d1 := mk({c3}, 11_000, set("title", "B"))
+	b2 := fold(t, {b1}, {on(d1, b1)}, 20_000)
+	late := mk({c3}, 15_000, set("note", "offline edit"))
+	x := mk({d1}, 21_000, set("x", "1"))
+
+	// Device A rebases with no live deltas; device B already holds x.
+	ra := base_rebase(&b2, {on(d1, b1), on(late, b1)}, base_classify({b1, b2}, {on(d1, b1), on(late, b1)}, nil), nil)
+	rb_in := []Delta{on(d1, b1), on(late, b1), on(x, b2)}
+	rb := base_rebase(&b2, rb_in, base_classify({b1, b2}, rb_in, nil), nil)
+	testing.expect(t, len(ra) == 1 && len(rb) == 1, "each device rebases the late edit")
+	testing.expect(t, string(ra[0].change.id) != string(rb[0].change.id), "different live heads, different copies")
+
+	// The compactor holds A's copy and x, not yet B's copy, and folds them.
+	b3 := fold(t, {b1, b2}, {on(d1, b1), on(x, b2), on(ra[0].change, b2)}, 30_000)
+
+	// B's copy lands after b3: same edit, already folded - covered, never rebased.
+	after := []Delta{on(d1, b1), on(late, b1), on(x, b2), on(ra[0].change, b2), on(rb[0].change, b2)}
+	cls := base_classify({b1, b2, b3}, after, nil)
+	testing.expect_value(t, class_of(cls, after, rb[0].change), Delta_Class.Covered)
+	testing.expect_value(t, class_of(cls, after, late), Delta_Class.Covered)
+	testing.expect_value(t, len(base_rebase(&b3, after, cls, nil)), 0)
+	state, _, _ := base_replay({b1, b2, b3}, after, nil, nil)
+	testing.expect_value(t, field(state, "note"), "offline edit")
+}
+
+// Several orphan copies of one edit (each device's) rebase to a single change.
+@(test)
+orphan_copies_of_one_edit_rebase_once :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	c1, c2, c3 := history()
+	b1 := fold(t, nil, {pre(c1), pre(c2), pre(c3)}, 10_000)
+	d1 := mk({c3}, 11_000, set("title", "B"))
+	b2 := fold(t, {b1}, {on(d1, b1)}, 20_000)
+	// Two copies of the same edit written on b1 with different parents, then a child of one.
+	copy_a := mk({c3}, 15_000, set("note", "n"))
+	copy_b := mk({c2}, 15_000, set("note", "n"))
+	child := mk({copy_b}, 16_000, set("more", "m"))
+	deltas := []Delta{on(d1, b1), on(copy_a, b1), on(copy_b, b1), on(child, b1)}
+	cls := base_classify({b1, b2}, deltas, nil)
+	testing.expect_value(t, class_of(cls, deltas, copy_a), Delta_Class.Orphan)
+	testing.expect_value(t, class_of(cls, deltas, copy_b), Delta_Class.Orphan)
+	out := base_rebase(&b2, deltas, cls, nil)
+	testing.expect_value(t, len(out), 2)
+	kept := out[0].change
+	testing.expect(t, string(out[1].change.ops[0].key) == "more", "the child rebases too")
+	has_parent := false
+	for p in out[1].change.parent_ids do if string(p) == string(kept.id) do has_parent = true
+	testing.expect(t, has_parent, "the child of the dropped copy hangs off the one kept")
+}
+
 @(test)
 concurrent_compaction_converges :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
