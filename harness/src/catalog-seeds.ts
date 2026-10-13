@@ -15,8 +15,8 @@
  * The retired `descriptor` cards these replaced are vanished.
  */
 
-import { bv, createObject, deleteField, iv, lv, markSystem, mutate, plainValue, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
-import { PROMPT_SEEDS, ensureSystemPrompt, type AgentKindEntry } from "./prompts";
+import { bv, createObject, deleteField, fetchObject, iv, lv, markSystem, mutate, plainValue, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
+import { PROMPT_SEEDS, SYSTEM_PROMPT_TYPE, ensureSystemPrompt, pageText, promptTarget, type AgentKindEntry } from "./prompts";
 import { CATALOG, upsertSkillObject } from "./skillmgr";
 import { SKILL_TYPE, SKILLS_KEY } from "./skills";
 import { linkList } from "./tool-objects";
@@ -78,12 +78,34 @@ async function writeKind(tpl: QueryRow, seed: AgentKindEntry, fields: Record<str
 }
 
 /**
+ * A kind scoped to other spaces (an extension's `spaces`): its template and
+ * prompt in `space` go - only while nobody edited them, and the prompt only
+ * while no agent links it. Returns how many objects it removed.
+ */
+async function removeOutOfScope(seed: AgentKindEntry, space: string, templates: QueryRow[]): Promise<number> {
+	let removed = 0;
+	for (const t of kindTemplates(templates, seed.key, space)) {
+		if (kindHash(seed, t.fields) !== str(t.fields, "seed_hash")) continue;
+		await mutate("delete", { object_id: t.id });
+		removed += 1;
+	}
+	const linked = new Set((await queryAll({ type: "agent" })).map((a) => promptTarget(a.fields)));
+	for (const p of await queryAll({ type: SYSTEM_PROMPT_TYPE })) {
+		if (str(p.fields, "channel") !== space || str(p.fields, "name") !== seed.promptName || linked.has(p.id)) continue;
+		if (pageText(await fetchObject(p.id)).trim() !== seed.system.trim()) continue;
+		await mutate("delete", { object_id: p.id });
+		removed += 1;
+	}
+	return removed;
+}
+
+/**
  * Converge the catalogs onto the vault: Skill objects, then each space's
  * kind properties and agent-kind templates, then vanish descriptor cards.
  * Idempotent - with nothing changed it writes nothing.
  */
 export async function seedCatalog(): Promise<void> {
-	const out = { skills: 0, properties: 0, templates: 0, upgraded: 0, deduped: 0, descriptors: 0 };
+	const out = { skills: 0, properties: 0, templates: 0, upgraded: 0, deduped: 0, descriptors: 0, removed: 0 };
 
 	const skillRows = await queryAll({ type: SKILL_TYPE });
 	for (const entry of CATALOG) if (await upsertSkillObject(entry, skillRows)) out.skills += 1;
@@ -99,9 +121,10 @@ export async function seedCatalog(): Promise<void> {
 	for (const space of spaces) {
 		const own = relations.filter((r) => str(r.fields, "channel") === space.id);
 		const have = new Set(own.map((r) => str(r.fields, "key")));
-		const seedKeys = new Set(PROMPT_SEEDS.flatMap((s) => s.fields.map((f) => f.key)));
+		const here = PROMPT_SEEDS.filter((s) => !s.spaces || s.spaces.includes(space.id));
+		const seedKeys = new Set(here.flatMap((s) => s.fields.map((f) => f.key)));
 		for (const r of own) if (seedKeys.has(str(r.fields, "key"))) await markSystem(r);
-		for (const f of PROMPT_SEEDS.flatMap((s) => s.fields)) {
+		for (const f of here.flatMap((s) => s.fields)) {
 			if (have.has(f.key)) continue;
 			await createObject(f.label, "relation", {
 				channel: sv(space.id),
@@ -125,6 +148,10 @@ export async function seedCatalog(): Promise<void> {
 	const templates = await queryAll({ type: TEMPLATE_TYPE });
 	for (const space of spaces) {
 		for (const seed of PROMPT_SEEDS) {
+			if (seed.spaces && !seed.spaces.includes(space.id)) {
+				out.removed += await removeOutOfScope(seed, space.id, templates);
+				continue;
+			}
 			const prompt = await ensureSystemPrompt(seed, space.id);
 			const fields = kindFields(seed, prompt.id, skillIds);
 			const hash = kindHash(seed, fields);

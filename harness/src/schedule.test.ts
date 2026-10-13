@@ -64,6 +64,7 @@ test("a scheduled object fires to the served agent on its guest list", async () 
 					channel: { stringValue: channelId },
 					name: { stringValue: "Retweet recent tagged in posts" },
 					agent: { valuesValue: { items: [{ stringValue: guestAgentId }] } },
+					repeat: { mapValue: { entries: {} } },
 				},
 				blocks: [],
 				deleted: false,

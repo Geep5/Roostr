@@ -50,6 +50,12 @@ export interface Extension {
 	sessionRenewers?: Record<string, SessionRenewer>;
 	credentialApis?: Record<string, CredentialApi>;
 	credentialActions?: Record<string, Record<string, CredentialActionRun>>;
+	/**
+	 * Space ids its kinds and credential presets are seeded into - a
+	 * deployment's own agents and services stay in its own space. Unset =
+	 * every space. Untouched copies elsewhere are removed.
+	 */
+	spaces?: string[];
 }
 
 /** Service -> session renewer. */
@@ -69,8 +75,8 @@ function removeFrom<T>(list: T[], items: T[]): void {
 /** Add `ext` to the seeds and registries; returns its removal (tests register a fake service and take it back). */
 export function registerExtension(ext: Extension): () => void {
 	const catalog = ext.catalog ?? [];
-	const kinds = ext.kinds ?? [];
-	const seeds = ext.credentialSeeds ?? [];
+	const kinds = (ext.kinds ?? []).map((k) => (ext.spaces ? { ...k, spaces: ext.spaces } : k));
+	const seeds = (ext.credentialSeeds ?? []).map((s) => (ext.spaces ? { ...s, spaces: ext.spaces } : s));
 	CATALOG.push(...catalog);
 	PROMPT_SEEDS.push(...kinds);
 	CREDENTIAL_SEEDS.push(...seeds);

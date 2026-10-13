@@ -340,7 +340,9 @@ renewer (`sessionRenewers`), a signed API for `roostr.credentials.api`
 (`credentialActions`, run through `credential_action`). Without the folder the
 harness builds, tests and runs on the public seeds alone, and a computer that
 lacks an extension leaves the vault objects it seeded elsewhere (skills,
-templates, capabilities, agents of its kinds) untouched.
+templates, capabilities, agents of its kinds) untouched. `spaces` (space ids)
+keeps an extension's kinds and credential presets in those spaces only: no
+other space gets them, and copies there that nobody edited are removed.
 
 ## Verified
 

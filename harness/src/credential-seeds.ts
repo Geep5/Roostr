@@ -107,8 +107,8 @@ export async function ensureProperties(space: string, props: PropertySeed[]): Pr
 	return made;
 }
 
-export async function seedCredentials(): Promise<{ properties: number; templates: number; upgraded: number; deduped: number; converted: number; filled: number; cleaned: number }> {
-	const out = { properties: 0, templates: 0, upgraded: 0, deduped: 0, converted: 0, filled: 0, cleaned: 0 };
+export async function seedCredentials(): Promise<{ properties: number; templates: number; upgraded: number; deduped: number; converted: number; filled: number; cleaned: number; removed: number }> {
+	const out = { properties: 0, templates: 0, upgraded: 0, deduped: 0, converted: 0, filled: 0, cleaned: 0, removed: 0 };
 	const spaces = await queryAll({ type: "channel" });
 
 	// Properties first: a credential's fields show only through them.
@@ -133,6 +133,15 @@ export async function seedCredentials(): Promise<{ properties: number; templates
 			const mine = templates
 				.filter((t) => str(t.fields, "seed_key") === seed.key && str(t.fields, "channel") === space.id)
 				.sort((a, b) => a.createdAt - b.createdAt);
+			// A preset scoped to other spaces (an extension's `spaces`): its untouched template here goes.
+			if (seed.spaces && !seed.spaces.includes(space.id)) {
+				for (const t of mine) {
+					if (recipeHash(t.fields) !== str(t.fields, "seed_hash")) continue;
+					await mutate("delete", { object_id: t.id });
+					out.removed += 1;
+				}
+				continue;
+			}
 			if (mine.length === 0) {
 				await createObject(seed.label, TEMPLATE_TYPE, { ...fields, channel: sv(space.id), target_type: sv(credentialTypeId(space.id)), seed_key: sv(seed.key), seed_hash: sv(hash) });
 				out.templates += 1;

@@ -42,11 +42,12 @@ A computer becomes part of Roostr when its harness first starts: it creates this
    | `credentials` | `{"valuesValue":{"items":[{"linkValue":{"targetId":"<credential id>","relationKey":"credentials"}}]}}` | needs a model key, see step 6. |
    | `tools` | links (relationKey `tools`) → the space's `tool` objects | the defaults are `shell_exec` and `web_fetch`, which an agent made from the template gets automatically. |
 
-6. **A model key.** An agent calls its model with a **Credential** listed in its `credentials`: a `credential` object with `service` `anthropic` and the key in `key_api_key`. Make one in the app (New object → Credential → Anthropic), or through the API:
+6. **A model key.** An agent calls its model with a **Credential** listed in its `credentials`: a `credential` object with `service` `anthropic` and the key in `key_api_key`. Every space you own already has one, named "Anthropic", with its key empty (Error: `No key yet - paste "API key or token"`), and new agents - `setup` and the app's "+ New agent" - list it. So the usual step is to paste the key into that credential (in the app, or `set_field` key `key_api_key` on it). An agent listing it before then shows `The "Anthropic" credential has no key…` on its Error. Each space also starts with a "<Space> Space" agent, its setup helper, served by the computer that seeded it.
    ```bash
-   curl -s -X POST http://127.0.0.1:7333/api/mutate -H "Authorization: Bearer $TOK" -d '{"action":"create","name":"Anthropic","type_key":"credential","fields":{"channel":{"stringValue":"<space id>"},"service":{"stringValue":"anthropic"},"key_api_key":{"stringValue":"sk-ant-…"},"served_by":{"stringValue":"<machine_id>"}}}'
+   curl -s -X POST http://127.0.0.1:7333/api/query -H "Authorization: Bearer $TOK" -d '{"type":"credential","filters":[{"key":"service","condition":"equal","value":"anthropic"}]}'   # find the space's one
+   curl -s -X POST http://127.0.0.1:7333/api/mutate -H "Authorization: Bearer $TOK" -d '{"action":"set_field","object_id":"<credential id>","key":"key_api_key","value":{"stringValue":"sk-ant-…"}}'
    ```
-   Only the computer named in the credential's own `served_by` marks it `active`. Without that, the agent shows `credential signed out: <name>` on its Error. A key starting `sk-ant-oat…` (from `claude setup-token`) is sent as a subscription token; any other key is sent as an API key.
+   Only the computer named in the credential's own `served_by` marks it `active`. A key starting `sk-ant-oat…` (from `claude setup-token`) is sent as a subscription token; any other key is sent as an API key.
 7. **Confirm it answers:** `curl -s http://127.0.0.1:7334/agents -H "Authorization: Bearer $TOK"` lists it under `serving`, and its `error` property is empty. Then, on a throwaway object: set `agent` to a link to the agent (relationKey `agent`), `{"action":"chat_post","object_id":"<object id>","text":"@<Agent name> say pong"}`, and read the reply in `GET /api/objects/<object id>` (a chat block authored by the agent). Delete the object afterwards.
 
 ## 3. Operate it from this machine

@@ -40,7 +40,7 @@ An agent is an object whose properties are its configuration - nothing is hidden
 
 - **System prompt**: links a System prompt object - the agent's standing instructions (its page) and default model.
 - **Model**: which model runs it (e.g. a Claude model). Overrides the prompt's model.
-- **Credentials**: logins it uses - its model key (an Anthropic or Kimi credential) and service logins (Gmail, Discord, a database...).
+- **Credentials**: logins it uses - its model key (an Anthropic or Kimi credential) and service logins (Gmail, Discord, a database...). Every space you own has an **Anthropic** credential, and every new agent lists it. Its key starts empty: until someone pastes an Anthropic API key (`sk-ant-api…`) or a `claude setup-token` token into its "API key or token", the credential's Error says "No key yet", and an agent that lists it stops with "The "Anthropic" credential has no key" on its Error instead of running.
 - **Tools**: extra tools beyond the always-on core - gated built-ins (`shell_exec`, `web_fetch`) and custom Tool objects.
 - **Skills**: instructions it may read (like this guide). With none listed it sees every Skill; with a list, only those.
 - **Served by**: the one computer it runs on. No Served by, no runs - its Error property says so.
@@ -50,7 +50,7 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 
 ### Lifecycle
 
-1. **Made**: from the space's Agent template ("+ New agent" in a picker - named right there - or New object -> Agent). The template supplies the prompt, model, tools and credentials. Made from an object's Agent row, it also starts with that object's tags (an agent made on a Team task is Customer: Team); made from a cell or the new-row line of a query's table, it starts with the query's filter values.
+1. **Made**: from the space's Agent template ("+ New agent" in a picker - named right there - or New object -> Agent). The template supplies the prompt, model, tools and credentials; with none, it gets the space's Assistant prompt, `shell_exec` and `web_fetch`, and the space's Anthropic credential. Made from an object's Agent row, it also starts with that object's tags (an agent made on a Team task is Customer: Team); made from a cell or the new-row line of a query's table, it starts with the query's filter values.
 2. **Placed**: its Served by names a computer. That computer's harness adopts it within seconds - no restart. Change Served by and it moves; the old computer lets go.
 3. **Invited**: an object's **Agent** property is its guest list. An agent only ever works on objects that list it (and on its own page). Nothing answers an object uninvited.
 4. **Woken**: a person (or another agent) @-mentions it in the object's chat, or a Repeat on an object it is on fires. A chat post with no @ wakes nobody.
@@ -134,7 +134,7 @@ These are enforced by the harness for every agent; follow them in any prompt you
 
 ### Reliability
 
-- **Every agent needs Served by, a running computer and a model key.** Check all three first when "it doesn't answer" - an agent asking another agent waits as long as that agent's computer is off.
+- **Every agent needs Served by, a running computer and a model key.** Check all three first when "it doesn't answer" - an agent asking another agent waits as long as that agent's computer is off. Each space you own starts with **"<Space> Space"**, its setup-and-upkeep agent (on the space's own chat), and an **Anthropic** credential: paste a key there once and every agent in the space that lists it runs.
 - **Read the Error property** - on the object, its agent and its Computer. Failed runs, stuck runs, missing computers, crashed programs, signed-out credentials and broken Tools all show there - fix the cause, and the next clean run (or Retry run) clears it.
 - **Keep computers on the service** (`bun run service install`), and run `bun run service restart` after every pull or rebuild.
 - **Test on a throwaway object** before pointing a setup at real data, then delete it.

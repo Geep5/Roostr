@@ -42,6 +42,8 @@ export interface PasswordField {
 export interface CredentialSeed {
 	key: string;
 	label: string;
+	/** Only these spaces get its template (an extension's `spaces`); unset = every space. */
+	spaces?: string[];
 	/** Shown on the Credential page so the person picks the right path. */
 	note: string;
 	/** Browser-login setup: the page the headed Chrome opens. */

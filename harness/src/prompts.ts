@@ -37,6 +37,8 @@ export interface AgentKindEntry {
 	fields: Array<{ key: string; label: string; note: string }>;
 	/** Values the kind's template carries for fields left blank. */
 	defaults: Record<string, string>;
+	/** Only these spaces get its prompt and template (an extension's `spaces`); unset = every space. */
+	spaces?: string[];
 }
 
 /**

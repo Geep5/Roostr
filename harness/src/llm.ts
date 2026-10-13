@@ -93,7 +93,12 @@ function applyPromptCaching(body: Record<string, unknown>): void {
 
 async function callAnthropic(req: LLMRequest): Promise<LLMResult> {
 	// A pasted subscription token (`claude setup-token`) is OAuth; an API key is not.
-	const auth = req.apiKey ? { token: req.apiKey, isOAuth: req.apiKey.startsWith("sk-ant-oat") } : await resolveAnthropicAuth();
+	// No key on the agent: this computer's own Claude sign-in - which, when it fails, says what the agent is missing.
+	const auth = req.apiKey
+		? { token: req.apiKey, isOAuth: req.apiKey.startsWith("sk-ant-oat") }
+		: await resolveAnthropicAuth().catch((err) => {
+				throw new Error(`This agent lists no Anthropic credential, and this computer's own Claude sign-in failed (${err instanceof Error ? err.message.slice(0, 160) : String(err)}). Add the space's "Anthropic" credential to the agent's Credentials, with a key in it.`);
+			});
 	const body: Record<string, unknown> = {
 		model: req.model,
 		max_tokens: req.maxTokens ?? 4096,

@@ -115,6 +115,11 @@ function liveState(row: CredentialRow): LiveState {
 	if (windows.has(row.id)) return { status: "connecting", auth: "", error: signInText.get(row.id) ?? `Finish signing in to ${label} in the Chrome window on ${hostname()}.` };
 	// It carried a login and the login is gone (expired, signed out): say so, rather than looking never-connected.
 	if (session.length > 0 || row.status === "active" || row.status === "needs_auth") return { status: "needs_auth", auth: "", error: `The ${label} sign-in expired or was signed out - press Reconnect.` };
+	// Never filled in: a keys-only credential says which ones to paste, by the names its Properties show.
+	if (!recipe.sessionCookie) {
+		const labels = recipe.passwordFields.map((f) => seedFor(row.service)?.passwordFields?.find((p) => p.key === f.key)?.label ?? f.label);
+		return { status: "missing", auth: "", error: `No key yet - paste ${labels.map((l) => `"${l}"`).join(" and ")} to use it.` };
+	}
 	return { status: "missing", auth: "", error: "" };
 }
 
@@ -670,15 +675,20 @@ export async function agentCredential(agent: ObjectJSON, service: string, pick =
  * first credential it lists of that service with its key filled in. Read
  * straight from the synced object - no computer has to vouch for it - so
  * the agent authenticates identically wherever it runs. null = it lists
- * none; the caller falls back to this computer's own login.
+ * none; the caller falls back to this computer's own login. Listing one
+ * whose key is empty is an error naming it - never a silent fallback that
+ * works on one computer and not another.
  */
 export async function agentModelKey(agent: ObjectJSON, provider: string): Promise<string | null> {
+	const empty: string[] = [];
 	for (const id of agentCredentialIds(agent)) {
 		const row = await credentialObject(id).catch(() => null);
 		if (row?.service !== provider) continue;
 		const key = credentialKeys(row.fields)?.api_key;
 		if (key) return key;
+		empty.push(row.name || "Anthropic");
 	}
+	if (empty.length > 0) throw new Error(`The "${empty[0]}" credential has no key. Open it and paste an API key or token in its "API key or token" property.`);
 	return null;
 }
 

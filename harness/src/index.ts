@@ -21,6 +21,7 @@ import { spawnSubagent } from "./spawn";
 import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./credential-objects";
 import { installGwsAs } from "./google-credentials";
 import { fillCredential, seedCredentials } from "./credential-seeds";
+import { seedSpaceDefaults, spaceAnthropicCredential } from "./space-defaults";
 import { seedJev } from "./jev";
 import { nudgeViewActions, startViewActions } from "./view-actions";
 import { seedGuide } from "./guide";
@@ -51,6 +52,9 @@ import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capabili
 import { arm as armScheduler, handleRunRequest, RUN_REQUEST_KEY, startScheduler } from "./schedule";
 import { startGmailPush } from "./gmail-push";
 import { badgeSignedOut, takeCredentialIssues } from "./credential-issues";
+
+/** Spaces whose defaults this run has seeded (boot: all of them); a space appearing later is seeded once. */
+const spacesSeeded = new Set<string>();
 
 function argValue(flagName: string): string {
 	const idx = process.argv.indexOf(flagName);
@@ -107,6 +111,14 @@ async function setup(): Promise<void> {
 	for (const [key, value] of Object.entries(template.fields)) if (!TEMPLATE_OWN[key]) fields[key] = value;
 	fields.channel = sv(space);
 	fields.served_by = sv(await machineId());
+	// Its model login: the space's Anthropic credential (seeded with an empty key when the space has none).
+	let modelCred = spaceAnthropicCredential(await queryAll({ type: "credential" }), space);
+	if (!modelCred) {
+		await seedCredentials();
+		await seedSpaceDefaults();
+		modelCred = spaceAnthropicCredential(await queryAll({ type: "credential" }), space);
+	}
+	if (modelCred && !fields.credentials) fields.credentials = linkList("credentials", [modelCred.id]);
 	// A normal agent can run commands and fetch the web: list both built-ins
 	// in its Tools (its space's Tool objects).
 	const builtins = await ensureBuiltinTools(space);
@@ -309,6 +321,9 @@ async function serve(): Promise<void> {
 	// own recipe - before the check below reads those recipes.
 	console.log("[harness] credential seeds:", JSON.stringify(await seedCredentials()));
 	await refreshCredentials();
+	// Every space of yours starts with an Anthropic credential (key empty) and its "<Space> Space" agent.
+	console.log("[harness] space defaults:", JSON.stringify(await seedSpaceDefaults()));
+	for (const s of await queryAll({ type: "channel" })) spacesSeeded.add(s.id);
 	// The Computer page's "Keep every file" and "Starts automatically" checkboxes, in every space with computers.
 	console.log("[harness] computer properties:", JSON.stringify({ seeded: await seedComputerProperties() }));
 	// Jev Skills' Answer / Writes to properties in every space; the retired Judge type and properties removed.
@@ -833,6 +848,14 @@ async function serve(): Promise<void> {
 		}
 		// A space (a new one included) holds the built-ins as Tool objects.
 		if (obj.typeKey === "channel" && !obj.deleted) void ensureBuiltinTools(obj.id).catch((err) => console.error(`[tools] built-in Tool objects for ${obj.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
+		// A space new since boot gets the credential properties and presets, then its defaults - once per run.
+		if (obj.typeKey === "channel" && !obj.deleted && !spacesSeeded.has(obj.id)) {
+			spacesSeeded.add(obj.id);
+			void seedCredentials()
+				.then(() => seedSpaceDefaults())
+				.then((r) => { if (r.credentials || r.agents) console.log(`[harness] space defaults for ${obj.id.slice(0, 8)}:`, JSON.stringify(r)); })
+				.catch((err) => console.error(`[harness] space defaults for ${obj.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
+		}
 		// A rule edit (repeat_set/clear, an occurrence completed or fired)
 		// may move the earliest occurrence.
 		if (obj.fields["repeat"]) void armScheduler();
