@@ -24,25 +24,66 @@ SCRATCH_LIMIT :: 128 * 1024 * 1024
 // this is ~6x headroom, and a bigger one still loads in batches.
 BLOB_LIMIT :: 32 * 1024 * 1024
 
+IS_WASM :: ODIN_ARCH == .wasm32 || ODIN_ARCH == .wasm64p32
+
 request_bytes: [REQUEST_LIMIT]byte
 blob_bytes: [BLOB_LIMIT]byte
-scratch_bytes: [SCRATCH_LIMIT]byte
-scratch: mem.Arena
 response: []byte
 reserved_length: int
 blob_length: int
 busy: bool
 
+when IS_WASM {
+	// WASM has no virtual memory to grow into: one static scratch block. The
+	// JS host catches the trap an exhausted request raises and resets.
+	scratch_bytes: [SCRATCH_LIMIT]byte
+	scratch: mem.Arena
+} else {
+	// Native hosts (iOS, macOS) cannot catch a trap: an exhausted fixed block
+	// killed the app on every launch once one object's history outgrew 128 MiB
+	// of request memory. Here the arena grows from the heap, every block is
+	// handed back after each request, and only a request past
+	// NATIVE_SCRATCH_CAP - far beyond what REQUEST_LIMIT + BLOB_LIMIT of input
+	// can need - still stops.
+	NATIVE_SCRATCH_CAP :: 1536 * 1024 * 1024
+	scratch: mem.Dynamic_Arena
+	scratch_used: int
+}
+
 // Each host entry point calls this exactly once before any other export.
 init :: proc() {
-	mem.arena_init(&scratch, scratch_bytes[:])
+	when IS_WASM {
+		mem.arena_init(&scratch, scratch_bytes[:])
+	} else {
+		heap := runtime.default_allocator()
+		mem.dynamic_arena_init(&scratch, heap, heap, block_size = 4 * 1024 * 1024, out_band_size = 1024 * 1024)
+	}
+}
+
+/** Empties the request arena; on native also returns its blocks to the heap. */
+scratch_free_all :: proc() {
+	when IS_WASM {
+		mem.arena_free_all(&scratch)
+	} else {
+		mem.dynamic_arena_free_all(&scratch)
+		scratch_used = 0
+	}
 }
 
 // A failed allocator operation must not let ignored append errors return a
-// partial successful result. The host catches the trap and resets this arena.
+// partial successful result: an exhausted request stops here.
 request_allocator :: proc(data: rawptr, mode: mem.Allocator_Mode, size, alignment: int,
 	old_memory: rawptr, old_size: int, loc := #caller_location) -> ([]byte, mem.Allocator_Error) {
-	bytes, err := mem.arena_allocator_proc(data, mode, size, alignment, old_memory, old_size, loc)
+	when IS_WASM {
+		bytes, err := mem.arena_allocator_proc(data, mode, size, alignment, old_memory, old_size, loc)
+	} else {
+		#partial switch mode {
+		case .Alloc, .Alloc_Non_Zeroed, .Resize, .Resize_Non_Zeroed:
+			scratch_used += size
+			if scratch_used > NATIVE_SCRATCH_CAP do panic("core request memory limit exceeded")
+		}
+		bytes, err := mem.dynamic_arena_allocator_proc(data, mode, size, alignment, old_memory, old_size, loc)
+	}
 	if err == .Out_Of_Memory do panic("core request memory limit exceeded")
 	return bytes, err
 }
@@ -82,7 +123,7 @@ core_reserve :: proc "c" (length: u32) -> rawptr {
 	reserved_length = int(length)
 	blob_length = 0
 	response = nil
-	mem.arena_free_all(&scratch)
+	scratch_free_all()
 	return raw_data(request_bytes[:])
 }
 
@@ -156,6 +197,6 @@ core_reset :: proc "c" (reset_all: u32) {
 	reserved_length = 0
 	blob_length = 0
 	busy = false
-	mem.arena_free_all(&scratch)
+	scratch_free_all()
 	if reset_all != 0 do core.query_cache_reset()
 }
