@@ -53,7 +53,7 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 1. **Made**: from the space's Agent template ("+ New agent" in a picker - named right there - or New object -> Agent). The template supplies the prompt, model, tools and credentials; with none, it gets the space's Assistant prompt, `shell_exec` and `web_fetch`, and the space's Anthropic credential. Made from an object's Agent row, it also starts with that object's tags (an agent made on a Team task is Customer: Team); made from a cell or the new-row line of a query's table, it starts with the query's filter values.
 2. **Placed**: its Served by names a computer. That computer's harness adopts it within seconds - no restart. Change Served by and it moves; the old computer lets go.
 3. **Invited**: an object's **Agent** property is its guest list. An agent only ever works on objects that list it (and on its own page). Nothing answers an object uninvited.
-4. **Woken**: a person (or another agent) @-mentions it in the object's chat - its own page included - or a Repeat on an object it is on fires. A chat post with no @ wakes nobody, anywhere.
+4. **Woken**: a person (or another agent) @-mentions it in the object's chat, or a Repeat on an object it is on fires. A chat post with no @ wakes nobody.
 5. **Turn**: the harness builds its prompt (system prompt, the workspace rules, Skills listing, memory, the object), the model calls tools, the harness runs them, until it has an answer.
 6. **Posts**: only its final text is posted to the chat. Text written alongside tool calls is kept as working notes on those calls, not posted.
 7. **Remembers**: each agent keeps one transcript (compacted over time), plus pinned facts and milestones it writes with its memory tools.
