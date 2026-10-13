@@ -10131,6 +10131,18 @@
         ],
         "parentIds": [],
         "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-chat-s",
+        "ops": [
+          {
+            "objectDelete": {}
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       }
     ],
     "expected_result": {},
@@ -13717,6 +13729,18 @@
                 "boolValue": true
               }
             }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-chat-s",
+        "ops": [
+          {
+            "objectDelete": {}
           }
         ],
         "parentIds": [],

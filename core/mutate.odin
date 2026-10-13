@@ -1666,8 +1666,9 @@ RETIRED_BUNDLED_RELATIONS :: []string{"requires", "install"}
 
 // Bundled types that were replaced: seeding deletes a space's copy.
 // `install` rows folded into capability objects; `descriptor` cards became
-// Skill objects and agent templates.
-RETIRED_BUNDLED_TYPES :: []string{"install", "descriptor"}
+// Skill objects and agent templates; `chat` objects became conversations
+// on the objects themselves (the Chat tab), so no space needs the type.
+RETIRED_BUNDLED_TYPES :: []string{"install", "descriptor", "chat"}
 
 bundled_picker_type :: proc(key: string) -> (string, bool) {
 	for pair in BUNDLED_PICKER_TYPES do if pair[0] == key do return pair[1], true

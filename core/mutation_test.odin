@@ -76,7 +76,8 @@ mutation_seed_skips_vanished_defaults :: proc(t: ^testing.T) {
 }
 
 // Types and properties the engine stopped shipping leave every space:
-// install rows folded into capabilities, descriptor cards into Skills.
+// install rows folded into capabilities, descriptor cards into Skills,
+// chat objects into each object's own conversations.
 @(test)
 mutation_seed_deletes_retired_types_and_relations :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
@@ -87,6 +88,7 @@ mutation_seed_deletes_retired_types_and_relations :: proc(t: ^testing.T) {
 			{"id": "space-aa", "typeKey": "channel", "fields": [], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []},
 			{"id": "bundled-type-install-space-aa", "typeKey": "type", "fields": [["channel", {"stringValue": "space-aa"}], ["key", {"stringValue": "install"}], ["bundled", {"boolValue": true}]], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []},
 			{"id": "bundled-type-descriptor-space-aa", "typeKey": "type", "fields": [["channel", {"stringValue": "space-aa"}], ["key", {"stringValue": "descriptor"}], ["bundled", {"boolValue": true}]], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []},
+			{"id": "bundled-type-chat-space-aa", "typeKey": "type", "fields": [["channel", {"stringValue": "space-aa"}], ["key", {"stringValue": "chat"}], ["bundled", {"boolValue": true}]], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []},
 			{"id": "bundled-rel-install-space-aa", "typeKey": "relation", "fields": [["channel", {"stringValue": "space-aa"}], ["key", {"stringValue": "install"}], ["bundled", {"boolValue": true}]], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []}
 		],
 		"timestamp": 1234, "author": "alice", "id_seed": "seed", "key_id": 0
@@ -100,7 +102,7 @@ mutation_seed_deletes_retired_types_and_relations :: proc(t: ^testing.T) {
 			if _, ok := json_field(op, "objectDelete"); ok do deleted[json_str(change, "objectId")] = true
 		}
 	}
-	for id in ([]string{"bundled-type-install-space-aa", "bundled-type-descriptor-space-aa", "bundled-rel-install-space-aa"}) {
+	for id in ([]string{"bundled-type-install-space-aa", "bundled-type-descriptor-space-aa", "bundled-type-chat-space-aa", "bundled-rel-install-space-aa"}) {
 		testing.expectf(t, deleted[id], "%s is deleted", id)
 	}
 }
