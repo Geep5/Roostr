@@ -244,12 +244,11 @@ async function buildServed(agents: Set<string>): Promise<Map<string, Served>> {
 const ingesting = new Set<string>();
 
 /**
- * The name an agent answers to on `ref`: on an object it is a guest of,
- * only messages @-mentioning it are its; on its own page, none needed.
- * Read fresh, so a renamed agent answers to its new name.
+ * The name an agent answers to: only messages @-mentioning it are its -
+ * on every object, its own page included. Read fresh, so a renamed agent
+ * answers to its new name.
  */
-async function addressedAs(s: Served, ref: ConvRef): Promise<string | undefined> {
-	if (ref.objectId === s.agentId) return undefined;
+async function addressedAs(s: Served): Promise<string> {
 	const agent = await fetchObject(s.agentId).catch(() => null);
 	return (agent && str(agent.fields, "name")) || s.name;
 }
@@ -263,7 +262,7 @@ async function ingestSurface(s: Served, origin: ConvRef): Promise<ConvRef | null
 		const surface = await fetchObject(origin.objectId);
 		// Only a human discussion is a surface. Addressed exchanges have
 		// durable processing receipts instead of local discussion watermarks.
-		const pending = await pendingMessages(surface, origin, s.agentId, await addressedAs(s, origin));
+		const pending = await pendingMessages(surface, origin, s.agentId, await addressedAs(s));
 		if (pending.length === 0) return null;
 		await setMark(origin, pending[pending.length - 1].blockId);
 		// Idempotence by identity, not marks: a message whose copy is already
@@ -697,7 +696,7 @@ async function serve(): Promise<void> {
 			for (const key of [convKey(humanRef(s.conv.objectId)), ...queued]) {
 				const ref = parseConvKey(key);
 				const surface = await fetchObject(ref.objectId).catch(() => null);
-				if (surface && (await pendingMessages(surface, ref, s.agentId, await addressedAs(s, ref))).length > 0) {
+				if (surface && (await pendingMessages(surface, ref, s.agentId, await addressedAs(s))).length > 0) {
 					void drive(s, ref);
 					break;
 				}
@@ -791,7 +790,7 @@ async function serve(): Promise<void> {
 			if (objectId === s.conv.objectId) {
 				const here = await fetchObject(objectId).catch(() => null);
 				const ref = humanRef(objectId);
-				if (here && (await pendingMessages(here, ref, s.agentId)).length > 0) void drive(s, ref);
+				if (here && (await pendingMessages(here, ref, s.agentId, await addressedAs(s))).length > 0) void drive(s, ref);
 				// The same object can also carry incoming/outgoing envelopes.
 			}
 		}
