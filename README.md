@@ -199,9 +199,11 @@ properties you'd click in the UI. There is no setup wizard and no `kind` field.
 
 - **`served_by`** (text): the computer it runs on - that computer's `machine_id`
   (`GET :7334/machine` → `id`), not a link to its Computer object.
-- **`prompt`** (link → `system_prompt` object): its standing prompt and
-  model. Edit or point at a different prompt object.
-- **`model`** (select): per-agent override of the prompt's model. The options
+- **`prompt`** (link → `system_prompt` object): its standing prompt. Edit or
+  point at a different prompt object.
+- **`model`** (select): the model it runs on - required; nothing falls back
+  (a blank Model is `run failed: No Model set…` on its Error). New agents start
+  with `claude-sonnet-4-5`. The options
   are fixed in the engine (`BUNDLED_RELATIONS` in `core/mutate.odin`; every
   device re-applies them when it seeds a space): `claude-opus-5-5`,
   `claude-sonnet-4-5`, `kimi-k3`.

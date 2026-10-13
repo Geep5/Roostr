@@ -6,7 +6,6 @@
  */
 
 import { choice, createObject, deleteField, fetchObject, iv, setField, str, sv } from "./api";
-import { promptFor } from "./prompts";
 import { runTurn } from "./runner";
 import { MAX_SPAWN_DEPTH, SPAWN_CONCURRENCY } from "./types";
 import type { ToolContext } from "./tools";
@@ -71,9 +70,9 @@ export async function spawnSubagent(task: string, templateName: string, parentCt
 
 	await semaphore.acquire();
 	try {
-		// The parent's effective model (its pick, else its prompt's) and its
-		// prompt object: a subagent runs on the same visible configuration.
-		const model = choice(parent.fields, "model") || (await promptFor(parent)).model;
+		// The parent's Model and its prompt object: a subagent runs on the same visible configuration.
+		const model = choice(parent.fields, "model");
+		if (!model) return "error: this agent has no Model set, so a helper can't run either - pick one in its Model property";
 		const { id } = await createObject(`sub: ${task.slice(0, 48)}`, "agent", {
 			spawn_parent: sv(parentCtx.agentId),
 			spawn_depth: iv(parentCtx.depth + 1),

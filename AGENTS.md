@@ -37,7 +37,7 @@ A computer becomes part of Roostr when its harness first starts: it creates this
    | Property | Value | Notes |
    |---|---|---|
    | `served_by` | `{"stringValue":"<machine_id>"}` | the id from step 4 as text, not a link to the Computer object. This computer adopts the agent within seconds. |
-   | `model` | `{"valuesValue":{"items":[{"stringValue":"claude-opus-5-5"}]}}` | a select. Its options are fixed in the engine (`BUNDLED_RELATIONS` in `core/mutate.odin`): `claude-opus-5-5`, `claude-sonnet-4-5`, `kimi-k3`. If unset, the agent uses its System prompt's Model. |
+   | `model` | `{"valuesValue":{"items":[{"stringValue":"claude-opus-5-5"}]}}` | a select, **required**: the agent runs only on its own Model (blank = `No Model set` on its Error; nothing falls back to the System prompt). Options are fixed in the engine (`BUNDLED_RELATIONS` in `core/mutate.odin`): `claude-opus-5-5`, `claude-sonnet-4-5`, `kimi-k3`. `setup` and the app's "+ New agent" fill in `claude-sonnet-4-5`. |
    | `prompt` | link → `system_prompt` object | if unset, the harness links the space's "Assistant" prompt the first time it serves the agent. |
    | `credentials` | `{"valuesValue":{"items":[{"linkValue":{"targetId":"<credential id>","relationKey":"credentials"}}]}}` | needs a model key, see step 6. |
    | `tools` | links (relationKey `tools`) → the space's `tool` objects | the defaults are `shell_exec` and `web_fetch`, which an agent made from the template gets automatically. |

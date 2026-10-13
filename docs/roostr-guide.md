@@ -38,8 +38,8 @@ Everything in Roostr is an object: a note, a task, an email, a person, an agent,
 
 An agent is an object whose properties are its configuration - nothing is hidden in code:
 
-- **System prompt**: links a System prompt object - the agent's standing instructions (its page) and default model.
-- **Model**: which model runs it (e.g. a Claude model). Overrides the prompt's model.
+- **System prompt**: links a System prompt object - the agent's standing instructions (its page).
+- **Model**: which model runs it (e.g. a Claude model) - required, and the only place the model is chosen. New agents start with claude-sonnet-4-5; a blank Model stops the agent with "No Model set" on its Error.
 - **Credentials**: logins it uses - its model key (an Anthropic or Kimi credential) and service logins (Gmail, Discord, a database...). Every space you own has an **Anthropic** credential, and every new agent lists it. Its key starts empty: until someone pastes an Anthropic API key (`sk-ant-api…`) or a `claude setup-token` token into its "API key or token", the credential's Error says "No key yet", and an agent that lists it stops with "The "Anthropic" credential has no key" on its Error instead of running.
 - **Tools**: extra tools beyond the always-on core - gated built-ins (`shell_exec`, `web_fetch`) and custom Tool objects.
 - **Skills**: instructions it may read (like this guide). With none listed it sees every Skill; with a list, only those.

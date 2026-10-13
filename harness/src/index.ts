@@ -12,9 +12,9 @@
 
 // First: private extensions (harness/private/) register their seeds before anything reads them.
 import "./extensions";
-import { API, VANISH_LOG_ID, apiFetch, chatPost, deleteField, fetchObject, guestAgents, mutate, query, setField, str, subscribe, sv, createObject, queryAll, vanishedEntries, wasDeleted } from "./api";
+import { API, VANISH_LOG_ID, apiFetch, chatPost, deleteField, fetchObject, guestAgents, mutate, query, setField, str, subscribe, sv, createObject, lv, queryAll, vanishedEntries, wasDeleted } from "./api";
 import { TEMPLATE_OWN, kindTemplates, seedCatalog } from "./catalog-seeds";
-import { PROMPT_SEEDS } from "./prompts";
+import { DEFAULT_MODEL, PROMPT_SEEDS } from "./prompts";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
@@ -112,6 +112,8 @@ async function setup(): Promise<void> {
 	for (const [key, value] of Object.entries(template.fields)) if (!TEMPLATE_OWN[key]) fields[key] = value;
 	fields.channel = sv(space);
 	fields.served_by = sv(await machineId());
+	// The model is the agent's own Model property (nothing falls back to anything): the kind's default unless the template sets one.
+	if (!fields.model) fields.model = lv([PROMPT_SEEDS.find((s) => s.key === kindKey)?.model ?? DEFAULT_MODEL]);
 	// Its model login: the space's Anthropic credential (seeded with an empty key when the space has none).
 	let modelCred = spaceAnthropicCredential(await queryAll({ type: "credential" }), space);
 	if (!modelCred) {

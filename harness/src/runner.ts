@@ -337,8 +337,9 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		ctx.workspacePath = repo ? (await workspaceAt(repo).catch(() => null))?.path : undefined;
 		const ratio = tokenRatio(agent);
 		const cfg = compactionConfig(agent);
-		// The model picked on the agent (a select stores a one-item list), else its prompt's.
-		const model = choice(agent.fields, "model") || (await promptFor(agent)).model;
+		// The model is the agent's own Model property (a select stores a one-item list) - nothing else.
+		const model = choice(agent.fields, "model");
+		if (!model) throw new Error(`No Model set - pick one in this agent's Model property.`);
 		// Its login travels with it: a model credential it lists beats this computer's.
 		const apiKey = (await agentModelKey(agent, modelProvider(model))) ?? undefined;
 		// Re-read every iteration with everything else, so editing the

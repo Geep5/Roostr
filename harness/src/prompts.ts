@@ -19,7 +19,7 @@
  * object (or pointing the agent at another) is the whole reconfiguration.
  */
 
-import { addBlock, choice, createObject, fetchObject, queryAll, setField, str, sv, type ObjectJSON, type ValueJSON } from "./api";
+import { addBlock, createObject, fetchObject, queryAll, setField, str, sv, type ObjectJSON, type ValueJSON } from "./api";
 
 export const SYSTEM_PROMPT_TYPE = "system_prompt";
 
@@ -120,11 +120,10 @@ export function promptTarget(fields: Record<string, ValueJSON>): string {
 	return first?.linkValue?.targetId ?? first?.stringValue ?? "";
 }
 
-/** What a linked system_prompt object configures: the standing text and the model. */
+/** What a linked system_prompt object configures: the standing text. The model is the agent's own Model. */
 export interface PromptConfig {
 	name: string;
 	system: string;
-	model: string;
 }
 
 /**
@@ -132,19 +131,17 @@ export interface PromptConfig {
  * `prompt` property links. Every served agent is linked before it runs
  * (`ensureAgentPrompt`), so the base prompt is always one a human can see
  * and edit in Roostr; a blank `system` there means no base prompt, never a
- * hidden one. The default model covers the instant between an agent's
- * creation and that link landing.
+ * hidden one.
  */
 export async function promptFor(agent: ObjectJSON): Promise<PromptConfig> {
 	const id = promptTarget(agent.fields);
 	const prompt = id ? await fetchObject(id).catch(() => null) : null;
-	if (!prompt) return { name: DEFAULT_PROMPT.name, system: "", model: DEFAULT_PROMPT.model };
+	if (!prompt) return { name: DEFAULT_PROMPT.name, system: "" };
 	return {
 		name: str(prompt.fields, "name") || DEFAULT_PROMPT.name,
 		// The page body is the prompt. The legacy `system` field is read only
 		// until this machine's boot migration moves it onto the page.
 		system: pageText(prompt) || str(prompt.fields, "system"),
-		model: choice(prompt.fields, "model") || DEFAULT_MODEL,
 	};
 }
 
@@ -183,7 +180,6 @@ export async function ensureSystemPrompt(seed: AgentKindEntry, channelId: string
 	);
 	if (existing) return { id: existing.id, created: false };
 	const fields: Record<string, ValueJSON> = {
-		model: sv(seed.model),
 		description: sv(seed.description),
 	};
 	if (channel) fields.channel = sv(channel);

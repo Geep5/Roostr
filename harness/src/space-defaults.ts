@@ -16,7 +16,7 @@
  * an Anthropic credential, or an agent of that name, is left as it is.
  */
 
-import { apiFetch, API, createObject, fetchObject, queryAll, setField, str, sv, type QueryRow } from "./api";
+import { apiFetch, API, createObject, fetchObject, lv, queryAll, setField, str, sv, type QueryRow } from "./api";
 import { CREDENTIAL_TYPE } from "./credential-objects";
 import { fillCredential } from "./credential-seeds";
 import { SYSTEM_PROMPT_TYPE, DEFAULT_MODEL, writePageText } from "./prompts";
@@ -86,7 +86,7 @@ export async function seedSpaceDefaults(): Promise<{ credentials: number; agents
 		const prompts = (await queryAll({ type: SYSTEM_PROMPT_TYPE })).filter((p) => str(p.fields, "channel") === space.id && str(p.fields, "name") === name);
 		let promptId = prompts[0]?.id;
 		if (!promptId) {
-			promptId = (await createObject(name, SYSTEM_PROMPT_TYPE, { channel: sv(space.id), model: sv(DEFAULT_MODEL), description: sv(`Setup and upkeep of the ${space.name} space.`) }, `space-prompt-${space.id}`)).id;
+			promptId = (await createObject(name, SYSTEM_PROMPT_TYPE, { channel: sv(space.id), description: sv(`Setup and upkeep of the ${space.name} space.`) }, `space-prompt-${space.id}`)).id;
 			const p = await fetchObject(promptId);
 			if (p.blocks.length === 0) await writePageText(promptId, spaceAgentPrompt(space.name));
 		}
@@ -94,6 +94,7 @@ export async function seedSpaceDefaults(): Promise<{ credentials: number; agents
 			channel: sv(space.id),
 			prompt: { linkValue: { relationKey: "prompt", targetId: promptId } },
 			served_by: sv(me),
+			model: lv([DEFAULT_MODEL]),
 			credentials: linkList("credentials", [cred.id]),
 		}, `space-agent-${space.id}`);
 		// On the space's guest list: it answers in the space's own chat.
