@@ -274,6 +274,23 @@ export function startAuthServer(served: Set<string>): void {
 					const { hostname } = await import("node:os");
 					return json({ id: await machineId(), host: hostname() });
 				}
+				// A Project folder as this computer sees it: {ok, path, summary} or {ok:false, error}.
+				if (req.method === "POST" && url.pathname === "/workspace/check") {
+					const { workspaceAt, workspaceSummary, expandHome, thisComputerName } = await import("./workspace");
+					const body = (await req.json().catch(() => ({}))) as { path?: string };
+					const path = String(body.path ?? "").trim();
+					if (!path) return json({ ok: false, error: "No folder given." });
+					const ws = await workspaceAt(path).catch(() => null);
+					return json(ws ? { ok: true, path: ws.path, summary: workspaceSummary(ws), git: ws.git } : { ok: false, path: expandHome(path), error: `${path} isn't a folder on ${await thisComputerName()}.` });
+				}
+				// The macOS "Choose Folder" window on this computer: {path} or {cancelled:true}.
+				if (req.method === "POST" && url.pathname === "/workspace/pick") {
+					if (process.platform !== "darwin") return json({ error: "The folder chooser is macOS only - type the path." }, 501);
+					const proc = Bun.spawn(["osascript", "-e", 'POSIX path of (choose folder with prompt "Choose the agent\'s Project folder")'], { stdout: "pipe", stderr: "pipe" });
+					const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+					if ((await proc.exited) !== 0) return /User canceled|-128/.test(err) ? json({ cancelled: true }) : json({ error: err.trim().slice(0, 200) }, 500);
+					return json({ path: out.trim().replace(/\/$/, "") });
+				}
 				if (req.method === "GET" && url.pathname === "/join-requests") {
 					const { listJoinRequests } = await import("./nostrsync");
 					return json({ requests: await listJoinRequests() });

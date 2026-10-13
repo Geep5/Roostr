@@ -44,7 +44,7 @@ An agent is an object whose properties are its configuration - nothing is hidden
 - **Tools**: extra tools beyond the always-on core - gated built-ins (`shell_exec`, `web_fetch`) and custom Tool objects.
 - **Skills**: instructions it may read (like this guide). With none listed it sees every Skill; with a list, only those.
 - **Served by**: the one computer it runs on. No Served by, no runs - its Error property says so.
-- **Project folder**: optional - the folder on that computer where it works (repo work with the shell).
+- **Project folder**: optional - a folder on its computer that is its project (Choose… picks it with the macOS folder window when you're at that computer). When set, every turn the agent is told it's its project - and its git repo, remote, branch and uncommitted changes, when it is one - reads the folder's AGENTS.md (or CLAUDE.md), and its shell and helpers start there. All of that comes from this property, never the System prompt. A folder that isn't on its computer is on the agent's Error until fixed or cleared.
 
 The always-on core tools let every agent read and edit objects (`object_get`, `object_set_field`, `object_add_text`, `object_create`, `object_delete`, `find`, `query_run`, `space_map`, `neighborhood`...), read Skills, keep memory, schedule (`object_set_repeat`, `occurrence_complete`), ask other agents (`agent_ask`) and delegate (`spawn`).
 

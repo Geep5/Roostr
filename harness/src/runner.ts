@@ -21,7 +21,7 @@ import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
 import { agentModelKey, credentialsPromptLine } from "./credential-objects";
 import { dispatchTool, toolDefs, type ToolContext } from "./tools";
 import { agentToolset } from "./tool-objects";
-import { workspaceAt, workspacePromptSection } from "./workspace";
+import { checkProjectFolder, workspaceAt, workspacePromptSection, workspaceSummary } from "./workspace";
 import { genesisCalls, genesisFingerprint, lastGenesis } from "./genesis";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
@@ -201,7 +201,8 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	const kbRows = await knowledgeBaseRows(agent);
 	const credsLine = await credentialsPromptLine(agent);
 	const repo = str(agent.fields, "repo_path");
-	const ws = repo ? await workspaceAt(repo).catch(() => null) : null;
+	// Checked every turn on the computer running it: missing here is on the agent's Error.
+	const ws = await checkProjectFolder(agent).catch(() => null);
 	const fingerprint = [
 		agent.updatedAt ?? 0,
 		promptObj?.updatedAt ?? 0,
@@ -215,7 +216,7 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 		maxUpdated(kbRows),
 		channelId,
 		repo,
-		ws?.path ?? "",
+		ws ? `${workspaceSummary(ws)}#${ws.agentsMd.length}` : "",
 		objectId,
 	].join("|");
 

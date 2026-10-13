@@ -22,6 +22,7 @@ import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./cre
 import { installGwsAs } from "./google-credentials";
 import { fillCredential, seedCredentials } from "./credential-seeds";
 import { seedSpaceDefaults, spaceAnthropicCredential } from "./space-defaults";
+import { checkProjectFolder } from "./workspace";
 import { seedJev } from "./jev";
 import { nudgeViewActions, startViewActions } from "./view-actions";
 import { seedGuide } from "./guide";
@@ -809,6 +810,8 @@ async function serve(): Promise<void> {
 					console.log(`[harness] released ${str(agent.fields, "name") || objectId.slice(0, 8)} (${objectId.slice(0, 8)}) - ${pin ? `now served by ${pin.slice(0, 8)}` : "its Served by is empty"}`);
 					return;
 				}
+				// Its Project folder, checked here where it must exist.
+				void checkProjectFolder(agent).catch(() => {});
 			}
 			return; // agent objects are not surfaces
 		}
@@ -831,6 +834,7 @@ async function serve(): Promise<void> {
 					if (one) {
 						served.set(objectId, one);
 						console.log(`[harness] adopted ${one.name} (${objectId.slice(0, 8)}) - assigned to this machine`);
+						void checkProjectFolder(maybe).catch(() => {});
 						void publishSystemSnapshot(one.agentId, one.conv);
 						void drive(one, humanRef(one.conv.objectId));
 					}
