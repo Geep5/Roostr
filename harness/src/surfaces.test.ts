@@ -21,6 +21,8 @@ import * as api from "./api";
 import type { BlockJSON, ObjectJSON } from "./api";
 
 const AGENT = "9b08be05-ed4b-4417-a976-1efead0cb561";
+/** The name AGENT answers to: every message it takes @-mentions it. */
+const NAME = "Agent";
 const OTHER_AGENT = "4c1de8f2-7b60-4a19-8d33-5ae0c91b7f04";
 const HUMAN = "816854963a03323d";
 const PRIVATE = "__thread__7c1b4a02";
@@ -63,28 +65,28 @@ test("a newer message merged before the watermark is still pending", async () =>
 	// and the agent's reply, which is the watermark.
 	const obj = objectWith("merged-early", {
 		threadId: HUMAN_THREAD,
-		order: [msg("m1", HUMAN, 100, "first question"), msg("m3", HUMAN, 300, "from the phone"), msg("m2", AGENT, 200, "answer to the first")],
+		order: [msg("m1", HUMAN, 100, "@Agent first question"), msg("m3", HUMAN, 300, "@Agent from the phone"), msg("m2", AGENT, 200, "answer to the first")],
 	});
 	await setMark(humanRef(obj.id), "m2");
-	expect((await pendingMessages(obj, humanRef(obj.id), AGENT)).map((p) => p.text)).toEqual(["from the phone"]);
+	expect((await pendingMessages(obj, humanRef(obj.id), AGENT, NAME)).map((p) => p.text)).toEqual(["@Agent from the phone"]);
 });
 
 test("messages older than the watermark stay answered", async () => {
 	const obj = objectWith("all-answered", {
 		threadId: HUMAN_THREAD,
-		order: [msg("m1", HUMAN, 100, "first question"), msg("m2", AGENT, 200, "answer to the first")],
+		order: [msg("m1", HUMAN, 100, "@Agent first question"), msg("m2", AGENT, 200, "answer to the first")],
 	});
 	await setMark(humanRef(obj.id), "m2");
-	expect(await pendingMessages(obj, humanRef(obj.id), AGENT)).toEqual([]);
+	expect(await pendingMessages(obj, humanRef(obj.id), AGENT, NAME)).toEqual([]);
 });
 
 test("a same-millisecond tie falls back to block order", async () => {
 	const obj = objectWith("tied", {
 		threadId: HUMAN_THREAD,
-		order: [msg("m1", HUMAN, 100, "before the mark"), msg("m2", AGENT, 100, "the mark itself"), msg("m3", HUMAN, 100, "after the mark")],
+		order: [msg("m1", HUMAN, 100, "@Agent before the mark"), msg("m2", AGENT, 100, "the mark itself"), msg("m3", HUMAN, 100, "@Agent after the mark")],
 	});
 	await setMark(humanRef(obj.id), "m2");
-	expect((await pendingMessages(obj, humanRef(obj.id), AGENT)).map((p) => p.text)).toEqual(["after the mark"]);
+	expect((await pendingMessages(obj, humanRef(obj.id), AGENT, NAME)).map((p) => p.text)).toEqual(["@Agent after the mark"]);
 });
 
 test("pending is chronological, so the caller's watermark only moves forward", async () => {
@@ -93,11 +95,11 @@ test("pending is chronological, so the caller's watermark only moves forward", a
 	// message becomes pending again on the next pass.
 	const obj = objectWith("out-of-order", {
 		threadId: HUMAN_THREAD,
-		order: [msg("m1", HUMAN, 100, "oldest"), msg("m3", HUMAN, 300, "newest"), msg("m2", HUMAN, 200, "middle")],
+		order: [msg("m1", HUMAN, 100, "@Agent oldest"), msg("m3", HUMAN, 300, "@Agent newest"), msg("m2", HUMAN, 200, "@Agent middle")],
 	});
 	await setMark(humanRef(obj.id), "m1");
-	const pending = await pendingMessages(obj, humanRef(obj.id), AGENT);
-	expect(pending.map((p) => p.text)).toEqual(["middle", "newest"]);
+	const pending = await pendingMessages(obj, humanRef(obj.id), AGENT, NAME);
+	expect(pending.map((p) => p.text)).toEqual(["@Agent middle", "@Agent newest"]);
 	expect(pending[pending.length - 1].blockId).toBe("m3");
 });
 
@@ -107,9 +109,9 @@ test("a mark written before conversations were addressed still holds", async () 
 	// be live - the question before it silently answered on upgrade.
 	const obj = objectWith("pre-migration", {
 		threadId: HUMAN_THREAD,
-		order: [msg("m1", HUMAN, 100, "answered before the upgrade"), msg("m2", HUMAN, 200, "second question"), msg("m3", HUMAN, 300, "asked since")],
+		order: [msg("m1", HUMAN, 100, "@Agent answered before the upgrade"), msg("m2", HUMAN, 200, "@Agent second question"), msg("m3", HUMAN, 300, "@Agent asked since")],
 	});
-	expect((await pendingMessages(obj, humanRef(obj.id), AGENT)).map((p) => p.text)).toEqual(["second question", "asked since"]);
+	expect((await pendingMessages(obj, humanRef(obj.id), AGENT, NAME)).map((p) => p.text)).toEqual(["@Agent second question", "@Agent asked since"]);
 });
 
 test("a watermark belongs to one conversation, not the whole object", async () => {
@@ -118,19 +120,19 @@ test("a watermark belongs to one conversation, not the whole object", async () =
 	// other's unanswered message.
 	const obj = objectWith(
 		"two-threads",
-		{ threadId: HUMAN_THREAD, order: [msg("h1", HUMAN, 100, "human asks"), msg("h2", AGENT, 200, "agent answers"), msg("h3", HUMAN, 300, "human asks again")] },
-		{ threadId: PRIVATE, order: [msg("t1", HUMAN, 400, "in the transcript"), msg("t2", AGENT, 500, "worked on it"), msg("t3", OTHER_AGENT, 600, "peer chimes in")] },
+		{ threadId: HUMAN_THREAD, order: [msg("h1", HUMAN, 100, "@Agent human asks"), msg("h2", AGENT, 200, "agent answers"), msg("h3", HUMAN, 300, "@Agent human asks again")] },
+		{ threadId: PRIVATE, order: [msg("t1", HUMAN, 400, "@Agent in the transcript"), msg("t2", AGENT, 500, "worked on it"), msg("t3", OTHER_AGENT, 600, "peer chimes in")] },
 	);
 	const discussion = humanRef(obj.id);
 	const transcript = { objectId: obj.id, threadId: PRIVATE };
 
 	await setMark(transcript, "t3");
-	expect((await pendingMessages(obj, discussion, AGENT)).map((p) => p.text)).toEqual(["human asks again"]);
+	expect((await pendingMessages(obj, discussion, AGENT, NAME)).map((p) => p.text)).toEqual(["@Agent human asks again"]);
 
 	await setMark(discussion, "h3");
-	expect(await pendingMessages(obj, discussion, AGENT)).toEqual([]);
+	expect(await pendingMessages(obj, discussion, AGENT, NAME)).toEqual([]);
 	// The transcript's own mark survived the discussion's advance.
-	expect(await pendingMessages(obj, transcript, AGENT)).toEqual([]);
+	expect(await pendingMessages(obj, transcript, AGENT, NAME)).toEqual([]);
 });
 
 test("legacy shared threads and private transcripts never wake the human-discussion path", async () => {
@@ -139,10 +141,10 @@ test("legacy shared threads and private transcripts never wake the human-discuss
 	const obj = objectWith(
 		"peer-post",
 		{ threadId: HUMAN_THREAD, order: [msg("h1", AGENT, 100, "my own reply"), msg("h2", OTHER_AGENT, 200, "peer chatter")] },
-		{ threadId: PRIVATE, order: [msg("t1", AGENT, 100, "my own reply"), msg("t2", OTHER_AGENT, 200, "peer asks me something")] },
+		{ threadId: PRIVATE, order: [msg("t1", AGENT, 100, "my own reply"), msg("t2", OTHER_AGENT, 200, "@Agent peer asks me something")] },
 	);
-	expect(await pendingMessages(obj, humanRef(obj.id), AGENT)).toEqual([]);
-	expect(await pendingMessages(obj, { objectId: obj.id, threadId: PRIVATE }, AGENT)).toEqual([]);
+	expect(await pendingMessages(obj, humanRef(obj.id), AGENT, NAME)).toEqual([]);
+	expect(await pendingMessages(obj, { objectId: obj.id, threadId: PRIVATE }, AGENT, NAME)).toEqual([]);
 });
 
 test("a guest answers only what @-mentions it, including another agent's tag", async () => {

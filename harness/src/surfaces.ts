@@ -123,14 +123,13 @@ export async function answersGuestQuestion(msgs: ChatRow[], at: number, agentId:
  * copies (already ingested from another surface) never count. Seeding rules
  * per the bridge's seed_mark.
  *
- * `addressedAs`: on an object this agent is a guest of, only messages that
- * @-mention it are its to answer - a person's, or another agent's that
- * tagged it ("@Marco Dev Bot, which tournaments?") - plus an agent's answer
- * to a question it asked (answersGuestQuestion). Without it (the agent's
- * own page) the thread is human-to-agent: every human message is its to
- * answer and no agent post ever wakes it.
+ * `addressedAs`: the agent's name. Only messages that @-mention it are its
+ * to answer - a person's, or another agent's that tagged it ("@Marco Dev
+ * Bot, which tournaments?") - plus an agent's answer to a question it asked
+ * (answersGuestQuestion). On every object, the agent's own page included:
+ * nothing wakes an agent untagged.
  */
-export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: string, addressedAs?: string): Promise<PendingMessage[]> {
+export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: string, addressedAs: string): Promise<PendingMessage[]> {
 	if (!isHuman(ref)) return [];
 	const m = await loadMarks();
 	const mark = markFor(m, ref);
@@ -170,10 +169,8 @@ export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: st
 		if (author === agentId) continue;
 		if (meta["origin"]) continue; // ingested copy, handled with its origin surface
 		const text = meta["text"] ?? "";
-		if (addressedAs !== undefined) {
-			// A guest answers what is addressed to it, whoever wrote it.
-			if (!mentions(text, addressedAs) && !(await answersGuestQuestion(msgs, at, agentId))) continue;
-		} else if (isHuman(ref) && isAgentAuthor(author)) continue;
+		// An agent answers what is addressed to it, whoever wrote it.
+		if (!mentions(text, addressedAs) && !(await answersGuestQuestion(msgs, at, agentId))) continue;
 		pending.push({ blockId: id, author, text });
 	}
 
