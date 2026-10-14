@@ -198,3 +198,31 @@ mutation_seed_all_objects_query :: proc(t: ^testing.T) {
 	testing.expect(t, !touches(again, ALL), "a deleted All Objects stays deleted")
 	testing.expect(t, !touches(again, space.id), "and is not pinned again")
 }
+
+// System is ticked on what ships with Roostr - built-in tools, seeded
+// templates, engine types - and never on the user's own objects.
+@(test)
+mutation_bootstrap_ticks_system_on_builtins :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	add :: proc(states: ^map[string]^Object_State, id, type_key: string, fields: ..Value_Entry) {
+		s := new(Object_State)
+		s^ = Object_State{id = id, type_key = type_key, fields = make([dynamic]Value_Entry)}
+		append(&s.fields, ..fields)
+		states[id] = s
+	}
+	states := make(map[string]^Object_State)
+	add(&states, "tool-builtin", "tool", Value_Entry{key = "tool_builtin", value = bool_value(true)})
+	add(&states, "tpl-seeded", "template", Value_Entry{key = "seed_key", value = string_value("agent-default")})
+	add(&states, "type-mine", "type", Value_Entry{key = "key", value = string_value("recipe")})
+	add(&states, "tool-mine", "tool")
+	add(&states, "tool-done", "tool", Value_Entry{key = "tool_builtin", value = bool_value(true)}, Value_Entry{key = "system", value = bool_value(true)})
+	request := jobj()
+	request["action"] = json.String("bootstrap_space_defaults")
+	plan, err := mutation_plan(json.Object(request), Mutation_Input{states = states, timestamp = 1000, author = "alice", id_seed = "seed"})
+	testing.expect_value(t, err, "")
+	ticked := make(map[string]bool)
+	for c in plan.changes do for op in c.ops do if op.kind == .Field_Set && op.key == "system" && op.value.b do ticked[c.object_id] = true
+	testing.expect(t, ticked["tool-builtin"] && ticked["tpl-seeded"], "built-ins get System")
+	testing.expect(t, !ticked["type-mine"] && !ticked["tool-mine"], "the user's own objects do not")
+	testing.expect(t, !ticked["tool-done"], "one already ticked is left alone")
+}

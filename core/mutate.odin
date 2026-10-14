@@ -1386,6 +1386,10 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	{"tools", "object", "Tools", "🧰", false, false, 0, {}},
 	{"tool_inputs", "longtext", "Inputs", "📥", false, false, 1, {}},
 	{"tool_builtin", "checkbox", "Built-in", "🔒", false, true, 1, {}},
+	// Ticked on everything that ships with Roostr (bundled types/properties,
+	// built-in tools, seeded templates and skills): one filter, System is
+	// unchecked, hides them all. The engine sets it; nobody edits it.
+	{"system", "checkbox", "System", "⚙️", false, true, 1, {}},
 	{"tool_version", "number", "Version", "🔢", false, true, 1, {}},
 	// A repeating object's pre-check: a Tool run (no AI) before each turn;
 	// an empty result ends the run there.
@@ -1542,6 +1546,7 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "readOnly", value = bool_value(r.read_only)},
 			{kind = .Field_Set, key = "maxCount", value = int_value(r.max_count)},
 			{kind = .Field_Set, key = "bundled", value = bool_value(true)},
+			{kind = .Field_Set, key = "system", value = bool_value(true)},
 			{kind = .Field_Set, key = "options", value = options_value(r.options)},
 		}
 		mutation_add(plan, input, id, ops)
@@ -1572,6 +1577,7 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "iconEmoji", value = string_value(t.emoji)},
 			{kind = .Field_Set, key = "layout", value = string_value(t.layout)},
 			{kind = .Field_Set, key = "bundled", value = bool_value(true)},
+			{kind = .Field_Set, key = "system", value = bool_value(true)},
 		}
 		mutation_add(plan, input, id, ops)
 	}
@@ -1593,6 +1599,7 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "iconEmoji", value = string_value("🌐")},
 			{kind = .Field_Set, key = "setOf", value = list_value({})},
 			{kind = .Field_Set, key = "bundled", value = bool_value(true)},
+			{kind = .Field_Set, key = "system", value = bool_value(true)},
 		})
 		// A space made in this same change (channel_create) is not in the
 		// states yet: its pinned list is empty, so All Objects is all of it.
@@ -1661,6 +1668,17 @@ mutation_bootstrap_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_
 		for oid in rel_ids do mutation_add(plan, input, oid, {Operation{kind = .Field_Delete, key = rel_key}})
 		mutation_add(plan, input, id, {Operation{kind = .Object_Delete}})
 	}
+	// System: every built-in that ships with Roostr is ticked, once - engine
+	// types and properties (bundled), built-in tools (tool_builtin), seeded
+	// templates and skills (seed_key). Older rows predate the property.
+	unticked := make([dynamic]string, context.temp_allocator)
+	for id, s in input.states {
+		if s.deleted || !ships_with_roostr(s.fields) do continue
+		if v, ok := fields_get(s.fields, "system"); ok && v.kind == .Bool && v.b do continue
+		append(&unticked, id)
+	}
+	slice.sort(unticked[:])
+	for id in unticked do mutation_add(plan, input, id, {Operation{kind = .Field_Set, key = "system", value = bool_value(true)}})
 	// Agents written before the served_by rule get its error (or lose a
 	// stale one) once; after that every write keeps it in line.
 	agents := make([dynamic]string, context.temp_allocator)
@@ -1675,6 +1693,14 @@ mutation_bootstrap_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_
 bundled_relation_shipped :: proc(key: string) -> bool {
 	for r in BUNDLED_RELATIONS do if r.key == key do return true
 	return false
+}
+
+/** Built in and shipped with Roostr, by the marker each kind carries. */
+ships_with_roostr :: proc(fields: [dynamic]Value_Entry) -> bool {
+	for key in ([]string{"bundled", "tool_builtin"}) {
+		if v, ok := fields_get(fields, key); ok && v.kind == .Bool && v.b do return true
+	}
+	return field_string(fields, "seed_key") != ""
 }
 
 // The bundled type a relation's picker is restricted to, when it is.

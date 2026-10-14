@@ -2765,6 +2765,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -2854,6 +2862,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -2957,6 +2973,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -3046,6 +3070,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -3149,6 +3181,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -3238,6 +3278,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -3341,6 +3389,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -3430,6 +3486,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -3533,6 +3597,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -3629,6 +3701,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -3718,6 +3798,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -3844,6 +3932,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -3956,6 +4052,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -4082,6 +4186,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -4171,6 +4283,118 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-system-new-id",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "system"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "checkbox"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "System"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "⚙️"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -4274,6 +4498,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -4363,6 +4595,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -4489,6 +4729,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -4585,6 +4833,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -4674,6 +4930,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -4800,6 +5064,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -4919,6 +5191,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -5031,6 +5311,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -5225,6 +5513,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -5314,6 +5610,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -5417,6 +5721,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -5506,6 +5818,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -5609,6 +5929,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -5705,6 +6033,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -5774,6 +6110,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -5832,6 +6176,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -5898,6 +6250,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -5956,6 +6316,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -6022,6 +6390,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -6080,6 +6456,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -6146,6 +6530,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -6204,6 +6596,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -6270,6 +6670,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -6328,6 +6736,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -6394,6 +6810,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -6452,6 +6876,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -6518,6 +6950,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -6580,6 +7020,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -6632,6 +7080,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -8169,6 +8625,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -8258,6 +8722,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -8384,6 +8856,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -8496,6 +8976,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -8622,6 +9110,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -8711,6 +9207,118 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-system-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "system"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "checkbox"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "System"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "⚙️"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -8814,6 +9422,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -8903,6 +9519,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -9029,6 +9653,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -9125,6 +9757,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -9214,6 +9854,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -9340,6 +9988,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -9459,6 +10115,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -9571,6 +10235,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -9765,6 +10437,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -9834,6 +10514,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -9892,6 +10580,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -9958,6 +10654,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -10016,6 +10720,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -10082,6 +10794,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -10144,6 +10864,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -10202,6 +10930,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -10270,6 +11006,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -11788,6 +12532,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -11877,6 +12629,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -12003,6 +12763,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -12115,6 +12883,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -12241,6 +13017,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -12330,6 +13114,118 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-system-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "system"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "checkbox"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "System"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "⚙️"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -12433,6 +13329,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -12522,6 +13426,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -12648,6 +13560,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -12744,6 +13664,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -12833,6 +13761,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -12959,6 +13895,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -13078,6 +14022,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -13190,6 +14142,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -13384,6 +14344,14 @@
           },
           {
             "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "options",
               "value": {
                 "valuesValue": {
@@ -13453,6 +14421,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -13511,6 +14487,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -13577,6 +14561,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -13635,6 +14627,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -13701,6 +14701,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -13759,6 +14767,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -13825,6 +14841,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -13883,6 +14907,14 @@
           {
             "fieldSet": {
               "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
               "value": {
                 "boolValue": true
               }
@@ -13955,6 +14987,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -13990,6 +15030,380 @@
         "ops": [
           {
             "objectDelete": {}
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-createdDate-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-description-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-done-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-dueDate-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-email-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-featuredRelations-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-iconEmoji-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-modifiedDate-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-name-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-phone-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-setOf-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-status-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-tag-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-url-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-bookmark-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-chat-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-note-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-page-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-person-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-project-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-type-task-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "legacy",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -17203,30 +18617,47 @@
     },
     "expected_changes": [
       {
+        "author": "alice",
         "id": "",
         "objectId": "a",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "fieldDelete": {
               "key": "responsible_types"
             }
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       },
       {
+        "author": "alice",
         "id": "",
         "objectId": "bundled-rel-responsible_types-s",
-        "parentIds": [],
-        "timestamp": 1234,
-        "author": "alice",
         "ops": [
           {
             "objectDelete": {}
           }
-        ]
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-responsible_types-s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       }
     ],
     "expected_result": {},
