@@ -62,46 +62,80 @@ export function spaceAnthropicCredential(creds: QueryRow[], space: string): Quer
 	return mine.find((c) => str(c.fields, "status") === "active") ?? mine[0];
 }
 
-export async function seedSpaceDefaults(): Promise<{ credentials: number; agents: number }> {
-	const out = { credentials: 0, agents: 0 };
+/**
+ * Whether a default was ever made under `id` - still here, renamed or in the bin. One deleted
+ * for good reads as never made; making it again then answers "was deleted" (see madeOnce).
+ * A person who deleted or renamed one meant it: it is never made again.
+ */
+async function everMade(id: string): Promise<boolean> {
+	return fetchObject(id).then(() => true, () => false);
+}
+
+/** Create a default under its fixed id; false when that id was deleted for good - a person's choice, kept. */
+async function madeOnce(name: string, type: string, fields: Parameters<typeof createObject>[2], id: string): Promise<boolean> {
+	try {
+		await createObject(name, type, fields, id);
+		return true;
+	} catch (err) {
+		if (/was deleted/i.test(err instanceof Error ? err.message : String(err))) return false;
+		throw err;
+	}
+}
+
+export async function seedSpaceDefaults(): Promise<{ credentials: number; agents: number; failed: number }> {
+	const out = { credentials: 0, agents: 0, failed: 0 };
 	const spaces = ((await (await apiFetch(`${API}/api/channels`)).json()) as Array<{ id: string; name: string; owner: string }>).filter((s) => !s.owner);
 	const me = await machineId();
 	for (const space of spaces) {
-		// 1. The Anthropic credential.
-		let cred = spaceAnthropicCredential(await queryAll({ type: CREDENTIAL_TYPE }), space.id);
-		if (!cred) {
-			// Served by the seeding computer: it keeps Status and Error ("No key yet - paste …"), and marks it active once a key is pasted.
-			const { id } = await createObject("Anthropic", CREDENTIAL_TYPE, { channel: sv(space.id), service: sv(ANTHROPIC_SERVICE), served_by: sv(me) }, `anthropic-${space.id}`);
-			const made = await fetchObject(id);
-			await fillCredential(made);
-			if (made.blocks.length === 0) await writePageText(id, ANTHROPIC_PAGE);
-			cred = { id, typeKey: CREDENTIAL_TYPE, fields: made.fields, createdAt: made.createdAt } as QueryRow;
-			out.credentials += 1;
+		// One space's trouble never stops the others - or the harness starting.
+		try {
+			await seedSpace(space, me, out);
+		} catch (err) {
+			out.failed += 1;
+			console.error(`[harness] space defaults for ${space.name} (${space.id.slice(0, 8)}) failed:`, err instanceof Error ? err.message : err);
 		}
-
-		// 2. "<Space> Space".
-		const name = `${space.name} Space`;
-		const agents = (await queryAll({ type: "agent" })).filter((a) => str(a.fields, "channel") === space.id);
-		if (agents.some((a) => str(a.fields, "name") === name)) continue;
-		const prompts = (await queryAll({ type: SYSTEM_PROMPT_TYPE })).filter((p) => str(p.fields, "channel") === space.id && str(p.fields, "name") === name);
-		let promptId = prompts[0]?.id;
-		if (!promptId) {
-			promptId = (await createObject(name, SYSTEM_PROMPT_TYPE, { channel: sv(space.id), description: sv(`Setup and upkeep of the ${space.name} space.`) }, `space-prompt-${space.id}`)).id;
-			const p = await fetchObject(promptId);
-			if (p.blocks.length === 0) await writePageText(promptId, spaceAgentPrompt(space.name));
-		}
-		const { id: agentId } = await createObject(name, "agent", {
-			channel: sv(space.id),
-			prompt: { linkValue: { relationKey: "prompt", targetId: promptId } },
-			served_by: sv(me),
-			model: lv([DEFAULT_MODEL]),
-			credentials: linkList("credentials", [cred.id]),
-		}, `space-agent-${space.id}`);
-		// On the space's guest list: it answers in the space's own chat.
-		const spaceObj = await fetchObject(space.id);
-		const guests = linkIds(spaceObj.fields, "agent");
-		if (!guests.includes(agentId)) await setField(space.id, "agent", linkList("agent", [...guests, agentId]));
-		out.agents += 1;
 	}
 	return out;
+}
+
+async function seedSpace(space: { id: string; name: string }, me: string, out: { credentials: number; agents: number }): Promise<void> {
+	// 1. The Anthropic credential.
+	let cred = spaceAnthropicCredential(await queryAll({ type: CREDENTIAL_TYPE }), space.id);
+	const credId = `anthropic-${space.id}`;
+	if (!cred && !(await everMade(credId))) {
+		// Served by the seeding computer: it keeps Status and Error ("No key yet - paste …"), and marks it active once a key is pasted.
+		if (!(await madeOnce("Anthropic", CREDENTIAL_TYPE, { channel: sv(space.id), service: sv(ANTHROPIC_SERVICE), served_by: sv(me) }, credId))) return;
+		const made = await fetchObject(credId);
+		await fillCredential(made);
+		if (made.blocks.length === 0) await writePageText(credId, ANTHROPIC_PAGE);
+		cred = { id: credId, typeKey: CREDENTIAL_TYPE, fields: made.fields, createdAt: made.createdAt } as QueryRow;
+		out.credentials += 1;
+	}
+
+	// 2. "<Space> Space" - unless the space has one by that name, or ever had the default one.
+	const name = `${space.name} Space`;
+	const agentId = `space-agent-${space.id}`;
+	const agents = (await queryAll({ type: "agent" })).filter((a) => str(a.fields, "channel") === space.id);
+	if (agents.some((a) => str(a.fields, "name") === name) || (await everMade(agentId))) return;
+	const prompts = (await queryAll({ type: SYSTEM_PROMPT_TYPE })).filter((p) => str(p.fields, "channel") === space.id && str(p.fields, "name") === name);
+	let promptId = prompts[0]?.id;
+	if (!promptId) {
+		promptId = `space-prompt-${space.id}`;
+		if (!(await madeOnce(name, SYSTEM_PROMPT_TYPE, { channel: sv(space.id), description: sv(`Setup and upkeep of the ${space.name} space.`) }, promptId))) return;
+		const p = await fetchObject(promptId);
+		if (p.blocks.length === 0) await writePageText(promptId, spaceAgentPrompt(space.name));
+	}
+	const made = await madeOnce(name, "agent", {
+		channel: sv(space.id),
+		prompt: { linkValue: { relationKey: "prompt", targetId: promptId } },
+		served_by: sv(me),
+		model: lv([DEFAULT_MODEL]),
+		...(cred ? { credentials: linkList("credentials", [cred.id]) } : {}),
+	}, agentId);
+	if (!made) return;
+	// On the space's guest list: it answers in the space's own chat.
+	const spaceObj = await fetchObject(space.id);
+	const guests = linkIds(spaceObj.fields, "agent");
+	if (!guests.includes(agentId)) await setField(space.id, "agent", linkList("agent", [...guests, agentId]));
+	out.agents += 1;
 }

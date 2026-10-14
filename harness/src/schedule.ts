@@ -406,7 +406,8 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 				check = await runToolObject(checkId, { object_id: obj.id }, { agentId: owner?.agentId ?? "", channelId: str(obj.fields, "channel"), boundObject: obj.id, depth: 0, touched: new Set() });
 			} catch (err) {
 				const failure = `check failed: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
-				await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, error: failure } });
+				// The run's record lives on the repeat rule; a push-only object has none (and the Error below must still land).
+				if (obj.fields.repeat) await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, error: failure } });
 				await setField(obj.id, "error", sv(failure));
 				// Completed anyway: the next occurrence is the retry.
 				await completeOccurrence(d);
@@ -414,7 +415,7 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 				return;
 			}
 			if (isEmptyResult(check.value)) {
-				await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, result: "nothing new" } });
+				if (obj.fields.repeat) await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, result: "nothing new" } });
 				await clearRunBadge(obj, false);
 				await completeOccurrence(d);
 				console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) - ${check.name} found nothing new; no turn`);
@@ -458,7 +459,7 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 					if (Array.isArray(value)) value = value.filter((item) => !(item && typeof item === "object" && "id" in item && binned.has(String(item.id))));
 					console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) - queries binned ${gone.length} of what it found`);
 					if (isEmptyResult(value)) {
-						await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, result: `nothing left (${gone.length} binned by queries)` } });
+						if (obj.fields.repeat) await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, result: `nothing left (${gone.length} binned by queries)` } });
 						await completeOccurrence(d);
 						return;
 					}
