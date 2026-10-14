@@ -1578,7 +1578,36 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 	for key in RETIRED_BUNDLED_TYPES {
 		if e, ok := types[key]; ok do mutation_add(plan, input, e.id, {Operation{kind = .Object_Delete}})
 	}
-
+	// "All Objects": a query with no source type - every object in the space -
+	// pinned at the top of the space's sidebar. Made once: a binned copy is
+	// still in the states and a vanished one is in the ledger, so deleting it
+	// keeps it gone, and only the run that creates it pins it, so unpinning
+	// keeps it unpinned.
+	all_id := fmt.tprintf("bundled-query-all-%s", prefix)
+	_, held := input.states[all_id]
+	if !held && all_id not_in vanished {
+		mutation_add(plan, input, all_id, []Operation{
+			{kind = .Object_Create, type_key = "query"},
+			{kind = .Field_Set, key = "channel", value = string_value(channel_id)},
+			{kind = .Field_Set, key = "name", value = string_value("All Objects")},
+			{kind = .Field_Set, key = "iconEmoji", value = string_value("🌐")},
+			{kind = .Field_Set, key = "setOf", value = list_value({})},
+			{kind = .Field_Set, key = "bundled", value = bool_value(true)},
+		})
+		// A space made in this same change (channel_create) is not in the
+		// states yet: its pinned list is empty, so All Objects is all of it.
+		space, ok := input.states[channel_id]
+		if !ok || !space.deleted {
+			pinned := make([dynamic]Value, context.temp_allocator)
+			append(&pinned, string_value(all_id))
+			if ok {
+				if v, pok := fields_get(space.fields, "pinnedIds"); pok && v.kind == .List {
+					for item in v.items do if !(item.kind == .String && item.str == all_id) do append(&pinned, item)
+				}
+			}
+			mutation_add(plan, input, channel_id, {Operation{kind = .Field_Set, key = "pinnedIds", value = list_value(pinned[:])}})
+		}
+	}
 }
 mutation_bootstrap_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input) {
 	chans := make([dynamic]string)

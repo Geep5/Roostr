@@ -146,3 +146,55 @@ mutation_seed_converges :: proc(t: ^testing.T) {
 	testing.expect(t, committed[0] > 0, "the first run seeds the catalog")
 	for n, i in committed[1:] do testing.expectf(t, n == 0, "run %d committed %d change(s)", i + 2, n)
 }
+
+// Every space gets a pinned "All Objects" query (every object: no source
+// type), made once. Deleting it keeps it gone; unpinning keeps it unpinned.
+@(test)
+mutation_seed_all_objects_query :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	run :: proc(states: map[string]^Object_State) -> Mutation_Plan {
+		request := jobj()
+		request["action"] = json.String("seed_space_defaults")
+		request["channel_id"] = json.String("space-aa")
+		plan, _ := mutation_plan(json.Object(request), Mutation_Input{states = states, timestamp = 1000, author = "alice", id_seed = "seed"})
+		return plan
+	}
+	touches :: proc(plan: Mutation_Plan, id: string) -> bool {
+		for c in plan.changes do if c.object_id == id do return true
+		return false
+	}
+	ALL :: "bundled-query-all-space-aa"
+	space := new(Object_State)
+	space^ = Object_State{id = "space-aa", type_key = "channel", fields = make([dynamic]Value_Entry)}
+	append(&space.fields, Value_Entry{key = "pinnedIds", value = list_value({string_value("note-1")})})
+	states := make(map[string]^Object_State)
+	states[space.id] = space
+
+	first := run(states)
+	created := false
+	pinned_first := false
+	for c in first.changes {
+		if c.object_id == ALL {
+			for op in c.ops {
+				if op.kind == .Object_Create do created = op.type_key == "query"
+				if op.kind == .Field_Set && op.key == "setOf" do testing.expect(t, len(op.value.items) == 0, "no source type: every object")
+				if op.kind == .Field_Set && op.key == "name" do testing.expect_value(t, op.value.str, "All Objects")
+			}
+		}
+		if c.object_id == space.id {
+			for op in c.ops do if op.key == "pinnedIds" {
+				pinned_first = len(op.value.items) == 2 && op.value.items[0].str == ALL && op.value.items[1].str == "note-1"
+			}
+		}
+	}
+	testing.expect(t, created, "the space gets an All Objects query")
+	testing.expect(t, pinned_first, "pinned at the top, the existing pins kept after it")
+
+	// Held - unpinned by the user, or binned - it is never made or pinned again.
+	query := new(Object_State)
+	query^ = Object_State{id = ALL, type_key = "query", deleted = true}
+	states[ALL] = query
+	again := run(states)
+	testing.expect(t, !touches(again, ALL), "a deleted All Objects stays deleted")
+	testing.expect(t, !touches(again, space.id), "and is not pinned again")
+}

@@ -6584,6 +6584,85 @@
         ],
         "parentIds": [],
         "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-query-all-new-id",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "query"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "All Objects"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🌐"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "setOf",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "new-id",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "pinnedIds",
+              "value": {
+                "valuesValue": {
+                  "items": [
+                    {
+                      "stringValue": "bundled-query-all-new-id"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
       }
     ],
     "expected_result": {
@@ -10139,6 +10218,85 @@
         "ops": [
           {
             "objectDelete": {}
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-query-all-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "query"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "All Objects"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🌐"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "setOf",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "pinnedIds",
+              "value": {
+                "valuesValue": {
+                  "items": [
+                    {
+                      "stringValue": "bundled-query-all-s"
+                    }
+                  ]
+                }
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -13741,6 +13899,85 @@
         "ops": [
           {
             "objectDelete": {}
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-query-all-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "query"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "All Objects"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🌐"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "setOf",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "s",
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "pinnedIds",
+              "value": {
+                "valuesValue": {
+                  "items": [
+                    {
+                      "stringValue": "bundled-query-all-s"
+                    }
+                  ]
+                }
+              }
+            }
           }
         ],
         "parentIds": [],
