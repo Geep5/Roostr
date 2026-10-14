@@ -16,7 +16,7 @@
  * an Anthropic credential, or an agent of that name, is left as it is.
  */
 
-import { apiFetch, API, createObject, fetchObject, lv, queryAll, setField, str, sv, type QueryRow } from "./api";
+import { apiFetch, API, createDefault, fetchObject, lv, queryAll, setField, str, sv, type QueryRow } from "./api";
 import { CREDENTIAL_TYPE } from "./credential-objects";
 import { fillCredential } from "./credential-seeds";
 import { SYSTEM_PROMPT_TYPE, DEFAULT_MODEL, writePageText } from "./prompts";
@@ -63,38 +63,27 @@ export function spaceAnthropicCredential(creds: QueryRow[], space: string): Quer
 }
 
 /**
- * Whether a default was ever made under `id` - still here, renamed or in the bin. One deleted
- * for good reads as never made; making it again then answers "was deleted" (see madeOnce).
- * A person who deleted or renamed one meant it: it is never made again.
+ * Whether a default is still here under `id` - renamed or in the bin included. One deleted
+ * for good reads as absent; createDefault then refuses to make it again.
  */
 async function everMade(id: string): Promise<boolean> {
 	return fetchObject(id).then(() => true, () => false);
 }
 
-/** Create a default under its fixed id; false when that id was deleted for good - a person's choice, kept. */
-async function madeOnce(name: string, type: string, fields: Parameters<typeof createObject>[2], id: string): Promise<boolean> {
-	try {
-		await createObject(name, type, fields, id);
-		return true;
-	} catch (err) {
-		if (/was deleted/i.test(err instanceof Error ? err.message : String(err))) return false;
-		throw err;
-	}
-}
-
-export async function seedSpaceDefaults(): Promise<{ credentials: number; agents: number; failed: number }> {
-	const out = { credentials: 0, agents: 0, failed: 0 };
+export async function seedSpaceDefaults(): Promise<{ credentials: number; agents: number }> {
+	const out = { credentials: 0, agents: 0 };
 	const spaces = ((await (await apiFetch(`${API}/api/channels`)).json()) as Array<{ id: string; name: string; owner: string }>).filter((s) => !s.owner);
 	const me = await machineId();
+	const failed: string[] = [];
 	for (const space of spaces) {
-		// One space's trouble never stops the others - or the harness starting.
+		// One space's trouble never stops the others; all of it is reported at the end.
 		try {
 			await seedSpace(space, me, out);
 		} catch (err) {
-			out.failed += 1;
-			console.error(`[harness] space defaults for ${space.name} (${space.id.slice(0, 8)}) failed:`, err instanceof Error ? err.message : err);
+			failed.push(`${space.name}: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
+	if (failed.length > 0) throw new Error(failed.join("; "));
 	return out;
 }
 
@@ -104,7 +93,7 @@ async function seedSpace(space: { id: string; name: string }, me: string, out: {
 	const credId = `anthropic-${space.id}`;
 	if (!cred && !(await everMade(credId))) {
 		// Served by the seeding computer: it keeps Status and Error ("No key yet - paste …"), and marks it active once a key is pasted.
-		if (!(await madeOnce("Anthropic", CREDENTIAL_TYPE, { channel: sv(space.id), service: sv(ANTHROPIC_SERVICE), served_by: sv(me) }, credId))) return;
+		if (!(await createDefault("Anthropic", CREDENTIAL_TYPE, { channel: sv(space.id), service: sv(ANTHROPIC_SERVICE), served_by: sv(me) }, credId))) return;
 		const made = await fetchObject(credId);
 		await fillCredential(made);
 		if (made.blocks.length === 0) await writePageText(credId, ANTHROPIC_PAGE);
@@ -121,11 +110,11 @@ async function seedSpace(space: { id: string; name: string }, me: string, out: {
 	let promptId = prompts[0]?.id;
 	if (!promptId) {
 		promptId = `space-prompt-${space.id}`;
-		if (!(await madeOnce(name, SYSTEM_PROMPT_TYPE, { channel: sv(space.id), description: sv(`Setup and upkeep of the ${space.name} space.`) }, promptId))) return;
+		if (!(await createDefault(name, SYSTEM_PROMPT_TYPE, { channel: sv(space.id), description: sv(`Setup and upkeep of the ${space.name} space.`) }, promptId))) return;
 		const p = await fetchObject(promptId);
 		if (p.blocks.length === 0) await writePageText(promptId, spaceAgentPrompt(space.name));
 	}
-	const made = await madeOnce(name, "agent", {
+	const made = await createDefault(name, "agent", {
 		channel: sv(space.id),
 		prompt: { linkValue: { relationKey: "prompt", targetId: promptId } },
 		served_by: sv(me),

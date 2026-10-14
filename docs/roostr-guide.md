@@ -135,7 +135,7 @@ These are enforced by the harness for every agent; follow them in any prompt you
 ### Reliability
 
 - **Every agent needs Served by, a running computer and a model key.** Check all three first when "it doesn't answer" - an agent asking another agent waits as long as that agent's computer is off. Each space you own starts with **"<Space> Space"**, its setup-and-upkeep agent (on the space's own chat), and an **Anthropic** credential: paste a key there once and every agent in the space that lists it runs.
-- **Read the Error property** - on the object, its agent and its Computer. Failed runs, stuck runs, missing computers, crashed programs, signed-out credentials and broken Tools all show there - fix the cause, and the next clean run (or Retry run) clears it.
+- **Read the Error property** - on the object, its agent and its Computer. Failed runs, stuck runs, missing computers, crashed programs, failed startup steps (a computer's housekeeping at start - seeding, its own migrations - runs after it starts serving, so a failure there never stops its agents), signed-out credentials and broken Tools all show there - fix the cause, and the next clean run (or Retry run) clears it.
 - **Keep computers on the service** (`bun run service install`), and run `bun run service restart` after every pull or rebuild.
 - **Test on a throwaway object** before pointing a setup at real data, then delete it.
 - **Don't duplicate.** Search (`find`, `space_map`, saved views) before creating types, properties, templates or agents that may already exist.

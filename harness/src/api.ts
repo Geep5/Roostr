@@ -272,6 +272,21 @@ export const createObject = async (name: string, typeKey: string, fields?: Recor
 	(await mutate("create", { name, type_key: typeKey, fields, ...(id ? { id } : {}) })) as { id: string; existed?: boolean };
 
 /**
+ * A default seeded under a fixed id (create-if-absent, so two computers make
+ * one). False when that id was deleted for good: a person removed it, and a
+ * default a person removed is never made again - and never stops a seeder.
+ */
+export async function createDefault(name: string, typeKey: string, fields: Record<string, ValueJSON>, id: string): Promise<boolean> {
+	try {
+		await createObject(name, typeKey, fields, id);
+		return true;
+	} catch (err) {
+		if (/was deleted/i.test(err instanceof Error ? err.message : String(err))) return false;
+		throw err;
+	}
+}
+
+/**
  * Append a chat message block; `asAuthor` attributes it to the agent.
  *
  * `threadId` empty = the object's human discussion, which is what every

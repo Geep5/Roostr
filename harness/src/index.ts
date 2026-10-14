@@ -38,16 +38,12 @@ import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishM
 import { CAPABILITY_TYPE } from "./capabilities";
 import { SKILLS_KEY, machineSkillKeys } from "./skills";
 import { TOOLS_KEY, ensureBuiltinTools, ensureBuiltinToolsEverywhere, linkList } from "./tool-objects";
-import { migrateToolGrants } from "./migrate-tool-grants";
-import { migrateSkills } from "./migrate-skills";
 import { migrateCapabilities } from "./migrate-capabilities";
-import { migratePrompts } from "./migrate-prompts";
+import { runBootSteps } from "./boot";
 import { startDiscordManager } from "./discord";
 import { answersGuestQuestion, chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, mentions, pendingMessages, setMark } from "./surfaces";
 import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
-import { migrateExchanges } from "./migrate-exchanges";
-import { migrateAgentLists, migrateBoundAgents, migrateSpaceComputers, migrateSpaceDefaults } from "./migrate-bound";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
 import { arm as armScheduler, handleRunRequest, RUN_REQUEST_KEY, startScheduler } from "./schedule";
@@ -310,50 +306,35 @@ async function serve(): Promise<void> {
 	setCapabilityRequestOwner(inboxOwner);
 	await publishMachine(); // register this machine before serving resolves against the roster
 	installGwsAs();
-	// Service logins are Credential objects: move this machine's old login
-	// rows over once, then check the credentials this machine looks after.
-	console.log("[harness] login migration:", JSON.stringify(await migrateLoginInstalls()));
-	// install rows and machine.capabilities fold into capability objects, one
-	// per (key x machine); after the login migration has read its rows.
-	console.log("[harness] capability migration:", JSON.stringify(await migrateCapabilities()));
-	// A Skill object per catalog key and the agent-kind Templates per space.
-	await seedCatalog();
-	// The Roostr Guide (docs/roostr-guide.md) as a Skill every agent can read.
-	console.log("[harness] roostr guide:", await seedGuide());
-	// Service presets become Credential templates, and credentials carry their
-	// own recipe - before the check below reads those recipes.
-	console.log("[harness] credential seeds:", JSON.stringify(await seedCredentials()));
-	await refreshCredentials();
-	// Every space of yours starts with an Anthropic credential (key empty) and its "<Space> Space" agent.
-	console.log("[harness] space defaults:", JSON.stringify(await seedSpaceDefaults()));
+	// Spaces the background seeding below covers: a channel event meanwhile must not seed them a second time.
 	for (const s of await queryAll({ type: "channel" })) spacesSeeded.add(s.id);
-	// The Computer page's "Keep every file" and "Starts automatically" checkboxes, in every space with computers.
-	console.log("[harness] computer properties:", JSON.stringify({ seeded: await seedComputerProperties() }));
-	// Jev Skills' Answer / Writes to properties in every space; the retired Judge type and properties removed.
-	console.log("[harness] jev seeds:", JSON.stringify(await seedJev()));
-	// Queries that act (Move to bin, Mark done, Tag agents, Set property): their properties, then a first run.
-	await startViewActions();
-	const migration = await migrateExchanges({ apply: true });
-	console.log("[harness] exchange migration:", JSON.stringify(migration));
-	// bound_object -> object.agent, after the exchange migration has read
-	// the legacy field for the last time.
-	console.log("[harness] bound-agent migration:", JSON.stringify(await migrateBoundAgents()));
-	console.log("[harness] agent-list migration:", JSON.stringify(await migrateAgentLists()));
-	// space_default -> the space's own guest list; spaces no longer imply a mind.
-	console.log("[harness] space-default migration:", JSON.stringify(await migrateSpaceDefaults()));
-	// channel served_by -> each agent's own pin; spaces no longer serve, and
-	// their checkout bindings give way to the agent's Project folder.
-	console.log("[harness] space-computer migration:", JSON.stringify(await migrateSpaceComputers()));
-	// agent.kind -> a linked system_prompt object.
-	console.log("[harness] prompt migration:", JSON.stringify(await migratePrompts()));
-	// requires (capability links) and prompt skills -> each object's Skills;
-	// after the login migration so a required login becomes a Credential link.
-	console.log("[harness] skills migration:", JSON.stringify(await migrateSkills()));
-	// Shell and web moved from the 'shell'/'web' skills to each agent's Tools.
-	console.log("[harness] tool-grant migration:", JSON.stringify(await migrateToolGrants()));
-	void ensureBuiltinToolsEverywhere();
 	const agents = await servedAgents();
 	let served = await buildServed(agents);
+	// Serve first; the housekeeping runs in the background. None of it is
+	// needed to answer agents, and none of it can stop the harness: a step
+	// that fails is on this computer's Error, and the rest still run (boot.ts).
+	void runBootSteps([
+		// Service logins are Credential objects: this computer's old login rows, moved over once.
+		{ name: "login migration", run: () => migrateLoginInstalls() },
+		// This computer's install rows fold into capability objects - after the login migration has read its rows.
+		{ name: "capability migration", run: () => migrateCapabilities() },
+		// A Skill object per catalog key and the agent-kind Templates per space.
+		{ name: "catalog seeds", run: () => seedCatalog() },
+		// The Roostr Guide (docs/roostr-guide.md) as a Skill every agent can read.
+		{ name: "roostr guide", run: () => seedGuide() },
+		// Service presets become Credential templates - before the check below reads those recipes.
+		{ name: "credential seeds", run: () => seedCredentials() },
+		{ name: "credential check", run: () => refreshCredentials() },
+		// Every space of yours starts with an Anthropic credential (key empty) and its "<Space> Space" agent.
+		{ name: "space defaults", run: () => seedSpaceDefaults() },
+		// The Computer page's "Keep every file" and "Starts automatically" checkboxes.
+		{ name: "computer properties", run: async () => ({ seeded: await seedComputerProperties() }) },
+		// Jev Skills' Answer / Writes to properties in every space.
+		{ name: "jev seeds", run: () => seedJev() },
+		// Queries that act (Move to bin, Mark done, Tag agents, Set property): their properties, then a first run.
+		{ name: "queries that act", run: () => startViewActions() },
+		{ name: "built-in tools", run: () => ensureBuiltinToolsEverywhere() },
+	]);
 
 	// `no machine serves this agent` is the engine's own error on an agent
 	// with no served_by (core/agent_serving.odin): agent-errors.ts only ever
