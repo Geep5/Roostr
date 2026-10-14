@@ -148,6 +148,16 @@ compare_plain :: proc(a, b: Plain) -> int {
 	if a.kind == .Bool && b.kind == .Bool {
 		return int(a.b ? 1 : 0) - int(b.b ? 1 : 0)
 	}
+	// Tags and other multi-value properties: item by item, then the shorter
+	// first. As plain strings every list read "", so a sort by one left the
+	// rows unordered and equal values never grouped.
+	if a.kind == .List || b.kind == .List {
+		la, lb := as_list(a), as_list(b)
+		for i in 0 ..< min(len(la), len(lb)) {
+			if c := compare_plain(la[i], lb[i]); c != 0 do return c
+		}
+		return len(la) - len(lb)
+	}
 	sa := plain_string(a)
 	sb := plain_string(b)
 	return strings.compare(sa, sb)

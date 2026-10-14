@@ -63,3 +63,45 @@ query_sources_are_types_even_when_a_property_shares_the_key :: proc(t: ^testing.
 	testing.expect_value(t, len(records), 1)
 	if len(records) == 1 do testing.expect_value(t, json_str(records[0], "id"), "marco")
 }
+
+// Tag and multi-value properties are lists: sorting by one must order rows by
+// their values. Every list compared equal, so a sort by Customer left the
+// rows in id order and the same customer never grouped together.
+@(test)
+query_sort_by_a_list_property_groups_its_values :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	states := make(map[string]^Object_State)
+	add :: proc(states: ^map[string]^Object_State, id: string, tags: ..string) {
+		s := new(Object_State)
+		s.id = id
+		s.type_key = "task"
+		s.fields = make([dynamic]Value_Entry)
+		s.blocks = make([dynamic]Block)
+		items := make([dynamic]Value)
+		for tag in tags do append(&items, string_value(tag))
+		if len(tags) > 0 do append(&s.fields, Value_Entry{key = "customer", value = list_value(items[:])})
+		states[id] = s
+	}
+	add(&states, "a", "Team")
+	add(&states, "b", "Finance")
+	add(&states, "c", "Team")
+	add(&states, "d")
+	add(&states, "e", "Finance")
+	add(&states, "f", "Finance", "Team")
+	order :: proc(states: map[string]^Object_State, dir: string) -> string {
+		body := jobj()
+		sort := jobj()
+		sort["key"] = json.String("customer")
+		sort["type"] = json.String(dir)
+		sort["emptyPlacement"] = json.String("end")
+		sorts := make(json.Array)
+		append(&sorts, json.Object(sort))
+		body["sorts"] = sorts
+		ids := make([dynamic]string)
+		for r in json_array(query_result(states, json.Object(body), 0), "records") do append(&ids, json_str(r, "id"))
+		return strings.join(ids[:], "")
+	}
+	// Finance, then Finance+Team (a longer list after its prefix), then Team; empty last.
+	testing.expect_value(t, order(states, "asc"), "befacd")
+	testing.expect_value(t, order(states, "desc"), "acfbed")
+}
