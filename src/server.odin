@@ -18,6 +18,7 @@ import "core:path/filepath"
 import "core:encoding/json"
 import "core:encoding/hex"
 import "../core"
+import "core:slice"
 // ── SSE hub ──────────────────────────────────────────────────────────
 
 Sse_Client :: struct { sock: net.TCP_Socket, expires: i64 }
@@ -340,7 +341,13 @@ handle_list_objects :: proc(sock: net.TCP_Socket) {
 		sock := (cast(^struct {
 				sock: net.TCP_Socket,
 			})user).sock
-		arr := make([dynamic]json.Value, context.temp_allocator)
+		// Newest first, id ascending as the tiebreak: without it the order among
+		// objects sharing a timestamp came from the state map, which iterates
+		// differently in every process - so the app's lists reshuffled across
+		// reloads for no reason the user did. Sorted on the states themselves
+		// (O(n log n), plain fields) before any JSON is built: the insertion sort
+		// over JSON values this replaced took ~10 s for 5k objects.
+		listed := make([dynamic]^core.Object_State, 0, len(states), context.temp_allocator)
 		for _, s in states {
 			if s.deleted do continue
 			hidden := false
@@ -349,6 +356,14 @@ handle_list_objects :: proc(sock: net.TCP_Socket) {
 				break
 			}
 			if hidden do continue
+			append(&listed, s)
+		}
+		slice.sort_by(listed[:], proc(a, b: ^core.Object_State) -> bool {
+			if a.updated_at != b.updated_at do return a.updated_at > b.updated_at
+			return a.id < b.id
+		})
+		arr := make([dynamic]json.Value, 0, len(listed), context.temp_allocator)
+		for s in listed {
 			o := core.jobj()
 			o["id"] = json.String(s.id)
 			o["typeKey"] = json.String(s.type_key)
@@ -368,32 +383,8 @@ handle_list_objects :: proc(sock: net.TCP_Socket) {
 			o["done"] = json.Boolean(done)
 			append(&arr, json.Object(o))
 		}
-		// Newest first.
-		sort_summaries(&arr)
 		respond_json(sock, json.Array(arr))
 	}, &ctx)
-}
-
-sort_summaries :: proc(arr: ^[dynamic]json.Value) {
-	// Insertion sort by updatedAt desc (lists are small), id asc as the
-	// tiebreak. Without the tiebreak the order among objects sharing a
-	// timestamp came from the state map, which iterates differently in every
-	// process - so two runs of `list` disagreed and the app's lists reshuffled
-	// across reloads for no reason the user did.
-	for i in 1 ..< len(arr) {
-		j := i
-		for j > 0 {
-			a, _ := core.json_int(arr[j - 1], "updatedAt")
-			b, _ := core.json_int(arr[j], "updatedAt")
-			if a != b {
-				if a > b do break
-			} else {
-				if core.json_str(arr[j - 1], "id") <= core.json_str(arr[j], "id") do break
-			}
-			arr[j - 1], arr[j] = arr[j], arr[j - 1]
-			j -= 1
-		}
-	}
 }
 
 handle_get_object :: proc(sock: net.TCP_Socket, id: string) {
