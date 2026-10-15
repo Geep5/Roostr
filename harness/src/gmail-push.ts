@@ -138,15 +138,22 @@ async function google<T>(mailbox: string, url: string, body: unknown, signal?: A
 
 // ── Watches ───────────────────────────────────────────────────────
 
-/** Start or renew a mailbox's watch when it is missing or ends within 2 days. */
+/**
+ * Start or renew a mailbox's watch when it is missing or ends within 2 days -
+ * and once per harness start, so a change to what is watched reaches watches
+ * made before it. Inbox and Sent: a reply this mailbox sends (from Gmail or
+ * anywhere) is checked in at once, not with the next incoming message.
+ */
+const watchedThisRun = new Set<string>();
 async function renewWatch(inbox: Inbox): Promise<void> {
-	if (inbox.watchExpires - Date.now() > RENEW_BEFORE_MS) return;
+	if (watchedThisRun.has(inbox.id) && inbox.watchExpires - Date.now() > RENEW_BEFORE_MS) return;
 	try {
 		const res = await google<{ historyId?: string; expiration?: string }>(inbox.mailbox, "https://gmail.googleapis.com/gmail/v1/users/me/watch", {
 			topicName: inbox.topic,
-			labelIds: ["INBOX"],
+			labelIds: ["INBOX", "SENT"],
 			labelFilterBehavior: "include",
 		});
+		watchedThisRun.add(inbox.id);
 		const expires = Number(res.expiration ?? 0);
 		await setField(inbox.id, "gmail_watch_expires", iv(expires));
 		inbox.watchExpires = expires;
