@@ -105,3 +105,89 @@ query_sort_by_a_list_property_groups_its_values :: proc(t: ^testing.T) {
 	testing.expect_value(t, order(states, "asc"), "befacd")
 	testing.expect_value(t, order(states, "desc"), "acfbed")
 }
+
+// A view asks for the properties it shows (`fields`); filters and sorts still
+// see every property. A big view used to ship every row's icon image.
+@(test)
+query_returns_only_the_requested_fields_and_still_filters_on_the_rest :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	states := make(map[string]^Object_State)
+	add :: proc(states: ^map[string]^Object_State, id: string, fields: ..Value_Entry) {
+		s := new(Object_State)
+		s.id = id
+		s.type_key = "bookmark"
+		s.fields = make([dynamic]Value_Entry)
+		s.blocks = make([dynamic]Block)
+		append(&s.fields, ..fields)
+		states[id] = s
+	}
+	add(&states, "a", Value_Entry{key = "name", value = string_value("Alpha")}, Value_Entry{key = "iconImage", value = string_value("data:image/png;base64,AAAA")}, Value_Entry{key = "url", value = string_value("https://a.example")})
+	add(&states, "b", Value_Entry{key = "name", value = string_value("Beta")}, Value_Entry{key = "iconImage", value = string_value("data:image/png;base64,BBBB")}, Value_Entry{key = "url", value = string_value("https://b.example")})
+
+	filter := jobj()
+	filter["key"] = json.String("url")
+	filter["condition"] = json.String("equal")
+	filter["value"] = json.String("https://b.example")
+	filters := make([dynamic]json.Value)
+	append(&filters, json.Object(filter))
+	keys := make([dynamic]json.Value)
+	append(&keys, json.String("name"))
+	body := jobj()
+	body["filters"] = json.Array(filters)
+	body["fields"] = json.Array(keys)
+
+	result := query_result(states, json.Object(body), 0)
+	records := json_array(result, "records")
+	testing.expect_value(t, len(records), 1)
+	fields := records[0].(json.Object)["fields"].(json.Object)
+	testing.expect_value(t, json_str(records[0], "id"), "b")
+	testing.expect_value(t, len(fields), 1)
+	_, has_name := fields["name"]
+	testing.expect(t, has_name, "the requested property is returned")
+	_, has_icon := fields["iconImage"]
+	testing.expect(t, !has_icon, "an unrequested property is not")
+
+	// No `fields`: every property, as before.
+	all := query_result(states, json.Object(jobj()), 0)
+	for r in json_array(all, "records") do testing.expect_value(t, len(r.(json.Object)["fields"].(json.Object)), 3)
+}
+
+// "Repeat is (not) empty" runs in the engine: a repeat rule is a map, which
+// used to read as nothing, so the app filtered it after the query - and a
+// paged view came back short.
+@(test)
+query_filters_a_map_property_by_empty_and_not_empty :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	states := make(map[string]^Object_State)
+	add :: proc(states: ^map[string]^Object_State, id: string, fields: ..Value_Entry) {
+		s := new(Object_State)
+		s.id = id
+		s.type_key = "task"
+		s.fields = make([dynamic]Value_Entry)
+		s.blocks = make([dynamic]Block)
+		append(&s.fields, ..fields)
+		states[id] = s
+	}
+	rule: Value
+	rule.kind = .Map
+	rule.entries = make([dynamic]Value_Entry)
+	append(&rule.entries, Value_Entry{key = "freq", value = string_value("day")})
+	add(&states, "repeats", Value_Entry{key = "repeat", value = rule})
+	add(&states, "once")
+	ids := proc(states: map[string]^Object_State, condition: string) -> [dynamic]string {
+		f := jobj()
+		f["key"] = json.String("repeat")
+		f["condition"] = json.String(condition)
+		filters := make([dynamic]json.Value)
+		append(&filters, json.Object(f))
+		body := jobj()
+		body["filters"] = json.Array(filters)
+		out := make([dynamic]string)
+		for r in json_array(query_result(states, json.Object(body), 0), "records") do append(&out, json_str(r, "id"))
+		return out
+	}
+	not_empty := ids(states, "notEmpty")
+	testing.expect(t, len(not_empty) == 1 && not_empty[0] == "repeats", "notEmpty finds the repeating task")
+	empty := ids(states, "empty")
+	testing.expect(t, len(empty) == 1 && empty[0] == "once", "empty finds the one-off task")
+}

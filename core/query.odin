@@ -17,6 +17,8 @@ Plain_Kind :: enum u8 {
 	Number,
 	Bool,
 	List,
+	// A map value (a repeat rule, a judged note): present or empty, never compared or sorted on.
+	Map,
 }
 
 Plain :: struct {
@@ -24,6 +26,8 @@ Plain :: struct {
 	str:     string,
 	num:     f64,
 	b:       bool,
+	// Map: how many entries it holds.
+	entries: int,
 	list:    [dynamic]Plain,
 }
 
@@ -51,7 +55,8 @@ value_to_plain :: proc(v: Value, allocator := context.temp_allocator) -> Plain {
 		for s in v.strings do append(&out.list, Plain{kind = .String, str = s})
 		return out
 	case .Map:
-		return plain_null() // maps aren't comparable
+		// Maps aren't comparable, but "is it set" is a fair question (Repeat is empty / not empty).
+		return Plain{kind = .Map, entries = len(v.entries)}
 	case .List:
 		out := Plain{kind = .List}
 		out.list = make([dynamic]Plain, allocator)
@@ -114,6 +119,8 @@ is_empty_plain :: proc(p: Plain) -> bool {
 		return !p.b
 	case .List:
 		return len(p.list) == 0
+	case .Map:
+		return p.entries == 0
 	}
 	return false
 }
@@ -135,6 +142,9 @@ plain_equal :: proc(a, b: Plain) -> bool {
 		if len(a.list) != len(b.list) do return false
 		for x, i in a.list do if !plain_equal(x, b.list[i]) do return false
 		return true
+	case .Map:
+		// Not comparable: no filter value equals a map.
+		return false
 	}
 	return false
 }
@@ -535,6 +545,29 @@ resolve_set_filter :: proc(set_obj: ^Object_State) -> json.Value {
 	return json.Object(f)
 }
 
+/**
+ * A record's fields as a query returns them: every field, or - when the query
+ * lists `fields` (property keys) - only those. Filters and sorts always run
+ * over every field; this only trims what is sent, so a table asks for the
+ * columns it shows and a big view stops shipping, say, every row's icon image.
+ */
+query_fields_json :: proc(fields: [dynamic]Value_Entry, body: json.Value, allocator := context.temp_allocator) -> json.Value {
+	want, listed := json_field(body, "fields")
+	if !listed do return fields_to_json(fields, allocator)
+	keys, is_list := want.(json.Array)
+	if !is_list do return fields_to_json(fields, allocator)
+	o := jobj(allocator)
+	for e in fields {
+		for k in keys {
+			if ks, ok := k.(json.String); ok && string(ks) == e.key {
+				o[e.key] = value_to_json(e.value, allocator)
+				break
+			}
+		}
+	}
+	return json.Object(o)
+}
+
 query_result :: proc(states: map[string]^Object_State, body: json.Value, now_ms: f64) -> json.Value {
 	extra: json.Value
 	if set_obj, ok := states[json_str(body, "setId")]; ok do extra = resolve_set_filter(set_obj)
@@ -549,7 +582,7 @@ query_result :: proc(states: map[string]^Object_State, body: json.Value, now_ms:
 		name := ""
 		if v, ok := fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
 		row["name"] = json.String(name)
-		row["fields"] = fields_to_json(s.fields)
+		row["fields"] = query_fields_json(s.fields, body)
 		row["createdAt"] = json.Integer(s.created_at)
 		row["updatedAt"] = json.Integer(s.updated_at)
 		if s.deleted do row["deleted"] = json.Boolean(true)

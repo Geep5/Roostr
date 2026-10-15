@@ -619,7 +619,7 @@ handle_query :: proc(sock: net.TCP_Socket, body: []byte) {
 			name := ""
 			if v, ok := core.fields_get(s.fields, "name"); ok && v.kind == .String do name = v.str
 			o["name"] = json.String(name)
-			o["fields"] = core.fields_to_json(s.fields)
+			o["fields"] = core.query_fields_json(s.fields, c.body)
 			o["createdAt"] = json.Integer(s.created_at)
 			o["updatedAt"] = json.Integer(s.updated_at)
 			if s.deleted do o["deleted"] = json.Boolean(true)
