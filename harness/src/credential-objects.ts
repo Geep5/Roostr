@@ -406,6 +406,9 @@ export class CredentialNotConnected extends Error {
 	}
 }
 
+/** The agent lists no credential for a service at all (adding one to its Credentials fixes it). */
+export class CredentialMissing extends Error {}
+
 async function credentialObject(id: string): Promise<CredentialRow> {
 	const obj = await fetchObject(id).catch(() => null);
 	if (!obj || obj.deleted || obj.typeKey !== CREDENTIAL_TYPE) throw new CredentialError(404, "No such credential.");
@@ -659,10 +662,10 @@ export interface AgentCredential {
  */
 export async function agentCredential(agent: ObjectJSON, service: string, pick = ""): Promise<AgentCredential> {
 	const linked = agentCredentialIds(agent);
-	if (linked.length === 0) throw new Error("This agent lists no credentials. Add one to its Credentials property.");
+	if (linked.length === 0) throw new CredentialMissing("This agent lists no credentials. Add one to its Credentials property.");
 	const rows = await Promise.all(linked.map((id) => credentialObject(id).catch(() => null)));
 	const ofService = rows.filter((r): r is CredentialRow => !!r && r.service === service);
-	if (ofService.length === 0) throw new Error(`None of this agent's credentials is for "${service}".`);
+	if (ofService.length === 0) throw new CredentialMissing(`None of this agent's credentials is for "${service}".`);
 	const picked = pick ? ofService.find((r) => r.id === pick || r.name === pick) ?? ofService.find((r) => r.name.toLowerCase() === pick.toLowerCase()) : undefined;
 	if (pick && !picked) throw new Error(`None of this agent's "${service}" credentials is "${pick}"; they are: ${ofService.map((r) => `"${r.name}"`).join(", ")}.`);
 	const row = picked ?? ofService.find((r) => r.status === "active") ?? ofService[0];

@@ -46,9 +46,9 @@ import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvK
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
-import { arm as armScheduler, handleRunRequest, RUN_REQUEST_KEY, startScheduler } from "./schedule";
+import { arm as armScheduler, handleRunRequest, retryUnblockedRuns, RUN_REQUEST_KEY, startScheduler } from "./schedule";
 import { startGmailPush } from "./gmail-push";
-import { badgeSignedOut, credentialBadge, takeCredentialIssues } from "./credential-issues";
+import { badgeLoginIssues, issuesBadge, takeCredentialIssues } from "./credential-issues";
 import { beginAgentTurn, flagAgent, settleAgentTurn } from "./agent-errors";
 
 /** Spaces whose defaults this run has seeded (boot: all of them); a space appearing later is seeded once. */
@@ -689,12 +689,12 @@ async function serve(): Promise<void> {
 		await withTurn(s, surface, async () => {
 			takeCredentialIssues(s.agentId); // another turn's leftovers are not this one's
 			await handleSurface(s, surface);
-			// A signed-out login this turn hit goes on the object it was about, as a
+			// A dead or missing login this turn hit goes on the object it was about, as a
 			// scheduled run's does - else only a chat line says why the work stopped.
-			const dead = takeCredentialIssues(s.agentId);
-			if (dead.length > 0) {
-				await badgeSignedOut(surface.objectId, dead).catch(() => {});
-				await flagAgent(s.agentId, credentialBadge(dead));
+			const blocked = takeCredentialIssues(s.agentId);
+			if (blocked.length > 0) {
+				await badgeLoginIssues(surface.objectId, blocked).catch(() => {});
+				await flagAgent(s.agentId, issuesBadge(blocked));
 			}
 		});
 	}
@@ -832,6 +832,8 @@ async function serve(): Promise<void> {
 		if (obj.fields["repeat"]) void armScheduler();
 		// Run now, asked for from any device: the computer that serves the object starts it.
 		if (obj.fields[RUN_REQUEST_KEY] && !obj.deleted) void handleRunRequest(obj).catch((err) => console.error(`[schedule] run request ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
+		// A login reconnected (or changed): runs it blocked may retry now, not at the next 10-minute check.
+		if (obj.typeKey === "credential" && !obj.deleted) void retryUnblockedRuns().catch((err) => console.error("[schedule] blocked-run check:", err instanceof Error ? err.message : err));
 		// Serving inputs changed: a machine or capability object (its status
 		// included), a pin (served_by) or Skills on any object. Refresh
 		// the resolver cache and re-arm, so the next event and the clock

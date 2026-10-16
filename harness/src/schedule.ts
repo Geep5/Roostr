@@ -39,7 +39,8 @@
 import { flagAgent } from "./agent-errors";
 import { deleteField, fetchObject, guestAgents, mutate, queryAll, setField, str, sv, wasDeleted, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { addConvBlock, convKey, humanRef, type ConvRef } from "./conv";
-import { CREDENTIAL_BADGE, credentialBadge, takeCredentialIssues } from "./credential-issues";
+import { CREDENTIAL_BADGE, CREDENTIAL_MISSING_BADGE, issuesBadge, parseIssuesBadge, takeCredentialIssues } from "./credential-issues";
+import { agentCredentialIds } from "./credential-objects";
 import { primeServing, servesHere } from "./machine";
 import { machineId } from "./roster";
 import { objectText } from "./skills";
@@ -108,7 +109,7 @@ async function completeOccurrence(d: Due): Promise<void> {
 /** Error badges a clean run clears: what a failed run or check wrote - never a human's or another writer's message. */
 async function clearRunBadge(obj: ObjectJSON, alsoNoAgent: boolean): Promise<void> {
 	const badge = str(obj.fields, "error");
-	if (badge.startsWith("run failed:") || badge.startsWith("check failed:") || badge.startsWith(CREDENTIAL_BADGE) || (alsoNoAgent && badge.startsWith("recurring object has no agent"))) await deleteField(obj.id, "error");
+	if (badge.startsWith("run failed:") || badge.startsWith("check failed:") || badge.startsWith(CREDENTIAL_BADGE) || badge.startsWith(CREDENTIAL_MISSING_BADGE) || (alsoNoAgent && badge.startsWith("recurring object has no agent"))) await deleteField(obj.id, "error");
 }
 
 /** setTimeout's ceiling; longer waits re-arm when it elapses. */
@@ -160,8 +161,69 @@ export async function startScheduler(h: ScheduleHost): Promise<void> {
 	}
 	await arm();
 	// An occurrence that never finished stops its object for good: say so on its Error.
-	void flagStuckRuns().catch((err) => console.error("[schedule] stuck-run check:", err instanceof Error ? err.message : err));
-	stuckTimer ??= setInterval(() => void flagStuckRuns().catch((err) => console.error("[schedule] stuck-run check:", err instanceof Error ? err.message : err)), STUCK_CHECK_MS);
+	// And a run a login blocked retries itself once that login is fixed.
+	const checks = () => {
+		void flagStuckRuns().catch((err) => console.error("[schedule] stuck-run check:", err instanceof Error ? err.message : err));
+		void retryUnblockedRuns().catch((err) => console.error("[schedule] blocked-run check:", err instanceof Error ? err.message : err));
+	};
+	checks();
+	stuckTimer ??= setInterval(checks, STUCK_CHECK_MS);
+}
+
+/** Blocked occurrences already retried by themselves (object:occurrence): one automatic retry each. */
+const autoRetried = new Set<string>();
+
+/**
+ * A run a login blocked - its Error names a credential signed out, or a
+ * service the agent had no credential for - is retried once that is fixed:
+ * the named credential is active again and was reconnected since the run,
+ * or the agent now lists an active credential for the service. It says so
+ * in the object's chat ("↻ retried because …"), then asks for a run the
+ * way Retry run does (`run_now`), so an open occurrence is retried and
+ * finishing it moves the schedule on. Once per occurrence: a retry that is
+ * blocked again waits for the next fix by a person or the next occurrence.
+ */
+let retryPass: Promise<number> | null = null;
+/** One pass at a time: credential edits arrive in bursts, and two passes must not retry one run twice. */
+export function retryUnblockedRuns(): Promise<number> {
+	retryPass ??= retryBlocked().finally(() => (retryPass = null));
+	return retryPass;
+}
+
+async function retryBlocked(): Promise<number> {
+	if (!host) return 0;
+	let started = 0;
+	const me = await machineId();
+	for (const d of await recurringMine()) {
+		const key = `${d.id}:${d.next}`;
+		if (running.has(d.id) || autoRetried.has(key)) continue;
+		const obj = await fetchObject(d.id).catch(() => null);
+		if (!obj || obj.deleted || obj.fields[RUN_REQUEST_KEY]) continue;
+		const blocked = parseIssuesBadge(str(obj.fields, "error"));
+		if (!blocked) continue;
+		const ranAt = obj.fields["repeat"]?.mapValue?.entries?.["last_run"]?.mapValue?.entries?.["at"]?.intValue ?? 0;
+		const owner = await ownerOf(obj);
+		const agent = owner ? await fetchObject(owner.agentId).catch(() => null) : null;
+		if (!agent) continue;
+		const active = (await Promise.all(agentCredentialIds(agent).map((id) => fetchObject(id).catch(() => null)))).filter(
+			(c): c is ObjectJSON => !!c && !c.deleted && str(c.fields, "status") === "active",
+		);
+		// Reconnected since the run: a login that stayed "active" yet hit a sign-in wall is not fixed by waiting.
+		const reconnected = blocked.signedOut.map((name) => active.find((c) => str(c.fields, "name") === name && c.updatedAt > ranAt));
+		const added = blocked.missing.map((service) => active.find((c) => str(c.fields, "service") === service));
+		const fixed = [...reconnected, ...added];
+		if (fixed.length === 0 || fixed.some((c) => !c)) continue;
+		autoRetried.add(key);
+		const why = [
+			...reconnected.map((c) => `"${str(c!.fields, "name")}" was reconnected`),
+			...added.map((c) => `"${str(c!.fields, "name")}" was added to ${str(agent.fields, "name") || "the agent"}`),
+		].join(" and ");
+		await postScheduled(humanRef(obj.id), `\u21bb Retried "${str(obj.fields, "name") || "this"}" because ${why}`, d, me);
+		await setField(obj.id, RUN_REQUEST_KEY, { mapValue: { entries: { at: { intValue: Date.now() } } } });
+		console.log(`[schedule] "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)}) retried: ${why}`);
+		started += 1;
+	}
+	return started;
 }
 
 /** Error-badge prefix for an occurrence that fired and never finished. */
@@ -499,21 +561,22 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 		console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) → agent ${owner.agentId.slice(0, 8)}`);
 		takeCredentialIssues(owner.agentId); // a chat turn's leftovers are not this run's
 		const error = await host.turn(owner.agentId, kind === "extra" ? RUN_NOW_SUFFIX : kind === "push" ? PUSH_SUFFIX : TURN_SUFFIX);
-		const deadLogins = takeCredentialIssues(owner.agentId);
+		const blockedBy = takeCredentialIssues(owner.agentId);
 		const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: convKey(owner.conv) };
 		if (error) run.error = error;
-		else if (deadLogins.length > 0) run.error = credentialBadge(deadLogins);
+		else if (blockedBy.length > 0) run.error = issuesBadge(blockedBy);
 		// The run's record lives on the repeat rule: an object run only by pushes has none. Its
 		// failing record threw past the Error badge below - a failed push run showed nowhere.
 		if (obj.fields.repeat) await mutate("run_record", { object_id: obj.id, run });
-		// The error badge: a failed run sets it, and so does a run that hit a
-		// signed-out credential (the turn itself "succeeds" - the agent just
-		// says why it couldn't); a clean run clears what either wrote (or the
-		// no-agent badge, once the object names one).
+		// The error badge: a failed run sets it, and so does a run a login
+		// blocked - signed out, or none listed for the service (the turn
+		// itself "succeeds" - the agent just says why it couldn't); a clean
+		// run clears what either wrote (or the no-agent badge, once the
+		// object names one). A login's badge is what retryUnblockedRuns reads.
 		if (error) await setField(obj.id, "error", sv(`run failed: ${error}`.slice(0, 300)));
-		else if (deadLogins.length > 0) {
-			await setField(obj.id, "error", sv(credentialBadge(deadLogins)));
-			await flagAgent(owner.agentId, credentialBadge(deadLogins));
+		else if (blockedBy.length > 0) {
+			await setField(obj.id, "error", sv(issuesBadge(blockedBy)));
+			await flagAgent(owner.agentId, issuesBadge(blockedBy));
 		}
 		else await clearRunBadge(obj, true);
 		if (subDaily(obj)) await completeOccurrence(d);

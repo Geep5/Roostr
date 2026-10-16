@@ -14,7 +14,7 @@ import { deleteField, fetchObject, setField, str, sv } from "./api";
 
 /** The automatic badges this module owns, by prefix. */
 export const RUN_FAILED = "run failed: ";
-const OWN = [RUN_FAILED, "helper agent failed: ", "credential signed out: ", "needs ", "scoring failed: "];
+const OWN = [RUN_FAILED, "helper agent failed: ", "credential signed out: ", "credential missing: ", "needs ", "scoring failed: "];
 
 const owned = (text: string) => OWN.some((p) => text.startsWith(p));
 

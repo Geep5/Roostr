@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { flagStuckRuns, isEmptyResult, resetScheduler, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
+import { credentialBadge, issuesBadge, missingBadge, parseIssuesBadge } from "./credential-issues";
+import { flagStuckRuns, isEmptyResult, resetScheduler, retryUnblockedRuns, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -321,4 +322,71 @@ test("an occurrence still open when the next would be due is flagged on its Erro
 	// Fired but its next is not due yet: a run in progress, not stuck.
 	fields = { ...fields, repeat: { mapValue: { entries: { freq: { stringValue: "day" }, next: { intValue: Date.now() - 60_000 }, fired_for: { intValue: Date.now() - 60_000 } } } } };
 	expect(await flagStuckRuns()).toBe(0);
+});
+
+test("a run a login blocked retries itself once that login is fixed - once, saying why in the chat", async () => {
+	const objectId = "0b6c86a7-7063-4dcd-81d8-3c5707bbeb83";
+	const agentId = "856fcc37-9ad6-43e8-a1d8-5ee236699183";
+	const credId = "c0ffee00-0000-4000-8000-000000000001";
+	const ranAt = Date.now() - 3_600_000;
+	const next = ranAt - 1000; // fired, the run said it couldn't, still open
+	let fields: Record<string, unknown> = {
+		name: { stringValue: "Remove Old Tournaments" },
+		agent: { valuesValue: { items: [{ stringValue: agentId }] } },
+		error: { stringValue: missingBadge(["matcherino"]) },
+		repeat: { mapValue: { entries: { freq: { stringValue: "day" }, next: { intValue: next }, fired_for: { intValue: next }, last_run: { mapValue: { entries: { at: { intValue: ranAt } } } } } } },
+	};
+	const agentFields: Record<string, unknown> = { name: { stringValue: "Matcherino Space" }, credentials: { valuesValue: { items: [] } } };
+	let cred = { status: "active", service: "matcherino", name: "Matcherino - Sharky", updatedAt: ranAt - 60_000 };
+	const posted: string[] = [];
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		const filter = Array.isArray(body.filters) ? body.filters[0] : undefined;
+		if (url.pathname === "/api/query") return respond(filter?.key === "repeat" ? { records: [{ id: objectId, typeKey: "task", fields }], total: 1 } : { records: [], total: 0 });
+		if (url.pathname === "/api/serving") return respond({ [objectId]: { machineId: "test-machine", reason: "pinned", skills: [], candidates: ["test-machine"] } });
+		if (url.pathname === `/api/objects/${objectId}`) return respond({ id: objectId, typeKey: "task", fields, blocks: [], deleted: false, createdAt: 0, updatedAt: 0 });
+		if (url.pathname === `/api/objects/${agentId}`) return respond({ id: agentId, typeKey: "agent", fields: agentFields, blocks: [], deleted: false, createdAt: 0, updatedAt: Date.now() });
+		if (url.pathname === `/api/objects/${credId}`) return respond({ id: credId, typeKey: "credential", fields: { status: { stringValue: cred.status }, service: { stringValue: cred.service }, name: { stringValue: cred.name } }, blocks: [], deleted: false, createdAt: 0, updatedAt: cred.updatedAt });
+		if (url.pathname === "/api/mutate") {
+			if (body.action === "set_field") fields = { ...fields, [String(body.key)]: body.value };
+			if (body.action === "delete_field") fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== body.key));
+			const meta = (body.block as { content?: { custom?: { meta?: { text?: string } } } } | undefined)?.content?.custom?.meta;
+			if (meta?.text) posted.push(meta.text);
+			return respond({ ok: true, id: "message" });
+		}
+		return respond({ error: `unexpected ${url.pathname}` }, 404);
+	}) as typeof fetch;
+	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
+	await startScheduler({
+		async served(id) {
+			return id === agentId ? { agentId, conv: { objectId: agentId, threadId: "thread" } } : undefined;
+		},
+		async turn() {
+			return "";
+		},
+	});
+
+	// The agent still lists no Matcherino login: nothing to retry.
+	expect(await retryUnblockedRuns()).toBe(0);
+	expect(fields.run_now).toBeUndefined();
+
+	// Someone adds one: the run is asked for once, and the chat says why.
+	agentFields.credentials = { valuesValue: { items: [{ linkValue: { targetId: credId } }] } };
+	expect(await retryUnblockedRuns()).toBe(1);
+	expect(fields.run_now).toBeDefined();
+	expect(posted.some((t) => t.includes('because "Matcherino - Sharky" was added to Matcherino Space'))).toBe(true);
+
+	// Blocked again on the same occurrence: no second automatic retry.
+	fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== "run_now"));
+	expect(await retryUnblockedRuns()).toBe(0);
+});
+
+test("a blocked run's Error names the logins to reconnect or add, and reads back as them", async () => {
+	const badge = credentialBadge(["Matcherino - Sharky"]);
+	expect(parseIssuesBadge(badge)).toEqual({ signedOut: ["Matcherino - Sharky"], missing: [] });
+	expect(parseIssuesBadge(missingBadge(["matcherino", "google-account"]))).toEqual({ signedOut: [], missing: ["matcherino", "google-account"] });
+	expect(parseIssuesBadge("run failed: boom")).toBeNull();
+	// A dead login is the one named first: reconnecting it is what a person does.
+	expect(issuesBadge([{ kind: "missing", service: "x" }, { kind: "signed_out", name: "Y" }])).toBe(credentialBadge(["Y"]));
 });
