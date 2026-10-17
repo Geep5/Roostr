@@ -330,7 +330,8 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 // deliberately absent from both, so Computers appear in lists on every
 // surface. A type hidden on one host and listed on the other is how
 // machines became invisible on localhost and visible on the website.
-HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "relation", "channel", "peer", "pinned_fact", "milestone", VANISH_LOG_TYPE, "user_prefs"}
+// Engine internals only: agents, templates, skills, properties, types and spaces all list.
+HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "peer", "pinned_fact", "milestone", VANISH_LOG_TYPE, "user_prefs", "descriptor", "install", "set", ""}
 
 handle_list_objects :: proc(sock: net.TCP_Socket) {
 	Ctx :: struct {
