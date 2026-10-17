@@ -914,8 +914,10 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 			if s := json_str(run_json, key); s != "" do append(&run.entries, Value_Entry{key = key, value = string_value(s)})
 		}
 		at, has_at := json_int(run_json, "at")
-		append(&run.entries, Value_Entry{key = "at", value = int_value(has_at ? at : input.timestamp)})
-		mutation_add(&plan, input, object_id, {Operation{kind = .Field_Set, key = REPEAT_KEY, value = repeat_with(current, "last_run", run)}})
+		ran_at := has_at ? at : input.timestamp
+		append(&run.entries, Value_Entry{key = "at", value = int_value(ran_at)})
+		// Last run: the same moment as a date property, to show, sort and filter by.
+		mutation_add(&plan, input, object_id, {Operation{kind = .Field_Set, key = REPEAT_KEY, value = repeat_with(current, "last_run", run)}, Operation{kind = .Field_Set, key = "last_run", value = int_value(ran_at)}})
 		return plan, ""
 
 	case "delete_field":
@@ -1427,6 +1429,8 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// nothing more and flags nothing - until a person clears it, which
 	// retries the run. Not an error: nothing is broken.
 	{"stuck", "longtext", "Stuck", "🧱", false, false, 1, {}},
+	// When a repeating object last ran (run_record writes it).
+	{"last_run", "date", "Last run", "🕘", false, true, 1, {}},
 	{"url", "url", "URL", "🔗", false, false, 0, {}},
 	{"email", "email", "Email", "✉️", false, false, 0, {}},
 	{"phone", "phone", "Phone", "📞", false, false, 0, {}},

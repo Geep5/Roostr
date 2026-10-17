@@ -144,19 +144,46 @@ function dueOf(row: { id: string; fields: Record<string, ValueJSON> }): Due | nu
 /** Stuck: what the agent is waiting on a person for. While it has text the object's run is held. */
 export const STUCK_KEY = "stuck";
 const isWaiting = (fields: Record<string, ValueJSON>): boolean => str(fields, STUCK_KEY).trim() !== "";
-/** Objects this computer serves whose Stuck had text last time it looked. */
-const waitingSeen = new Set<string>();
+/**
+ * Objects this computer serves whose Stuck had text last time it looked,
+ * with the newest chat message's time when it first saw that: a person's
+ * message after it is the reply Stuck waits for.
+ */
+const waitingSeen = new Map<string, number>();
+
+/** Agents (object ids) and the scheduler post in a chat; anyone else is a person. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function newestChat(obj: ObjectJSON, byPerson = false): number {
+	let newest = 0;
+	for (const b of obj.blocks) {
+		const m = b.content.custom?.meta;
+		if (b.content.custom?.contentType !== "chat" || !m) continue;
+		const author = m.author ?? "";
+		if (byPerson && (!author || author === "scheduler" || UUID.test(author))) continue;
+		newest = Math.max(newest, Number(m.ts ?? 0));
+	}
+	return newest;
+}
 
 /**
- * A person cleared Stuck on an object this computer serves: its held run
- * goes again now, the way Retry run does (`run_now`) - the open occurrence
- * is retried, and finishing it moves the schedule on. Called on every
- * change; only a Stuck going from text to empty does anything.
+ * Stuck on an object this computer serves, on every change to it:
+ * - a person replies in its chat after it got stuck: that answers it, so
+ *   Stuck clears (which then runs it again, below);
+ * - Stuck goes from text to empty (that reply, or a person clearing it):
+ *   the held run goes again now, the way Retry run does (`run_now`) - the
+ *   open occurrence is retried, and finishing it moves the schedule on.
  */
 export async function handleStuckChange(obj: ObjectJSON): Promise<void> {
 	if (!host || obj.deleted || !obj.fields["repeat"]) return;
 	if (isWaiting(obj.fields)) {
-		waitingSeen.add(obj.id);
+		const since = waitingSeen.get(obj.id);
+		if (since === undefined) {
+			waitingSeen.set(obj.id, newestChat(obj));
+			return;
+		}
+		if (newestChat(obj, true) <= since || !(await servesHere(obj.id))) return;
+		console.log(`[schedule] "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)}) answered in chat: clearing Stuck`);
+		await deleteField(obj.id, STUCK_KEY);
 		return;
 	}
 	if (!waitingSeen.delete(obj.id) || !(await servesHere(obj.id))) return;
@@ -179,8 +206,9 @@ export async function startScheduler(h: ScheduleHost): Promise<void> {
 	host = h;
 	// Nothing runs at boot: a Running… mark left by a run this computer was killed in is stale.
 	for (const d of await recurringMine().catch(() => [] as Due[])) {
-		if (d.waiting) waitingSeen.add(d.id);
 		const obj = await fetchObject(d.id).catch(() => null);
+		// A reply posted while this computer was off reads as already seen.
+		if (d.waiting && obj) waitingSeen.set(d.id, newestChat(obj));
 		if (obj?.fields[RUN_ACTIVE_KEY]) await deleteField(d.id, RUN_ACTIVE_KEY).catch(() => {});
 		// A Run now asked for while this computer was off.
 		if (obj?.fields[RUN_REQUEST_KEY]) await handleRunRequest(obj);

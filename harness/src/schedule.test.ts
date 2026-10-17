@@ -419,9 +419,16 @@ test("Stuck holds an open run: never flagged as unfinished, and clearing it asks
 	expect(await flagStuckRuns()).toBe(0);
 	expect(fields.error).toBeUndefined();
 
-	// Grant reached out and cleared it: the held run is asked for again.
-	fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== "stuck"));
-	await handleStuckChange({ id: objectId, typeKey: "person", fields: fields as Record<string, never>, blocks: [], deleted: false, createdAt: 0, updatedAt: 0 });
+	const chat = (author: string, ts: number) => ({ id: `c${ts}`, childrenIds: [], content: { custom: { contentType: "chat", meta: { author, ts: String(ts), text: "…" } } } });
+	const obj = (blocks: unknown[]) => ({ id: objectId, typeKey: "person", fields: fields as Record<string, never>, blocks: blocks as never[], deleted: false, createdAt: 0, updatedAt: 0 });
+	// The agent's own message after getting stuck is not an answer.
+	await handleStuckChange(obj([chat("a9c326b4-89e8-4a37-82c0-3d72a0bc1207", 2000)]));
+	expect(fields.stuck).toBeDefined();
+	// Grant answers in the chat: Stuck clears.
+	await handleStuckChange(obj([chat("a9c326b4-89e8-4a37-82c0-3d72a0bc1207", 2000), chat("816854963a03323d816854963a03323d816854963a03323d816854963a03323d", 3000)]));
+	expect(fields.stuck).toBeUndefined();
+	// ...and with Stuck gone the held run is asked for again.
+	await handleStuckChange(obj([]));
 	expect(fields.run_now).toBeDefined();
 	// Without Stuck, the same open run is flagged as unfinished again.
 	fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== "run_now"));
