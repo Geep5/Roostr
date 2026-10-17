@@ -395,6 +395,7 @@ test("Stuck holds an open run: never flagged as unfinished, and clearing it asks
 	const objectId = "0b6c86a7-7063-4dcd-81d8-3c5707bbeb83";
 	const day = 86_400_000;
 	const next = Date.now() - 20 * day; // fired weeks ago, held open by Stuck
+	let agentName = "";
 	let fields: Record<string, unknown> = {
 		name: { stringValue: "Lou Fasulo" },
 		stuck: { stringValue: "Ping Lou about integrating the bracket into Matcherino" },
@@ -406,6 +407,7 @@ test("Stuck holds an open run: never flagged as unfinished, and clearing it asks
 		if (url.pathname === "/api/query") return respond({ records: [{ id: objectId, typeKey: "person", fields }], total: 1 });
 		if (url.pathname === "/api/serving") return respond({ [objectId]: { machineId: "test-machine", reason: "pinned", skills: [], candidates: ["test-machine"] } });
 		if (url.pathname === `/api/objects/${objectId}`) return respond({ id: objectId, typeKey: "person", fields, blocks: [], deleted: false, createdAt: 0, updatedAt: 0 });
+		if (url.pathname === "/api/objects/a9c326b4-89e8-4a37-82c0-3d72a0bc1207") return respond({ id: "a9c326b4-89e8-4a37-82c0-3d72a0bc1207", typeKey: "agent", fields: { name: { stringValue: agentName } }, blocks: [], deleted: false, createdAt: 0, updatedAt: 0 });
 		if (url.pathname === "/api/mutate") {
 			if (body.action === "set_field") fields = { ...fields, [String(body.key)]: body.value };
 			if (body.action === "delete_field") fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== body.key));
@@ -419,7 +421,7 @@ test("Stuck holds an open run: never flagged as unfinished, and clearing it asks
 	expect(await flagStuckRuns()).toBe(0);
 	expect(fields.error).toBeUndefined();
 
-	const chat = (author: string, ts: number) => ({ id: `c${ts}`, childrenIds: [], content: { custom: { contentType: "chat", meta: { author, ts: String(ts), text: "…" } } } });
+	const chat = (author: string, ts: number, text = "…") => ({ id: `c${ts}`, childrenIds: [], content: { custom: { contentType: "chat", meta: { author, ts: String(ts), text } } } });
 	const obj = (blocks: unknown[]) => ({ id: objectId, typeKey: "person", fields: fields as Record<string, never>, blocks: blocks as never[], deleted: false, createdAt: 0, updatedAt: 0 });
 	// The agent's own message after getting stuck is not an answer.
 	await handleStuckChange(obj([chat("a9c326b4-89e8-4a37-82c0-3d72a0bc1207", 2000)]));
@@ -430,6 +432,17 @@ test("Stuck holds an open run: never flagged as unfinished, and clearing it asks
 	// ...and with Stuck gone the held run is asked for again.
 	await handleStuckChange(obj([]));
 	expect(fields.run_now).toBeDefined();
+	// Stuck again, answered by a reply that @-asks the object's agent: that chat turn handles it - Stuck clears, no second run.
+	fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== "run_now"));
+	fields.stuck = { stringValue: "Is the white label ready?" };
+	fields.agent = { valuesValue: { items: [{ linkValue: { relationKey: "agent", targetId: "a9c326b4-89e8-4a37-82c0-3d72a0bc1207" } }] } };
+	agentName = "Lou Agent";
+	await handleStuckChange(obj([chat("a9c326b4-89e8-4a37-82c0-3d72a0bc1207", 4000)]));
+	await handleStuckChange(obj([chat("816854963a03323d816854963a03323d816854963a03323d816854963a03323d", 5000, "@Lou Agent it shipped")]));
+	expect(fields.stuck).toBeUndefined();
+	await handleStuckChange(obj([]));
+	expect(fields.run_now).toBeUndefined();
+	delete fields.agent;
 	// Without Stuck, the same open run is flagged as unfinished again.
 	fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== "run_now"));
 	expect(await flagStuckRuns()).toBe(1);

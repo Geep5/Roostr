@@ -882,6 +882,19 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 		repeat_result(&plan, advanced)
 		return plan, ""
 
+	case "occurrence_move":
+		// {object_id, date: "YYYY-MM-DD", by?, reason?}: the next run, once, on that day at the rule's time.
+		object_id := json_str(parsed, "object_id")
+		if object_id == "" do return plan, "object_id required"
+		current, recurring := repeat_state_value(input, object_id)
+		if !recurring do return plan, "object does not repeat"
+		now_ms, tz_offset_min := repeat_clock(parsed, input)
+		moved, err := repeat_move_ops(current, json_str(parsed, "date"), json_str(parsed, "by"), json_str(parsed, "reason"), now_ms, tz_offset_min)
+		if err != "" do return plan, err
+		mutation_add(&plan, input, object_id, {Operation{kind = .Field_Set, key = REPEAT_KEY, value = moved}})
+		repeat_result(&plan, moved)
+		return plan, ""
+
 	case "occurrence_fire":
 		// The scheduler's idempotency mark: only the current occurrence, only once.
 		object_id := json_str(parsed, "object_id")

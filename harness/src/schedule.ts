@@ -153,40 +153,65 @@ const waitingSeen = new Map<string, number>();
 
 /** Agents (object ids) and the scheduler post in a chat; anyone else is a person. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function newestChat(obj: ObjectJSON, byPerson = false): number {
-	let newest = 0;
+/** The newest chat message (by a person only, with `byPerson`): its time and text. */
+function newestChat(obj: ObjectJSON, byPerson = false): { ts: number; text: string } {
+	let newest = { ts: 0, text: "" };
 	for (const b of obj.blocks) {
 		const m = b.content.custom?.meta;
 		if (b.content.custom?.contentType !== "chat" || !m) continue;
 		const author = m.author ?? "";
 		if (byPerson && (!author || author === "scheduler" || UUID.test(author))) continue;
-		newest = Math.max(newest, Number(m.ts ?? 0));
+		const ts = Number(m.ts ?? 0);
+		if (ts > newest.ts) newest = { ts, text: m.text ?? "" };
 	}
 	return newest;
+}
+
+/** Objects whose Stuck a reply @-asking one of its agents cleared: that chat turn answers it, so no second run starts. */
+const answeredByAsk = new Set<string>();
+
+/** The reply @-asks one of the object's agents (by name), which starts that agent's own chat turn. */
+async function asksAnAgent(obj: ObjectJSON, text: string): Promise<boolean> {
+	for (const id of guestAgents(obj.fields)) {
+		const name = str((await fetchObject(id).catch(() => null))?.fields ?? {}, "name");
+		if (name && text.includes(`@${name}`)) return true;
+	}
+	return false;
 }
 
 /**
  * Stuck on an object this computer serves, on every change to it:
  * - a person replies in its chat after it got stuck: that answers it, so
- *   Stuck clears (which then runs it again, below);
+ *   Stuck clears;
  * - Stuck goes from text to empty (that reply, or a person clearing it):
  *   the held run goes again now, the way Retry run does (`run_now`) - the
  *   open occurrence is retried, and finishing it moves the schedule on.
+ *   When the reply @-asked one of the object's agents, that agent's chat
+ *   turn is already answering it: no second run, and the open occurrence
+ *   (if any) is finished here instead, so it never reads as unfinished.
  */
 export async function handleStuckChange(obj: ObjectJSON): Promise<void> {
 	if (!host || obj.deleted || !obj.fields["repeat"]) return;
 	if (isWaiting(obj.fields)) {
 		const since = waitingSeen.get(obj.id);
 		if (since === undefined) {
-			waitingSeen.set(obj.id, newestChat(obj));
+			waitingSeen.set(obj.id, newestChat(obj).ts);
 			return;
 		}
-		if (newestChat(obj, true) <= since || !(await servesHere(obj.id))) return;
+		const reply = newestChat(obj, true);
+		if (reply.ts <= since || !(await servesHere(obj.id))) return;
+		if (await asksAnAgent(obj, reply.text)) answeredByAsk.add(obj.id);
 		console.log(`[schedule] "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)}) answered in chat: clearing Stuck`);
 		await deleteField(obj.id, STUCK_KEY);
 		return;
 	}
 	if (!waitingSeen.delete(obj.id) || !(await servesHere(obj.id))) return;
+	if (answeredByAsk.delete(obj.id)) {
+		const d = dueOf(obj);
+		if (d && d.firedFor === d.next && !running.has(d.id)) await completeOccurrence(d);
+		console.log(`[schedule] "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)}) unstuck by a reply to its agent: no second run`);
+		return;
+	}
 	console.log(`[schedule] "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)}) unstuck: running it again`);
 	await setField(obj.id, RUN_REQUEST_KEY, { mapValue: { entries: { at: { intValue: Date.now() } } } });
 }
@@ -208,7 +233,7 @@ export async function startScheduler(h: ScheduleHost): Promise<void> {
 	for (const d of await recurringMine().catch(() => [] as Due[])) {
 		const obj = await fetchObject(d.id).catch(() => null);
 		// A reply posted while this computer was off reads as already seen.
-		if (d.waiting && obj) waitingSeen.set(d.id, newestChat(obj));
+		if (d.waiting && obj) waitingSeen.set(d.id, newestChat(obj).ts);
 		if (obj?.fields[RUN_ACTIVE_KEY]) await deleteField(d.id, RUN_ACTIVE_KEY).catch(() => {});
 		// A Run now asked for while this computer was off.
 		if (obj?.fields[RUN_REQUEST_KEY]) await handleRunRequest(obj);

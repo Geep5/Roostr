@@ -40,6 +40,7 @@ const COVERAGE: Record<string, Coverage> = {
 	repeat_set: { tools: ["object_set_repeat"] },
 	repeat_clear: { tools: ["object_clear_repeat"] },
 	occurrence_complete: { tools: ["occurrence_complete"] },
+	occurrence_move: { tools: ["object_move_next_run"] },
 	occurrence_fire: { reason: "the scheduler's own bookkeeping when an occurrence starts, not an edit" },
 	run_record: { reason: "the scheduler's record of an agent run, written by the harness around the turn" },
 	// ── Conversation ──

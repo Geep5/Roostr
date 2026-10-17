@@ -27,6 +27,7 @@ package core
 
 import "core:encoding/json"
 import "core:slice"
+import "core:strconv"
 import "core:strings"
 
 REPEAT_KEY :: "repeat"
@@ -362,13 +363,61 @@ repeat_advance_ops :: proc(current: Value, now_ms, tz_offset_min: i64) -> (Value
 	next_ms, has_next := repeat_entry_int(current, "next")
 	if !has_next do return {}, "repeat has no current occurrence"
 	now_local := now_ms + tz_offset_min * REPEAT_MIN_MS
-	current_local := floor_div(next_ms, REPEAT_MIN_MS) + tz_offset_min
-	next_local := repeat_advance(rule, current_local, now_local)
-	out := repeat_with(current, "next", int_value(repeat_local_to_ms(next_local, tz_offset_min)))
+	next_after: i64
+	if moved, was_moved := repeat_entry(current, "moved"); was_moved {
+		// A moved run (occurrence_move) sits off the rule's days: the rule
+		// picks up from the occurrence it displaced - that one itself when
+		// it is still ahead (moved earlier), else the first after now.
+		from, _ := repeat_entry_int(moved, "from")
+		from_local := floor_div(from, REPEAT_MIN_MS) + tz_offset_min
+		next_after = from > now_ms ? repeat_local_to_ms(from_local, tz_offset_min) : repeat_local_to_ms(repeat_advance(rule, from_local, now_local), tz_offset_min)
+	} else {
+		current_local := floor_div(next_ms, REPEAT_MIN_MS) + tz_offset_min
+		next_after = repeat_local_to_ms(repeat_advance(rule, current_local, now_local), tz_offset_min)
+	}
+	out := repeat_with(current, "next", int_value(next_after))
 	out = repeat_with(out, "last_done", int_value(now_ms))
 	count, _ := repeat_entry_int(out, "count")
 	out = repeat_with(out, "count", int_value(count + 1))
-	for key in ([]string{"fired_for", "fired_at", "fired_by"}) do out = repeat_without(out, key)
+	for key in ([]string{"fired_for", "fired_at", "fired_by", "moved"}) do out = repeat_without(out, key)
+	return out, ""
+}
+
+/**
+ * Move the next run, once, to `date` ("YYYY-MM-DD", local) at the rule's
+ * own time, recording {from, at, by, reason} as `moved`; the rule itself is
+ * untouched and picks up again after that run (repeat_advance_ops). An
+ * occurrence that fired and is still open is finished by the move - its
+ * run is what decided to check again later.
+ */
+repeat_move_ops :: proc(current: Value, date: string, by: string, reason: string, now_ms, tz_offset_min: i64) -> (Value, string) {
+	rule, ok := repeat_rule_from_value(current)
+	if !ok do return {}, "object has no valid repeat rule"
+	if len(date) != 10 || date[4] != '-' || date[7] != '-' do return {}, "date must be YYYY-MM-DD"
+	y, m, d := strconv.parse_i64(date[0:4]) or_else -1, strconv.parse_i64(date[5:7]) or_else -1, strconv.parse_i64(date[8:10]) or_else -1
+	if y < 1970 || m < 1 || m > 12 || d < 1 || d > 31 do return {}, "date must be YYYY-MM-DD"
+	times := repeat_day_times(rule)
+	at_min := len(times) > 0 ? times[0] : 0
+	target := repeat_local_to_ms(days_from_civil(y, m, d) * REPEAT_DAY_MIN + at_min, tz_offset_min)
+	if target <= now_ms do return {}, "that run would be in the past"
+	if target > now_ms + 366 * REPEAT_DAY_MS do return {}, "a run can move at most a year ahead"
+	out := current
+	next_ms, _ := repeat_entry_int(current, "next")
+	if fired_for, fired := repeat_entry_int(current, "fired_for"); fired && fired_for == next_ms {
+		advanced, err := repeat_advance_ops(current, now_ms, tz_offset_min)
+		if err != "" do return {}, err
+		out = advanced
+	}
+	// Moved twice: the rule still resumes from the occurrence first displaced.
+	from, _ := repeat_entry_int(out, "next")
+	if prior, was := repeat_entry(out, "moved"); was do from, _ = repeat_entry_int(prior, "from")
+	moved := Value{kind = .Map}
+	moved.entries = make([dynamic]Value_Entry, context.temp_allocator)
+	append(&moved.entries, Value_Entry{key = "from", value = int_value(from)}, Value_Entry{key = "at", value = int_value(now_ms)})
+	if by != "" do append(&moved.entries, Value_Entry{key = "by", value = string_value(by)})
+	if reason != "" do append(&moved.entries, Value_Entry{key = "reason", value = string_value(reason)})
+	out = repeat_with(out, "next", int_value(target))
+	out = repeat_with(out, "moved", moved)
 	return out, ""
 }
 

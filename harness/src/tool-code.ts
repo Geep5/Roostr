@@ -45,6 +45,7 @@ import * as object_set_field from "./tool-code/object_set_field";
 import * as object_set_repeat from "./tool-code/object_set_repeat";
 import * as object_set_type from "./tool-code/object_set_type";
 import * as occurrence_complete from "./tool-code/occurrence_complete";
+import * as object_move_next_run from "./tool-code/object_move_next_run";
 import * as query_run from "./tool-code/query_run";
 import * as shell_exec from "./tool-code/shell_exec";
 import * as skill_read from "./tool-code/skill_read";
@@ -99,6 +100,7 @@ const FILES: ReadonlyArray<[string, { description: string; inputs: string }]> = 
 	["object_clear_field", object_clear_field],
 	["object_set_type", object_set_type],
 	["occurrence_complete", occurrence_complete],
+	["object_move_next_run", object_move_next_run],
 	["object_add_text", object_add_text],
 	["object_edit_block", object_edit_block],
 	["object_set_block_style", object_set_block_style],
