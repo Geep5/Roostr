@@ -70,6 +70,11 @@ function daemon(obj: ObjectJSON) {
 		const url = new URL(input instanceof Request ? input.url : String(input));
 		if (url.pathname === `/api/objects/${obj.id}`) return Response.json(obj);
 		if (url.pathname === "/api/channels") return Response.json([{ id: "space" }]);
+		// The space's properties: Last Contact is a date.
+		if (url.pathname === "/api/query") {
+			const rows = JSON.parse(String(init?.body)).type === "relation" ? [{ id: "rel-lc", typeKey: "relation", fields: { key: { stringValue: "last_contact" }, name: { stringValue: "Last Contact" }, format: { stringValue: "date" }, channel: { stringValue: "space" } } }] : [];
+			return Response.json({ records: rows, total: rows.length });
+		}
 		if (url.pathname === "/api/mutate") {
 			mutations.push(JSON.parse(String(init?.body)));
 			return Response.json({ ok: true });
@@ -98,8 +103,8 @@ async function call(name: string, input: Record<string, unknown>): Promise<strin
 	}
 }
 
-test("object_get (its shipped code) lists body lines with their ids and never the conversation", async () => {
-	daemon(page());
+test("object_get (its shipped code) lists body lines with their ids and never the conversation, and reads dates as dates", async () => {
+	daemon({ ...page(), fields: { channel: { stringValue: "space" }, last_contact: { intValue: Date.UTC(2026, 9, 2, 19) } } });
 	const touched = new Set<string>();
 	const got = JSON.parse(await objectGet({ id: "page" }, createRoostr({ agentId: "agent", objectId: "page", channelId: "space", machineId: "m" }, touched, noHarness)));
 	expect(touched).toEqual(new Set(["page"]));
@@ -108,6 +113,7 @@ test("object_get (its shipped code) lists body lines with their ids and never th
 		{ block: "todo", depth: 1, line: "- [ ] Review with Brian" },
 		{ block: "note", depth: 0, line: "Notes" },
 	]);
+	expect(got.fields.last_contact).toBe("2026-10-02T19:00:00.000Z");
 });
 
 test("a conversation message is not a body line: editing it is refused", async () => {

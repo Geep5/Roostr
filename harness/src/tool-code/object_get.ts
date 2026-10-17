@@ -7,8 +7,13 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 	const id = String(input.id ?? "");
 	roostr.touch(id);
 	const obj = await roostr.getInSpace(id);
+	const properties = await roostr.properties();
 	const fields: Record<string, unknown> = {};
-	for (const [key, value] of Object.entries(obj.fields)) fields[key] = roostr.plain(value);
+	for (const [key, value] of Object.entries(obj.fields)) {
+		// A date reads as one (epoch ms is easy to misread); object_set_field takes it back as is.
+		const ms = properties.get(key)?.format === "date" ? value.intValue : undefined;
+		fields[key] = ms !== undefined ? new Date(ms).toISOString() : roostr.plain(value);
+	}
 	const body = roostr.body(obj);
 	const shown = body.slice(0, 400);
 	// A link card reads as the linked object's name on the page, so the agent sees that too (plus the id to open it).
