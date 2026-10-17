@@ -73,7 +73,7 @@ export interface ScheduleHost {
  * done in every run.
  */
 const TURN_SUFFIX =
-	"This turn was started by the scheduler, not a person. Follow the object's instructions exactly - they decide what to post and when the run is done. If they say to stop, end with no reply. Call occurrence_complete only when they say the run is done; if something blocks the run, say what, once, and do not call it.";
+	"This turn was started by the scheduler, not a person. When the object's page gives instructions, follow them exactly - they decide what to post and when the run is done; when it holds no instructions (notes, a record), your own instructions say what to do with it. If they say to stop, end with no reply. Call occurrence_complete only when they say the run is done; if something blocks the run, say what, once, and do not call it.";
 
 /** How much of a check's finding goes into the frame. */
 const FINDING_CAP = 8000;
@@ -608,7 +608,7 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 						? `Retry of "${name}" (${obj.typeKey || "object"}): the occurrence due ${when} never finished, and a person pressed Retry - do it again now, from the start`
 						: `Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}`;
 		const frame = [
-			`${header}. ${finding ? "What its check found, then its instructions" : "Its instructions"} follow; ${ending}`,
+			`${header}. ${finding ? "What its check found, then its page" : "Its page"} follows; ${ending}`,
 			...(finding ? [finding, "Instructions:"] : []),
 			body || "(this object has no body text)",
 		].join("\n");
@@ -642,7 +642,7 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 
 /** A Run now turn's own words: the object's instructions as usual, but the schedule is not this run's to move. */
 const RUN_NOW_SUFFIX =
-	"This turn was started by a person pressing Run now on the object - an extra run, not a scheduled occurrence. Follow the object's instructions exactly - they decide what to post. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
+	"This turn was started by a person pressing Run now on the object - an extra run, not a scheduled occurrence. When the object's page gives instructions, follow them exactly - they decide what to post; when it holds no instructions (notes, a record), your own instructions say what to do with it. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
 
 /** On a repeating object: a person asked for Run now ({at}); the computer that serves it starts the run and deletes this. */
 export const RUN_REQUEST_KEY = "run_now";
@@ -678,7 +678,7 @@ async function runExclusive(d: Due, me: string, kind: RunKind): Promise<void> {
 
 /** A push's own words: the object's instructions as usual, outside the schedule. */
 const PUSH_SUFFIX =
-	"This turn was started because new data arrived for this object (a push), not by its schedule or a person. Follow the object's instructions exactly - they decide what to post. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
+	"This turn was started because new data arrived for this object (a push), not by its schedule or a person. When the object's page gives instructions, follow them exactly - they decide what to post; when it holds no instructions (notes, a record), your own instructions say what to do with it. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
 
 /** Objects pushed while a run of them was in progress: each gets one more run when it ends. */
 const pushWaiting = new Set<string>();
