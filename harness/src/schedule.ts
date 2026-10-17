@@ -120,6 +120,8 @@ interface Due {
 	id: string;
 	next: number;
 	firedFor: number | undefined;
+	/** Its Stuck has text: waiting on a person, so nothing fires and nothing is flagged. */
+	waiting: boolean;
 }
 
 let host: ScheduleHost | null = null;
@@ -136,7 +138,30 @@ function dueOf(row: { id: string; fields: Record<string, ValueJSON> }): Due | nu
 	const entries = row.fields["repeat"]?.mapValue?.entries;
 	const next = entries?.["next"]?.intValue;
 	if (next === undefined) return null;
-	return { id: row.id, next, firedFor: entries?.["fired_for"]?.intValue };
+	return { id: row.id, next, firedFor: entries?.["fired_for"]?.intValue, waiting: isWaiting(row.fields) };
+}
+
+/** Stuck: what the agent is waiting on a person for. While it has text the object's run is held. */
+export const STUCK_KEY = "stuck";
+const isWaiting = (fields: Record<string, ValueJSON>): boolean => str(fields, STUCK_KEY).trim() !== "";
+/** Objects this computer serves whose Stuck had text last time it looked. */
+const waitingSeen = new Set<string>();
+
+/**
+ * A person cleared Stuck on an object this computer serves: its held run
+ * goes again now, the way Retry run does (`run_now`) - the open occurrence
+ * is retried, and finishing it moves the schedule on. Called on every
+ * change; only a Stuck going from text to empty does anything.
+ */
+export async function handleStuckChange(obj: ObjectJSON): Promise<void> {
+	if (!host || obj.deleted || !obj.fields["repeat"]) return;
+	if (isWaiting(obj.fields)) {
+		waitingSeen.add(obj.id);
+		return;
+	}
+	if (!waitingSeen.delete(obj.id) || !(await servesHere(obj.id))) return;
+	console.log(`[schedule] "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)}) unstuck: running it again`);
+	await setField(obj.id, RUN_REQUEST_KEY, { mapValue: { entries: { at: { intValue: Date.now() } } } });
 }
 
 /** Every recurring object this machine serves, with its clock. */
@@ -154,6 +179,7 @@ export async function startScheduler(h: ScheduleHost): Promise<void> {
 	host = h;
 	// Nothing runs at boot: a Running… mark left by a run this computer was killed in is stale.
 	for (const d of await recurringMine().catch(() => [] as Due[])) {
+		if (d.waiting) waitingSeen.add(d.id);
 		const obj = await fetchObject(d.id).catch(() => null);
 		if (obj?.fields[RUN_ACTIVE_KEY]) await deleteField(d.id, RUN_ACTIVE_KEY).catch(() => {});
 		// A Run now asked for while this computer was off.
@@ -292,7 +318,8 @@ export async function flagStuckRuns(now = Date.now()): Promise<number> {
 		const rule = obj.fields["repeat"]?.mapValue?.entries ?? {};
 		const gap = occurrenceGap(rule);
 		const badge = str(obj.fields, "error");
-		const isStuck = gap !== null && d.firedFor === d.next && !running.has(d.id) && now > d.next + gap;
+		// Waiting on a person (Stuck) is a held run, not one that never finished.
+		const isStuck = !d.waiting && gap !== null && d.firedFor === d.next && !running.has(d.id) && now > d.next + gap;
 		if (isStuck) {
 			stuck += 1;
 			const when = new Date(d.next).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -349,7 +376,7 @@ export async function arm(): Promise<void> {
 			armAgain = false;
 			let soonest = Infinity;
 			for (const d of await recurringMine()) {
-				if (d.firedFor !== d.next && d.next < soonest) soonest = d.next;
+				if (!d.waiting && d.firedFor !== d.next && d.next < soonest) soonest = d.next;
 			}
 			clearTimeout(timer);
 			timer = undefined;
@@ -373,7 +400,7 @@ async function fire(): Promise<void> {
 	try {
 		const now = Date.now();
 		// An object mid-run waits: it fires when that run ends (runExclusive re-arms).
-		const due = (await recurringMine()).filter((d) => d.next <= now && d.firedFor !== d.next && !running.has(d.id)).sort((a, b) => a.next - b.next);
+		const due = (await recurringMine()).filter((d) => !d.waiting && d.next <= now && d.firedFor !== d.next && !running.has(d.id)).sort((a, b) => a.next - b.next);
 		const me = await machineId();
 		for (const d of due) {
 			try {
@@ -645,7 +672,7 @@ export function runNow(objectId: string, why: string): void {
 		const me = await machineId();
 		console.log(`[schedule] ${objectId.slice(0, 8)} run now: ${why}`);
 		// No occurrence: `next` matches none, so the run completes nothing.
-		await runExclusive({ id: objectId, next: -1, firedFor: undefined }, me, "push");
+		await runExclusive({ id: objectId, next: -1, firedFor: undefined, waiting: false }, me, "push");
 	})().catch((err) => {
 		running.delete(objectId);
 		console.error(`[schedule] push run ${objectId.slice(0, 8)} failed:`, err instanceof Error ? err.message : err);
@@ -679,7 +706,7 @@ export async function handleRunRequest(obj: ObjectJSON): Promise<void> {
 		const open = !!due && due.firedFor === due.next && !subDaily(obj);
 		console.log(`[schedule] ${open ? "retry" : "run now"} of "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)})`);
 		// A retry is the open occurrence itself; an extra run has no `next` to match, so it completes nothing.
-		const d: Due = open ? due! : { id: obj.id, next: -1, firedFor: undefined };
+		const d: Due = open ? due! : { id: obj.id, next: -1, firedFor: undefined, waiting: false };
 		void runExclusive(d, me, open ? "retry" : "extra").catch((err) => console.error(`[schedule] run now ${obj.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
 	} catch (err) {
 		running.delete(obj.id);

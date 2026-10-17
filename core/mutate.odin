@@ -1422,6 +1422,11 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// filter and sort by it. Automation prefixes its messages ("run failed:",
 	// "needs <capability>:") and only ever clears what it wrote.
 	{"error", "shorttext", "Error", "⚠️", false, false, 0, {}},
+	// Waiting on a person (Grant reaching back out to someone): the agent
+	// writes the action; it holds the object's open run - the scheduler fires
+	// nothing more and flags nothing - until a person clears it, which
+	// retries the run. Not an error: nothing is broken.
+	{"stuck", "longtext", "Stuck", "🧱", false, false, 1, {}},
 	{"url", "url", "URL", "🔗", false, false, 0, {}},
 	{"email", "email", "Email", "✉️", false, false, 0, {}},
 	{"phone", "phone", "Phone", "📞", false, false, 0, {}},

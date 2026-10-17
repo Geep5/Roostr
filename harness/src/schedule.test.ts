@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { credentialBadge, issuesBadge, missingBadge, parseIssuesBadge } from "./credential-issues";
-import { flagStuckRuns, isEmptyResult, resetScheduler, retryUnblockedRuns, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
+import { flagStuckRuns, handleStuckChange, isEmptyResult, resetScheduler, retryUnblockedRuns, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -389,4 +389,41 @@ test("a blocked run's Error names the logins to reconnect or add, and reads back
 	expect(parseIssuesBadge("run failed: boom")).toBeNull();
 	// A dead login is the one named first: reconnecting it is what a person does.
 	expect(issuesBadge([{ kind: "missing", service: "x" }, { kind: "signed_out", name: "Y" }])).toBe(credentialBadge(["Y"]));
+});
+
+test("Stuck holds an open run: never flagged as unfinished, and clearing it asks for the run again", async () => {
+	const objectId = "0b6c86a7-7063-4dcd-81d8-3c5707bbeb83";
+	const day = 86_400_000;
+	const next = Date.now() - 20 * day; // fired weeks ago, held open by Stuck
+	let fields: Record<string, unknown> = {
+		name: { stringValue: "Lou Fasulo" },
+		stuck: { stringValue: "Ping Lou about integrating the bracket into Matcherino" },
+		repeat: { mapValue: { entries: { freq: { stringValue: "week" }, interval: { intValue: 2 }, next: { intValue: next }, fired_for: { intValue: next } } } },
+	};
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		if (url.pathname === "/api/query") return respond({ records: [{ id: objectId, typeKey: "person", fields }], total: 1 });
+		if (url.pathname === "/api/serving") return respond({ [objectId]: { machineId: "test-machine", reason: "pinned", skills: [], candidates: ["test-machine"] } });
+		if (url.pathname === `/api/objects/${objectId}`) return respond({ id: objectId, typeKey: "person", fields, blocks: [], deleted: false, createdAt: 0, updatedAt: 0 });
+		if (url.pathname === "/api/mutate") {
+			if (body.action === "set_field") fields = { ...fields, [String(body.key)]: body.value };
+			if (body.action === "delete_field") fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== body.key));
+			return respond({ ok: true });
+		}
+		return respond({ error: "unexpected" }, 404);
+	}) as typeof fetch;
+	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
+	await startScheduler({ async served() { return undefined; }, async turn() { return ""; } });
+
+	expect(await flagStuckRuns()).toBe(0);
+	expect(fields.error).toBeUndefined();
+
+	// Grant reached out and cleared it: the held run is asked for again.
+	fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== "stuck"));
+	await handleStuckChange({ id: objectId, typeKey: "person", fields: fields as Record<string, never>, blocks: [], deleted: false, createdAt: 0, updatedAt: 0 });
+	expect(fields.run_now).toBeDefined();
+	// Without Stuck, the same open run is flagged as unfinished again.
+	fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== "run_now"));
+	expect(await flagStuckRuns()).toBe(1);
 });

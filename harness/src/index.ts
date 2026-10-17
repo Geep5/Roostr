@@ -46,7 +46,7 @@ import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvK
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
-import { arm as armScheduler, handleRunRequest, retryUnblockedRuns, RUN_REQUEST_KEY, startScheduler } from "./schedule";
+import { arm as armScheduler, handleRunRequest, handleStuckChange, retryUnblockedRuns, RUN_REQUEST_KEY, startScheduler } from "./schedule";
 import { startGmailPush } from "./gmail-push";
 import { badgeLoginIssues, issuesBadge, takeCredentialIssues } from "./credential-issues";
 import { beginAgentTurn, flagAgent, settleAgentTurn } from "./agent-errors";
@@ -832,6 +832,8 @@ async function serve(): Promise<void> {
 		if (obj.fields["repeat"]) void armScheduler();
 		// Run now, asked for from any device: the computer that serves the object starts it.
 		if (obj.fields[RUN_REQUEST_KEY] && !obj.deleted) void handleRunRequest(obj).catch((err) => console.error(`[schedule] run request ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
+		// Stuck cleared by a person: the held run goes again.
+		if (obj.fields["repeat"]) void handleStuckChange(obj).catch((err) => console.error(`[schedule] stuck change ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
 		// A login reconnected (or changed): runs it blocked may retry now, not at the next 10-minute check.
 		if (obj.typeKey === "credential" && !obj.deleted) void retryUnblockedRuns().catch((err) => console.error("[schedule] blocked-run check:", err instanceof Error ? err.message : err));
 		// Serving inputs changed: a machine or capability object (its status
