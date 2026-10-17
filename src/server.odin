@@ -485,6 +485,8 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 		sock := c.sock
 		arr := make([dynamic]json.Value, context.temp_allocator)
 		keys := make([dynamic]i64, context.temp_allocator)
+		// Each pinned object carries its own position (core/pins.odin).
+		pins := core.pins_by_space(states, core.pins_default_space(states))
 		for _, s in states {
 			if s.type_key != "channel" || s.deleted do continue
 			o := core.jobj()
@@ -501,9 +503,7 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 		}
 		o["icon"] = json.String(icon)
 			pinned := make([dynamic]json.Value, context.temp_allocator)
-			if v, ok := core.fields_get(s.fields, "pinnedIds"); ok && v.kind == .List {
-				for item in v.items do if item.kind == .String do append(&pinned, json.String(item.str))
-			}
+			for id in pins[s.id] do append(&pinned, json.String(id))
 			o["pinnedIds"] = json.Array(pinned)
 			members := make([dynamic]json.Value, context.temp_allocator)
 			if v, ok := core.fields_get(s.fields, "members"); ok && v.kind == .List {

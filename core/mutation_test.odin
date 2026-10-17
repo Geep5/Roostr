@@ -166,29 +166,29 @@ mutation_seed_all_objects_query :: proc(t: ^testing.T) {
 	ALL :: "bundled-query-all-space-aa"
 	space := new(Object_State)
 	space^ = Object_State{id = "space-aa", type_key = "channel", fields = make([dynamic]Value_Entry)}
-	append(&space.fields, Value_Entry{key = "pinnedIds", value = list_value({string_value("note-1")})})
+	note := new(Object_State)
+	note^ = Object_State{id = "note-1", type_key = "page", fields = make([dynamic]Value_Entry)}
+	append(&note.fields, Value_Entry{key = "channel", value = string_value("space-aa")}, Value_Entry{key = PIN_KEY, value = string_value("V")})
 	states := make(map[string]^Object_State)
 	states[space.id] = space
+	states[note.id] = note
 
 	first := run(states)
 	created := false
-	pinned_first := false
+	all_key := ""
 	for c in first.changes {
 		if c.object_id == ALL {
 			for op in c.ops {
 				if op.kind == .Object_Create do created = op.type_key == "query"
 				if op.kind == .Field_Set && op.key == "setOf" do testing.expect(t, len(op.value.items) == 0, "no source type: every object")
 				if op.kind == .Field_Set && op.key == "name" do testing.expect_value(t, op.value.str, "All Objects")
+				if op.kind == .Field_Set && op.key == PIN_KEY do all_key = op.value.str
 			}
 		}
-		if c.object_id == space.id {
-			for op in c.ops do if op.key == "pinnedIds" {
-				pinned_first = len(op.value.items) == 2 && op.value.items[0].str == ALL && op.value.items[1].str == "note-1"
-			}
-		}
+		testing.expect(t, c.object_id != note.id, "the existing pin is not rewritten")
 	}
 	testing.expect(t, created, "the space gets an All Objects query")
-	testing.expect(t, pinned_first, "pinned at the top, the existing pins kept after it")
+	testing.expect(t, all_key != "" && all_key < "V", "pinned at the top, before the existing pin")
 
 	// Held - unpinned by the user, or binned - it is never made or pinned again.
 	query := new(Object_State)
@@ -197,6 +197,51 @@ mutation_seed_all_objects_query :: proc(t: ^testing.T) {
 	again := run(states)
 	testing.expect(t, !touches(again, ALL), "a deleted All Objects stays deleted")
 	testing.expect(t, !touches(again, space.id), "and is not pinned again")
+}
+
+// Pins carry their own positions: a key always fits between two others,
+// and a space's retired whole list converts in its order, once, keeping
+// what is already positioned.
+@(test)
+mutation_pins_from_list :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	a := pin_key_between("", "", false)
+	b := pin_key_between(a, "", false)
+	mid := pin_key_between(a, b, true)
+	before := pin_key_between("", a, true)
+	testing.expect(t, before < a && a < mid && mid < b, "keys order: before < a < between < b")
+	tight := pin_key_between("V", "V1", true)
+	testing.expect(t, "V" < tight && tight < "V1", "room even between adjacent keys")
+
+	add :: proc(states: ^map[string]^Object_State, id, type_key: string, fields: ..Value_Entry) {
+		s := new(Object_State)
+		s^ = Object_State{id = id, type_key = type_key, fields = make([dynamic]Value_Entry), created_at = 1}
+		append(&s.fields, ..fields)
+		states[id] = s
+	}
+	states := make(map[string]^Object_State)
+	in_space := Value_Entry{key = "channel", value = string_value("sp")}
+	add(&states, "sp", "channel", Value_Entry{key = PIN_LIST_KEY, value = list_value({string_value("q"), string_value("p"), string_value("kept"), string_value("gone")})})
+	add(&states, "q", "query", in_space)
+	add(&states, "p", "page", in_space)
+	add(&states, "kept", "page", in_space, Value_Entry{key = PIN_KEY, value = string_value("1")})
+	plan := Mutation_Plan{}
+	pins_from_list(&plan, Mutation_Input{states = states, timestamp = 1, author = "alice", id_seed = "s"}, "sp", "sp")
+	keys := make(map[string]string)
+	list_dropped := false
+	for c in plan.changes do for op in c.ops {
+		if op.kind == .Field_Set && op.key == PIN_KEY do keys[c.object_id] = op.value.str
+		if c.object_id == "sp" && op.kind == .Field_Delete && op.key == PIN_LIST_KEY do list_dropped = true
+	}
+	testing.expect(t, keys["q"] != "" && keys["p"] != "" && "1" < keys["q"] && keys["q"] < keys["p"], "listed pins get positions after the last, in list order")
+	_, rewrote_kept := keys["kept"]
+	testing.expect(t, !rewrote_kept, "an object already positioned keeps its position")
+	_, wrote_gone := keys["gone"]
+	testing.expect(t, !wrote_gone, "an id that names nothing gets nothing")
+	testing.expect(t, list_dropped, "the list goes")
+	for id, k in keys do append(&states[id].fields, Value_Entry{key = PIN_KEY, value = string_value(k)})
+	order := pins_by_space(states, "sp")["sp"]
+	testing.expect(t, len(order) == 3 && order[0] == "kept" && order[1] == "q" && order[2] == "p", "the space's pins read back in position order")
 }
 
 // System is ticked on what ships with Roostr - built-in tools, seeded

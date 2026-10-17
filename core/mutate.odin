@@ -1105,7 +1105,6 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 			{kind = .Object_Create, type_key = "channel"},
 			{kind = .Field_Set, key = "name", value = string_value(name)},
 			{kind = .Field_Set, key = "iconEmoji", value = string_value(json_str(parsed, "icon"))},
-			{kind = .Field_Set, key = "pinnedIds", value = list_value(empty)},
 			{kind = .Field_Set, key = "members", value = list_value(empty)},
 			{kind = .Field_Set, key = "keyId", value = int_value(1)},
 		}
@@ -1623,19 +1622,11 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "bundled", value = bool_value(true)},
 			{kind = .Field_Set, key = "system", value = bool_value(true)},
 		})
-		// A space made in this same change (channel_create) is not in the
-		// states yet: its pinned list is empty, so All Objects is all of it.
-		space, ok := input.states[channel_id]
-		if !ok || !space.deleted {
-			pinned := make([dynamic]Value, context.temp_allocator)
-			append(&pinned, string_value(all_id))
-			if ok {
-				if v, pok := fields_get(space.fields, "pinnedIds"); pok && v.kind == .List {
-					for item in v.items do if !(item.kind == .String && item.str == all_id) do append(&pinned, item)
-				}
-			}
-			mutation_add(plan, input, channel_id, {Operation{kind = .Field_Set, key = "pinnedIds", value = list_value(pinned[:])}})
-		}
+		// Pinned first: a position before every other pin in the space (a space
+		// made in this same change has none yet). Unpinning clears it for good.
+		first, any := pins_first_key(input.states, channel_id, pins_default_space(input.states))
+		key := pin_key_between("", first, any)
+		mutation_add(plan, input, all_id, {Operation{kind = .Field_Set, key = PIN_KEY, value = string_value(key)}})
 	}
 }
 mutation_bootstrap_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input) {
@@ -1709,6 +1700,10 @@ mutation_bootstrap_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_
 	for id in agents {
 		if op, needed := agent_error_op(input.states[id].fields); needed do mutation_add(plan, input, id, {op})
 	}
+	// A space's retired whole pin list becomes per-object positions (an
+	// older client writing the list again adds only what it newly pinned).
+	default_space := pins_default_space(input.states)
+	for c in chans do pins_from_list(plan, input, c, default_space)
 
 }
 

@@ -2651,16 +2651,6 @@
           },
           {
             "fieldSet": {
-              "key": "pinnedIds",
-              "value": {
-                "valuesValue": {
-                  "items": []
-                }
-              }
-            }
-          },
-          {
-            "fieldSet": {
               "key": "members",
               "value": {
                 "valuesValue": {
@@ -7308,19 +7298,13 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "new-id",
+        "objectId": "bundled-query-all-new-id",
         "ops": [
           {
             "fieldSet": {
-              "key": "pinnedIds",
+              "key": "pin_order",
               "value": {
-                "valuesValue": {
-                  "items": [
-                    {
-                      "stringValue": "bundled-query-all-new-id"
-                    }
-                  ]
-                }
+                "stringValue": "V"
               }
             }
           }
@@ -11442,19 +11426,13 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "s",
+        "objectId": "bundled-query-all-s",
         "ops": [
           {
             "fieldSet": {
-              "key": "pinnedIds",
+              "key": "pin_order",
               "value": {
-                "valuesValue": {
-                  "items": [
-                    {
-                      "stringValue": "bundled-query-all-s"
-                    }
-                  ]
-                }
+                "stringValue": "V"
               }
             }
           }
@@ -15627,19 +15605,13 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "s",
+        "objectId": "bundled-query-all-s",
         "ops": [
           {
             "fieldSet": {
-              "key": "pinnedIds",
+              "key": "pin_order",
               "value": {
-                "valuesValue": {
-                  "items": [
-                    {
-                      "stringValue": "bundled-query-all-s"
-                    }
-                  ]
-                }
+                "stringValue": "V"
               }
             }
           }
