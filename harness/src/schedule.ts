@@ -206,6 +206,12 @@ export async function handleStuckChange(obj: ObjectJSON): Promise<void> {
 		return;
 	}
 	if (!waitingSeen.delete(obj.id) || !(await servesHere(obj.id))) return;
+	// Cleared by the object's own run (its agent saw the reply arrive): that run carries on; no second one.
+	if (running.has(obj.id)) {
+		answeredByAsk.delete(obj.id);
+		console.log(`[schedule] "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)}) unstuck by its own run`);
+		return;
+	}
 	if (answeredByAsk.delete(obj.id)) {
 		const d = dueOf(obj);
 		if (d && d.firedFor === d.next && !running.has(d.id)) await completeOccurrence(d);
@@ -533,7 +539,8 @@ type RunKind = "scheduled" | "retry" | "extra" | "push";
  * Tell the owner: an agent gets the instructions and a turn, a person gets
  * a reminder - unless the object's Check first finds nothing to do.
  */
-async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promise<void> {
+/** `why`: for a push, what arrived - the agent is told, so it knows what to look at. */
+async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = ""): Promise<void> {
 	if (!host) return;
 	try {
 		const obj = await fetchObject(d.id);
@@ -626,7 +633,7 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 				: `occurrence_complete on object ${obj.id} ends the run when they say it is done.`;
 		const header =
 			kind === "push"
-				? `Run of "${name}" (${obj.typeKey || "object"}) because new data arrived (a push)`
+				? `Run of "${name}" (${obj.typeKey || "object"}) because new data arrived (a push)${why ? `: ${why}` : ""}`
 				: kind === "extra"
 					? `Run now of "${name}" (${obj.typeKey || "object"})`
 					: kind === "retry"
@@ -669,7 +676,7 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled"): Promis
 const RUN_NOW_SUFFIX =
 	"This turn was started by a person pressing Run now on the object - an extra run, not a scheduled occurrence. When the object's page gives instructions, follow them exactly - they decide what to post; when it holds no instructions (notes, a record), your own instructions say what to do with it. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
 
-/** On a repeating object: a person asked for Run now ({at}); the computer that serves it starts the run and deletes this. */
+/** On a repeating object: a person asked for Run now ({at}), or another writer a push ({at, push: true, why}: an importer saying a message from this person arrived); the computer that serves it starts the run and deletes this. */
 export const RUN_REQUEST_KEY = "run_now";
 /** On a repeating object while a run of it is in progress ({at, machine, manual}): every device shows it; another run waits. */
 const RUN_ACTIVE_KEY = "run_active";
@@ -678,12 +685,12 @@ const RUN_ACTIVE_KEY = "run_active";
 const running = new Set<string>();
 
 /** Mark the run on the object, run it, then clear the mark and look again for what waited on it. */
-async function runExclusive(d: Due, me: string, kind: RunKind): Promise<void> {
+async function runExclusive(d: Due, me: string, kind: RunKind, why = ""): Promise<void> {
 	const gen = generation;
 	running.add(d.id);
 	try {
 		await setField(d.id, RUN_ACTIVE_KEY, { mapValue: { entries: { at: { intValue: Date.now() }, machine: sv(me), manual: { boolValue: kind !== "scheduled" } } } }).catch(() => {});
-		await dispatch(d, me, kind);
+		await dispatch(d, me, kind, why);
 	} finally {
 		// A run that outlived its scheduler (tests reset it) neither frees nor re-arms the new one.
 		if (gen === generation) {
@@ -695,7 +702,8 @@ async function runExclusive(d: Due, me: string, kind: RunKind): Promise<void> {
 				// The Error says where things stand now - stuck, waiting on whom, or fine.
 				void flagStuckRuns().catch(() => {});
 				// A push that came in mid-run: its data may have landed after this run read. Run again.
-				if (pushWaiting.delete(d.id)) runNow(d.id, "pushed during the last run");
+				const waited = pushWaiting.get(d.id);
+				if (waited !== undefined && pushWaiting.delete(d.id)) runNow(d.id, waited || "pushed during the last run");
 			}
 		}
 	}
@@ -705,8 +713,8 @@ async function runExclusive(d: Due, me: string, kind: RunKind): Promise<void> {
 const PUSH_SUFFIX =
 	"This turn was started because new data arrived for this object (a push), not by its schedule or a person. When the object's page gives instructions, follow them exactly - they decide what to post; when it holds no instructions (notes, a record), your own instructions say what to do with it. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
 
-/** Objects pushed while a run of them was in progress: each gets one more run when it ends. */
-const pushWaiting = new Set<string>();
+/** Objects pushed while a run of them was in progress, with what arrived: each gets one more run when it ends. */
+const pushWaiting = new Map<string, string>();
 
 /**
  * Run an object now because its source changed (gmail-push.ts): the same
@@ -717,7 +725,8 @@ const pushWaiting = new Set<string>();
 export function runNow(objectId: string, why: string): void {
 	if (!host) return;
 	if (running.has(objectId)) {
-		pushWaiting.add(objectId);
+		const before = pushWaiting.get(objectId);
+		pushWaiting.set(objectId, before && why && before !== why ? `${before}; ${why}` : why || before || "");
 		return;
 	}
 	running.add(objectId);
@@ -725,7 +734,7 @@ export function runNow(objectId: string, why: string): void {
 		const me = await machineId();
 		console.log(`[schedule] ${objectId.slice(0, 8)} run now: ${why}`);
 		// No occurrence: `next` matches none, so the run completes nothing.
-		await runExclusive({ id: objectId, next: -1, firedFor: undefined, waiting: false }, me, "push");
+		await runExclusive({ id: objectId, next: -1, firedFor: undefined, waiting: false }, me, "push", why);
 	})().catch((err) => {
 		running.delete(objectId);
 		console.error(`[schedule] push run ${objectId.slice(0, 8)} failed:`, err instanceof Error ? err.message : err);
@@ -745,6 +754,13 @@ export function runNow(objectId: string, why: string): void {
 export async function handleRunRequest(obj: ObjectJSON): Promise<void> {
 	if (!host || !obj.fields[RUN_REQUEST_KEY] || !obj.fields["repeat"]) return;
 	if (!(await servesHere(obj.id))) return;
+	// A push asked for by another writer (an importer: "new email from …"): wake it now, saying why.
+	const request = obj.fields[RUN_REQUEST_KEY]?.mapValue?.entries ?? {};
+	if (request["push"]?.boolValue) {
+		await deleteField(obj.id, RUN_REQUEST_KEY);
+		runNow(obj.id, request["why"]?.stringValue ?? "");
+		return;
+	}
 	// Check and claim with no await between: two events for one click can't both start a run.
 	if (running.has(obj.id)) {
 		await deleteField(obj.id, RUN_REQUEST_KEY).catch(() => {});
