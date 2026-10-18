@@ -41,6 +41,7 @@ export interface CredentialApi {
 /** One credential action's harness-side code: the tool's input, and the service's API signed in with the agent's credential. */
 export type CredentialActionRun = (input: Record<string, unknown>, api: (path: string, request?: { method?: string; body?: unknown }) => Promise<CredentialAnswer>) => Promise<unknown>;
 
+/** Renew a browser sign-in: the re-stamped cookies; null when the site could not be reached (tried again later); throws, saying why, when the site refused the login. */
 export type SessionRenewer = (fields: Record<string, ValueJSON>) => Promise<SessionCookie[] | null>;
 
 export interface Extension {

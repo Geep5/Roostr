@@ -141,6 +141,11 @@ async function callAnthropic(req: LLMRequest): Promise<LLMResult> {
 	});
 	if (!res.ok) {
 		const errBody = await res.text();
+		// A refused plan login is marked on the credentials holding it (loaded lazily: claude-plan reaches the store).
+		if (res.status === 401 && auth.isOAuth) {
+			const why = (errBody.match(/"message"\s*:\s*"([^"]*)"/)?.[1] ?? "HTTP 401").slice(0, 150);
+			await import("./claude-plan").then((m) => m.planRefused(auth.token, why)).catch((err) => console.error("[claude-plan] marking a refused login:", err instanceof Error ? err.message : err));
+		}
 		throw new Error(`anthropic ${res.status}: ${errBody.slice(0, 600)}`);
 	}
 	const out = (await res.json()) as {

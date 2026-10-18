@@ -256,3 +256,16 @@ export async function renewPlans(now = Date.now()): Promise<number> {
 	}
 	return renewed;
 }
+
+/**
+ * Claude refused a plan token an agent called with (401: revoked, signed out
+ * elsewhere). Its renewal date says nothing about that, so the credentials
+ * holding it still looked active: mark each one, so its Status and Error say
+ * the plan stopped working and agents move to its API key, if it has one.
+ */
+export async function planRefused(token: string, why: string): Promise<void> {
+	for (const c of await queryAll({ type: CREDENTIAL_TYPE })) {
+		if (str(c.fields, "service") !== ANTHROPIC_SERVICE || str(c.fields, PLAN_TOKEN) !== token || str(c.fields, PLAN_ERROR)) continue;
+		await setField(c.id, PLAN_ERROR, sv(`Claude refused the plan login: ${why}`.slice(0, 200)));
+	}
+}

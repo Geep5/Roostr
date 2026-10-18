@@ -176,20 +176,29 @@ const RENEW_AHEAD_S = 20 * 60;
  * renewed; else unchanged. Renewable: a service with an extension's session
  * renewer - the site re-sets the cookie on every visit while the login behind
  * it lives much longer, so the renewer visits the way a browser would and
- * returns the re-stamped cookies, or null when the login is really gone.
+ * returns the re-stamped cookies. `refused` is why the site turned the login
+ * down (the renewer threw): it is gone, and the credential says so now
+ * rather than when its cookie runs out. A renewer's null (could not reach
+ * the site) is tried again on the next refresh.
  */
-async function renewSession(row: CredentialRow, me: string): Promise<CredentialRow> {
+async function renewSession(row: CredentialRow, me: string): Promise<{ row: CredentialRow; refused?: string }> {
 	const renew = sessionRenewers[row.service];
 	const recipe = recipeOf(row.fields);
 	const session = credentialSession(row.fields);
-	if (!renew || !recipe.sessionCookie || session.length === 0) return row;
+	if (!renew || !recipe.sessionCookie || session.length === 0) return { row };
 	const soon = Date.now() / 1000 + RENEW_AHEAD_S;
 	const cookie = session.find((c) => c.name === recipe.sessionCookie!.name);
-	if (!cookie || (cookie.expires > 0 && cookie.expires > soon)) return row;
-	const renewed = await renew(row.fields).catch(() => null);
-	if (!renewed) return row;
+	if (!cookie || (cookie.expires > 0 && cookie.expires > soon)) return { row };
+	let renewed: SessionCookie[] | null;
+	try {
+		renewed = await renew(row.fields);
+	} catch (err) {
+		const why = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+		return { row, refused: why };
+	}
+	if (!renewed) return { row };
 	// The site re-stamped them here: they work on this computer.
-	return { ...row, fields: await saveSession(row, renewed, me) };
+	return { row: { ...row, fields: await saveSession(row, renewed, me) } };
 }
 
 /** A credential still carrying the pre-property `session` JSON, converted to `cookie_*` properties (the computer serving it does this once). */
@@ -393,7 +402,9 @@ async function refreshCredentialsOnce(): Promise<CredentialRow[]> {
 						throw err;
 					}
 				}
-				const row = r.service === GOOGLE_SERVICE || r.service === POSTGRES_SERVICE ? r : await renewSession(await convertLegacySession(r, me), me);
+				if (r.service === GOOGLE_SERVICE || r.service === POSTGRES_SERVICE) return publishState(r, false, await servedState(r, me));
+				const { row, refused } = await renewSession(await convertLegacySession(r, me), me);
+				if (refused) return publishState(row, false, { status: "needs_auth", auth: "", error: `${recipeOf(row.fields).label || row.name || "This site"} turned down the sign-in (${refused}) - press Reconnect.` });
 				return publishState(row, false, await servedState(row, me));
 			}),
 	);
