@@ -26,7 +26,8 @@ export function isContextOverflowError(err: unknown): boolean {
 
 // ── Claude Code OAuth impersonation (glon agent-llm.ts:35-58) ────
 
-const CLAUDE_CODE_VERSION = "2.1.39";
+/** Must be a current Claude Code release: Anthropic refuses newer models (Opus 5.5 needs 2.1.280+) to older versions on a plan login. */
+const CLAUDE_CODE_VERSION = "2.1.302";
 const CLAUDE_CODE_SYSTEM_INSTRUCTION = "You are Claude Code, Anthropic's official CLI for Claude.";
 const CLAUDE_CODE_TOOL_PREFIX = "proxy_";
 const CLAUDE_CODE_BETAS = [
