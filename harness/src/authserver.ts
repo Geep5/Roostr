@@ -11,7 +11,6 @@ import { authStatus, setApiKey } from "./auth";
 import { finishPlanSignIn, planStatus, servePlanOn, signOutPlan, startPlanSignIn } from "./claude-plan";
 import { agentTurnStatus } from "./index";
 import { readRoster } from "./roster";
-import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
 import { approveCapabilityRequest, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
 import { CredentialError, checkCredential, connectCredential, disconnectCredential, type CredentialRow } from "./credential-objects";
 import { scoreAgain } from "./jev";
@@ -324,19 +323,6 @@ export function startAuthServer(served: Set<string>): void {
 					const { clearJoinRequest } = await import("./nostrsync");
 					await clearJoinRequest(body.key ?? "");
 					return json({ ok: true });
-				}
-				if (req.method === "POST" && url.pathname.startsWith("/skills/")) {
-					const body = (await req.json()) as { key?: string; text?: string };
-					if (!body.key) return json({ error: "key required" }, 400);
-					const op = url.pathname.slice("/skills/".length);
-					if (op === "prompt") {
-						await setSkillPrompt(body.key, body.text ?? "");
-						return json({ ok: true });
-					}
-					if (op === "prompt-reset") {
-						return json({ ok: true, prompt: await resetSkillPrompt(body.key) });
-					}
-					return json({ error: "not found" }, 404);
 				}
 				return json({ error: "not found" }, 404);
 			} catch (err) {

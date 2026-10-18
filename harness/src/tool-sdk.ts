@@ -253,7 +253,7 @@ export interface Roostr {
 	/** A live http(s) page through this computer's headless Chrome (browserless). Refused unless the agent's Tools list web_fetch. */
 	webPage(url: string): Promise<WebPage>;
 	credentials: RoostrCredentials;
-	/** The skills this agent may read: its own and the shared ones, narrowed by its Skills; machine skills only while working here, and only with the shell. */
+	/** The skills this agent may read: its own space's (its own and everyone's there), narrowed by its Skills; machine skills only while working here, and only with the shell. */
 	skills(): Promise<SkillListing[]>;
 	/** Run one of the agent's Jev Skills (a Skill with an Answer) on objects: Jev's answer becomes the Skill's property on each, with how sure. Uses the agent's TypeSafe credential. */
 	jev(skill: string, objectIds: string[]): Promise<ScoreRow[]>;

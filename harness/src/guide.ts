@@ -1,10 +1,11 @@
 /**
  * The Roostr Guide as a Skill: how Roostr works, for agents.
  *
- * `docs/roostr-guide.md` is the one source. Each harness keeps one
- * spaceless Skill object made from it (like the catalog Skills: no space,
- * so every agent in every space lists it and reads it with `skill_read`).
- * The body is real blocks (headings, lists), so it also reads well in the app.
+ * `docs/roostr-guide.md` is the one source. Each space you own holds its own
+ * copy, a Skill under a fixed id (two computers seeding at once make one;
+ * a copy a person deleted stays deleted), which that space's agents list
+ * and read with `skill_read`. The body is real blocks (headings, lists), so
+ * it also reads well in the app.
  *
  * When the file changes, an untouched copy is rewritten; a copy someone
  * edited in the app keeps their edit. `seed_hash` is the file the copy was
@@ -13,9 +14,9 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createObject, fetchObject, mutate, queryAll, setField, str, sv, type ObjectJSON } from "./api";
+import { createDefault, fetchObject, mutate, ownedSpaces, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { appendMarkdown } from "./markdown";
-import { GLOBAL_SCOPE } from "./skillmgr";
+import { copyBody, copyFields, spacelessSource } from "./skill-spaces";
 import { GUIDE_SEED_KEY as SEED_KEY, objectText, SKILL_TYPE } from "./skills";
 
 const GUIDE_FILE = join(import.meta.dir, "../../docs/roostr-guide.md");
@@ -47,18 +48,34 @@ async function writeBody(id: string, markdown: string, fileHash: string): Promis
 	await setField(id, "seed_text", sv(hash(objectText(await fetchObject(id)))));
 }
 
-/** Make the guide Skill, or bring an untouched one up to the file. Returns what it did. */
-export async function seedGuide(): Promise<"created" | "updated" | "kept" | "edited" | "no file"> {
+/** The fixed id of the guide's copy in a space. */
+export const guideId = (space: string): string => `roostr-guide-${space}`;
+
+type GuideResult = "created" | "updated" | "kept" | "edited" | "deleted";
+
+/** Make each space's guide Skill, or bring an untouched one up to the file. Returns how many copies did what. */
+export async function seedGuide(): Promise<Partial<Record<GuideResult, number>> | "no file"> {
 	const markdown = await readFile(GUIDE_FILE, "utf8").catch(() => "");
 	if (!markdown) return "no file";
+	const rows = (await queryAll({ type: SKILL_TYPE })).filter((r) => str(r.fields, "seed_key") === SEED_KEY);
+	const out: Partial<Record<GuideResult, number>> = {};
+	for (const space of await ownedSpaces()) {
+		const did = await seedSpaceGuide(space.id, rows, markdown);
+		out[did] = (out[did] ?? 0) + 1;
+	}
+	return out;
+}
+
+async function seedSpaceGuide(space: string, rows: QueryRow[], markdown: string): Promise<GuideResult> {
 	const fileHash = hash(markdown);
-	const mine = (await queryAll({ type: SKILL_TYPE }))
-		.filter((r) => str(r.fields, "seed_key") === SEED_KEY && !str(r.fields, "channel"))
-		.sort((a, b) => a.createdAt - b.createdAt);
+	const mine = rows.filter((r) => str(r.fields, "channel") === space).sort((a, b) => a.createdAt - b.createdAt);
 	if (mine.length === 0) {
-		// An explicit empty space: without one the engine files it under the oldest space.
-		const { id } = await createObject(NAME, SKILL_TYPE, { channel: sv(""), description: sv(DESCRIPTION), scope: sv(GLOBAL_SCOPE), seed_key: sv(SEED_KEY) });
-		await writeBody(id, markdown, fileHash);
+		// A spaceless one from before Skills had spaces: the copy starts as it is - an edited one stays edited (its seed_text no longer matches).
+		const source = spacelessSource(rows, () => true);
+		const fields: Record<string, ValueJSON> = source ? { ...copyFields(source, space), description: sv(DESCRIPTION) } : { channel: sv(space), description: sv(DESCRIPTION), seed_key: sv(SEED_KEY) };
+		if (!(await createDefault(NAME, SKILL_TYPE, fields, guideId(space)))) return "deleted";
+		if (source) await copyBody(source.id, guideId(space));
+		else await writeBody(guideId(space), markdown, fileHash);
 		return "created";
 	}
 	const guide = await fetchObject(mine[0].id);

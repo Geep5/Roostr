@@ -16,7 +16,7 @@
  * an Anthropic credential, or an agent of that name, is left as it is.
  */
 
-import { apiFetch, API, createDefault, fetchObject, lv, queryAll, setField, str, sv, type QueryRow } from "./api";
+import { createDefault, fetchObject, lv, ownedSpaces, queryAll, setField, str, sv, type QueryRow } from "./api";
 import { CREDENTIAL_TYPE } from "./credential-objects";
 import { fillCredential } from "./credential-seeds";
 import { SYSTEM_PROMPT_TYPE, DEFAULT_MODEL, writePageText } from "./prompts";
@@ -72,7 +72,7 @@ async function everMade(id: string): Promise<boolean> {
 
 export async function seedSpaceDefaults(): Promise<{ credentials: number; agents: number }> {
 	const out = { credentials: 0, agents: 0 };
-	const spaces = ((await (await apiFetch(`${API}/api/channels`)).json()) as Array<{ id: string; name: string; owner: string }>).filter((s) => !s.owner);
+	const spaces = await ownedSpaces();
 	const me = await machineId();
 	const failed: string[] = [];
 	for (const space of spaces) {

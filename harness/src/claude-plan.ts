@@ -10,7 +10,7 @@
  * new token onto every one of those credentials. Agents use the plan while
  * it is good and the credential's API key otherwise.
  */
-import { apiFetch, API, deleteField, iv, queryAll, setField, str, sv, type QueryRow } from "./api";
+import { apiFetch, API, deleteField, iv, ownedSpaces, queryAll, setField, str, sv, type QueryRow } from "./api";
 import { ANTHROPIC_AUTHORIZE_URL, ANTHROPIC_CLIENT_ID, ANTHROPIC_REDIRECT_URI, ANTHROPIC_SCOPES, ANTHROPIC_TOKEN_URL, generatePkce, refreshAnthropicToken } from "./auth";
 import { PLAN_ACCOUNT, PLAN_ERROR, PLAN_EXPIRES, PLAN_FIELDS, PLAN_REFRESH, PLAN_TOKEN, anthropicState, hasPlan } from "./anthropic-plan";
 import { openInDefaultBrowser, visitedUrlsLike } from "./browser";
@@ -41,15 +41,6 @@ interface Pending {
 	error: string;
 }
 let pending: Pending | null = null;
-
-// ── Spaces ──────────────────────────────────────────────────────
-
-/** Spaces this identity owns (an imported space names its owner). */
-async function ownedSpaces(): Promise<Array<{ id: string; name: string }>> {
-	const res = await apiFetch(`${API}/api/channels`);
-	if (!res.ok) throw new Error(`spaces: HTTP ${res.status}`);
-	return ((await res.json()) as Array<{ id: string; name: string; owner: string }>).filter((s) => !s.owner);
-}
 
 /** Each owned space's default Anthropic credential: the one already holding the plan, else the space's default. */
 async function planCredentials(): Promise<Array<{ space: { id: string; name: string }; credential: QueryRow | undefined }>> {

@@ -26,6 +26,7 @@ import { checkProjectFolder } from "./workspace";
 import { seedJev } from "./jev";
 import { nudgeViewActions, startViewActions } from "./view-actions";
 import { seedGuide } from "./guide";
+import { foldSpacelessSkills } from "./skill-spaces";
 import { capabilities } from "./skillmgr";
 import { fileCapabilityHoldup } from "./tool-harness";
 import { startAuthServer } from "./authserver";
@@ -318,10 +319,12 @@ async function serve(): Promise<void> {
 		{ name: "login migration", run: () => migrateLoginInstalls() },
 		// This computer's install rows fold into capability objects - after the login migration has read its rows.
 		{ name: "capability migration", run: () => migrateCapabilities() },
-		// A Skill object per catalog key and the agent-kind Templates per space.
+		// Each space's copy of every catalog Skill, and the agent-kind Templates per space.
 		{ name: "catalog seeds", run: () => seedCatalog() },
-		// The Roostr Guide (docs/roostr-guide.md) as a Skill every agent can read.
+		// Each space's Roostr Guide (docs/roostr-guide.md), a Skill its agents read.
 		{ name: "roostr guide", run: () => seedGuide() },
+		// Skills with no space become each space's own - after the copies above exist.
+		{ name: "space skills", run: () => foldSpacelessSkills() },
 		// Service presets become Credential templates - before the check below reads those recipes.
 		{ name: "credential seeds", run: () => seedCredentials() },
 		{ name: "credential check", run: () => refreshCredentials() },
@@ -823,6 +826,8 @@ async function serve(): Promise<void> {
 		if (obj.typeKey === "channel" && !obj.deleted && !spacesSeeded.has(obj.id)) {
 			spacesSeeded.add(obj.id);
 			void seedCredentials()
+				.then(() => seedCatalog())
+				.then(() => seedGuide())
 				.then(() => seedSpaceDefaults())
 				.then((r) => { if (r.credentials || r.agents) console.log(`[harness] space defaults for ${obj.id.slice(0, 8)}:`, JSON.stringify(r)); })
 				.catch((err) => console.error(`[harness] space defaults for ${obj.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));

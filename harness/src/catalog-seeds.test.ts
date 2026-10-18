@@ -14,7 +14,8 @@ import type { ObjectJSON, ValueJSON } from "./api";
 import { agentTypeId, kindHash, seedCatalog } from "./catalog-seeds";
 import { registerExtension } from "./extensions";
 import { PROMPT_SEEDS, type AgentKindEntry } from "./prompts";
-import { CATALOG } from "./skillmgr";
+import { CATALOG, catalogSkillId } from "./skillmgr";
+import { foldSpacelessSkills } from "./skill-spaces";
 
 /** A kind with settings of its own, a default and a catalog skill. */
 const PROBE: AgentKindEntry = {
@@ -85,9 +86,16 @@ function daemon(initial: ObjectJSON[]) {
 			const o = objects.get(decodeURIComponent(url.pathname.slice("/api/objects/".length)));
 			return o ? Response.json(o) : Response.json({ error: "not found" }, { status: 404 });
 		}
+		if (url.pathname === "/api/channels") {
+			// A space someone shared with you names its owner.
+			return Response.json([...objects.values()].filter((o) => !o.deleted && o.typeKey === "channel").map((o) => ({ id: o.id, name: o.fields.name?.stringValue ?? o.id, owner: o.fields.owner?.stringValue ?? "" })));
+		}
 		const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, any>;
 		if (url.pathname === "/api/query") {
-			const all = [...objects.values()].filter((o) => !o.deleted && o.typeKey === body.type).map((o) => ({ id: o.id, typeKey: o.typeKey, fields: structuredClone(o.fields), createdAt: o.createdAt, updatedAt: o.updatedAt }));
+			const notEmpty = ((body.filters ?? []) as Array<{ key: string; condition: string }>).filter((f) => f.condition === "notEmpty").map((f) => f.key);
+			const all = [...objects.values()]
+				.filter((o) => !o.deleted && (!body.type || o.typeKey === body.type) && notEmpty.every((k) => o.fields[k] !== undefined))
+				.map((o) => ({ id: o.id, typeKey: o.typeKey, fields: structuredClone(o.fields), createdAt: o.createdAt, updatedAt: o.updatedAt }));
 			const offset = body.offset ?? 0;
 			return Response.json({ records: all.slice(offset, offset + (body.limit ?? all.length)), total: all.length });
 		}
@@ -96,7 +104,8 @@ function daemon(initial: ObjectJSON[]) {
 			const o = objects.get(body.object_id);
 			switch (body.action) {
 				case "create": {
-					const id = `new-${++n}`;
+					const id = body.id ?? `new-${++n}`;
+					if (objects.has(id)) return Response.json({ ok: true, id, existed: true });
 					objects.set(id, object(id, body.type_key, { ...body.fields, name: sv(body.name) }));
 					return Response.json({ ok: true, id });
 				}
@@ -131,12 +140,13 @@ function daemon(initial: ObjectJSON[]) {
 
 const target = (v: ValueJSON | undefined): string[] => (v?.valuesValue?.items ?? (v ? [v] : [])).map((i) => i.linkValue?.targetId ?? "");
 
-test("an empty vault gets one Skill per catalog key and one template per agent kind; the next boot writes nothing", async () => {
+test("each space you own gets one Skill per catalog key and one template per agent kind; the next boot writes nothing", async () => {
 	const vault = daemon([object(SPACE, "channel", {}), ...bundled]);
 	await seedCatalog();
 
 	const skills = vault.ofType("skill");
 	expect(skills.map((s) => s.fields.key?.stringValue).sort()).toEqual(CATALOG.map((c) => c.key).sort());
+	expect(skills.every((s) => s.fields.channel?.stringValue === SPACE)).toBe(true);
 	for (const entry of CATALOG) {
 		const skill = skills.find((s) => s.fields.key?.stringValue === entry.key)!;
 		expect(skill.fields.name?.stringValue).toBe(entry.name);
@@ -161,8 +171,35 @@ test("an empty vault gets one Skill per catalog key and one template per agent k
 	expect(vault.writes).toEqual([]);
 });
 
-test("an older skill object is adopted, never duplicated, and its page stays the user's", async () => {
-	const old = object("old-browserless", "skill", { name: sv("browserless") }, ["my own notes"]);
+test("a space shared with you gets no Skill copies; each space you own gets its own, and its templates link those", async () => {
+	const OTHER = "space-0002-bbbb";
+	const vault = daemon([object(SPACE, "channel", {}), object(OTHER, "channel", {}), object("shared-1", "channel", { owner: sv("someone-else") }), ...bundled]);
+	await seedCatalog();
+	const skills = vault.ofType("skill");
+	expect(skills.filter((s) => s.fields.channel?.stringValue === "shared-1")).toEqual([]);
+	for (const space of [SPACE, OTHER]) {
+		const here = skills.filter((s) => s.fields.channel?.stringValue === space);
+		expect(here.map((s) => s.fields.key?.stringValue).sort()).toEqual(CATALOG.map((c) => c.key).sort());
+		const probe = vault.ofType("template").find((t) => t.fields.seed_key?.stringValue === "probe" && t.fields.channel?.stringValue === space)!;
+		expect(target(probe.fields.skills)).toEqual([here.find((s) => s.fields.key?.stringValue === "browserless")!.id]);
+	}
+});
+
+test("a space's default copy a person deleted for good is not made again", async () => {
+	const vault = daemon([object(SPACE, "channel", {}), ...bundled]);
+	const realFetch = globalThis.fetch;
+	// The engine refuses an id deleted for good.
+	globalThis.fetch = (async (input, init) => {
+		const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, any>;
+		if (body.action === "create" && body.id === catalogSkillId("browserless", SPACE)) return Response.json({ ok: false, error: "object was deleted" }, { status: 409 });
+		return realFetch(input, init);
+	}) as typeof fetch;
+	await seedCatalog();
+	expect(vault.ofType("skill").map((s) => s.fields.key?.stringValue)).not.toContain("browserless");
+});
+
+test("an older skill object in the space is adopted, never duplicated, and its page stays the user's", async () => {
+	const old = object("old-browserless", "skill", { name: sv("browserless"), channel: sv(SPACE) }, ["my own notes"]);
 	const vault = daemon([object(SPACE, "channel", {}), ...bundled, old]);
 	await seedCatalog();
 
@@ -174,7 +211,7 @@ test("an older skill object is adopted, never duplicated, and its page stays the
 
 test("a Skill page still holding an earlier catalog body is upgraded; an edited one is left alone", async () => {
 	const entry = CATALOG.find((c) => c.key === "browserless")!;
-	const untouched = object("old-browserless", "skill", { key: sv("browserless"), name: sv(entry.name) }, [entry.legacySkillBodies![0]]);
+	const untouched = object("old-browserless", "skill", { key: sv("browserless"), name: sv(entry.name), channel: sv(SPACE) }, [entry.legacySkillBodies![0]]);
 	const vault = daemon([object(SPACE, "channel", {}), ...bundled, untouched]);
 	await seedCatalog();
 	expect(untouched.blocks.map((b) => b.content.text?.text)).toEqual([entry.skillBody]);
@@ -209,4 +246,31 @@ test("the retired descriptor cards are vanished", async () => {
 	const vault = daemon([object(SPACE, "channel", {}), ...bundled, object("card", "descriptor", { key: sv("browserless") })]);
 	await seedCatalog();
 	expect(vault.objects.has("card")).toBe(false);
+});
+
+test("a spaceless Skill becomes each space's own, edits included: whatever lists it lists its space's copy, and the spaceless one goes", async () => {
+	const OTHER = "space-0002-bbbb";
+	const entry = CATALOG.find((c) => c.key === "browserless")!;
+	const globalBrowserless = object("global-browserless", "skill", { key: sv("browserless"), name: sv(entry.name), scope: sv("global") }, ["My own browserless notes."]);
+	const notes = object("global-notes", "skill", { name: sv("summarize-notes"), description: sv("How to summarize") }, ["Keep it short."]);
+	const link = (ids: string[]): ValueJSON => ({ valuesValue: { items: ids.map((id) => ({ linkValue: { relationKey: "skills", targetId: id } })) } });
+	const here = object("agent-here", "agent", { channel: sv(SPACE), skills: link(["global-browserless", "global-notes"]) });
+	const there = object("agent-there", "agent", { channel: sv(OTHER), skills: link(["global-notes"]) });
+	const vault = daemon([object(SPACE, "channel", {}), object(OTHER, "channel", {}), object("shared-1", "channel", { owner: sv("someone-else") }), ...bundled, globalBrowserless, notes, here, there]);
+	await seedCatalog();
+	await foldSpacelessSkills();
+
+	const skills = vault.ofType("skill");
+	expect(skills.filter((s) => !s.fields.channel?.stringValue)).toEqual([]);
+	const notesIn = (space: string) => skills.find((s) => s.fields.name?.stringValue === "summarize-notes" && s.fields.channel?.stringValue === space);
+	expect(notesIn("shared-1")).toBeUndefined();
+	for (const space of [SPACE, OTHER]) expect(vault.objects.get(catalogSkillId("browserless", space))!.blocks.map((b) => b.content.text?.text).join("\n")).toContain("My own browserless notes.");
+	expect(notesIn(OTHER)!.blocks.map((b) => b.content.text?.text).join("\n")).toContain("Keep it short.");
+	expect(notesIn(OTHER)!.fields.description?.stringValue).toBe("How to summarize");
+	expect(target(here.fields.skills)).toEqual([catalogSkillId("browserless", SPACE), notesIn(SPACE)!.id]);
+	expect(target(there.fields.skills)).toEqual([notesIn(OTHER)!.id]);
+
+	vault.writes.length = 0;
+	await foldSpacelessSkills();
+	expect(vault.writes).toEqual([]);
 });

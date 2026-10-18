@@ -16,7 +16,8 @@
  * and the Machine panel is where a human already looks for it.
  */
 
-import { createObject, fetchObject, mutate, setField, str, sv, queryAll, type QueryRow } from "./api";
+import { createDefault, fetchObject, mutate, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
+import { copyBody, copyFields, spacelessSource } from "./skill-spaces";
 import { machines, publishMachine } from "./machine";
 import { machineId } from "./roster";
 import { humanRef, postTo } from "./conv";
@@ -210,14 +211,6 @@ export async function capabilities(): Promise<string[]> {
 	return activeCapabilityKeys();
 }
 
-/**
- * The global set is hardcoded: it is exactly this catalog. Their skill
- * objects carry `scope: global` so both apps can tell a device capability
- * from a hand-written skill without asking the daemon — the latter is
- * assignable to one agent, the former never is.
- */
-export const GLOBAL_SCOPE = "global";
-
 // ── Holdups: blocked capability calls ─────
 //
 // A holdup is the capability's `error` text - visible and sortable. It
@@ -273,35 +266,54 @@ async function postSetupNotice(text: string): Promise<void> {
 }
 
 /**
- * The catalog entry's Skill object among `rows`: the one carrying its key,
- * else a keyless one still named for it (made before skills had keys,
- * named by its catalog name or by the key that was its name then).
+ * The catalog entry's Skill object in `space` among `rows`: the one carrying
+ * its key, else a keyless one still named for it (made before skills had
+ * keys, named by its catalog name or by the key that was its name then).
  */
-function findSkillObject(entry: CatalogEntry, rows: QueryRow[]): QueryRow | null {
+function findSkillObject(entry: CatalogEntry, rows: QueryRow[], space: string): QueryRow | null {
+	const here = rows.filter((r) => str(r.fields, "channel") === space);
 	const names = [entry.name.toLowerCase(), entry.key.toLowerCase()];
-	return rows.find((r) => str(r.fields, "key") === entry.key) ?? rows.find((r) => !str(r.fields, "key") && names.includes(str(r.fields, "name").toLowerCase())) ?? null;
+	return here.find((r) => str(r.fields, "key") === entry.key) ?? here.find((r) => !str(r.fields, "key") && names.includes(str(r.fields, "name").toLowerCase())) ?? null;
 }
 
-async function createSkillObject(entry: CatalogEntry): Promise<string> {
-	const { id } = await createObject(entry.name, SKILL_TYPE, { key: sv(entry.key), description: sv(entry.description), scope: sv(GLOBAL_SCOPE) });
-	return id;
-}
+/** The fixed id of a catalog Skill's copy in a space: two computers seeding at once make one. */
+export const catalogSkillId = (key: string, space: string): string => `skill-${key}-${space}`;
 
 const addBody = (id: string, text: string) => mutate("block_add", { object_id: id, block: { content: { text: { text, style: 0 } } } });
 
+/** Replace a page's own blocks (everything but the discussion) with `text`. */
+async function replaceBody(id: string, text: string): Promise<void> {
+	const obj = await fetchObject(id);
+	const referenced = new Set<string>();
+	for (const b of obj.blocks) for (const c of b.childrenIds) referenced.add(c);
+	for (const b of obj.blocks) {
+		if (referenced.has(b.id) || b.id === "__discussion__") continue;
+		await mutate("block_remove", { object_id: id, block_id: b.id });
+	}
+	await addBody(id, text);
+}
+
 /**
- * Converge the key's shared Skill object (seeded at boot, catalog-seeds.ts):
- * a missing one is created with the catalog name, description and body. An
- * older one gains its `key` and the global scope, a name still equal to its
- * key becomes the catalog name, and an empty page - or one still holding an
- * earlier catalog body verbatim, never edited - gets the catalog body;
- * everything else is the user's to edit. `rows` are the vault's skill
- * objects. Returns whether it wrote.
+ * Converge the key's Skill object in `space` (seeded at boot, catalog-seeds.ts):
+ * a missing one is created with the catalog name, description and body -
+ * unless the space's default copy was deleted, which stays deleted. An
+ * older one gains its `key`, a name still equal to its key becomes the
+ * catalog name, and an empty page - or one still holding an earlier catalog
+ * body verbatim, never edited - gets the catalog body; everything else is
+ * the user's to edit. `rows` are the vault's skill objects. Returns whether
+ * it wrote.
  */
-export async function upsertSkillObject(entry: CatalogEntry, rows: QueryRow[]): Promise<boolean> {
-	const hit = findSkillObject(entry, rows);
+export async function upsertSkillObject(entry: CatalogEntry, rows: QueryRow[], space: string): Promise<boolean> {
+	const hit = findSkillObject(entry, rows, space);
 	if (!hit) {
-		await addBody(await createSkillObject(entry), entry.skillBody);
+		const id = catalogSkillId(entry.key, space);
+		if (rows.some((r) => r.id === id)) return false;
+		// A spaceless one from before Skills had spaces: the copy starts as it is, edits included.
+		const source = spacelessSource(rows, (r) => str(r.fields, "key") === entry.key);
+		const fields: Record<string, ValueJSON> = source ? { ...copyFields(source, space), key: sv(entry.key) } : { channel: sv(space), key: sv(entry.key), description: sv(entry.description) };
+		if (!(await createDefault(entry.name, SKILL_TYPE, fields, id))) return false;
+		if (source) await copyBody(source.id, id);
+		else await addBody(id, entry.skillBody);
 		return true;
 	}
 	let wrote = false;
@@ -310,45 +322,16 @@ export async function upsertSkillObject(entry: CatalogEntry, rows: QueryRow[]): 
 		wrote = true;
 	};
 	if (str(hit.fields, "key") !== entry.key) await fix("key", entry.key);
-	if (str(hit.fields, "scope") !== GLOBAL_SCOPE) await fix("scope", GLOBAL_SCOPE);
 	if (str(hit.fields, "name") === entry.key && entry.name !== entry.key) await fix("name", entry.name);
 	const page = objectText(await fetchObject(hit.id)).trim();
 	if (page === "") {
 		await addBody(hit.id, entry.skillBody);
 		wrote = true;
 	} else if (entry.legacySkillBodies?.some((body) => body.trim() === page)) {
-		await setSkillPrompt(entry.key, entry.skillBody);
+		await replaceBody(hit.id, entry.skillBody);
 		wrote = true;
 	}
 	return wrote;
-}
-
-/** Restore a skill's prompt to the catalog default (the "reinstall" button). */
-export async function resetSkillPrompt(key: string): Promise<string> {
-	const entry = CATALOG.find((c) => c.key === key);
-	if (!entry) throw new Error(`unknown skill "${key}"`);
-	await setSkillPrompt(key, entry.skillBody);
-	return entry.skillBody;
-}
-
-/** Replace a skill's prompt body (Settings editor). Creates the object if missing. */
-export async function setSkillPrompt(key: string, text: string): Promise<void> {
-	const entry = CATALOG.find((c) => c.key === key);
-	if (!entry) throw new Error(`unknown skill "${key}"`);
-	let id = findSkillObject(entry, await queryAll({ type: SKILL_TYPE }))?.id;
-	if (!id) {
-		id = await createSkillObject(entry);
-	} else {
-		// Drop the existing body blocks (everything except the discussion subtree).
-		const obj = await fetchObject(id);
-		const referenced = new Set<string>();
-		for (const b of obj.blocks) for (const c of b.childrenIds) referenced.add(c);
-		for (const b of obj.blocks) {
-			if (referenced.has(b.id) || b.id === "__discussion__") continue;
-			await mutate("block_remove", { object_id: id, block_id: b.id });
-		}
-	}
-	await addBody(id, text);
 }
 
 

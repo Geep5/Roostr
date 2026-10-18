@@ -103,7 +103,7 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 ## 9. Tools and Skills
 
 - **Tools** are objects: a name the model calls, a description, inputs, and TypeScript in the body, run by the harness. Built-in Tools ship with Roostr in every space; custom Tools are written the same way and given to agents through their Tools property.
-- **Skills** are instructions an agent reads on demand. Every agent's prompt lists Skills by name and one line; the agent reads the full page with `skill_read` when the task matches. A Skill with a `key` is also catalog software its computer must have.
+- **Skills** are instructions an agent reads on demand. Every agent's prompt lists Skills by name and one line; the agent reads the full page with `skill_read` when the task matches. A Skill lives in one space, and an agent sees only its own space's Skills - a space shared with you never lends its Skills to your other spaces. The defaults (the Roostr Guide, Headless Chrome, Google Workspace) are copied into each space you own, so each space's copy can be edited on its own. A Skill with a `key` is also catalog software its computer must have.
 
 ## 10. How an agent should behave in Roostr
 

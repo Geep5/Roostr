@@ -75,31 +75,31 @@ export interface SkillListing {
 	id: string;
 	name: string;
 	description: string;
-	/** Owning agent id, or "" for a global skill every agent sees. */
+	/** Owning agent id, or "" for a skill every agent in its space sees. */
 	owner: string;
 	/** A Jev Skill (it has an Answer): run with jev_score, not read. */
 	jev?: boolean;
 }
 
 /**
- * A skill is either global or one agent's own.
+ * An agent's skills are its own space's: a skill lives in one space, like
+ * every object, and an agent reads only the skills of the space it belongs
+ * to - a space shared with you never lends its skills to your other spaces.
+ * The defaults (the catalog Skills and the Roostr Guide) are copied into
+ * each space for that reason (catalog-seeds.ts, guide.ts).
  *
- * Global skills (`agent` unset) are shared vocabulary: device
- * capabilities like gws and browserless describe this machine, and a
- * hand-written convention can be published the same way. An owned skill
- * (`agent` = an agent id) is that agent's private playbook: nobody else
- * lists it and nobody else can read it, so a specialist's procedure
- * costs every other agent nothing.
+ * Within the space a skill is either everyone's or one agent's own. An
+ * owned skill (`agent` = an agent id) is that agent's private playbook:
+ * nobody else lists it and nobody else can read it, so a specialist's
+ * procedure costs every other agent nothing.
  *
- * Spaces do not enter into it: an agent already belongs to exactly one,
- * so ownership is the finer grain and a global skill stays reachable
- * from anywhere. An agent's Skills property narrows the list to the skills
- * it names; empty means everything above. The Roostr Guide (guide.ts) is
- * listed regardless: it is how Roostr itself works, which every agent
- * works in. A machine skill (one with a
- * `key`) is listed only while this machine has it working, and only to an
- * agent with the shell: `granted` = the gated built-ins its Tools give it
- * (tool-objects.ts), omitted = no agent to ask about.
+ * An agent's Skills property narrows the list to the skills it names;
+ * empty means everything above. The space's Roostr Guide is listed
+ * regardless: it is how Roostr itself works, which every agent works in.
+ * A machine skill (one with a `key`) is listed only while this machine has
+ * it working, and only to an agent with the shell: `granted` = the gated
+ * built-ins its Tools give it (tool-objects.ts), omitted = no agent to ask
+ * about.
  */
 export async function listSkills(agentId?: string, granted?: ReadonlySet<string>): Promise<SkillListing[]> {
 	// Dynamic: skillmgr imports objectText from this module, so a static
@@ -110,6 +110,7 @@ export async function listSkills(agentId?: string, granted?: ReadonlySet<string>
 	// the toggle looks.
 	const ready = new Set(await capabilities());
 	const agent = agentId ? await fetchObject(agentId).catch(() => null) : null;
+	const space = agent ? str(agent.fields, "channel") : null;
 	const only = new Set(agent ? skillIds(agent.fields) : []);
 	const shell = !granted || granted.has("shell_exec");
 	const rows = await queryAll({ type: SKILL_TYPE });
@@ -119,11 +120,14 @@ export async function listSkills(agentId?: string, granted?: ReadonlySet<string>
 			name: str(r.fields, "name") || r.id.slice(0, 8),
 			description: str(r.fields, "description"),
 			owner: str(r.fields, "agent"),
+			space: str(r.fields, "channel"),
 			key: str(r.fields, "key"),
 			always: str(r.fields, "seed_key") === GUIDE_SEED_KEY,
 			jev: r.fields["jev_answer"] !== undefined,
 		}))
 		.filter((s) => {
+			// Another space's skill: not this agent's to read.
+			if (space !== null && s.space !== space) return false;
 			// Someone else's playbook: invisible, whoever is asking.
 			if (s.owner !== "" && s.owner !== agentId) return false;
 			if (only.size > 0 && !only.has(s.id) && !s.always) return false;
@@ -131,7 +135,7 @@ export async function listSkills(agentId?: string, granted?: ReadonlySet<string>
 			if (s.key && !shell) return false;
 			return !s.key || ready.has(s.key);
 		})
-		.map(({ key: _key, always: _always, ...listing }) => listing);
+		.map(({ key: _key, always: _always, space: _space, ...listing }) => listing);
 }
 
 /** Prompt section: descriptions only (OMP system-prompt.md:88-93). */

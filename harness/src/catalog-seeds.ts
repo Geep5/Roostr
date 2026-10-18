@@ -3,8 +3,8 @@
  * (prompts.ts) are seeds, not runtime lookups; once per boot they converge
  * onto the vault, like Credential templates (credential-seeds.ts):
  *
- * - **Skills**: one shared Skill object per catalog key - what the software
- *   is and how an agent uses it. Its name is every display of the key.
+ * - **Skills**: one Skill object per catalog key in each space you own -
+ *   what the software is and how an agent uses it. Its name is every display of the key.
  * - **Agent kinds**: one Template per kind per space, targeting the space's
  *   agent type: the kind's system prompt, its Skills and its setting
  *   defaults. Creating an agent from it (the website's template picker, or
@@ -15,7 +15,7 @@
  * The retired `descriptor` cards these replaced are vanished.
  */
 
-import { bv, createObject, deleteField, fetchObject, iv, lv, markSystem, mutate, plainValue, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
+import { bv, createObject, deleteField, fetchObject, iv, lv, markSystem, mutate, ownedSpaces, plainValue, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
 import { PROMPT_SEEDS, SYSTEM_PROMPT_TYPE, ensureSystemPrompt, pageText, promptTarget, type AgentKindEntry } from "./prompts";
 import { CATALOG, upsertSkillObject } from "./skillmgr";
 import { SKILL_TYPE, SKILLS_KEY } from "./skills";
@@ -107,13 +107,18 @@ async function removeOutOfScope(seed: AgentKindEntry, space: string, templates: 
 export async function seedCatalog(): Promise<void> {
 	const out = { skills: 0, properties: 0, templates: 0, upgraded: 0, deduped: 0, descriptors: 0, removed: 0 };
 
+	// Each space you own holds its own copy of every catalog Skill; a shared space is its owner's to seed.
 	const skillRows = await queryAll({ type: SKILL_TYPE });
-	for (const entry of CATALOG) if (await upsertSkillObject(entry, skillRows)) out.skills += 1;
-	// Two computers seeding at once may each have made one: link the oldest.
-	const skillIds = new Map<string, string>();
+	for (const space of await ownedSpaces()) for (const entry of CATALOG) if (await upsertSkillObject(entry, skillRows, space.id)) out.skills += 1;
+	// Space → catalog key → that space's Skill (the oldest, should two computers each have made one).
+	const skillIds = new Map<string, Map<string, string>>();
 	for (const r of (await queryAll({ type: SKILL_TYPE })).sort((a, b) => a.createdAt - b.createdAt)) {
 		const key = str(r.fields, "key");
-		if (key && !skillIds.has(key)) skillIds.set(key, r.id);
+		const space = str(r.fields, "channel");
+		if (!key || !space) continue;
+		const here = skillIds.get(space) ?? new Map<string, string>();
+		if (!here.has(key)) here.set(key, r.id);
+		skillIds.set(space, here);
 	}
 
 	const spaces = await queryAll({ type: "channel" });
@@ -153,7 +158,7 @@ export async function seedCatalog(): Promise<void> {
 				continue;
 			}
 			const prompt = await ensureSystemPrompt(seed, space.id);
-			const fields = kindFields(seed, prompt.id, skillIds);
+			const fields = kindFields(seed, prompt.id, skillIds.get(space.id) ?? new Map());
 			const hash = kindHash(seed, fields);
 			const mine = kindTemplates(templates, seed.key, space.id);
 			if (mine.length === 0) {

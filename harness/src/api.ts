@@ -286,6 +286,13 @@ export async function createDefault(name: string, typeKey: string, fields: Recor
 	}
 }
 
+/** The spaces this identity owns (`owner` ""): a space someone shared with you is theirs to set up. */
+export async function ownedSpaces(): Promise<Array<{ id: string; name: string }>> {
+	const res = await apiFetch(`${API}/api/channels`);
+	if (!res.ok) throw new Error(`spaces: HTTP ${res.status}`);
+	return ((await res.json()) as Array<{ id: string; name: string; owner: string }>).filter((s) => !s.owner);
+}
+
 /**
  * Append a chat message block; `asAuthor` attributes it to the agent.
  *

@@ -57,6 +57,9 @@ function daemon(initial: ObjectJSON[]) {
 			const o = objects.get(decodeURIComponent(url.pathname.slice("/api/objects/".length)));
 			return o ? Response.json(o) : Response.json({ error: "not found" }, { status: 404 });
 		}
+		if (url.pathname === "/api/channels") {
+			return Response.json([...objects.values()].filter((o) => !o.deleted && o.typeKey === "channel").map((o) => ({ id: o.id, name: o.id, owner: "" })));
+		}
 		const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, any>;
 		if (url.pathname === "/api/query") {
 			const all = [...objects.values()].filter((o) => !o.deleted && (!body.type || o.typeKey === body.type)).map((o) => ({ id: o.id, typeKey: o.typeKey, fields: structuredClone(o.fields), createdAt: o.createdAt, updatedAt: o.updatedAt }));
@@ -68,7 +71,8 @@ function daemon(initial: ObjectJSON[]) {
 			const o = objects.get(body.object_id);
 			switch (body.action) {
 				case "create": {
-					const id = `new-${++n}`;
+					const id = body.id ?? `new-${++n}`;
+					if (objects.has(id)) return Response.json({ ok: true, id, existed: true });
 					objects.set(id, object(id, body.type_key, { ...body.fields, name: sv(body.name) }));
 					return Response.json({ ok: true, id });
 				}
