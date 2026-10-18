@@ -851,7 +851,7 @@ async function serve(): Promise<void> {
 			// Service just set on a blank credential: take its template, then check it.
 			void fillCredential(obj)
 				.then(() => refreshCredentials())
-				.catch((error) => console.error("[harness] credential refresh:", error));
+				.catch((error) => console.error("[harness] credential refresh:", error instanceof Error ? `${error.name}: ${error.message}` : String(error)));
 			return;
 		}
 		if (obj.typeKey === "agent") return; // other agents' brains
@@ -919,7 +919,7 @@ async function serve(): Promise<void> {
 	// skips anything with nothing waiting.
 	// Sign-ins expire on their own; notice within a few minutes.
 	setInterval(() => {
-		void refreshCredentials().catch((error) => console.error("[harness] credential refresh:", error));
+		void refreshCredentials().catch((error) => console.error("[harness] credential refresh:", error instanceof Error ? `${error.name}: ${error.message}` : String(error)));
 	}, 5 * 60_000);
 	setInterval(() => {
 		void scanMailboxes().catch((error) => console.error("[harness] mailbox rescan:", error));

@@ -335,12 +335,43 @@ async function checkNow(row: CredentialRow, me: string): Promise<CredentialRow> 
 	return publishState(row, true, await servedState(row, me, true));
 }
 
+/** The refresh running now, and whether another was asked for meanwhile. */
+let refreshing: Promise<CredentialRow[]> | null = null;
+let refreshAgain = false;
+
 /**
  * Re-read the credentials this computer looks after and write any status
  * that changed - and answer any Check asked for since the last one. Boot,
  * every credential change and a slow timer call it.
+ *
+ * One at a time: asked again while one runs, it runs once more after it,
+ * on fresh reads. Overlapping runs each worked from an older read, so a
+ * session cookie that had just been renewed looked about to expire to the
+ * next one, which renewed and wrote it again - a credential change, which
+ * started another run: a loop that queued thousands of writes on the store
+ * and stalled every agent behind them.
  */
-export async function refreshCredentials(): Promise<CredentialRow[]> {
+export function refreshCredentials(): Promise<CredentialRow[]> {
+	if (refreshing) {
+		refreshAgain = true;
+		return refreshing;
+	}
+	refreshing = (async () => {
+		try {
+			let rows = await refreshCredentialsOnce();
+			while (refreshAgain) {
+				refreshAgain = false;
+				rows = await refreshCredentialsOnce();
+			}
+			return rows;
+		} finally {
+			refreshing = null;
+		}
+	})();
+	return refreshing;
+}
+
+async function refreshCredentialsOnce(): Promise<CredentialRow[]> {
 	// Claude plans this computer serves are renewed before they expire, so the states below read the new tokens.
 	await renewPlans().catch((err) => console.error("[claude-plan] renewal:", err instanceof Error ? err.message : err));
 	const me = await machineId();
