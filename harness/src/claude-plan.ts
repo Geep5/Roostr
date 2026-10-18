@@ -1,7 +1,8 @@
 /**
  * The Claude plan, space-wide. Settings' "Sign in with Claude" opens the
- * claude.ai sign-in in a Chrome window on this computer; the code it lands
- * on is read from the window's tab list (nothing attaches to a page), and the
+ * claude.ai sign-in in the person's own default browser on this computer
+ * (their accounts and passkeys); the code it lands on is read from that
+ * browser's History (only Anthropic's callback page, nothing else), and the
  * login goes onto the default Anthropic credential of every space you own
  * (its Plan login - anthropic-plan.ts), served by the computer Settings
  * picks. That computer alone renews it - Claude replaces the refresh token
@@ -12,7 +13,7 @@
 import { apiFetch, API, deleteField, iv, queryAll, setField, str, sv, type QueryRow } from "./api";
 import { ANTHROPIC_AUTHORIZE_URL, ANTHROPIC_CLIENT_ID, ANTHROPIC_REDIRECT_URI, ANTHROPIC_SCOPES, ANTHROPIC_TOKEN_URL, generatePkce, refreshAnthropicToken } from "./auth";
 import { PLAN_ACCOUNT, PLAN_ERROR, PLAN_EXPIRES, PLAN_FIELDS, PLAN_REFRESH, PLAN_TOKEN, anthropicState, hasPlan } from "./anthropic-plan";
-import { openLoginWindow, type LoginWindow } from "./browser";
+import { openInDefaultBrowser, visitedUrlsLike } from "./browser";
 import { refreshCredentials } from "./credential-objects";
 import { machineId } from "./roster";
 import { ANTHROPIC_SERVICE, spaceAnthropicCredential } from "./space-defaults";
@@ -34,7 +35,8 @@ interface Tokens {
 interface Pending {
 	verifier: string;
 	servedBy: string;
-	window: LoginWindow | null;
+	/** True while the sign-in page is open and being watched for its code. */
+	watching: boolean;
 	/** "" while it runs; otherwise why it stopped (the paste box takes over). */
 	error: string;
 }
@@ -89,41 +91,44 @@ async function exchange(code: string, state: string, verifier: string): Promise<
 	return { access: data.access_token, refresh: data.refresh_token, expires: Date.now() + data.expires_in * 1000, account: data.account?.email_address ?? "" };
 }
 
+/** Where Anthropic's callback page lives, on each of its hosts. */
+const CALLBACK_PREFIXES = [...CALLBACK_HOSTS].map((host) => `https://${host}${new URL(ANTHROPIC_REDIRECT_URI).pathname}?`);
+
 /**
- * Start a sign-in: a Chrome window opens here on the claude.ai sign-in;
- * when it reaches the callback page the login is saved space-wide and the
- * window closes. Returns at once - Settings follows it through status().
+ * Start a sign-in: the claude.ai sign-in opens in the person's default
+ * browser here; when it reaches the callback page (seen in that browser's
+ * History, matched by this sign-in's own state) the login is saved
+ * space-wide. Returns at once - Settings follows it through status().
  */
 export async function startPlanSignIn(servedBy: string): Promise<void> {
-	if (pending?.window) throw new Error("A Claude sign-in window is already open on this computer.");
+	if (pending?.watching) throw new Error("A Claude sign-in is already open on this computer - finish it or paste its code.");
 	const pkce = await generatePkce();
 	const params = new URLSearchParams({ code: "true", client_id: ANTHROPIC_CLIENT_ID, response_type: "code", redirect_uri: ANTHROPIC_REDIRECT_URI, scope: ANTHROPIC_SCOPES, code_challenge: pkce.challenge, code_challenge_method: "S256", state: pkce.verifier });
 	const me = await machineId();
-	const job: Pending = { verifier: pkce.verifier, servedBy: servedBy || me, window: null, error: "" };
+	const job: Pending = { verifier: pkce.verifier, servedBy: servedBy || me, watching: true, error: "" };
 	pending = job;
 	try {
-		job.window = openLoginWindow(`${ANTHROPIC_AUTHORIZE_URL}?${params.toString()}`);
+		openInDefaultBrowser(`${ANTHROPIC_AUTHORIZE_URL}?${params.toString()}`);
 	} catch (err) {
+		job.watching = false;
 		job.error = `${err instanceof Error ? err.message : String(err)} Open the sign-in yourself and paste the code.`;
 		return;
 	}
-	const win = job.window;
-	let closed = false;
-	void win.exited.then(() => (closed = true));
 	void (async () => {
 		const deadline = Date.now() + SIGN_IN_MS;
 		let landed = null as { code: string; state: string } | null;
-		while (!landed && !closed && Date.now() < deadline && pending === job) {
-			for (const url of win.visitedUrls()) landed ??= codeFromCallback(url);
-			if (!landed) await Bun.sleep(1000);
+		while (!landed && Date.now() < deadline && pending === job) {
+			// Only this sign-in's callback: an older one in the history carries another state.
+			for (const url of visitedUrlsLike(CALLBACK_PREFIXES)) {
+				const hit = codeFromCallback(url);
+				if (hit && hit.state === job.verifier) landed ??= hit;
+			}
+			if (!landed) await Bun.sleep(1500);
 		}
-		// Chrome writes History every few seconds and on quit: a window closed right after the code page still has it.
-		if (!landed && closed) for (const url of win.visitedUrls()) landed ??= codeFromCallback(url);
-		await win.finish().catch(() => []);
 		if (pending !== job) return;
-		job.window = null;
+		job.watching = false;
 		if (!landed) {
-			job.error = closed ? "The sign-in window closed before it finished. Paste the code claude.ai showed, or sign in again." : "The sign-in took too long. Paste the code claude.ai showed, or sign in again.";
+			job.error = "The sign-in took too long, or your browser's history could not be read. Paste the code claude.ai showed, or sign in again.";
 			return;
 		}
 		try {
@@ -142,7 +147,7 @@ export async function finishPlanSignIn(raw: string): Promise<void> {
 	const [code, state = ""] = raw.trim().split("#");
 	if (!code) throw new Error("Paste the code claude.ai showed.");
 	await applyPlan(await exchange(code, state, job.verifier), job.servedBy);
-	if (job.window) await job.window.finish().catch(() => []);
+	job.watching = false;
 	pending = null;
 }
 

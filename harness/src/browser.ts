@@ -7,10 +7,10 @@
  * computer can act with the login. Agents receive only page text, never the
  * cookies.
  */
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import { spawn, type ChildProcess } from "node:child_process";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -261,8 +261,6 @@ export async function profileCookies(profile: string, timeoutMs = 20_000): Promi
 export interface LoginWindow {
 	/** Whether the window's profile holds a cookie by that name for that host yet (names are plaintext on disk). */
 	hasCookie(host: string, name: string): boolean;
-	/** Addresses the window has visited, newest first, read from its profile's History file (Chrome commits it every few seconds). Nothing attaches to the browser. */
-	visitedUrls(): string[];
 	/** Close the window (Chrome flushes its cookies on a clean quit), export every cookie, delete the profile. */
 	finish(): Promise<SessionCookie[]>;
 	/** Resolves when the person closes the window. */
@@ -273,8 +271,8 @@ export interface LoginWindow {
  * Open a plain HEADED Chrome on a fresh profile at a login page. Nothing is
  * attached while the person signs in, and no DevTools port is opened: sites'
  * bot checks (Twitch, X, Google's "This browser or app may not be secure")
- * reject a window with remote debugging on. The cookies and visited addresses
- * are read from the profile's own files; the profile is then thrown away.
+ * reject a window with remote debugging on. The cookies are read afterwards,
+ * from the closed profile; the profile is then thrown away.
  */
 export function openLoginWindow(loginUrl: string): LoginWindow {
 	const chrome = chromeBinary();
@@ -303,23 +301,6 @@ export function openLoginWindow(loginUrl: string): LoginWindow {
 				rmSync(snap, { force: true });
 			}
 		},
-		visitedUrls() {
-			const db = join(profile, "Default", "History");
-			if (!existsSync(db)) return [];
-			// Chrome holds the db open; read a snapshot.
-			const snap = join(tmpdir(), `roostr-history-${crypto.randomUUID()}`);
-			try {
-				copyFileSync(db, snap);
-				const sqlite = new Database(snap, { readonly: true });
-				const rows = sqlite.query("SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 50").all() as Array<{ url: string }>;
-				sqlite.close();
-				return rows.map((r) => r.url);
-			} catch {
-				return [];
-			} finally {
-				rmSync(snap, { force: true });
-			}
-		},
 		async finish() {
 			if (!gone) {
 				proc.kill("SIGTERM");
@@ -332,4 +313,58 @@ export function openLoginWindow(loginUrl: string): LoginWindow {
 			}
 		},
 	};
+}
+
+/**
+ * Open `url` in the person's own default browser - their profile, signed-in
+ * accounts and passkeys - with nothing attached. For a sign-in that ends on
+ * a page whose address carries the result, follow it with visitedUrlsLike.
+ */
+export function openInDefaultBrowser(url: string): void {
+	const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+	spawn(opener, [url], { stdio: "ignore", detached: true }).unref();
+}
+
+/** The person's Chromium-family History files (Chrome, Brave, Edge, Arc, Chromium; every profile). */
+function chromiumHistoryFiles(): string[] {
+	const home = homedir();
+	const roots = process.platform === "darwin"
+		? ["Google/Chrome", "Google/Chrome Beta", "BraveSoftware/Brave-Browser", "Microsoft Edge", "Arc/User Data", "Chromium"].map((d) => join(home, "Library", "Application Support", d))
+		: [".config/google-chrome", ".config/BraveSoftware/Brave-Browser", ".config/microsoft-edge", ".config/chromium"].map((d) => join(home, d));
+	const files: string[] = [];
+	for (const root of roots) {
+		if (!existsSync(root)) continue;
+		for (const entry of readdirSync(root)) {
+			const history = join(root, entry, "History");
+			if ((entry === "Default" || entry.startsWith("Profile ")) && existsSync(history)) files.push(history);
+		}
+	}
+	return files;
+}
+
+/**
+ * Addresses starting with one of `prefixes` that the person's Chromium-family
+ * browsers visited (Chrome writes History every few seconds). Only rows
+ * matching a prefix are read - nothing else of their history is looked at.
+ */
+export function visitedUrlsLike(prefixes: string[]): string[] {
+	const out: string[] = [];
+	for (const db of chromiumHistoryFiles()) {
+		// The browser holds the db open; read a snapshot.
+		const snap = join(tmpdir(), `roostr-history-${crypto.randomUUID()}`);
+		try {
+			copyFileSync(db, snap);
+			const sqlite = new Database(snap, { readonly: true });
+			for (const prefix of prefixes) {
+				const rows = sqlite.query("SELECT url FROM urls WHERE substr(url, 1, ?) = ? ORDER BY last_visit_time DESC LIMIT 20").all(prefix.length, prefix) as Array<{ url: string }>;
+				for (const r of rows) out.push(r.url);
+			}
+			sqlite.close();
+		} catch {
+			// A browser mid-write or a locked file: the next poll reads it.
+		} finally {
+			rmSync(snap, { force: true });
+		}
+	}
+	return out;
 }
