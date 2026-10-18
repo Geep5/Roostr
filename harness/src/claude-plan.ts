@@ -102,7 +102,7 @@ export async function startPlanSignIn(servedBy: string): Promise<void> {
 	const job: Pending = { verifier: pkce.verifier, servedBy: servedBy || me, window: null, error: "" };
 	pending = job;
 	try {
-		job.window = openLoginWindow(`${ANTHROPIC_AUTHORIZE_URL}?${params.toString()}`, { tabs: true });
+		job.window = openLoginWindow(`${ANTHROPIC_AUTHORIZE_URL}?${params.toString()}`);
 	} catch (err) {
 		job.error = `${err instanceof Error ? err.message : String(err)} Open the sign-in yourself and paste the code.`;
 		return;
@@ -114,9 +114,11 @@ export async function startPlanSignIn(servedBy: string): Promise<void> {
 		const deadline = Date.now() + SIGN_IN_MS;
 		let landed = null as { code: string; state: string } | null;
 		while (!landed && !closed && Date.now() < deadline && pending === job) {
-			for (const url of await win.tabUrls()) landed ??= codeFromCallback(url);
+			for (const url of win.visitedUrls()) landed ??= codeFromCallback(url);
 			if (!landed) await Bun.sleep(1000);
 		}
+		// Chrome writes History every few seconds and on quit: a window closed right after the code page still has it.
+		if (!landed && closed) for (const url of win.visitedUrls()) landed ??= codeFromCallback(url);
 		await win.finish().catch(() => []);
 		if (pending !== job) return;
 		job.window = null;

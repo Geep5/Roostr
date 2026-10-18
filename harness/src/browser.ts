@@ -261,8 +261,8 @@ export async function profileCookies(profile: string, timeoutMs = 20_000): Promi
 export interface LoginWindow {
 	/** Whether the window's profile holds a cookie by that name for that host yet (names are plaintext on disk). */
 	hasCookie(host: string, name: string): boolean;
-	/** The addresses of the window's open tabs - only for a window opened with `{ tabs: true }` (Chrome's local tab list, read over HTTP; nothing attaches to a page). [] otherwise. */
-	tabUrls(): Promise<string[]>;
+	/** Addresses the window has visited, newest first, read from its profile's History file (Chrome commits it every few seconds). Nothing attaches to the browser. */
+	visitedUrls(): string[];
 	/** Close the window (Chrome flushes its cookies on a clean quit), export every cookie, delete the profile. */
 	finish(): Promise<SessionCookie[]>;
 	/** Resolves when the person closes the window. */
@@ -271,16 +271,16 @@ export interface LoginWindow {
 
 /**
  * Open a plain HEADED Chrome on a fresh profile at a login page. Nothing is
- * attached while the person signs in: sites' bot checks (Twitch, X) reject a
- * window with a live DevTools connection. The cookies are read afterwards,
- * from the closed profile; the profile is then thrown away.
+ * attached while the person signs in, and no DevTools port is opened: sites'
+ * bot checks (Twitch, X, Google's "This browser or app may not be secure")
+ * reject a window with remote debugging on. The cookies and visited addresses
+ * are read from the profile's own files; the profile is then thrown away.
  */
-export function openLoginWindow(loginUrl: string, { tabs = false }: { tabs?: boolean } = {}): LoginWindow {
+export function openLoginWindow(loginUrl: string): LoginWindow {
 	const chrome = chromeBinary();
 	if (!chrome) throw new Error("No Chrome, Chromium or Brave is installed on this computer.");
 	const profile = mkdtempSync(join(tmpdir(), "roostr-login-"));
-	// `tabs`: Chrome lists its tabs on a local port (tabUrls) - a sign-in that ends on a page whose address carries the result.
-	const proc = spawn(chrome, [`--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", ...(tabs ? ["--remote-debugging-port=0"] : []), "--new-window", loginUrl], { stdio: "ignore" });
+	const proc = spawn(chrome, [`--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--new-window", loginUrl], { stdio: "ignore" });
 	const exited = new Promise((resolve) => proc.once("exit", resolve));
 	let gone = false;
 	void exited.then(() => (gone = true));
@@ -303,14 +303,21 @@ export function openLoginWindow(loginUrl: string, { tabs = false }: { tabs?: boo
 				rmSync(snap, { force: true });
 			}
 		},
-		async tabUrls() {
-			if (!tabs || gone) return [];
+		visitedUrls() {
+			const db = join(profile, "Default", "History");
+			if (!existsSync(db)) return [];
+			// Chrome holds the db open; read a snapshot.
+			const snap = join(tmpdir(), `roostr-history-${crypto.randomUUID()}`);
 			try {
-				const port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
-				const list = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as Array<{ type?: string; url?: string }>;
-				return list.filter((t) => t.type === "page" && t.url).map((t) => t.url as string);
+				copyFileSync(db, snap);
+				const sqlite = new Database(snap, { readonly: true });
+				const rows = sqlite.query("SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 50").all() as Array<{ url: string }>;
+				sqlite.close();
+				return rows.map((r) => r.url);
 			} catch {
 				return [];
+			} finally {
+				rmSync(snap, { force: true });
 			}
 		},
 		async finish() {
