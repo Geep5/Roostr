@@ -241,6 +241,9 @@ export async function startScheduler(h: ScheduleHost): Promise<void> {
 		// A reply posted while this computer was off reads as already seen.
 		if (d.waiting && obj) waitingSeen.set(d.id, newestChat(obj).ts);
 		if (obj?.fields[RUN_ACTIVE_KEY]) await deleteField(d.id, RUN_ACTIVE_KEY).catch(() => {});
+		// A minute/hour object's run cut off by the restart stays open and would stop it for good
+		// (nothing flags one): finish it, so the next occurrence runs on time.
+		if (obj && subDaily(obj) && d.firedFor === d.next && !d.waiting) await completeOccurrence(d).catch(() => {});
 		// A Run now asked for while this computer was off.
 		if (obj?.fields[RUN_REQUEST_KEY]) await handleRunRequest(obj);
 	}

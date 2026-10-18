@@ -447,3 +447,25 @@ test("Stuck holds an open run: never flagged as unfinished, and clearing it asks
 	fields = Object.fromEntries(Object.entries(fields).filter(([k]) => k !== "run_now"));
 	expect(await flagStuckRuns()).toBe(1);
 });
+
+test("a minute repeat whose run a restart cut off is finished at boot, so it keeps running", async () => {
+	const objectId = "7891d9df-26c7-40b4-9756-947c8c567a55";
+	const next = Date.now() - 20 * 3_600_000; // fired, then the harness restarted mid-run
+	const fields = { name: { stringValue: "Check messages" }, repeat: { mapValue: { entries: { freq: { stringValue: "minute" }, interval: { intValue: 1 }, next: { intValue: next }, fired_for: { intValue: next } } } } };
+	const actions: string[] = [];
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		if (url.pathname === "/api/query") return respond({ records: [{ id: objectId, typeKey: "page", fields }], total: 1 });
+		if (url.pathname === "/api/serving") return respond({ [objectId]: { machineId: "test-machine", reason: "pinned", skills: [], candidates: ["test-machine"] } });
+		if (url.pathname === `/api/objects/${objectId}`) return respond({ id: objectId, typeKey: "page", fields, blocks: [], deleted: false, createdAt: 0, updatedAt: 0 });
+		if (url.pathname === "/api/mutate") {
+			actions.push(String(body.action));
+			return respond({ ok: true });
+		}
+		return respond({ error: "unexpected" }, 404);
+	}) as typeof fetch;
+	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
+	await startScheduler({ async served() { return undefined; }, async turn() { return ""; } });
+	expect(actions).toContain("occurrence_complete");
+});
