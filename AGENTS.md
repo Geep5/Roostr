@@ -75,7 +75,7 @@ Rules that keep it working for the people using it:
 - **Problems go on the object's `error` property**, never only in a log or a chat line.
 - **Don't run a second store, sync or harness** next to the service; restart the service instead.
 - **Agents are objects too**: change one by editing its properties (System prompt, Model, Credentials, Tools, Skills, Served by), not code.
-- **Test on a throwaway object**, then delete it.
+- **Test on a throwaway object**, then delete it. Careful with `vanish`: it also deletes, for good, every agent on that object that no other object lists (`object_agent_cascade`, `core/mutate.odin`) - a brand-new agent tested only there goes with it. Use `delete` (the bin), or take the agent off the object's `agent` first.
 
 Skills, machine software and recurring work:
 
