@@ -274,3 +274,20 @@ test("a spaceless Skill becomes each space's own, edits included: whatever lists
 	await foldSpacelessSkills();
 	expect(vault.writes).toEqual([]);
 });
+
+test("an extension's catalog Skill is seeded only in the extension's spaces; a stray copy elsewhere goes unless something lists it", async () => {
+	const OTHER = "space-0002-bbbb";
+	const THIRD = "space-0003-cccc";
+	const take = registerExtension({ catalog: [{ ...CATALOG[0], key: "probe-dev", name: "Probe dev" }], spaces: [SPACE] });
+	const stray = object(catalogSkillId("probe-dev", OTHER), "skill", { key: sv("probe-dev"), channel: sv(OTHER) });
+	const kept = object(catalogSkillId("probe-dev", THIRD), "skill", { key: sv("probe-dev"), channel: sv(THIRD) });
+	const user = object("agent-third", "agent", { channel: sv(THIRD), skills: { valuesValue: { items: [{ linkValue: { relationKey: "skills", targetId: kept.id } }] } } });
+	const vault = daemon([object(SPACE, "channel", {}), object(OTHER, "channel", {}), object(THIRD, "channel", {}), ...bundled, stray, kept, user]);
+	try {
+		await seedCatalog();
+	} finally {
+		take();
+	}
+	const probeDev = vault.ofType("skill").filter((s) => s.fields.key?.stringValue === "probe-dev").map((s) => s.fields.channel?.stringValue).sort();
+	expect(probeDev).toEqual([SPACE, THIRD]);
+});

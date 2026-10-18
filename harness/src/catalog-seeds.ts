@@ -17,8 +17,8 @@
 
 import { bv, createObject, deleteField, fetchObject, iv, lv, markSystem, mutate, ownedSpaces, plainValue, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
 import { PROMPT_SEEDS, SYSTEM_PROMPT_TYPE, ensureSystemPrompt, pageText, promptTarget, type AgentKindEntry } from "./prompts";
-import { CATALOG, upsertSkillObject } from "./skillmgr";
-import { SKILL_TYPE, SKILLS_KEY } from "./skills";
+import { CATALOG, catalogSkillId, upsertSkillObject } from "./skillmgr";
+import { SKILL_TYPE, SKILLS_KEY, skillIds as skillLinks } from "./skills";
 import { linkList } from "./tool-objects";
 
 const TEMPLATE_TYPE = "template";
@@ -107,9 +107,23 @@ async function removeOutOfScope(seed: AgentKindEntry, space: string, templates: 
 export async function seedCatalog(): Promise<void> {
 	const out = { skills: 0, properties: 0, templates: 0, upgraded: 0, deduped: 0, descriptors: 0, removed: 0 };
 
-	// Each space you own holds its own copy of every catalog Skill; a shared space is its owner's to seed.
+	// Each space you own holds its own copy of every catalog Skill meant for it; a shared space is its owner's to seed.
 	const skillRows = await queryAll({ type: SKILL_TYPE });
-	for (const space of await ownedSpaces()) for (const entry of CATALOG) if (await upsertSkillObject(entry, skillRows, space.id)) out.skills += 1;
+	const listed = new Set((await queryAll({ filters: [{ key: SKILLS_KEY, condition: "notEmpty" }] })).flatMap((o) => skillLinks(o.fields)));
+	for (const space of await ownedSpaces()) {
+		for (const entry of CATALOG) {
+			if (!entry.spaces || entry.spaces.includes(space.id)) {
+				if (await upsertSkillObject(entry, skillRows, space.id)) out.skills += 1;
+				continue;
+			}
+			// An extension's Skill seeded outside its spaces: its default copy goes, unless something lists it.
+			const stray = catalogSkillId(entry.key, space.id);
+			if (skillRows.some((r) => r.id === stray) && !listed.has(stray)) {
+				await mutate("delete", { object_id: stray });
+				out.removed += 1;
+			}
+		}
+	}
 	// Space → catalog key → that space's Skill (the oldest, should two computers each have made one).
 	const skillIds = new Map<string, Map<string, string>>();
 	for (const r of (await queryAll({ type: SKILL_TYPE })).sort((a, b) => a.createdAt - b.createdAt)) {

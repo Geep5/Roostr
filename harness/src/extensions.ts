@@ -75,7 +75,7 @@ function removeFrom<T>(list: T[], items: T[]): void {
 
 /** Add `ext` to the seeds and registries; returns its removal (tests register a fake service and take it back). */
 export function registerExtension(ext: Extension): () => void {
-	const catalog = ext.catalog ?? [];
+	const catalog = (ext.catalog ?? []).map((c) => (ext.spaces ? { ...c, spaces: ext.spaces } : c));
 	const kinds = (ext.kinds ?? []).map((k) => (ext.spaces ? { ...k, spaces: ext.spaces } : k));
 	const seeds = (ext.credentialSeeds ?? []).map((s) => (ext.spaces ? { ...s, spaces: ext.spaces } : s));
 	CATALOG.push(...catalog);

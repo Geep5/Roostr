@@ -43,6 +43,8 @@ export interface CatalogEntry {
 	skillBody: string;
 	/** Earlier catalog bodies: a Skill page still holding one verbatim (never edited) is upgraded to `skillBody`. */
 	legacySkillBodies?: string[];
+	/** The spaces its Skill is seeded in (an extension's `spaces`); unset = every space you own. */
+	spaces?: string[];
 }
 
 /** The built-in catalog; private extensions (extensions.ts) append their own entries at load. */
