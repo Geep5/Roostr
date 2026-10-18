@@ -97,7 +97,7 @@ async function callAnthropic(req: LLMRequest): Promise<LLMResult> {
 	const auth = req.apiKey
 		? { token: req.apiKey, isOAuth: req.apiKey.startsWith("sk-ant-oat") }
 		: await resolveAnthropicAuth().catch((err) => {
-				throw new Error(`This agent lists no Anthropic credential, and this computer's own Claude sign-in failed (${err instanceof Error ? err.message.slice(0, 160) : String(err)}). Add the space's "Anthropic" credential to the agent's Credentials, with a key in it.`);
+				throw new Error(`This agent lists no Anthropic credential, and this computer's own Claude sign-in failed (${err instanceof Error ? err.message.slice(0, 160) : String(err)}). Add the space's "Anthropic" credential to the agent's Credentials, and sign in with Claude in Settings or paste a key in it.`);
 			});
 	const body: Record<string, unknown> = {
 		model: req.model,

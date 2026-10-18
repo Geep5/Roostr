@@ -261,6 +261,8 @@ export async function profileCookies(profile: string, timeoutMs = 20_000): Promi
 export interface LoginWindow {
 	/** Whether the window's profile holds a cookie by that name for that host yet (names are plaintext on disk). */
 	hasCookie(host: string, name: string): boolean;
+	/** The addresses of the window's open tabs - only for a window opened with `{ tabs: true }` (Chrome's local tab list, read over HTTP; nothing attaches to a page). [] otherwise. */
+	tabUrls(): Promise<string[]>;
 	/** Close the window (Chrome flushes its cookies on a clean quit), export every cookie, delete the profile. */
 	finish(): Promise<SessionCookie[]>;
 	/** Resolves when the person closes the window. */
@@ -273,11 +275,12 @@ export interface LoginWindow {
  * window with a live DevTools connection. The cookies are read afterwards,
  * from the closed profile; the profile is then thrown away.
  */
-export function openLoginWindow(loginUrl: string): LoginWindow {
+export function openLoginWindow(loginUrl: string, { tabs = false }: { tabs?: boolean } = {}): LoginWindow {
 	const chrome = chromeBinary();
 	if (!chrome) throw new Error("No Chrome, Chromium or Brave is installed on this computer.");
 	const profile = mkdtempSync(join(tmpdir(), "roostr-login-"));
-	const proc = spawn(chrome, [`--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--new-window", loginUrl], { stdio: "ignore" });
+	// `tabs`: Chrome lists its tabs on a local port (tabUrls) - a sign-in that ends on a page whose address carries the result.
+	const proc = spawn(chrome, [`--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", ...(tabs ? ["--remote-debugging-port=0"] : []), "--new-window", loginUrl], { stdio: "ignore" });
 	const exited = new Promise((resolve) => proc.once("exit", resolve));
 	let gone = false;
 	void exited.then(() => (gone = true));
@@ -298,6 +301,16 @@ export function openLoginWindow(loginUrl: string): LoginWindow {
 				return false;
 			} finally {
 				rmSync(snap, { force: true });
+			}
+		},
+		async tabUrls() {
+			if (!tabs || gone) return [];
+			try {
+				const port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
+				const list = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as Array<{ type?: string; url?: string }>;
+				return list.filter((t) => t.type === "page" && t.url).map((t) => t.url as string);
+			} catch {
+				return [];
 			}
 		},
 		async finish() {

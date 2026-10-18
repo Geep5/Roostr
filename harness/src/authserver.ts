@@ -7,7 +7,8 @@
 
 import { SimplePool, finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 
-import { authStatus, finishAnthropicLogin, setApiKey, startAnthropicLogin } from "./auth";
+import { authStatus, setApiKey } from "./auth";
+import { finishPlanSignIn, planStatus, servePlanOn, signOutPlan, startPlanSignIn } from "./claude-plan";
 import { agentTurnStatus } from "./index";
 import { readRoster } from "./roster";
 import { setSkillPrompt, resetSkillPrompt } from "./skillmgr";
@@ -230,14 +231,32 @@ export function startAuthServer(served: Set<string>): void {
 				if (req.method === "GET" && url.pathname === "/identity") {
 					return json(await identity());
 				}
-				if (req.method === "POST" && url.pathname === "/auth/anthropic/start") {
-					return json({ authUrl: await startAnthropicLogin() });
-				}
-				if (req.method === "POST" && url.pathname === "/auth/anthropic/finish") {
-					const body = (await req.json()) as { code?: string };
-					if (!body.code?.trim()) return json({ error: "code required" }, 400);
-					await finishAnthropicLogin(body.code);
-					return json({ ok: true });
+				// The Claude plan, space-wide (claude-plan.ts): every space you own gets it on its Anthropic credential.
+				if (url.pathname.startsWith("/claude-plan")) {
+					if (authorization.role !== "ui") return json({ error: "A paired app is required." }, 403);
+					try {
+						if (req.method === "GET" && url.pathname === "/claude-plan") return json(await planStatus());
+						const body = req.method === "POST" ? ((await req.json().catch(() => ({}))) as { servedBy?: unknown; code?: unknown; machine?: unknown }) : {};
+						if (req.method === "POST" && url.pathname === "/claude-plan/start") {
+							await startPlanSignIn(typeof body.servedBy === "string" ? body.servedBy : "");
+							return json(await planStatus());
+						}
+						if (req.method === "POST" && url.pathname === "/claude-plan/code") {
+							if (typeof body.code !== "string" || !body.code.trim()) return json({ error: "Paste the code claude.ai showed." }, 400);
+							await finishPlanSignIn(body.code);
+							return json(await planStatus());
+						}
+						if (req.method === "POST" && url.pathname === "/claude-plan/serve") {
+							await servePlanOn(typeof body.machine === "string" ? body.machine : "");
+							return json(await planStatus());
+						}
+						if (req.method === "POST" && url.pathname === "/claude-plan/signout") {
+							await signOutPlan();
+							return json(await planStatus());
+						}
+					} catch (error) {
+						return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+					}
 				}
 				if (req.method === "POST" && url.pathname === "/auth/key") {
 					const body = (await req.json()) as { provider?: string; key?: string };

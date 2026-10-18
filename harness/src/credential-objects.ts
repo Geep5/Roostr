@@ -28,6 +28,8 @@ import { join } from "node:path";
 import { createObject, deleteField, fetchObject, mutate, num, queryAll, setField, str, sv, iv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { linkTarget } from "./capabilities";
 import { credentialPageAction, openLoginWindow, profileCookies, type LoginWindow, type SessionCookie } from "./browser";
+import { anthropicKey, anthropicState } from "./anthropic-plan";
+import { renewPlans } from "./claude-plan";
 import { actionsOf, KEY_PREFIX, COOKIE_META, cookieProperty, cookieValueKeys, credentialKeys, credentialProperties, credentialSession, dropLegacySecrets, LEGACY_SESSION, legacyKeyName, legacyKeys, legacyProfileDir, legacyProfileExists, legacySession, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionAccepted, sessionDecision, sessionFields, sessionHash, sessionMeta, sessionSignedIn, type SessionCheck } from "./credentials";
 import { ensureProperties } from "./credential-seeds";
 import { legacyInstalls } from "./migrate-capabilities";
@@ -51,10 +53,13 @@ export interface CredentialRow {
 	/** machine_id of the computer that looks after it; "" when no Served by is set. */
 	servedBy: string;
 	status: CredentialStatus | "";
-	auth: "browser_profile" | "api_key" | "";
+	auth: "browser_profile" | "api_key" | "plan" | "";
 	error: string;
 	fields: Record<string, ValueJSON>;
 }
+
+/** The Anthropic credential's service (space-defaults.ts ANTHROPIC_SERVICE). */
+const ANTHROPIC_PLAN_SERVICE = "anthropic";
 
 /** Credentials this computer looks after, as last refreshed. */
 let mine: CredentialRow[] = [];
@@ -104,6 +109,8 @@ async function computerName(id: string): Promise<string> {
 
 /** What is true for a credential right now, from what it carries. */
 function liveState(row: CredentialRow): LiveState {
+	// Two logins, the plan first (anthropic-plan.ts).
+	if (row.service === ANTHROPIC_PLAN_SERVICE) return anthropicState(row.fields);
 	const recipe = recipeOf(row.fields);
 	const label = recipe.label || "this service";
 	if (!recipe.sessionCookie && recipe.passwordFields.length === 0) {
@@ -334,6 +341,8 @@ async function checkNow(row: CredentialRow, me: string): Promise<CredentialRow> 
  * every credential change and a slow timer call it.
  */
 export async function refreshCredentials(): Promise<CredentialRow[]> {
+	// Claude plans this computer serves are renewed before they expire, so the states below read the new tokens.
+	await renewPlans().catch((err) => console.error("[claude-plan] renewal:", err instanceof Error ? err.message : err));
 	const me = await machineId();
 	const rows = await Promise.all((await queryAll({ type: CREDENTIAL_TYPE })).map(rowOf));
 	mine = await Promise.all(
@@ -687,11 +696,15 @@ export async function agentModelKey(agent: ObjectJSON, provider: string): Promis
 	for (const id of agentCredentialIds(agent)) {
 		const row = await credentialObject(id).catch(() => null);
 		if (row?.service !== provider) continue;
-		const key = credentialKeys(row.fields)?.api_key;
+		// Anthropic: the Claude plan while it is good, else the API key.
+		const key = provider === ANTHROPIC_PLAN_SERVICE ? anthropicKey(row.fields) : credentialKeys(row.fields)?.api_key;
 		if (key) return key;
 		empty.push(row.name || "Anthropic");
 	}
-	if (empty.length > 0) throw new Error(`The "${empty[0]}" credential has no key. Open it and paste an API key or token in its "API key or token" property.`);
+	if (empty.length > 0) {
+		const fix = provider === ANTHROPIC_PLAN_SERVICE ? 'Sign in with Claude in Settings, or paste an API key in its "API key or token" property.' : 'Open it and paste an API key or token in its "API key or token" property.';
+		throw new Error(`The "${empty[0]}" credential has no working login. ${fix}`);
+	}
 	return null;
 }
 

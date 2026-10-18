@@ -28,10 +28,10 @@ export const ANTHROPIC_SERVICE = "anthropic";
 /** The page of a seeded Anthropic credential: what to paste, and where it comes from. */
 const ANTHROPIC_PAGE = [
 	"The Claude login for this space's agents. Every new agent lists it in its Credentials.",
-	"Paste one of these into API key or token:",
-	"- an Anthropic API key (sk-ant-api…) from console.anthropic.com → API keys, or",
-	"- a Claude subscription token (sk-ant-oat…): run `claude setup-token` in a terminal and paste what it prints.",
-	"Until a key is here, an agent that lists this credential stops and says so on its Error.",
+	"It holds up to two logins, and agents use the first that works:",
+	"- your Claude plan: Settings → Claude plan → Sign in with Claude (it goes onto every space you own, and one computer keeps it fresh), then",
+	"- an API key pasted into API key or token: an Anthropic API key (sk-ant-api…) from console.anthropic.com → API keys, or a Claude subscription token (sk-ant-oat…) from `claude setup-token`.",
+	"With neither, an agent that lists this credential stops and says so on its Error.",
 ].join("\n");
 
 /** The standing prompt of a space's "<Space> Space" agent. */

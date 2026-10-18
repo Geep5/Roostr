@@ -30,6 +30,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { str, type ValueJSON } from "./api";
+import { PLAN_REFRESH, PLAN_TOKEN } from "./anthropic-plan";
 import { LOGIN_WALL, type SessionCookie } from "./browser";
 
 export interface PasswordField {
@@ -126,7 +127,7 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 	{
 		key: "anthropic",
 		label: "Anthropic",
-		note: "Key for Claude models: an Anthropic API key (sk-ant-api…) or a long-lived Claude subscription token from `claude setup-token` (sk-ant-oat…). Agents whose Model is a Claude model use it on any computer.",
+		note: "Claude for agents whose Model is a Claude model, on any computer. Two logins, the first that works is used: your Claude plan (Settings → Claude plan → Sign in with Claude), then the key pasted here - an Anthropic API key (sk-ant-api…) or a Claude subscription token from `claude setup-token` (sk-ant-oat…).",
 		passwordFields: [{ key: "api_key", label: "API key or token", secret: true }],
 	},
 	{
@@ -323,7 +324,7 @@ export function blankSecretsDeep(value: unknown, secrets: string[]): unknown {
 export function hideCredentialSecrets<T extends { typeKey: string; fields: Record<string, ValueJSON> }>(obj: T): T {
 	if (obj.typeKey !== "credential") return obj;
 	const secret = Object.entries(obj.fields)
-		.filter(([k, v]) => (k === LEGACY_SESSION || k === "secret" || isCookieValueKey(k) || (k.startsWith(KEY_PREFIX) && k.length > KEY_PREFIX.length && k !== LEGACY_KEY_LIST)) && v.stringValue !== "" && Object.keys(v).length > 0)
+		.filter(([k, v]) => (k === LEGACY_SESSION || k === "secret" || k === PLAN_TOKEN || k === PLAN_REFRESH || isCookieValueKey(k) || (k.startsWith(KEY_PREFIX) && k.length > KEY_PREFIX.length && k !== LEGACY_KEY_LIST)) && v.stringValue !== "" && Object.keys(v).length > 0)
 		.map(([k]) => k);
 	if (secret.length === 0) return obj;
 	return { ...obj, fields: { ...obj.fields, ...Object.fromEntries(secret.map((k) => [k, { stringValue: SECRET_SHOWN }])) } };

@@ -1,9 +1,10 @@
 /**
- * Anthropic credentials — port of glon auth.ts. Authorization Code + PKCE
- * against claude.ai/oauth/authorize with the public Claude Code client_id
- * (plan-based inference, no API key), plus api_key entries. Stored in
- * GLON_DATA/auth.json (glon schema, atomic 0600 write), refreshed in place
- * with a 5-minute buffer and coalesced concurrent refreshes.
+ * Anthropic credentials of this computer - what an agent with no Anthropic
+ * credential of its own falls back to: GLON_DATA/auth.json (an older plan
+ * sign-in, refreshed in place, or an api_key), else the environment, else
+ * Claude Code's keychain login. The plan sign-in itself is space-wide now
+ * (claude-plan.ts); its OAuth pieces (PKCE against claude.ai with the public
+ * Claude Code client_id, token refresh) live here and are shared.
  *
  * Resolution order for calls: auth.json (oauth | api_key) → env →
  * Claude Code keychain.
@@ -11,11 +12,11 @@
 
 import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 
-const ANTHROPIC_CLIENT_ID = Buffer.from("OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl", "base64").toString("utf-8");
-const ANTHROPIC_AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
-const ANTHROPIC_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
-const ANTHROPIC_REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback";
-const ANTHROPIC_SCOPES = "org:create_api_key user:profile user:inference";
+export const ANTHROPIC_CLIENT_ID = Buffer.from("OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl", "base64").toString("utf-8");
+export const ANTHROPIC_AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
+export const ANTHROPIC_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
+export const ANTHROPIC_REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback";
+export const ANTHROPIC_SCOPES = "org:create_api_key user:profile user:inference";
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 interface OAuthCredential {
@@ -73,31 +74,10 @@ function base64UrlEncode(bytes: Uint8Array): string {
 	return Buffer.from(bytes).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function generatePkce(): Promise<{ verifier: string; challenge: string }> {
+export async function generatePkce(): Promise<{ verifier: string; challenge: string }> {
 	const verifier = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
 	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
 	return { verifier, challenge: base64UrlEncode(new Uint8Array(digest)) };
-}
-
-// ── Login flow ───────────────────────────────────────────────────
-
-let pendingLogin: { verifier: string } | null = null;
-
-/** Step 1: PKCE + the URL the user opens; claude.ai shows CODE#STATE to paste back. */
-export async function startAnthropicLogin(): Promise<string> {
-	const pkce = await generatePkce();
-	pendingLogin = { verifier: pkce.verifier };
-	const params = new URLSearchParams({
-		code: "true",
-		client_id: ANTHROPIC_CLIENT_ID,
-		response_type: "code",
-		redirect_uri: ANTHROPIC_REDIRECT_URI,
-		scope: ANTHROPIC_SCOPES,
-		code_challenge: pkce.challenge,
-		code_challenge_method: "S256",
-		state: pkce.verifier,
-	});
-	return `${ANTHROPIC_AUTHORIZE_URL}?${params.toString()}`;
 }
 
 interface TokenResponse {
@@ -106,36 +86,7 @@ interface TokenResponse {
 	expires_in: number;
 }
 
-/** Step 2: exchange the pasted code (may be CODE#STATE) and persist. */
-export async function finishAnthropicLogin(rawCode: string): Promise<void> {
-	if (!pendingLogin) throw new Error("no login in progress — start again");
-	const [code, state] = rawCode.trim().split("#");
-	const res = await fetch(ANTHROPIC_TOKEN_URL, {
-		method: "POST",
-		headers: { "Content-Type": "application/json", Accept: "application/json" },
-		body: JSON.stringify({
-			grant_type: "authorization_code",
-			client_id: ANTHROPIC_CLIENT_ID,
-			code,
-			state: state ?? pendingLogin.verifier,
-			redirect_uri: ANTHROPIC_REDIRECT_URI,
-			code_verifier: pendingLogin.verifier,
-		}),
-	});
-	if (!res.ok) throw new Error(`token exchange failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
-	const data = (await res.json()) as TokenResponse;
-	pendingLogin = null;
-	const file = await readAuthFile();
-	file.credentials.anthropic = {
-		type: "oauth",
-		access: data.access_token,
-		refresh: data.refresh_token,
-		expires: Date.now() + data.expires_in * 1000 - REFRESH_BUFFER_MS,
-	};
-	writeAuthFile(file);
-}
-
-async function refreshAnthropicToken(refreshToken: string): Promise<OAuthCredential> {
+export async function refreshAnthropicToken(refreshToken: string): Promise<OAuthCredential> {
 	const res = await fetch(ANTHROPIC_TOKEN_URL, {
 		method: "POST",
 		headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -213,7 +164,7 @@ export async function resolveAnthropicAuth(): Promise<ResolvedAuth> {
 	if (envKey) return { token: envKey, isOAuth: false };
 	const keychain = await keychainAuth();
 	if (keychain) return keychain;
-	throw new Error("No Anthropic credentials: sign in via Settings → Agent, set ANTHROPIC_API_KEY, or log into Claude Code.");
+	throw new Error("No Anthropic credentials: sign in with Claude in Settings → Claude plan, set ANTHROPIC_API_KEY, or log into Claude Code.");
 }
 
 export async function resolveKimiKey(): Promise<string> {
