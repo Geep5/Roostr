@@ -137,7 +137,11 @@ export async function startPlanSignIn(servedBy: string): Promise<void> {
 		} catch (err) {
 			job.error = err instanceof Error ? err.message : String(err);
 		}
-	})();
+	})().catch((err) => {
+		// Never take the harness down: the sign-in stops watching and the code box takes over.
+		job.watching = false;
+		job.error = `Could not watch for the sign-in (${err instanceof Error ? err.message : String(err)}). Paste the code claude.ai showed.`;
+	});
 }
 
 /** Finish a sign-in with the code claude.ai shows (CODE#STATE), when the window could not be read. */

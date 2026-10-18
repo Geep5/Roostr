@@ -334,7 +334,14 @@ function chromiumHistoryFiles(): string[] {
 	const files: string[] = [];
 	for (const root of roots) {
 		if (!existsSync(root)) continue;
-		for (const entry of readdirSync(root)) {
+		// macOS can refuse a browser's folder (privacy protection): that browser is just not looked at.
+		let entries: string[];
+		try {
+			entries = readdirSync(root);
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
 			const history = join(root, entry, "History");
 			if ((entry === "Default" || entry.startsWith("Profile ")) && existsSync(history)) files.push(history);
 		}
