@@ -1,7 +1,8 @@
 # State sync: bases, live deltas, rebase, Blossom files
 
 Status: core, daemon and harness implemented (compaction and deletions
-behind flags, see "Computers"); web and iOS in progress. Supersedes the
+behind flags, see "Computers"); web and iOS replicas implemented in Rust
+(`RoostrWebsite/gpui/crates/roostr-replica`). Supersedes the
 "replay everything" contract of `docs/checkpoint-sync.md`.
 
 ## Why
@@ -249,13 +250,34 @@ space objects). `b` is taken from a 1078 only as 64-char lowercase hex.
    holding no base is walked whole (since 0) exactly as before. Never a
    global floor: one stream's bases say nothing about another stream's
    unbased objects (a space whose owner's computer has not compacted yet).
-3. **Live subscription** as today (`since = cursor+1`) on 1078, 31078,
+3. **Unbased sweep.** The window in step 2 assumes every object older
+   than its stream's floor has a base. That fails whenever no computer
+   based an object (its serving computer offline, a harness whose unbased
+   fallback skipped it), and such objects would never reach a fresh
+   device. So, per relay and per stream holding a base, the replica
+   reconciles the stream *below* its floor (`until` = floor) and fetches
+   everything except the events of objects that hold a base: those ids
+   are listed first by NIP-77 over the based objects' `h` tags (personal
+   tag plus one per installed space key, `sha256(prefix || objectId)[..16]`),
+   against an empty set, so nothing is downloaded for them. Relays without
+   NIP-77 get a paged walk of the range instead. Progress is kept per
+   stream in store meta `unbased-swept` (scope -> swept-up-to); a stream
+   counts as swept only when every relay completed it, and later passes
+   sweep only the range its floor moved past. A device that synced before
+   the sweep existed runs it on its next pass. Known gap: a change
+   published late with a `created_at` below an already-swept floor (a
+   device catching up after days offline) is still missed, as by the live
+   subscription.
+4. **Live subscription** as today (`since = cursor+1`) on 1078, 31078,
    1080, 5.
-4. Never walks a stream holding a base from event zero again.
+5. Never walks a stream holding a base from event zero again; below the
+   floor only the unbased sweep reads, and only events no held base covers.
 
-Hosts: daemon + harness (`glonOdin`), web (`RoostrWebsite/gpui/crates/roostr-replica`),
-iOS (`RoostrIOS/Sources/RoostrSync`). The core (`core/`, shared via WASM
-and the xcframework) owns: base encode/decode/hash, current-base choice,
+Hosts: daemon + harness (`glonOdin`), and the Rust replica
+(`RoostrWebsite/gpui/crates/roostr-replica`, `src/sync/history.rs`) shared
+by the web app and the iOS app (`RoostrWebsite/gpui/crates/roostr-ios`,
+hosted by `RoostrIOS`). The core (`core/`, linked natively and as WASM)
+owns: base encode/decode/hash, current-base choice,
 live/orphan classification, rebase change construction, replay from base,
 sealing/opening bases.
 
@@ -416,7 +438,8 @@ local File lacking `blob_sha256` once at file-peer start.
 ## Core API
 
 Every host reaches these through the existing core boundary:
-`dispatch("sync", {action, ...})` (WASM `core_execute`, the xcframework, the
+`dispatch("sync", {action, ...})` (WASM `core_execute` in the browser, the
+static library linked by `roostr-engine` on desktop/iOS, the
 native daemon). Implementation: `core/state_sync.odin` (classification,
 replay, rebase, planner), `core/wire.odin` (sealing), `core/sync_session.odin`
 (ingest), `core/authority.odin` (authorization). Errors come back as the
