@@ -253,7 +253,7 @@ space objects). `b` is taken from a 1078 only as 64-char lowercase hex.
    1080, 5.
 4. Never walks a stream holding a base from event zero again.
 
-Hosts: daemon + harness (`glonOdin`), web (`RoostrWebsite/src/lib/engine`),
+Hosts: daemon + harness (`glonOdin`), web (`RoostrWebsite/gpui/crates/roostr-replica`),
 iOS (`RoostrIOS/Sources/RoostrSync`). The core (`core/`, shared via WASM
 and the xcframework) owns: base encode/decode/hash, current-base choice,
 live/orphan classification, rebase change construction, replay from base,

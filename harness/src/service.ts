@@ -1,9 +1,10 @@
 /**
- * Roostr as an OS service: the store, sync and harness (and, with --web, a
- * local web app) start at boot and come back when one crashes; a crash
- * shows as the Error on this computer's Computer object (supervisor.ts).
+ * Roostr as an OS service: the store, sync and harness (and, with --web, the
+ * local web app on http://127.0.0.1:5190, built and served by web.ts) start
+ * at boot and come back when one crashes; a crash shows as the Error on this
+ * computer's Computer object (supervisor.ts).
  *
- *   bun run service install [--web <path>]   write the service, start it now and at every boot
+ *   bun run service install [--web <path>]   write the service, start it now and at every boot (<path>: the RoostrWebsite repo)
  *   bun run service uninstall                stop it and remove the service
  *   bun run service restart                  restart everything (after a pull or a rebuild)
  *   bun run service logs                     follow every program's output
@@ -76,7 +77,7 @@ function programs(web: string): Program[] {
 		{ name: "sync", label: "Sync", cmd: [bun, "run", "src/sync.ts"], cwd: HARNESS_DIR },
 		{ name: "harness", label: "Harness", cmd: [bun, "run", "src/index.ts", "serve"], cwd: HARNESS_DIR },
 	];
-	if (web) list.push({ name: "web", label: "Web app", cmd: ["npm", "run", "dev:local"], cwd: web });
+	if (web) list.push({ name: "web", label: "Web app", cmd: [bun, "run", "src/web.ts", web], cwd: HARNESS_DIR });
 	return list;
 }
 
@@ -155,7 +156,7 @@ async function install(): Promise<void> {
 	const webArg = argValue("--web");
 	const web = webArg ? resolve(webArg) : "";
 	if (!existsSync(DAEMON)) fail(`No store binary at ${DAEMON}. Build it first, in ${REPO_DIR}: odin build src -o:speed -out:glon-odin`);
-	if (web && !existsSync(join(web, "package.json"))) fail(`--web ${webArg}: no package.json in ${web}`);
+	if (web && !existsSync(join(web, "gpui/scripts/build-web.sh"))) fail(`--web ${webArg}: no gpui/scripts/build-web.sh in ${web} (the RoostrWebsite repo)`);
 	const args = [process.execPath, "run", "src/service.ts", "run", ...(web ? ["--web", web] : [])];
 	// `bun run` prepends every node_modules/.bin up the tree; the service needs only the user's own PATH.
 	const path = [...new Set((process.env.PATH ?? "/usr/bin:/bin").split(":").filter((dir) => dir && !dir.endsWith("/node_modules/.bin")))];

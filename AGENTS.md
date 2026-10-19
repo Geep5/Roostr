@@ -26,7 +26,7 @@ A computer becomes part of Roostr when its harness first starts: it creates this
      curl -s -X POST http://127.0.0.1:7333/api/mutate -H "Authorization: Bearer $TOK" -d '{"action":"nostr_relays_set","relays":["wss://roostr-relay.fly.dev"]}'
      ```
    - The key *is* the account: never print it into a chat, an object or a log.
-3. **Start Roostr as a service** (from `harness/`): `bun run service install` - add `--web <path to the RoostrWebsite repo>` to also serve the web app on `http://127.0.0.1:5190/app` (pair it with the code in `bun run service logs`). The logs should show `[sync] identity <pubkey>… relays: …` and `[sync] backfill: N event(s)`: the account's objects arriving.
+3. **Start Roostr as a service** (from `harness/`): `bun run service install` - add `--web <path to the RoostrWebsite repo>` to also serve the web app on `http://127.0.0.1:5190/app` (it builds the repo's `gpui/web-dist` first when that is missing or stale, which needs `cargo` and the `wasm32-unknown-unknown` target; the page pairs with this computer's store and shows its one-use pairing code). The logs should show `[sync] identity <pubkey>… relays: …` and `[sync] backfill: N event(s)`: the account's objects arriving.
 4. **Check the Computer object exists:**
    ```bash
    curl -s http://127.0.0.1:7334/machine -H "Authorization: Bearer $TOK"   # {"id": <this computer's machine_id>, "host": …}
@@ -89,6 +89,6 @@ Skills, machine software and recurring work:
 
 - Engine (Odin, `core/`, `src/`): `odin test core && odin test src`, then `odin build src -out:glon-odin -o:speed`.
 - Harness (Bun, `harness/`): `bun test` and `npx tsc --noEmit -p .`.
-- Then `bun run service restart`. The web app lives in the sibling RoostrWebsite repository.
+- Then `bun run service restart`. The web app lives in the sibling RoostrWebsite repository (Rust/GPUI, `gpui/`); with `--web` the restart rebuilds it when its sources changed.
 - When behaviour changes, update `docs/roostr-guide.md` (and the website's `/guide` page, its people version).
 - Commit only what helps any Roostr deployment. Anything naming one account, person, login or site's workflow lives in the account as objects (skills, prompts, tasks), or, when it must be a file, in the gitignored `harness/private/<name>/` extension (README, "What only one deployment needs").

@@ -11,9 +11,9 @@ they install or change anything on a machine. Service logins are
 Credential objects: an agent uses the ones listed on it, and sees page
 text, never the secret.
 
-The substrate is **glon**, built on Odin + Svelte: a native backend
+The substrate is **glon**, built on Odin + Rust: a native backend
 serving the Change-DAG, with the object editor / queries / channels /
-discussions SPA as a pure client. Your Nostr key is your identity, sync
+discussions app (GPUI, desktop and browser) as a pure client. Your Nostr key is your identity, sync
 rides relays. Native and browser builds run the same Odin domain engine —
 the browser gets it as WebAssembly, so the web view works offline with a
 durable outbox and no account at all.
@@ -31,7 +31,7 @@ cd harness && bun install
 
 # Keep Roostr running: the store, sync and harness start at boot (Linux) or
 # login (macOS) and come back when one crashes.
-bun run service install            # --web ../../RoostrWebsite runs the local web app too
+bun run service install            # --web ../../RoostrWebsite also serves the web app on http://127.0.0.1:5190
 bun run service logs               # follow every program; also: restart, uninstall
 bun run pair                       # a fresh one-use pairing code, shown in the logs
 
@@ -42,9 +42,11 @@ bun run pair                       # a fresh one-use pairing code, shown in the 
 cd harness && bun run sync
 cd harness && bun run serve        # optional: agents and machine integrations
 
-# The single UI source is the sibling RoostrWebsite repository:
-cd ../RoostrWebsite && npm install && npm run dev:local
-# Open http://127.0.0.1:5190/app and pair with the code in the daemon terminal.
+# The single UI source is the sibling RoostrWebsite repository (GPUI, gpui/):
+cd harness && bun run src/web.ts ../../RoostrWebsite
+# Builds gpui/web-dist with gpui/scripts/build-web.sh when it is missing or
+# older than its sources, then serves it. Open http://127.0.0.1:5190/app: the
+# page pairs with the store here and shows its one-use pairing code.
 ```
 
 The service (`harness/src/service.ts`) is a systemd user unit on Linux
@@ -56,6 +58,18 @@ output - as the Error on this computer's Computer object. A crash loop is one
 Error with a count; clearing it starts the count over. The Computer's
 **Starts automatically** box is ticked while the service runs it. The harness
 and sync each refuse a second copy on the same computer.
+
+With `--web <RoostrWebsite repo>` it also runs the web app
+(`harness/src/web.ts`): the same build roostr.space serves, on
+`http://127.0.0.1:5190`, with the site's routing (`/<path>` is answered by
+`<path>`, `<path>.html`, `<path>/index.html`, else `200.html`). Its pages
+carry `<meta name="roostr-mode" content="daemon">`, so a new tab there uses
+this computer's store rather than a browser replica (a choice made in the
+tab's Settings still wins). The store and harness accept any loopback origin,
+and only a loopback page may read the pairing code. It builds `gpui/web-dist`
+first whenever that is missing or older than its sources (Rust's
+`wasm32-unknown-unknown` target and `cargo` on the service's `PATH`), so
+`bun run service restart` after a pull serves the new code.
 
 ### Toolchain
 
@@ -82,7 +96,8 @@ build-xcframework.mjs
 src/           native disk store, authenticated HTTP/SSE, identity and key files
 harness/       Bun services: independent Nostr sync; optional agent/tool harness
 ../RoostrWebsite/
-               canonical Svelte UI, paired-native and browser-offline backends
+               canonical UI: Rust/GPUI app (gpui/) for the desktop and, as wasm,
+               roostr.space; paired-daemon and browser-replica backends
                (no mirrored UI source in this repository)
 ../RoostrIOS/  Swift host: GlonCore actor over the xcframework, SwiftUI shell
 ```
@@ -349,16 +364,17 @@ other space gets them, and copies there that nobody edited are removed.
 ## Verified
 
 - Native/WASM codec, replay, query, mutation and wire fixtures are in `core/` and
-  `query_tests/`, with browser runners under `RoostrWebsite/scripts/` and Swift
-  runners under `RoostrIOS/Tests/`. `core/nip44_vectors.json` is the official
-  NIP-44 vector set; `core/wire_fixtures.json` was produced by the TypeScript
-  reference so the engine is held to the bytes already on the relays.
+  `query_tests/`, with Rust runners in `RoostrWebsite/gpui/crates/roostr-engine/tests/`
+  (`parity.rs`, `query.rs`, `abi.rs` through the native binding; `web.rs` loads the
+  site's `engine.wasm` in a browser) and Swift runners under `RoostrIOS/Tests/`.
+  `core/nip44_vectors.json` is the official NIP-44 vector set;
+  `core/wire_fixtures.json` was produced by the TypeScript reference so the
+  engine is held to the bytes already on the relays.
 - `odin test core`, `odin test query_tests`, and `odin test src` exercise domain
-  and local authorization contracts. Browser tests cover pairing, shared-space
-  authority, chunk bounds, durable outbox and ABI lifetime.
-- `RoostrWebsite/scripts/parity-replay.ts` verifies raw stored hashes and compares
-  all local objects against the daemon; it must use authenticated requests when
-  run against the protected daemon.
+  and local authorization contracts. The replica's tests
+  (`RoostrWebsite/gpui/crates/roostr-replica/tests/`) cover shared-space
+  authority, chunk bounds, the durable publish outbox and state sync;
+  `roostr-engine/tests/abi.rs` covers ABI lifetime.
 
 ## Known deviations
 

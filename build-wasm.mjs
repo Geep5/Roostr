@@ -18,10 +18,6 @@ for (const directory of ["abi", "core", "wasm"]) {
 	}
 }
 sourceFiles["build-wasm.mjs"] = hash(await readFile(fileURLToPath(import.meta.url)));
-const runtimeFiles = {};
-for (const path of ["src/lib/engine/core.ts", "src/lib/engine/odin-runtime.ts"]) {
-	runtimeFiles[path] = hash(await readFile(join(website, path)));
-}
 await mkdir(output, { recursive: true });
 const temporary = join(output, `.engine-${process.pid}.wasm`);
 const args = ["build", join(root, "wasm"), "-target:js_wasm32", "-o:speed", `-out:${temporary}`, "-extra-linker-flags:--max-memory=536870912"];
@@ -44,7 +40,6 @@ try {
 		sha256: hash(bytes),
 		sourceFingerprint: hash(JSON.stringify(sourceFiles)),
 		sourceFiles,
-		runtimeFiles,
 	};
 	await writeFile(join(output, `.engine-core-${process.pid}.json`), `${JSON.stringify(manifest, null, 2)}\n`);
 	await rename(temporary, join(output, "engine.wasm"));
