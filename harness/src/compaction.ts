@@ -47,15 +47,24 @@ export function shouldAutoCompact(system: string, view: ConversationView, tools:
 	return estimateAskTokens(system, view, tools, ratio) > cfg.contextWindow - cfg.reserveTokens;
 }
 
-function serializeForSummary(items: ClassifiedItem[]): string {
+/** The most of the compacted history the summariser sees: ~85k tokens, so the summary request itself always fits the context window. */
+const SUMMARY_INPUT_CAP = 300_000;
+
+/**
+ * The compacted history as the summariser reads it: every item cut to
+ * SUMMARY_TOOL_RESULT_CAP (a scheduled run's message carries the whole task
+ * page), and the oldest dropped first once the total passes
+ * SUMMARY_INPUT_CAP - the prior summary already holds what they said.
+ */
+export function serializeForSummary(items: ClassifiedItem[]): string {
 	const lines: string[] = [];
 	for (const item of items) {
 		switch (item.kind) {
 			case "user_text":
-				lines.push(`[user${item.author ? ` ${item.author}` : ""}] ${item.text}`);
+				lines.push(`[user${item.author ? ` ${item.author}` : ""}] ${item.text.slice(0, SUMMARY_TOOL_RESULT_CAP)}`);
 				break;
 			case "assistant_text":
-				lines.push(`[assistant] ${item.text}`);
+				lines.push(`[assistant] ${item.text.slice(0, SUMMARY_TOOL_RESULT_CAP)}`);
 				break;
 			case "tool_use":
 				lines.push(`[tool ${item.name}] ${JSON.stringify(item.input).slice(0, 400)}`);
@@ -67,7 +76,11 @@ function serializeForSummary(items: ClassifiedItem[]): string {
 				break;
 		}
 	}
-	return lines.join("\n");
+	let size = 0;
+	let first = lines.length;
+	while (first > 0 && size + lines[first - 1].length + 1 <= SUMMARY_INPUT_CAP) size += lines[--first].length + 1;
+	const kept = lines.slice(first);
+	return first > 0 ? [`[${first} earlier entries left out - the prior summary covers them]`, ...kept].join("\n") : kept.join("\n");
 }
 
 /** Exact holdfast summary structure (agent-compaction.ts:85-133). */

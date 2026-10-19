@@ -73,6 +73,20 @@ const CLAUDE_CODE_STAINLESS_HEADERS: Record<string, string> = {
 	"X-Stainless-Timeout": "600",
 };
 
+/** Half a UTF-16 pair: a high surrogate with no low one after it, or a low one with no high one before it. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * A model request as JSON with every string well-formed. Text cut anywhere
+ * along the way (`.slice` through an emoji) leaves half a UTF-16 pair, which
+ * JSON.stringify writes as a lone `\ud83d` - and the API rejects the whole
+ * request ("unexpected end of hex escape"), on every turn after. The half
+ * becomes U+FFFD instead.
+ */
+export function requestJson(body: unknown): string {
+	return JSON.stringify(body, (_key, value: unknown) => (typeof value === "string" ? value.replace(LONE_SURROGATE, "\uFFFD") : value));
+}
+
 /** Prompt-caching stamps (agent-llm.ts:137-163). */
 function applyPromptCaching(body: Record<string, unknown>): void {
 	const stamp = { type: "ephemeral" } as const;
@@ -137,7 +151,7 @@ async function callAnthropic(req: LLMRequest): Promise<LLMResult> {
 	const res = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
 		method: "POST",
 		headers,
-		body: JSON.stringify(body),
+		body: requestJson(body),
 	});
 	if (!res.ok) {
 		const errBody = await res.text();
@@ -199,7 +213,7 @@ async function callKimi(req: LLMRequest): Promise<LLMResult> {
 	const res = await fetchWithRetry("https://api.moonshot.ai/v1/chat/completions", {
 		method: "POST",
 		headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-		body: JSON.stringify({
+		body: requestJson({
 			model: req.model,
 			max_tokens: req.maxTokens ?? 4096,
 			temperature: req.temperature,
