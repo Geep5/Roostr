@@ -503,7 +503,7 @@ handle_channels :: proc(sock: net.TCP_Socket) {
 		}
 		o["icon"] = json.String(icon)
 			pinned := make([dynamic]json.Value, context.temp_allocator)
-			for id in pins[s.id] do append(&pinned, json.String(id))
+			if ids, has := pins[s.id]; has do for id in ids do append(&pinned, json.String(id))
 			o["pinnedIds"] = json.Array(pinned)
 			members := make([dynamic]json.Value, context.temp_allocator)
 			if v, ok := core.fields_get(s.fields, "members"); ok && v.kind == .List {

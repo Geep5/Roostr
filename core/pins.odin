@@ -57,26 +57,34 @@ Pin_Entry :: struct {
  * belongs to `default_space` (the oldest), as everywhere else.
  */
 pins_by_space :: proc(states: map[string]^Object_State, default_space: string, allocator := context.temp_allocator) -> map[string][dynamic]string {
-	entries := make(map[string][dynamic]Pin_Entry, allocator = context.temp_allocator)
+	// One flat list sorted by space, then position: no pointers into a map
+	// that grows while it is filled.
+	Row :: struct {
+		space, key, id: string,
+	}
+	rows := make([dynamic]Row, context.temp_allocator)
 	for id, s in states {
-		if s.deleted do continue
+		if s == nil || s.deleted do continue
 		key := field_string(s.fields, PIN_KEY)
 		if key == "" do continue
 		space := field_string(s.fields, "channel")
 		if space == "" do space = default_space
-		list, ok := &entries[space]
-		if !ok {
-			entries[space] = make([dynamic]Pin_Entry, context.temp_allocator)
-			list = &entries[space]
-		}
-		append(list, Pin_Entry{id, key})
+		append(&rows, Row{space, key, id})
 	}
+	slice.sort_by(rows[:], proc(x, y: Row) -> bool {
+		if x.space != y.space do return x.space < y.space
+		return x.key != y.key ? x.key < y.key : x.id < y.id
+	})
 	out := make(map[string][dynamic]string, allocator = allocator)
-	for space, list in entries {
-		slice.sort_by(list[:], proc(x, y: Pin_Entry) -> bool { return x.key != y.key ? x.key < y.key : x.id < y.id })
-		ids := make([dynamic]string, allocator)
-		for e in list do append(&ids, e.id)
-		out[space] = ids
+	for i := 0; i < len(rows); {
+		j := i
+		ids := make([dynamic]string, 0, 4, allocator)
+		for j < len(rows) && rows[j].space == rows[i].space {
+			append(&ids, rows[j].id)
+			j += 1
+		}
+		out[rows[i].space] = ids
+		i = j
 	}
 	return out
 }
@@ -85,7 +93,7 @@ pins_by_space :: proc(states: map[string]^Object_State, default_space: string, a
 pins_last_key :: proc(states: map[string]^Object_State, space: string, default_space: string) -> string {
 	last := ""
 	for _, s in states {
-		if s.deleted do continue
+		if s == nil || s.deleted do continue
 		key := field_string(s.fields, PIN_KEY)
 		if key == "" do continue
 		owner := field_string(s.fields, "channel")
@@ -100,7 +108,7 @@ pins_first_key :: proc(states: map[string]^Object_State, space: string, default_
 	first := ""
 	found := false
 	for _, s in states {
-		if s.deleted do continue
+		if s == nil || s.deleted do continue
 		key := field_string(s.fields, PIN_KEY)
 		if key == "" do continue
 		owner := field_string(s.fields, "channel")
@@ -118,7 +126,7 @@ pins_default_space :: proc(states: map[string]^Object_State) -> string {
 	best := ""
 	best_at: i64 = 0
 	for id, s in states {
-		if s.deleted || s.type_key != "channel" do continue
+		if s == nil || s.deleted || s.type_key != "channel" do continue
 		if best == "" || s.created_at < best_at || (s.created_at == best_at && id < best) {
 			best = id
 			best_at = s.created_at
