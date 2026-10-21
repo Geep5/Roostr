@@ -755,10 +755,12 @@ export function runNow(objectId: string, why: string): void {
  * progress is dropped; the app shows Running… and offers no Run now then.
  */
 export async function handleRunRequest(obj: ObjectJSON): Promise<void> {
-	if (!host || !obj.fields[RUN_REQUEST_KEY] || !obj.fields["repeat"]) return;
-	if (!(await servesHere(obj.id))) return;
-	// A push asked for by another writer (an importer: "new email from …"): wake it now, saying why.
+	if (!host || !obj.fields[RUN_REQUEST_KEY]) return;
+	// A push asked for by another writer (an importer: "new email from …", or a person catching up a
+	// push-only inbox): wake it now, saying why. A push-only object has no Repeat, and needs none for this.
 	const request = obj.fields[RUN_REQUEST_KEY]?.mapValue?.entries ?? {};
+	if (!request["push"]?.boolValue && !obj.fields["repeat"]) return;
+	if (!(await servesHere(obj.id))) return;
 	if (request["push"]?.boolValue) {
 		await deleteField(obj.id, RUN_REQUEST_KEY);
 		runNow(obj.id, request["why"]?.stringValue ?? "");
