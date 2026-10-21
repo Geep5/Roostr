@@ -953,6 +953,16 @@ async function serve(): Promise<void> {
 			if (!s) return Promise.resolve("agent no longer served on this machine");
 			return driveScheduled(s, systemSuffix);
 		},
+		async fresh(agentId) {
+			const s = served.get(agentId);
+			if (!s) throw new Error("agent no longer served on this machine");
+			// Never under a turn still reading the old transcript.
+			await awaitSlot(s);
+			// The whole thread goes (its root and everything under it), so the agent object shrinks too.
+			await mutate("block_remove", { object_id: s.conv.objectId, block_id: s.conv.threadId });
+			s.conv = await agentThread(await fetchObject(agentId));
+			return s.conv;
+		},
 	});
 	// Push, not polling, for inboxes: new mail runs its inbox object at once.
 	startGmailPush();

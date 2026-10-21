@@ -16,7 +16,8 @@
  * an Anthropic credential, or an agent of that name, is left as it is.
  */
 
-import { createDefault, fetchObject, lv, ownedSpaces, queryAll, setField, str, sv, type QueryRow } from "./api";
+import { bv, createDefault, fetchObject, iv, lv, ownedSpaces, queryAll, setField, str, sv, type QueryRow } from "./api";
+import { FRESH_RUNS_KEY } from "./schedule";
 import { CREDENTIAL_TYPE } from "./credential-objects";
 import { fillCredential } from "./credential-seeds";
 import { SYSTEM_PROMPT_TYPE, DEFAULT_MODEL, writePageText } from "./prompts";
@@ -88,6 +89,26 @@ export async function seedSpaceDefaults(): Promise<{ credentials: number; agents
 }
 
 async function seedSpace(space: { id: string; name: string }, me: string, out: { credentials: number; agents: number }): Promise<void> {
+	// 0. The agent property "Fresh each run" (schedule.ts FRESH_RUNS_KEY), unless the space has it.
+	const freshId = `rel-${FRESH_RUNS_KEY}-${space.id}`;
+	const relations = await queryAll({ type: "relation" });
+	if (!relations.some((r) => str(r.fields, "channel") === space.id && str(r.fields, "key") === FRESH_RUNS_KEY) && !(await everMade(freshId))) {
+		await createDefault("Fresh each run", "relation", {
+			channel: sv(space.id),
+			key: sv(FRESH_RUNS_KEY),
+			name: sv("Fresh each run"),
+			description: sv("On an agent: every scheduled or push run starts on an empty transcript, and the last run's is removed. For work whose state lives on the object it runs, like an inbox."),
+			format: sv("checkbox"),
+			iconEmoji: sv("🧹"),
+			hidden: bv(false),
+			readOnly: bv(false),
+			maxCount: iv(0),
+			options: lv([]),
+			bundled: bv(false),
+			system: bv(true),
+		}, freshId);
+	}
+
 	// 1. The Anthropic credential.
 	let cred = spaceAnthropicCredential(await queryAll({ type: CREDENTIAL_TYPE }), space.id);
 	const credId = `anthropic-${space.id}`;

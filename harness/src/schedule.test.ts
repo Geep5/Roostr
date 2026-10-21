@@ -24,6 +24,11 @@ afterEach(async () => {
 	await rm(root, { recursive: true, force: true });
 });
 
+/** These tests run no agent with Fresh each run. */
+async function unusedFresh(): Promise<never> {
+	throw new Error("fresh is not expected in this test");
+}
+
 function respond(body: unknown, status = 200): Response {
 	return Response.json(body, { status });
 }
@@ -87,6 +92,7 @@ test("a scheduled object fires to the served agent on its guest list", async () 
 	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
 	machine = "test-machine";
 	await startScheduler({
+		fresh: unusedFresh,
 		async served(agentId) {
 			if (agentId !== guestAgentId) return undefined;
 			return { agentId, conv: { objectId: transcriptObject, threadId: transcriptThread } };
@@ -158,6 +164,7 @@ test("a scheduled object with no agent gets an error badge and no turn", async (
 	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
 	machine = "test-machine";
 	await startScheduler({
+		fresh: unusedFresh,
 		async served() {
 			return undefined;
 		},
@@ -249,6 +256,7 @@ async function checkFirstRun(code: string): Promise<{ calls: Array<{ path: strin
 	const turnDone = waitForTurnEnd();
 	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
 	await startScheduler({
+		fresh: unusedFresh,
 		async served(id) {
 			return id === agentId ? { agentId, conv: { objectId: agentId, threadId: "thread" } } : undefined;
 		},
@@ -359,6 +367,7 @@ test("a run a login blocked retries itself once that login is fixed - once, sayi
 	}) as typeof fetch;
 	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
 	await startScheduler({
+		fresh: unusedFresh,
 		async served(id) {
 			return id === agentId ? { agentId, conv: { objectId: agentId, threadId: "thread" } } : undefined;
 		},
@@ -416,7 +425,8 @@ test("Stuck holds an open run: never flagged as unfinished, and clearing it asks
 		return respond({ error: "unexpected" }, 404);
 	}) as typeof fetch;
 	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
-	await startScheduler({ async served() { return undefined; }, async turn() { return ""; } });
+	await startScheduler({
+		fresh: unusedFresh, async served() { return undefined; }, async turn() { return ""; } });
 
 	expect(await flagStuckRuns()).toBe(0);
 	expect(fields.error).toBeUndefined();
@@ -466,7 +476,8 @@ test("a minute repeat whose run a restart cut off is finished at boot, so it kee
 		return respond({ error: "unexpected" }, 404);
 	}) as typeof fetch;
 	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
-	await startScheduler({ async served() { return undefined; }, async turn() { return ""; } });
+	await startScheduler({
+		fresh: unusedFresh, async served() { return undefined; }, async turn() { return ""; } });
 	expect(actions).toContain("occurrence_complete");
 });
 
@@ -503,7 +514,8 @@ test("a push run that fails while the store is down is retried until it gets thr
 	const realSetTimeout = globalThis.setTimeout;
 	globalThis.setTimeout = ((fn: () => void, ms?: number) => realSetTimeout(fn, (ms ?? 0) >= 60_000 ? 5 : ms)) as typeof setTimeout;
 	try {
-		await startScheduler({ async served() { return undefined; }, async turn() { return ""; } });
+		await startScheduler({
+		fresh: unusedFresh, async served() { return undefined; }, async turn() { return ""; } });
 		runNow(objectId, "new mail in grant@");
 		for (let i = 0; i < 100 && errorWrites.length === 0; i++) await Bun.sleep(5);
 		expect(errorWrites[0]).toStartWith("run failed: Unable to connect");
@@ -514,4 +526,55 @@ test("a push run that fails while the store is down is retried until it gets thr
 	} finally {
 		globalThis.setTimeout = realSetTimeout;
 	}
+});
+
+test("an agent with Fresh each run gets a new transcript for every run: the run's message goes there, and a run of an agent without it stays on its transcript", async () => {
+	const objectId = "5dadce02-0000-4000-8000-000000000002";
+	const agentId = "c7581436-0000-4000-8000-000000000003";
+	const oldConv = { objectId: agentId, threadId: "__thread__old" };
+	const newConv = { objectId: agentId, threadId: "__thread__new" };
+	let freshRuns = true;
+	const posts: string[] = [];
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		if (url.pathname === "/api/query") return respond({ records: [], total: 0 });
+		if (url.pathname === `/api/objects/${objectId}`) {
+			return respond({ id: objectId, typeKey: "task", fields: { name: { stringValue: "Check grant@ inbox" }, agent: { valuesValue: { items: [{ stringValue: agentId }] } } }, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
+		}
+		if (url.pathname === `/api/objects/${agentId}`) {
+			return respond({ id: agentId, typeKey: "agent", fields: freshRuns ? { fresh_runs: { boolValue: true } } : {}, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
+		}
+		if (url.pathname === "/api/mutate") {
+			if (body.action === "block_add") posts.push(String(body.target_id));
+			return respond({ ok: true, id: "message" });
+		}
+		return respond({ error: `unexpected ${url.pathname}` }, 404);
+	}) as typeof fetch;
+	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
+	const freshCalls: string[] = [];
+	await startScheduler({
+		async served(id) {
+			return id === agentId ? { agentId, conv: oldConv } : undefined;
+		},
+		async turn() {
+			return "";
+		},
+		async fresh(id) {
+			freshCalls.push(id);
+			return newConv;
+		},
+	});
+	let done = waitForTurnEnd();
+	runNow(objectId, "new mail in grant@");
+	await done;
+	expect(freshCalls).toEqual([agentId]);
+	expect(posts).toEqual([newConv.threadId]);
+
+	freshRuns = false;
+	done = waitForTurnEnd();
+	runNow(objectId, "new mail in grant@");
+	await done;
+	expect(freshCalls).toEqual([agentId]);
+	expect(posts).toEqual([newConv.threadId, oldConv.threadId]);
 });

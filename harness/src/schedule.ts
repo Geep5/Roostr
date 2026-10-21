@@ -64,7 +64,18 @@ export interface ScheduleHost {
 	served(agentId: string): Promise<{ agentId: string; conv: ConvRef } | undefined>;
 	/** One scheduler-started turn on the agent's transcript, serialized with its other turns. Resolves to the failure message, "" on success. */
 	turn(agentId: string, systemSuffix: string): Promise<string>;
+	/** Drop the agent's home transcript and open a new one (its Fresh each run): the transcript the run then posts into. */
+	fresh(agentId: string): Promise<ConvRef>;
 }
+
+/**
+ * On an agent: each scheduled or push run starts on a new, empty transcript
+ * and the last run's is removed - the agent keeps no history of its runs.
+ * For work whose state lives on the object it runs (an inbox: everything
+ * since its last check), where a growing transcript only costs - tokens to
+ * read it, and an object too big to sync.
+ */
+export const FRESH_RUNS_KEY = "fresh_runs";
 
 /**
  * The scheduler's own words for a run. The object's body is the instructions
@@ -648,12 +659,14 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = "
 			...(finding ? [finding, "Instructions:"] : []),
 			body || "(this object has no body text)",
 		].join("\n");
-		await postScheduled(owner.conv, frame, d, me);
+		// Fresh each run: the run starts on an empty transcript, the last run's removed.
+		const conv = (await fetchObject(owner.agentId).catch(() => null))?.fields[FRESH_RUNS_KEY]?.boolValue ? await host.fresh(owner.agentId) : owner.conv;
+		await postScheduled(conv, frame, d, me);
 		console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) → agent ${owner.agentId.slice(0, 8)}`);
 		takeCredentialIssues(owner.agentId); // a chat turn's leftovers are not this run's
 		const error = await host.turn(owner.agentId, kind === "extra" ? RUN_NOW_SUFFIX : kind === "push" ? PUSH_SUFFIX : TURN_SUFFIX);
 		const blockedBy = takeCredentialIssues(owner.agentId);
-		const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: convKey(owner.conv) };
+		const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: convKey(conv) };
 		if (error) run.error = error;
 		else if (blockedBy.length > 0) run.error = issuesBadge(blockedBy);
 		// The run's record lives on the repeat rule: an object run only by pushes has none. Its
