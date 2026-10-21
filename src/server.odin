@@ -126,10 +126,14 @@ serve :: proc(port: int) {
 	}
 	fmt.printfln("[glon-odin] listening on http://127.0.0.1:%d (data: %s)", port, g_store.data_root)
 
+	// Named before any thread starts: process_exec is not thread-safe.
+	g_device_name = machine_name()
 	pinger := thread.create_and_start(sse_ping_loop)
 	_ = pinger
 	recorder := thread.create_and_start(vanish_recorder_loop)
 	_ = recorder
+	devices := thread.create_and_start(device_record_loop)
+	_ = devices
 
 	for {
 		client, _, aerr := net.accept_tcp(sock)
@@ -331,8 +335,9 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 // surface. A type hidden on one host and listed on the other is how
 // machines became invisible on localhost and visible on the website.
 // Engine internals only: agents, templates, skills, properties, types and spaces all list.
-// Directories (core/directory.odin) are bookkeeping for partial replicas.
-HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "peer", "pinned_fact", "milestone", VANISH_LOG_TYPE, "user_prefs", "descriptor", "install", "set", core.DIRECTORY_TYPE, ""}
+// Directories (core/directory.odin) are bookkeeping for partial replicas;
+// device records (core/device.odin) are Settings' "Your devices".
+HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "peer", "pinned_fact", "milestone", VANISH_LOG_TYPE, "user_prefs", "descriptor", "install", "set", core.DIRECTORY_TYPE, core.DEVICE_TYPE, ""}
 
 handle_list_objects :: proc(sock: net.TCP_Socket) {
 	Ctx :: struct {

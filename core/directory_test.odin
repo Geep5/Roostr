@@ -2,7 +2,8 @@
 package core
 
 // Directories (directory.odin): kept in step by every mutation, rebuilt by
-// directories_repair, merged when two devices create the same one.
+// directories_repair, merged when two devices create the same one. Device
+// records (device.odin), which the personal directory lists.
 
 import "core:encoding/hex"
 import "core:encoding/json"
@@ -489,4 +490,156 @@ v_count_over :: proc(v: ^Vault, space: string) -> bool {
 @(private = "file")
 all_objects_id :: proc(space: string) -> string {
 	return fmt.tprintf("%s%s", ALL_OBJECTS_PREFIX, space[:min(8, len(space))])
+}
+
+// ── Device records (device.odin) ──
+
+@(private = "file")
+seen :: proc(t: ^testing.T, v: ^Vault, device, name, holding: string, percent: i64, loc := #caller_location) -> int {
+	request := params({"object_id", fmt.tprintf("%s%s", DEVICE_ID_PREFIX, device)}, {"name", name}, {"kind", "browser"}, {"holding", holding})
+	request["percent"] = json.Integer(percent)
+	_, n, err := apply(v, "device_seen", request, device)
+	testing.expect(t, err == "", fmt.tprintf("device_seen: %s", err), loc = loc)
+	return n
+}
+
+@(private = "file")
+int_field :: proc(v: ^Vault, id, key: string) -> i64 {
+	s := v.states[id]
+	if s == nil do return -1
+	value, ok := fields_get(s.fields, key)
+	return ok && value.kind == .Int ? value.i : -1
+}
+
+@(test)
+device_records_written_listed_and_hidden :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	v: Vault
+	space := setup(t, &v)
+	id := fmt.tprintf("%sdev-a", DEVICE_ID_PREFIX)
+	testing.expect(t, seen(t, &v, "dev-a", "Chrome at roostr.space", "lite", 12) > 0, "the first start writes the record")
+	s := v.states[id]
+	testing.expect(t, s != nil && s.type_key == DEVICE_TYPE, "a device record")
+	if s == nil do return
+	testing.expect_value(t, field_string(s.fields, "channel"), "")
+	_, has_channel := fields_get(s.fields, "channel")
+	testing.expect(t, !has_channel, "personal: no channel field")
+	testing.expect_value(t, field_string(s.fields, "name"), "Chrome at roostr.space")
+	testing.expect_value(t, field_string(s.fields, "kind"), "browser")
+	testing.expect_value(t, field_string(s.fields, "holding"), "lite")
+	testing.expect_value(t, int_field(&v, id, "percent"), 12)
+	testing.expect_value(t, int_field(&v, id, "last_seen"), v.clock)
+	custom, _ := fields_get(s.fields, "name_custom")
+	testing.expect(t, custom.kind == .Bool && !custom.b, "not renamed")
+
+	// The personal directory lists it (lite replicas learn the ids there); no space counts it.
+	key := fmt.tprintf("device:%s", id)
+	testing.expect_value(t, entry_str(&v, DIRECTORY_ID, key, "name"), "Chrome at roostr.space")
+	testing.expect_value(t, entry_str(&v, DIRECTORY_ID, key, "kind"), "browser")
+	testing.expect_value(t, count(&v, space, DEVICE_TYPE), 0)
+	_, _, err := apply(&v, "directories_repair", jobj())
+	testing.expect_value(t, err, "")
+	_, again, _ := apply(&v, "directories_repair", jobj())
+	testing.expect_value(t, again, 0)
+	testing.expect_value(t, entry_str(&v, DIRECTORY_ID, key, "name"), "Chrome at roostr.space")
+
+	// Hidden from untyped queries; asked by type, every device answers.
+	seen(t, &v, "dev-b", "Desktop app on studio", "full", 100)
+	for row in run_query(v.states, json.Object(jobj()), 0) do testing.expect(t, row.type_key != DEVICE_TYPE, "untyped query hides device records")
+	typed := jobj()
+	typed["type"] = json.String(DEVICE_TYPE)
+	testing.expect_value(t, len(run_query(v.states, json.Object(typed), 0)), 2)
+}
+
+@(test)
+device_record_cadence :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	v: Vault
+	setup(t, &v)
+	id := fmt.tprintf("%sdev-a", DEVICE_ID_PREFIX)
+	seen(t, &v, "dev-a", "Chrome at roostr.space", "lite", 12)
+	first := int_field(&v, id, "last_seen")
+	dir_changes := 0
+	for c in v.changes do if c.object_id == DIRECTORY_ID do dir_changes += 1
+
+	// Nothing changed within DEVICE_SEEN_MS: no write.
+	testing.expect_value(t, seen(t, &v, "dev-a", "Chrome at roostr.space", "lite", 12), 0)
+	v.clock += DEVICE_SEEN_MS - 5000
+	testing.expect_value(t, seen(t, &v, "dev-a", "Chrome at roostr.space", "lite", 12), 0)
+	testing.expect_value(t, int_field(&v, id, "last_seen"), first)
+
+	// Once it has passed: last_seen alone, and the directory stays as it was.
+	v.clock += 5000
+	before := len(v.changes)
+	testing.expect_value(t, seen(t, &v, "dev-a", "Chrome at roostr.space", "lite", 12), 1)
+	last := v.changes[len(v.changes) - 1]
+	testing.expect_value(t, len(v.changes) - before, 1)
+	testing.expect_value(t, len(last.ops), 1)
+	testing.expect_value(t, last.ops[0].key, "last_seen")
+	testing.expect_value(t, int_field(&v, id, "last_seen"), v.clock)
+	after := 0
+	for c in v.changes do if c.object_id == DIRECTORY_ID do after += 1
+	testing.expect_value(t, after, dir_changes)
+
+	// What it holds changing writes at once, with last_seen.
+	testing.expect_value(t, seen(t, &v, "dev-a", "Chrome at roostr.space", "lite", 40), 1)
+	testing.expect_value(t, int_field(&v, id, "percent"), 40)
+	testing.expect_value(t, int_field(&v, id, "last_seen"), v.clock)
+	testing.expect_value(t, seen(t, &v, "dev-a", "Chrome at roostr.space", "full", 100), 1)
+	testing.expect_value(t, field_string(v.states[id].fields, "holding"), "full")
+
+	// Invalid reports are refused.
+	bad := params({"object_id", "note-1"}, {"name", "x"}, {"kind", "browser"}, {"holding", "lite"})
+	bad["percent"] = json.Integer(1)
+	_, _, err := apply(&v, "device_seen", bad)
+	testing.expect(t, err != "", "only __device__: ids")
+	bad["object_id"] = json.String(id)
+	bad["percent"] = json.Integer(101)
+	_, _, err = apply(&v, "device_seen", bad)
+	testing.expect(t, err != "", "percent 0-100")
+	bad["percent"] = json.Integer(1)
+	bad["holding"] = json.String("some")
+	_, _, err = apply(&v, "device_seen", bad)
+	testing.expect(t, err != "", "holding full or lite")
+}
+
+@(test)
+device_record_rename_and_remove :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	v: Vault
+	setup(t, &v)
+	id := fmt.tprintf("%sdev-a", DEVICE_ID_PREFIX)
+	key := fmt.tprintf("device:%s", id)
+	seen(t, &v, "dev-a", "Chrome at roostr.space", "lite", 12)
+
+	// A person's name sticks: the auto name never replaces it.
+	must(t, &v, "device_rename", params({"object_id", id}, {"name", "  Work laptop  "}), device = "dev-b")
+	testing.expect_value(t, field_string(v.states[id].fields, "name"), "Work laptop")
+	custom, _ := fields_get(v.states[id].fields, "name_custom")
+	testing.expect(t, custom.kind == .Bool && custom.b, "renamed")
+	testing.expect_value(t, entry_str(&v, DIRECTORY_ID, key, "name"), "Work laptop")
+	testing.expect_value(t, seen(t, &v, "dev-a", "Firefox at roostr.space", "lite", 12), 0)
+	testing.expect_value(t, field_string(v.states[id].fields, "name"), "Work laptop")
+	_, _, err := apply(&v, "device_rename", params({"object_id", id}, {"name", " "}))
+	testing.expect(t, err != "", "a name is required")
+	_, _, err = apply(&v, "device_rename", params({"object_id", "__device__:nobody"}, {"name", "x"}))
+	testing.expect(t, err != "", "only an existing record")
+
+	// Removed: gone from the list and the directory, never purged, back on the device's next run.
+	must(t, &v, "delete", params({"object_id", id}), device = "dev-b")
+	testing.expect(t, v.states[id].deleted, "removed")
+	_, listed := entry(&v, DIRECTORY_ID, key)
+	testing.expect(t, !listed, "the directory drops a removed record")
+	typed := jobj()
+	typed["type"] = json.String(DEVICE_TYPE)
+	testing.expect_value(t, len(run_query(v.states, json.Object(typed), 0)), 0)
+	purge := jobj()
+	purge["confirm"] = json.Boolean(true)
+	must(t, &v, "purge_deleted", purge)
+	testing.expect(t, v.states[id] != nil, "purge leaves removed device records alone")
+	testing.expect(t, seen(t, &v, "dev-a", "Chrome at roostr.space", "lite", 12) > 0, "the device writes it again")
+	testing.expect(t, !v.states[id].deleted && v.states[id].type_key == DEVICE_TYPE, "revived")
+	testing.expect_value(t, int_field(&v, id, "last_seen"), v.clock)
+	_, listed = entry(&v, DIRECTORY_ID, key)
+	testing.expect(t, listed, "listed again")
 }

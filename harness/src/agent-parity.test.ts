@@ -66,6 +66,8 @@ const COVERAGE: Record<string, Coverage> = {
 	seed_space_defaults: { reason: "engine seeding of a new space's built-in types and properties" },
 	directories_repair: { reason: "engine rebuild of the directories partial replicas read, from the whole vault" },
 	unpin_all_objects_once: { reason: "engine one-time migration taking each space's All Objects off the sidebar" },
+	device_seen: { reason: "each device writes its own device record (core/device.odin); nothing an agent reports" },
+	device_rename: { reason: "a person names their devices in Settings → Your devices" },
 };
 
 /** Every action name in the engine's mutation dispatch; a case line may name several. */

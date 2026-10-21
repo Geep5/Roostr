@@ -203,6 +203,8 @@ handle_settings :: proc(sock: net.TCP_Socket) {
 	for r in s.relays do append(&relays, json.String(r))
 	o["relays"] = json.Array(relays)
 	o["authorId"] = json.String(author_id())
+	// Settings marks this daemon's record "(this device)" (core/device.odin).
+	o["deviceId"] = json.String(device_id())
 	// Damaged changes must be visible, not just logged: sync can refetch a
 	// content-addressed change, but only if someone knows one went missing.
 	o["quarantinedChanges"] = json.Integer(i64(g_store.quarantined))

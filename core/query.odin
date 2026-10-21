@@ -460,13 +460,14 @@ run_query :: proc(
 	loop: for _, s in states {
 		if s.deleted && !include_deleted do continue
 		if type_eq != "" && s.type_key != type_eq do continue
-		// The vanish ledger and the directories are bookkeeping, not content:
-		// singletons whose fields are one key per deleted object / listed
-		// entry. An untyped query returned the ledger, so any query-driven
-		// list showed a nameless row that opened an empty object page. Asking
-		// for them by type still works, which is how the sync daemon and the
-		// replicas read them.
-		if type_eq == "" && (s.type_key == VANISH_LOG_TYPE || s.type_key == DIRECTORY_TYPE) do continue
+		// The vanish ledger, the directories and the device records are
+		// bookkeeping, not content: the first two are singletons whose
+		// fields are one key per deleted object / listed entry. An untyped
+		// query returned the ledger, so any query-driven list showed a
+		// nameless row that opened an empty object page. Asking for them by
+		// type still works, which is how the sync daemon, the replicas and
+		// Settings ("Your devices") read them.
+		if type_eq == "" && (s.type_key == VANISH_LOG_TYPE || s.type_key == DIRECTORY_TYPE || s.type_key == DEVICE_TYPE) do continue
 		for f in filters {
 			if !matches_filter(s, f, now_ms) do continue loop
 		}

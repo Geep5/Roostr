@@ -9,6 +9,7 @@ package core
 //
 // Entries, each one field of the directory object:
 //   space:<spaceId>  Map{name, icon, created}           (personal)
+//   device:<deviceRecordId>  Map{name, kind}            (personal; device.odin)
 //   pin:<objectId>   Map{name, icon, type, order, collapsed}
 //   type:<objectId>  Map{key, name, icon, layout, builtin}
 //   rel:<objectId>   Map{key, name, icon, format, hidden, builtin}
@@ -37,8 +38,8 @@ DIRECTORY_VERSION :: 1
 
 // Bookkeeping and engine internals, never counted (and so never drawn as
 // objects): the Rust SYSTEM_TYPE_KEYS list, the directories themselves and
-// spaces, which are the personal directory's entries.
-DIRECTORY_UNCOUNTED_TYPES :: []string{DIRECTORY_TYPE, VANISH_LOG_TYPE, "user_prefs", "channel", "typescript", "program", "json", "proto", "peer", "pinned_fact", "milestone", "descriptor", "install", "set"}
+// spaces and device records, which are the personal directory's entries.
+DIRECTORY_UNCOUNTED_TYPES :: []string{DIRECTORY_TYPE, VANISH_LOG_TYPE, DEVICE_TYPE, "user_prefs", "channel", "typescript", "program", "json", "proto", "peer", "pinned_fact", "milestone", "descriptor", "install", "set"}
 
 directory_space_id :: proc(space_id: string, allocator := context.temp_allocator) -> string {
 	return strings.concatenate({DIRECTORY_SPACE_PREFIX, space_id}, allocator)
@@ -110,6 +111,12 @@ directory_live :: proc(s: ^Object_State, vanished: map[string]Vanish_Entry) -> b
 	return !gone
 }
 
+/** A live object with no `channel` that counts in the default space: everything but spaces and device records (personal entries). */
+@(private = "file")
+directory_needs_space :: proc(s: ^Object_State) -> bool {
+	return s.type_key != "channel" && s.type_key != DEVICE_TYPE && field_string(s.fields, "channel") == ""
+}
+
 /** Add what one live object contributes: its entries, and `sign` to its type's count. */
 directory_project :: proc(p: ^Directory_Projection, s: ^Object_State, default_space: string, sign: i64) {
 	if s.type_key == "channel" {
@@ -119,6 +126,16 @@ directory_project :: proc(p: ^Directory_Projection, s: ^Object_State, default_sp
 			Value_Entry{"name", string_value(cloned(s.fields, "name"))},
 			Value_Entry{"icon", string_value(icon)},
 			Value_Entry{"created", int_value(s.created_at)},
+		)
+		return
+	}
+	// A lite replica learns the account's device records from here (their
+	// ids are per install); last_seen stays out so the directory is written
+	// only when a device appears, goes or is renamed.
+	if s.type_key == DEVICE_TYPE {
+		p.entries[pair_key(DIRECTORY_ID, fmt.tprintf("device:%s", s.id))] = map_value(
+			Value_Entry{"name", string_value(cloned(s.fields, "name"))},
+			Value_Entry{"kind", string_value(cloned(s.fields, "kind"))},
 		)
 		return
 	}
@@ -314,7 +331,7 @@ directory_maintain :: proc(plan: ^Mutation_Plan, input: Mutation_Input) {
 		was_live := directory_live(stored, before_vanished)
 		is_live := directory_live(now, after_vanished)
 		if !was_live && !is_live do continue
-		needs_default := (was_live && stored.type_key != "channel" && field_string(stored.fields, "channel") == "") || (is_live && now.type_key != "channel" && field_string(now.fields, "channel") == "")
+		needs_default := (was_live && directory_needs_space(stored)) || (is_live && directory_needs_space(now))
 		if needs_default && !default_known {
 			default_space = strings.clone(pins_default_space(input.states), context.temp_allocator)
 			default_known = true
@@ -475,7 +492,7 @@ directory_repair :: proc(plan: ^Mutation_Plan, input: Mutation_Input, only_space
 		own := make(map[string]i64, context.temp_allocator)
 		stale := make([dynamic]string, context.temp_allocator)
 		for e in current {
-			if strings.has_prefix(e.key, "space:") || strings.has_prefix(e.key, "pin:") || strings.has_prefix(e.key, "type:") || strings.has_prefix(e.key, "rel:") {
+			if strings.has_prefix(e.key, "space:") || strings.has_prefix(e.key, "device:") || strings.has_prefix(e.key, "pin:") || strings.has_prefix(e.key, "type:") || strings.has_prefix(e.key, "rel:") {
 				if e.key not_in desired do append(&stale, strings.clone(e.key, context.temp_allocator))
 				continue
 			}

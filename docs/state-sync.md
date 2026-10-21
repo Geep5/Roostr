@@ -291,7 +291,10 @@ untyped queries, object lists and the graph like the vanish ledger):
 
 - `__directory__` (no `channel`: the personal stream) - one field
   `space:<spaceId>` per live space: Map `{name, icon, created}` (`icon` =
-  `iconImage` when set, else `iconEmoji`; `created` = the space's createdAt).
+  `iconImage` when set, else `iconEmoji`; `created` = the space's createdAt),
+  and one `device:<recordId>` per live device record: Map `{name, kind}`
+  (below; `last_seen` stays out, so the directory changes only when a
+  device appears, goes or is renamed).
 - `__directory__:<spaceId>` (`channel` = the space, so it is encrypted and
   routed with it) - `pin:<id>` Map `{name, icon, type, order, collapsed}`
   per pinned object, `type:<id>` Map `{key, name, icon, layout, builtin}`,
@@ -311,7 +314,7 @@ a replica's kv `roostr-device-id`; the author when absent; never holding
 `:`, so the type key is everything before the last `:`). Concurrent writes
 from different devices never touch the same field. Counted: live objects
 (not binned, not vanished) except spaces and bookkeeping (`directory`,
-`vanish_log`, `user_prefs` and the engine internals the clients hide);
+`vanish_log`, `device`, `user_prefs` and the engine internals the clients hide);
 types and properties count under `type` and `relation`.
 
 **Kept in step by every mutation.** `mutation_plan` ends with
@@ -344,10 +347,11 @@ Swift app's) stays full. A lite session:
   (`{kinds: DAG, #h: [...]}` since the persisted cursor) and on the live
   subscription and the watchdog's head check;
 - fetches on start the personal directory and the vanish ledger, every
-  installed or listed space object with its directory, then the `type:` and
-  `rel:` objects the space directories list; the sidebar draws every space
-  and its pins from the directories for what is not held (an unheld pin is
-  an object summary from its `pin:` entry);
+  installed or listed space object with its directory, the device records
+  the personal directory lists (and those it lists later, as it changes),
+  then the `type:` and `rel:` objects the space directories list; the
+  sidebar draws every space and its pins from the directories for what is
+  not held (an unheld pin is an object summary from its `pin:` entry);
 - fetches an object by id when it is opened (or a mutation plan names it):
   `#h` under the personal tag and every installed space key's, bases first
   (and their 1080 parts), then of an object holding a base the deltas on it
@@ -362,6 +366,26 @@ Swift app's) stays full. A lite session:
 - becomes full on "Fully sync this device" (`roostr-holding` = `full`, a
   bootstrap walk as on a fresh device), and at once when the relays hold no
   event of the identity at all (a new key: nothing to leave out).
+
+**Device records** (`core/device.odin`). Every device of the account keeps
+one personal object (no `channel`) under `__device__:<deviceId>` (the same
+device id as its counts), type `device`, hidden like the directories:
+`name` (auto: "Chrome at roostr.space", "iPhone", "Desktop app on
+<host>", a daemon's computer name), `name_custom` (true once a person
+renamed it: the auto name never replaces it), `kind` (`engine`, `browser`,
+`iphone`, `desktop`), `holding` (`full`/`lite`), `percent` (0-100) and
+`last_seen` (epoch ms). The device writes it with the `device_seen`
+mutation (`object_id`, `name`, `kind`, `holding`, `percent`): on start,
+when what it holds changes, and on a timer; the planner writes only the
+fields that differ, and `last_seen` alone at most every 30 minutes
+(`DEVICE_SEEN_MS`), so a running device does not churn the change log.
+The daemon writes its own (always `full`, 100%) from `src/device.odin`; a
+replica from its backend. `device_rename` sets `name` and `name_custom`;
+removing one is a plain `delete`, which its device undoes the next time it
+runs (Object_Create revives it; `purge_deleted` never vanishes a device
+record, which would forbid that). Settings lists them ("Your devices") by
+a typed query; `/api/settings` and a replica's settings carry `deviceId`
+so this device's row is marked.
 
 ## Files on Blossom (RoostrRelay)
 

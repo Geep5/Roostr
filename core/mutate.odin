@@ -1072,6 +1072,9 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 			for id, st in states {
 				if !st.deleted do continue
 				if id == "__vanished__" do continue
+				// A removed device record comes back when its device next
+				// runs; vanished, it never could.
+				if st.type_key == DEVICE_TYPE do continue
 				// Cloned, per the convention the cascade helpers follow: these
 				// keys belong to the store, and vanish_objects invalidates it
 				// (freeing them) before its own broadcast loop reads them back.
@@ -1214,6 +1217,14 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
  case "directories_repair":
   directory_repair(&plan, input)
   return plan, ""
+ // This device's record (device.odin): written on start, when what it
+ // holds changes, and every DEVICE_SEEN_MS while it runs; a renamed one.
+ case "device_seen":
+  err := device_seen_plan(&plan, input, parsed)
+  return plan, err
+ case "device_rename":
+  err := device_rename_plan(&plan, input, parsed)
+  return plan, err
  // Take every space's bundled All Objects query off the sidebar, once
  // (pins_unpin_all_once). `object_ids` limits it to those queries.
  case "unpin_all_objects_once":
