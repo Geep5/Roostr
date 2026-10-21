@@ -44,9 +44,13 @@ Shared_Space :: struct {
 	owner:    string,
 }
 
-protected_field :: proc(key: string) -> bool {
+// Owner-only fields. The space's key material (key, keys, keyId) is protected
+// on the space object alone: elsewhere `key` is an identifier members set like
+// any field - a property's, a type's, a skill's, a capability's.
+protected_field :: proc(key: string, is_space: bool) -> bool {
 	switch key {
-	case "members", "owner", "keyId", "key", "keys", "served_by", "machine", "machine_id", "machineId": return true
+	case "members", "owner", "served_by", "machine", "machine_id", "machineId": return true
+	case "keyId", "key", "keys": return is_space
 	}
 	return false
 }
@@ -144,14 +148,14 @@ authorize_shared_change :: proc(c: ^Change, p: Shared_Provenance, space: Shared_
 			if is_space && snap.deleted != existing.deleted do return false, "only the owner may delete or restore the space"
 			// Compare both directions: omitting a protected field is a delete.
 			for entry in snap.fields {
-				if !protected_field(entry.key) do continue
+				if !protected_field(entry.key, is_space) do continue
 				if !exists do return false, "only the owner may set protected fields"
 				old, found := fields_get(existing.fields, entry.key)
 				if !found || !values_equal(old, entry.value) do return false, "only the owner may change protected fields"
 			}
 			if exists {
 				for entry in existing.fields {
-					if !protected_field(entry.key) do continue
+					if !protected_field(entry.key, is_space) do continue
 					value, found := fields_get(snap.fields, entry.key)
 					if !found || !values_equal(value, entry.value) do return false, "only the owner may change protected fields"
 				}
@@ -176,7 +180,7 @@ authorize_shared_change :: proc(c: ^Change, p: Shared_Provenance, space: Shared_
 				if is_space || op.kind != .Field_Set || op.value.kind != .String || op.value.str != space.space_id do return false, "channel field must stamp this space"
 				stamped = true
 			}
-			if !is_owner && protected_field(op.key) do return false, "only the owner may change protected fields"
+			if !is_owner && protected_field(op.key, is_space) do return false, "only the owner may change protected fields"
 		case .None:
 			return false, "operation is empty"
 		case .Block_Add, .Block_Remove, .Block_Update, .Block_Move, .Block_Set_Align, .Block_Set_Background:

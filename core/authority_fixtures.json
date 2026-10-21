@@ -3929,6 +3929,212 @@
       "existing": null,
       "ok": false,
       "reason": "signer is not a writer of the space"
+    },
+    {
+      "name": "writer creates a property: its key is an identifier, not the space key",
+      "change": {
+        "id": "",
+        "objectId": "rel-1",
+        "parentIds": [],
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "space-a"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "discord_channel_id"
+              }
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "x"
+      },
+      "provenance": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "signer": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "space": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "owner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "trustedSpace": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "ok": true,
+      "reason": ""
+    },
+    {
+      "name": "writer cannot set the space object key",
+      "change": {
+        "id": "",
+        "objectId": "space-a",
+        "parentIds": [],
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "deadbeef"
+              }
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "x"
+      },
+      "provenance": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "signer": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "space": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "owner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "trustedSpace": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "existing": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "ok": false,
+      "reason": "only the owner may change protected fields"
     }
   ],
   "vanished": [
