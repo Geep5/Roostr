@@ -415,6 +415,7 @@ export function resetScheduler(): void {
 	armAgain = false;
 	firing = false;
 	pushWaiting.clear();
+	pushRetries.clear();
 	running.clear();
 	generation += 1;
 	clearInterval(stuckTimer);
@@ -719,11 +720,23 @@ const PUSH_SUFFIX =
 /** Objects pushed while a run of them was in progress, with what arrived: each gets one more run when it ends. */
 const pushWaiting = new Map<string, string>();
 
+/** Push runs that failed before they could run (the store unreachable...): how many tries so far. */
+const pushRetries = new Map<string, number>();
+/** Waits between tries of a failed push run: 1 min, doubling, at most 15 min. */
+const PUSH_RETRY_MS = 60_000;
+const PUSH_RETRY_MAX_MS = 15 * 60_000;
+
 /**
  * Run an object now because its source changed (gmail-push.ts): the same
  * path as an occurrence - Check first, then a turn only when it found
  * something - with nothing fired or completed. One run at a time per
  * object: a push during a run queues exactly one more, after it.
+ *
+ * A run that fails before it can run (the store down: the push note is
+ * already acknowledged, so nothing else would bring that data in) is tried
+ * again, backing off, until it gets through - and each failure goes on the
+ * object's Error where a person sees it, until a run gets through and
+ * clears it.
  */
 export function runNow(objectId: string, why: string): void {
 	if (!host) return;
@@ -738,9 +751,24 @@ export function runNow(objectId: string, why: string): void {
 		console.log(`[schedule] ${objectId.slice(0, 8)} run now: ${why}`);
 		// No occurrence: `next` matches none, so the run completes nothing.
 		await runExclusive({ id: objectId, next: -1, firedFor: undefined, waiting: false }, me, "push", why);
+		// Got through after failing: whatever this run found or didn't, those failures are over.
+		if (pushRetries.delete(objectId)) await clearRunBadge(await fetchObject(objectId), false);
 	})().catch((err) => {
 		running.delete(objectId);
-		console.error(`[schedule] push run ${objectId.slice(0, 8)} failed:`, err instanceof Error ? err.message : err);
+		const message = err instanceof Error ? err.message : String(err);
+		// The object is gone (deleted, vanished): nothing left to run, so nothing to retry.
+		if (/: 404\b|was deleted|no object/i.test(message)) {
+			pushRetries.delete(objectId);
+			console.error(`[schedule] push run ${objectId.slice(0, 8)} dropped: ${message}`);
+			return;
+		}
+		const tries = (pushRetries.get(objectId) ?? 0) + 1;
+		pushRetries.set(objectId, tries);
+		const wait = Math.min(PUSH_RETRY_MS * 2 ** (tries - 1), PUSH_RETRY_MAX_MS);
+		console.error(`[schedule] push run ${objectId.slice(0, 8)} failed (try ${tries}, again in ${wait / 60_000} min): ${message}`);
+		// Written when the store takes it; while it is down the retry is what counts.
+		void setField(objectId, "error", sv(`run failed: ${message} - trying again in ${wait / 60_000} min (${tries} ${tries === 1 ? "try" : "tries"} so far)`.slice(0, 300))).catch(() => {});
+		setTimeout(() => runNow(objectId, why || "retrying a run that failed"), wait);
 	});
 }
 

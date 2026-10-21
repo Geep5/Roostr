@@ -2057,6 +2057,44 @@ export async function startNostrSync(): Promise<void> {
 	 * offline, or not upgraded yet) would be cut off. Concurrent epoch-1
 	 * bases from two computers resolve by the current-base rule.
 	 */
+	/** Prefix of the Error sync puts on an object it could not compact; only sync writes or clears these. */
+	const SYNC_BADGE = "sync failed: ";
+	/** An object row's Error text, read from a parsed `/api/objects` or `/api/query` row; "" when it has none. */
+	function errorOf(row: unknown): string {
+		if (!row || typeof row !== "object" || !("fields" in row)) return "";
+		const fields = row.fields;
+		if (!fields || typeof fields !== "object" || !("error" in fields)) return "";
+		const error = fields.error;
+		return error && typeof error === "object" && "stringValue" in error && typeof error.stringValue === "string" ? error.stringValue : "";
+	}
+	/** Objects whose Error is sync's. */
+	async function syncBadged(): Promise<string[]> {
+		const res = await apiFetch(`${API}/api/query`, { method: "POST", body: JSON.stringify({ filters: [{ key: "error", condition: "like", value: SYNC_BADGE }], limit: 1000, fields: ["error"] }) });
+		if (!res.ok) return [];
+		const body: unknown = await res.json();
+		const records = body && typeof body === "object" && "records" in body && Array.isArray(body.records) ? body.records : [];
+		return records.flatMap((r: unknown) => (r && typeof r === "object" && "id" in r && typeof r.id === "string" && errorOf(r).startsWith(SYNC_BADGE) ? [r.id] : []));
+	}
+	/**
+	 * Put a compaction failure on the object's Error, where a person sees it,
+	 * not only in this log: its history stops being packed for the relays.
+	 * An Error someone else wrote (a run, a person) is left alone.
+	 */
+	async function syncBadge(objectId: string, message: string, ours: boolean): Promise<void> {
+		const why = /exceeds chunk limit/.test(message)
+			? "its history is too big to sync as one piece (over 2.5 MB). Its new changes still sync, but a new device must replay all of them."
+			: message;
+		const text = `${SYNC_BADGE}${why}`.slice(0, 300);
+		try {
+			const res = await apiFetch(`${API}/api/objects/${encodeURIComponent(objectId)}`);
+			if (!res.ok) return;
+			const current = errorOf(await res.json());
+			if (current === text || (current && !ours && !current.startsWith(SYNC_BADGE))) return;
+			await mutate("set_field", { object_id: objectId, key: "error", value: { stringValue: text } });
+		} catch (err) {
+			console.error(`[sync] error badge for ${objectId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
+		}
+	}
 	let compactBusy = false;
 	async function compactionPass(): Promise<void> {
 		if (compactBusy) return;
@@ -2064,6 +2102,8 @@ export async function startNostrSync(): Promise<void> {
 		try {
 			await rebasePass();
 			let built = 0;
+			// Objects whose Error says an earlier pass could not compact them: a pass that gets through clears it.
+			const flagged = new Set(await syncBadged());
 			for (const [objectId, row] of Object.entries(await localBases())) {
 				if (vanished.has(objectId) || objectId === VANISH_LOG_ID) continue;
 				const space = sharedSpaces.get(spaceMap.get(objectId) ?? "") ?? null;
@@ -2075,8 +2115,11 @@ export async function startNostrSync(): Promise<void> {
 						continue;
 					}
 					if (await compactObject(objectId, row, space, fallback)) built++;
+					if (flagged.has(objectId)) await mutate("delete_field", { object_id: objectId, key: "error" }).catch(() => {});
 				} catch (err) {
-					console.error(`[sync] compaction failed for ${objectId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
+					const message = err instanceof Error ? err.message : String(err);
+					console.error(`[sync] compaction failed for ${objectId.slice(0, 8)}:`, message);
+					await syncBadge(objectId, message, flagged.has(objectId));
 				}
 			}
 			if (built > 0) console.log(`[sync] compaction pass: ${built} base(s) built`);

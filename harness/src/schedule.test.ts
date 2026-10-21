@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { credentialBadge, issuesBadge, missingBadge, parseIssuesBadge } from "./credential-issues";
-import { flagStuckRuns, handleStuckChange, isEmptyResult, resetScheduler, retryUnblockedRuns, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
+import { flagStuckRuns, handleStuckChange, isEmptyResult, resetScheduler, retryUnblockedRuns, runNow, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -468,4 +468,50 @@ test("a minute repeat whose run a restart cut off is finished at boot, so it kee
 	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
 	await startScheduler({ async served() { return undefined; }, async turn() { return ""; } });
 	expect(actions).toContain("occurrence_complete");
+});
+
+test("a push run that fails while the store is down is retried until it gets through: the failure shows on the Error meanwhile, and the run that gets through clears it", async () => {
+	const objectId = "5dadce02-0000-4000-8000-000000000001";
+	let storeUp = false;
+	let error = "";
+	const errorWrites: string[] = [];
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		if (url.pathname === "/api/query") return respond({ records: [], total: 0 });
+		if (url.pathname === `/api/objects/${objectId}`) {
+			// The store is down for reads; writes reach it (a crash loop lets some requests through).
+			if (!storeUp) throw new TypeError("Unable to connect. Is the computer able to access the url?");
+			const fields: Record<string, unknown> = { name: { stringValue: "Check grant@ inbox" }, agent: { valuesValue: { items: [{ stringValue: "agent-served-elsewhere" }] } } };
+			if (error) fields.error = { stringValue: error };
+			return respond({ id: objectId, typeKey: "task", fields, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
+		}
+		if (url.pathname === "/api/mutate") {
+			if (body.object_id === objectId && body.key === "error") {
+				if (body.action === "set_field") {
+					error = String((body.value as { stringValue?: string }).stringValue ?? "");
+					errorWrites.push(error);
+				}
+				if (body.action === "delete_field") error = "";
+			}
+			return respond({ ok: true });
+		}
+		return respond({ error: `unexpected ${url.pathname}` }, 404);
+	}) as typeof fetch;
+	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
+	// The retry waits a minute or more: run those waits at once.
+	const realSetTimeout = globalThis.setTimeout;
+	globalThis.setTimeout = ((fn: () => void, ms?: number) => realSetTimeout(fn, (ms ?? 0) >= 60_000 ? 5 : ms)) as typeof setTimeout;
+	try {
+		await startScheduler({ async served() { return undefined; }, async turn() { return ""; } });
+		runNow(objectId, "new mail in grant@");
+		for (let i = 0; i < 100 && errorWrites.length === 0; i++) await Bun.sleep(5);
+		expect(errorWrites[0]).toStartWith("run failed: Unable to connect");
+		expect(error).toStartWith("run failed:");
+		storeUp = true;
+		for (let i = 0; i < 200 && error !== ""; i++) await Bun.sleep(5);
+		expect(error).toBe("");
+	} finally {
+		globalThis.setTimeout = realSetTimeout;
+	}
 });
