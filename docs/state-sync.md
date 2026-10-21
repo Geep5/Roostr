@@ -482,7 +482,7 @@ HTTP (POSTs are service-only, like `/api/checkpoints`):
 | `POST /api/bases/covered` | `{objectId, ids}` → `{premigration, covered}` (ids folded by a held epoch-1 base / by any held base) |
 | `POST /api/changes/published` | `{published: {objectId: [hex]}}` clears `.local` |
 | `GET /api/changes/<id>` | rows add `b`, `pending`, and `class` (`live`/`covered`/`premigrationCovered`/`orphan`/`stale`) when a base is held |
-| `POST /api/changes` | items may be `{b64, b}`: `b` is stored with the change |
+| `POST /api/changes` | items may be `{b64, b}`: `b` is stored with the change; `reasons` says why each rejected item was refused (the sync logs it once per event) |
 
 ### Harness (`harness/src/nostrsync.ts`)
 

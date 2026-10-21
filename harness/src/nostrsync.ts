@@ -456,11 +456,20 @@ interface SharedProvenance {
 	signer: string;
 }
 
+/** The store refused an imported change; `reason` is the store's own (e.g. the shared-space authority gate's). */
+class ImportRejected extends Error {
+	reason: string;
+	constructor(reason: string) {
+		super(`Change import rejected: ${reason}`);
+		this.reason = reason;
+	}
+}
+
 /** `b`: the base hash the change's event carried; stored with the change for classification. */
-async function localImport(items: Array<string | { b64: string; b: string }>, provenance?: SharedProvenance): Promise<{ imported: number; rejected: number; ids: string[] }> {
+async function localImport(items: Array<string | { b64: string; b: string }>, provenance?: SharedProvenance): Promise<{ imported: number; rejected: number; ids: string[]; reasons?: string[] }> {
 	const res = await apiFetch(`${API}/api/changes`, { method: "POST", body: JSON.stringify({ changes: items, provenance }) });
 	if (!res.ok) throw new Error(`Change import failed: ${res.status}`);
-	return (await res.json()) as { imported: number; rejected: number; ids: string[] };
+	return (await res.json()) as { imported: number; rejected: number; ids: string[]; reasons?: string[] };
 }
 
 /** POST JSON to a state-sync endpoint of the daemon (src/bases.odin); non-2xx throws with the daemon's reason. */
@@ -1026,7 +1035,7 @@ export async function startNostrSync(): Promise<void> {
 	async function importB64(b64: string, space: SharedSpace | null, signer: string, eventIds: readonly string[] = [], b?: string): Promise<void> {
 		const provenance = space ? { spaceId: space.spaceId, keyId: space.keyId, signer } : undefined;
 		const res = await localImport([b ? { b64, b } : b64], provenance);
-		if (res.rejected > 0) throw new Error("Change import rejected");
+		if (res.rejected > 0) throw new ImportRejected(res.reasons?.[0] || "no reason given");
 		// Anything the relay already holds must never be echoed back.
 		for (const hex of res.ids) {
 			if (space) state.publishedSpace![`${space.spaceId}/${space.keyId}/${hex}`] = true;
@@ -1212,6 +1221,15 @@ export async function startNostrSync(): Promise<void> {
 	let replayScanGeneration = 0;
 	let activeReplayScans = 0;
 	let activeImports = 0;
+	// Events whose rejection was already logged: a replayed or re-delivered
+	// event is refused again, but says so once. Bounded by clearing.
+	const loggedRejections = new Set<string>();
+	function logRejection(eventId: string, reason: string): void {
+		if (loggedRejections.has(eventId)) return;
+		if (loggedRejections.size >= 4096) loggedRejections.clear();
+		loggedRejections.add(eventId);
+		console.warn(`[sync] event ${eventId.slice(0, 8)} refused by the store: ${reason}`);
+	}
 	// Like published change IDs, receipt identities live for this daemon's
 	// lifetime. Expiring one could turn an inclusive-cursor suffix replay
 	// into an unresolved group whose prefix is outside the requested range.
@@ -1375,9 +1393,10 @@ export async function startNostrSync(): Promise<void> {
 				state.cursor = event.created_at;
 				dirty = true;
 			}
-		} catch {
+		} catch (err) {
 			if (importing) recordReplayFault(event.created_at);
-			/* not ours / garbled / unavailable native import — leave unpublished */
+			if (err instanceof ImportRejected) logRejection(event.id, err.reason);
+			/* otherwise not ours / garbled / unavailable native import — leave unpublished */
 		} finally {
 			activeImports--;
 		}

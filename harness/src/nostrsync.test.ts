@@ -334,6 +334,24 @@ test("a rejected import cannot be hidden by later successful imports in the same
 	expect((await state()).replaySince).toBeUndefined();
 });
 
+test("a store rejection is logged with its reason, once per event however often it is replayed", async () => {
+	history = [event("YWJj", 10)];
+	let attempts = 0;
+	importChange = async () => {
+		attempts++;
+		return Response.json({ imported: 0, rejected: 1, ids: [], reasons: ["only the owner may change protected fields"] });
+	};
+	const warn = spyOn(console, "warn").mockImplementation(() => {});
+	restore.push(() => warn.mockRestore());
+	await startNostrSync();
+	await watchdog();
+	await settle();
+	const lines = warn.mock.calls.map((args) => String(args[0])).filter((line) => line.includes("refused by the store"));
+	expect(attempts).toBeGreaterThan(1);
+	expect(lines).toContain(`[sync] event ${history[0].id.slice(0, 8)} refused by the store: only the owner may change protected fields`);
+	expect(new Set(lines).size).toBe(lines.length);
+});
+
 test("restart and empty complete history cannot discharge an unresolved group", async () => {
 	const complete = chunks();
 	history = complete.slice(1);

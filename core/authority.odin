@@ -51,13 +51,6 @@ protected_field :: proc(key: string) -> bool {
 	return false
 }
 
-control_type :: proc(key: string) -> bool {
-	switch key {
-	case "machine", "agent", "program", "typescript", "skill", "peer": return true
-	}
-	return false
-}
-
 field_string :: proc(fields: [dynamic]Value_Entry, key: string) -> string {
 	v, ok := fields_get(fields, key)
 	if ok && v.kind == .String do return v.str
@@ -128,7 +121,6 @@ authorize_shared_change :: proc(c: ^Change, p: Shared_Provenance, space: Shared_
 		} else if existing.type_key == "channel" || field_string(existing.fields, "channel") != space.space_id {
 			return false, "existing object belongs to another scope"
 		}
-		if !is_owner && control_type(existing.type_key) do return false, "only the owner may change control objects"
 	}
 	created := exists
 	stamped := exists || is_space
@@ -148,7 +140,7 @@ authorize_shared_change :: proc(c: ^Change, p: Shared_Provenance, space: Shared_
 			return false, "snapshot is not scoped to the space"
 		}
 		if !is_owner {
-			if control_type(snap.type_key) || !exists && is_space do return false, "only the owner may snapshot this object"
+			if !exists && is_space do return false, "only the owner may create the space"
 			if is_space && snap.deleted != existing.deleted do return false, "only the owner may delete or restore the space"
 			// Compare both directions: omitting a protected field is a delete.
 			for entry in snap.fields {
@@ -175,7 +167,7 @@ authorize_shared_change :: proc(c: ^Change, p: Shared_Provenance, space: Shared_
 			if exists && op.type_key != existing.type_key do return false, "create changes the object type"
 			if c.has_snapshot && op.type_key != c.snapshot.type_key do return false, "create disagrees with the snapshot type"
 			if is_space != (op.type_key == "channel") do return false, "channels are created only as the space object"
-			if !is_owner && (is_space || control_type(op.type_key)) do return false, "only the owner may create this object"
+			if !is_owner && is_space do return false, "only the owner may create the space"
 			created = true
 		case .Object_Delete:
 			if is_space && !is_owner do return false, "only the owner may delete the space"

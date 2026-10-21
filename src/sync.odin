@@ -13,6 +13,8 @@ import "../core"
 //                                    provenance is the trusted personal path.
 //                                    `b` writes the .b sidecar; a change held
 //                                    only in archive/ is skipped, never revived.
+//                                    → {ok, imported, skipped, rejected, dropped,
+//                                    ids, reasons: [why each rejected item was]}
 //
 // Import bypasses commit_change on purpose: these changes already carry
 // their identity (id = sha256(encode with id zeroed)); recomputing parents
@@ -194,7 +196,7 @@ changes_import :: proc(parsed: json.Value) -> Op_Result {
 
 	imported := 0
 	skipped := 0
-	rejected := 0
+	reasons := make([dynamic]json.Value, context.temp_allocator)
 	dropped := 0
 	// The ledger is authoritative: a vanished object never comes back, no
 	// matter how many relays or peers still hold its changes - nor does
@@ -215,17 +217,17 @@ changes_import :: proc(parsed: json.Value) -> Op_Result {
 			b_hex = core.json_str(item, "b")
 		}
 		if text == "" || b_hex != "" && !hash_hex_valid(b_hex) {
-			rejected += 1
+			append(&reasons, json.String("malformed item"))
 			continue
 		}
 		data, derr := base64.decode(text, allocator = context.temp_allocator)
 		if derr != nil {
-			rejected += 1
+			append(&reasons, json.String("bad base64"))
 			continue
 		}
 		c, cok := core.decode_change(data, context.temp_allocator)
 		if !cok || c.object_id == "" || len(c.id) != 32 {
-			rejected += 1
+			append(&reasons, json.String("undecodable change"))
 			continue
 		}
 		// Verify the content address over the RAW WIRE BYTES: the id is
@@ -234,7 +236,7 @@ changes_import :: proc(parsed: json.Value) -> Op_Result {
 		// Re-encoding through our codec would reject legacy changes whose
 		// exact encoding predates schema evolution — bytes are the truth.
 		if len(data) < 34 || data[0] != 0x0a || data[1] != 0x20 {
-			rejected += 1
+			append(&reasons, json.String("change id is not leading"))
 			continue
 		}
 		hashed := make([dynamic]byte, 0, len(data) - 32, context.temp_allocator)
@@ -242,18 +244,20 @@ changes_import :: proc(parsed: json.Value) -> Op_Result {
 		append(&hashed, ..data[34:])
 		digest := core.sha256(hashed[:])
 		if string(digest[:]) != string(c.id) {
-			rejected += 1
+			append(&reasons, json.String("change id does not match its bytes"))
 			continue
 		}
 		if strings.contains(c.object_id, "/") || strings.contains(c.object_id, "..") || strings.contains(c.object_id, "\\") || strings.contains(c.object_id, "\x00") {
-			rejected += 1
+			append(&reasons, json.String("object id is not a safe path"))
 			continue
 		}
 		// Validate against locally trusted authority and the durable state from
 		// preceding accepted changes, never this change's claimed author/scope.
-		if shared && !shared_import_allowed(&c, provenance) {
-			rejected += 1
-			continue
+		if shared {
+			if reason := shared_import_rejection(&c, provenance); reason != "" {
+				append(&reasons, json.String(reason))
+				continue
+			}
 		}
 		// An object already purged is refused by id. A change that places an
 		// object into a vanished space is refused by the space, and its id
@@ -292,7 +296,7 @@ changes_import :: proc(parsed: json.Value) -> Op_Result {
 			continue
 		}
 		if !write_change_markers(c.object_id, hex_str, b_hex, false) || os.write_entire_file(path, data) != nil {
-			rejected += 1
+			append(&reasons, json.String("write failed"))
 			continue
 		}
 		archive_link(c.object_id, hex_str, path)
@@ -312,8 +316,9 @@ changes_import :: proc(parsed: json.Value) -> Op_Result {
 	out["ok"] = json.Boolean(true)
 	out["imported"] = json.Integer(i64(imported))
 	out["skipped"] = json.Integer(i64(skipped))
-	out["rejected"] = json.Integer(i64(rejected))
+	out["rejected"] = json.Integer(i64(len(reasons)))
 	out["dropped"] = json.Integer(i64(dropped))
 	out["ids"] = json.Array(ids)
+	out["reasons"] = json.Array(reasons)
 	return {out = json.Object(out)}
 }

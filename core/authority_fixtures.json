@@ -981,7 +981,7 @@
       "reason": "existing object belongs to another scope"
     },
     {
-      "name": "writer cannot touch control object",
+      "name": "writer changes a control object",
       "change": {
         "id": "",
         "objectId": "agent-1",
@@ -1065,8 +1065,8 @@
         "createdAt": 1,
         "updatedAt": 1
       },
-      "ok": false,
-      "reason": "only the owner may change control objects"
+      "ok": true,
+      "reason": ""
     },
     {
       "name": "owner may touch control object",
@@ -1157,7 +1157,7 @@
       "reason": ""
     },
     {
-      "name": "writer cannot create control object",
+      "name": "writer creates a control object",
       "change": {
         "id": "",
         "objectId": "new-agent",
@@ -1234,8 +1234,587 @@
         "updatedAt": 1
       },
       "existing": null,
+      "ok": true,
+      "reason": ""
+    },
+    {
+      "name": "writer adds a chat message on an agent",
+      "change": {
+        "id": "",
+        "objectId": "agent-1",
+        "parentIds": [],
+        "ops": [
+          {
+            "blockAdd": {
+              "block": {
+                "id": "__discussion__",
+                "childrenIds": [],
+                "content": {
+                  "custom": {
+                    "contentType": "discussion",
+                    "meta": []
+                  }
+                }
+              },
+              "targetId": "",
+              "position": 0
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "msg-1",
+                "childrenIds": [],
+                "content": {
+                  "text": {
+                    "text": "hello",
+                    "style": 0
+                  }
+                }
+              },
+              "targetId": "__discussion__",
+              "position": 0
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "x"
+      },
+      "provenance": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "signer": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "space": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "owner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "trustedSpace": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "existing": {
+        "id": "agent-1",
+        "typeKey": "agent",
+        "fields": {
+          "channel": {
+            "stringValue": "space-a"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "ok": true,
+      "reason": ""
+    },
+    {
+      "name": "writer snapshots a control object",
+      "change": {
+        "id": "",
+        "objectId": "agent-1",
+        "parentIds": [],
+        "ops": [],
+        "timestamp": 1,
+        "author": "x",
+        "snapshot": {
+          "id": "agent-1",
+          "typeKey": "agent",
+          "fields": {
+            "channel": {
+              "stringValue": "space-a"
+            },
+            "name": {
+              "stringValue": "Renamed"
+            }
+          },
+          "blocks": [],
+          "deleted": false,
+          "createdAt": 1,
+          "updatedAt": 1
+        }
+      },
+      "provenance": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "signer": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "space": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "owner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "trustedSpace": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "existing": {
+        "id": "agent-1",
+        "typeKey": "agent",
+        "fields": {
+          "channel": {
+            "stringValue": "space-a"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "ok": true,
+      "reason": ""
+    },
+    {
+      "name": "writer deletes a control object",
+      "change": {
+        "id": "",
+        "objectId": "agent-1",
+        "parentIds": [],
+        "ops": [
+          {
+            "objectDelete": {}
+          }
+        ],
+        "timestamp": 1,
+        "author": "x"
+      },
+      "provenance": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "signer": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "space": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "owner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "trustedSpace": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "existing": {
+        "id": "agent-1",
+        "typeKey": "agent",
+        "fields": {
+          "channel": {
+            "stringValue": "space-a"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "ok": true,
+      "reason": ""
+    },
+    {
+      "name": "writer cannot change who serves a control object",
+      "change": {
+        "id": "",
+        "objectId": "agent-1",
+        "parentIds": [],
+        "ops": [
+          {
+            "fieldSet": {
+              "key": "served_by",
+              "value": {
+                "stringValue": "machine-1"
+              }
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "x"
+      },
+      "provenance": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "signer": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "space": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "owner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "trustedSpace": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "existing": {
+        "id": "agent-1",
+        "typeKey": "agent",
+        "fields": {
+          "channel": {
+            "stringValue": "space-a"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
       "ok": false,
-      "reason": "only the owner may create this object"
+      "reason": "only the owner may change protected fields"
+    },
+    {
+      "name": "writer cannot set a machine id on a new machine",
+      "change": {
+        "id": "",
+        "objectId": "new-machine",
+        "parentIds": [],
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "machine"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "space-a"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "machine_id",
+              "value": {
+                "stringValue": "m-1"
+              }
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "x"
+      },
+      "provenance": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "signer": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "space": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "owner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "trustedSpace": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "existing": null,
+      "ok": false,
+      "reason": "only the owner may change protected fields"
+    },
+    {
+      "name": "viewer cannot add a chat message on an agent",
+      "change": {
+        "id": "",
+        "objectId": "agent-1",
+        "parentIds": [],
+        "ops": [
+          {
+            "blockAdd": {
+              "block": {
+                "id": "__discussion__",
+                "childrenIds": [],
+                "content": {
+                  "custom": {
+                    "contentType": "discussion",
+                    "meta": []
+                  }
+                }
+              },
+              "targetId": "",
+              "position": 0
+            }
+          },
+          {
+            "blockAdd": {
+              "block": {
+                "id": "msg-1",
+                "childrenIds": [],
+                "content": {
+                  "text": {
+                    "text": "hello",
+                    "style": 0
+                  }
+                }
+              },
+              "targetId": "__discussion__",
+              "position": 0
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "x"
+      },
+      "provenance": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "signer": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "space": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "owner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "trustedSpace": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "existing": {
+        "id": "agent-1",
+        "typeKey": "agent",
+        "fields": {
+          "channel": {
+            "stringValue": "space-a"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "ok": false,
+      "reason": "signer is not a writer of the space"
     },
     {
       "name": "writer cannot edit members",
@@ -1752,6 +2331,231 @@
       },
       "ok": true,
       "reason": ""
+    },
+    {
+      "name": "writer cannot delete the space by snapshot",
+      "change": {
+        "id": "",
+        "objectId": "space-a",
+        "parentIds": [],
+        "ops": [],
+        "timestamp": 1,
+        "author": "x",
+        "snapshot": {
+          "id": "space-a",
+          "typeKey": "channel",
+          "fields": {
+            "members": {
+              "valuesValue": {
+                "items": [
+                  {
+                    "mapValue": {
+                      "entries": {
+                        "npub": {
+                          "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        },
+                        "role": {
+                          "stringValue": "writer"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "mapValue": {
+                      "entries": {
+                        "npub": {
+                          "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        },
+                        "role": {
+                          "stringValue": "viewer"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "name": {
+              "stringValue": "A"
+            }
+          },
+          "blocks": [],
+          "deleted": true,
+          "createdAt": 1,
+          "updatedAt": 1
+        }
+      },
+      "provenance": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "signer": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "space": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "owner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "trustedSpace": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "existing": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "ok": false,
+      "reason": "only the owner may delete or restore the space"
+    },
+    {
+      "name": "writer cannot create the space",
+      "change": {
+        "id": "",
+        "objectId": "space-a",
+        "parentIds": [],
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "channel"
+            }
+          }
+        ],
+        "timestamp": 1,
+        "author": "x"
+      },
+      "provenance": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "signer": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "space": {
+        "spaceId": "space-a",
+        "keyId": 1,
+        "owner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "trustedSpace": {
+        "id": "space-a",
+        "typeKey": "channel",
+        "fields": {
+          "members": {
+            "valuesValue": {
+              "items": [
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                      },
+                      "role": {
+                        "stringValue": "writer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "mapValue": {
+                    "entries": {
+                      "npub": {
+                        "stringValue": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                      },
+                      "role": {
+                        "stringValue": "viewer"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "name": {
+            "stringValue": "A"
+          }
+        },
+        "blocks": [],
+        "deleted": false,
+        "createdAt": 1,
+        "updatedAt": 1
+      },
+      "existing": null,
+      "ok": false,
+      "reason": "only the owner may create the space"
     },
     {
       "name": "vanish ledger never shared",

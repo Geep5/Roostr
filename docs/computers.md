@@ -47,7 +47,7 @@ Add to `BUNDLED_TYPES`:
 ```
 
 `machine` stays the type key. Renaming it would break `machine_id`/`served_by`
-(protected fields in `core/authority.odin:39`), `control_type`, the serving
+(protected fields: `protected_field` in `core/authority.odin`), the serving
 resolver (`core/serving.odin`), `UNSERVED_TYPES`, and the harness roster — all
 keyed on the string `machine`. The human-facing name is what changes.
 

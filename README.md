@@ -420,6 +420,11 @@ entry, purged on that identity's devices, never chased on relays).
 Shared imports carry verified outer signer, source space and key version to the
 native importer. Both engines check target scope and owner-only operations;
 knowing one shared-space key is not authority over another space or its members.
+A writer of the space creates, changes, snapshots and deletes any object in it -
+agents, skills, programs and computers included - while the protected fields
+(`members`, `served_by`, `machine_id`, … - `protected_field` in
+`core/authority.odin`) and creating, deleting or restoring the space itself stay
+the owner's. A refused import is logged by the sync with the store's reason.
 Browser edits enter a durable outbox before publication, and logout refuses
 unpublished work unless it is explicitly exported.
 

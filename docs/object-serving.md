@@ -39,9 +39,10 @@ identically. No heartbeats, no leases, no coordinator.
 | skill    | `key`          | string      | harness catalog seed       | catalog key: the skill is software a computer installs |
 | capability | `key`, `served_by`, `status`, `error`, `checked_at`, `channel` | strings | that machine | one catalog skill's state on one machine |
 
-`served_by` is already a protected field (`core/authority.odin`
-`protected_field`); `machine` is a control type — only the owner writes
-either, which is every harness of the owner, since they share the key.
+`served_by` is a protected field (`core/authority.odin` `protected_field`):
+in a shared space only the owner writes it, which is every harness of the
+owner, since they share the key. A `machine` object is otherwise like any
+other - every writer of the space may change it, as agents, skills and programs.
 `skills` is ordinary data. A skill with no `key` is instructions only and
 never constrains the machine; one with a `key` needs a machine with an
 active capability of that key. People pick skills, never capabilities -

@@ -23,12 +23,13 @@ shared_provenance_parse :: proc(body: json.Value) -> (Shared_Provenance, bool, b
 }
 
 // The shared gate lives in core (authorize_shared_change); this binds it to
-// the daemon's state map and the keyring-resolved owner. shared_import_allowed
+// the daemon's state map and the keyring-resolved owner. shared_import_rejection
 // has already matched the keyring's key version against the provenance.
-shared_change_allowed :: proc(c: ^core.Change, p: Shared_Provenance, owner: string, states: map[string]^core.Object_State) -> bool {
+// Returns why the change is refused, "" when it may be imported.
+shared_change_rejection :: proc(c: ^core.Change, p: Shared_Provenance, owner: string, states: map[string]^core.Object_State) -> string {
 	space := core.Shared_Space{p.space_id, p.key_id, owner}
-	ok, _ := core.authorize_shared_change(c, p, space, states[p.space_id], states[c.object_id])
-	return ok
+	_, reason := core.authorize_shared_change(c, p, space, states[p.space_id], states[c.object_id])
+	return reason
 }
 
 /**
@@ -63,16 +64,16 @@ shared_space_resolve :: proc(p: Shared_Provenance) -> (core.Shared_Space, bool) 
 	return core.Shared_Space{p.space_id, p.key_id, owner}, true
 }
 
-shared_import_allowed :: proc(c: ^core.Change, p: Shared_Provenance) -> bool {
+shared_import_rejection :: proc(c: ^core.Change, p: Shared_Provenance) -> string {
 	space, valid := shared_space_resolve(p)
-	if !valid do return false
+	if !valid do return "space key is not installed for this provenance"
 	sync.lock(&g_store.mu)
 	defer sync.unlock(&g_store.mu)
 	ensure_loaded()
-	return shared_change_allowed(c, p, space.owner, g_store.states)
+	return shared_change_rejection(c, p, space.owner, g_store.states)
 }
 
-/** Checkpoint counterpart of shared_import_allowed: owner-only, scope-checked. */
+/** Checkpoint counterpart of shared_import_rejection: owner-only, scope-checked. */
 shared_checkpoint_allowed :: proc(cp: ^core.Checkpoint, p: Shared_Provenance) -> bool {
 	space, valid := shared_space_resolve(p)
 	if !valid do return false
