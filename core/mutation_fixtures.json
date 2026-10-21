@@ -7290,6 +7290,14 @@
                 "boolValue": true
               }
             }
+          },
+          {
+            "fieldSet": {
+              "key": "all_unpinned_once",
+              "value": {
+                "boolValue": true
+              }
+            }
           }
         ],
         "parentIds": [],
@@ -7298,13 +7306,2136 @@
       {
         "author": "alice",
         "id": "",
-        "objectId": "bundled-query-all-new-id",
+        "objectId": "__directory__:new-id",
         "ops": [
           {
+            "objectCreate": {
+              "typeKey": "directory"
+            }
+          },
+          {
             "fieldSet": {
-              "key": "pin_order",
+              "key": "name",
               "value": {
-                "stringValue": "V"
+                "stringValue": "Directory"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-agent-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "agent"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Agent"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🤖"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-chat_color-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "chat_color"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Chat color"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🎨"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-check_first-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "check_first"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Check first"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔎"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-createdDate-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "createdDate"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Created date"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📅"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-credentials-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "credentials"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Credentials"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔑"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-description-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "description"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Description"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📝"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-done-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "done"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Done"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "✅"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "checkbox"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-dueDate-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "dueDate"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Due date"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "⏰"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-email-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "email"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Email"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "✉️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "email"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-error-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "error"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Error"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "⚠️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-featuredRelations-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "featuredRelations"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Featured relations"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "⭐"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "relations"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": true
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-iconEmoji-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "iconEmoji"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Icon"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🖼️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "emoji"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": true
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-last_run-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "last_run"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Last run"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🕘"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-model-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "model"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Model"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧬"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "status"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-modifiedDate-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "modifiedDate"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Modified date"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🗓️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-name-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "name"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Name"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "✏️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-phone-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "phone"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Phone"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📞"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "phone"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-prompt-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "prompt"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "System prompt"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧠"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-repeat-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "repeat"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Repeat"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "↻"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "repeat"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": true
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-repo_path-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "repo_path"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Project folder"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📁"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-served_by-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "served_by"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Served by"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🖥️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-setOf-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "setOf"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Set of"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🗂️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": true
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-skills-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "skills"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Skills"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🛠️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-status-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "status"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Status"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🚦"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "status"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-stuck-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "stuck"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Stuck"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧱"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-system-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "system"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "System"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "⚙️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "checkbox"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-tag-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tag"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Tag"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🏷️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "tag"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-tool_builtin-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tool_builtin"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Built-in"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔒"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "checkbox"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-tool_inputs-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tool_inputs"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Inputs"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📥"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-tool_version-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tool_version"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Version"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔢"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "number"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-tools-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tools"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Tools"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧰"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-url-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "url"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "URL"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔗"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "url"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-agent-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "agent"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Agent"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🤖"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-bookmark-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "bookmark"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Bookmark"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔖"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-capability-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "capability"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Capability"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧩"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-credential-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "credential"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Credential"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔑"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-file-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "file"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "File"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📎"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-machine-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "machine"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Computer"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🖥️"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-note-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "note"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Note"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📝"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-page-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Page"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📄"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-person-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "person"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Human"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "👤"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-project-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "project"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Project"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔨"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-skill-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "skill"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Skill"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🛠️"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-system_prompt-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "system_prompt"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "System prompt"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧠"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-task-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "task"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Task"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "✅"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "task"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-tool-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tool"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Tool"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧰"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "count:query:alice",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "count:relation:alice",
+              "value": {
+                "intValue": 32
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "count:type:alice",
+              "value": {
+                "intValue": 14
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "version",
+              "value": {
+                "intValue": 1
               }
             }
           }
@@ -11418,21 +13549,12 @@
                 "boolValue": true
               }
             }
-          }
-        ],
-        "parentIds": [],
-        "timestamp": 1234
-      },
-      {
-        "author": "alice",
-        "id": "",
-        "objectId": "bundled-query-all-s",
-        "ops": [
+          },
           {
             "fieldSet": {
-              "key": "pin_order",
+              "key": "all_unpinned_once",
               "value": {
-                "stringValue": "V"
+                "boolValue": true
               }
             }
           }
@@ -15597,21 +17719,12 @@
                 "boolValue": true
               }
             }
-          }
-        ],
-        "parentIds": [],
-        "timestamp": 1234
-      },
-      {
-        "author": "alice",
-        "id": "",
-        "objectId": "bundled-query-all-s",
-        "ops": [
+          },
           {
             "fieldSet": {
-              "key": "pin_order",
+              "key": "all_unpinned_once",
               "value": {
-                "stringValue": "V"
+                "boolValue": true
               }
             }
           }
@@ -15998,6 +18111,2205 @@
               "key": "system",
               "value": {
                 "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "__directory__",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "directory"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Directory"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "space:s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "name",
+                      {
+                        "stringValue": ""
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": ""
+                      }
+                    ],
+                    [
+                      "created",
+                      {
+                        "intValue": 1
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "version",
+              "value": {
+                "intValue": 1
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "__directory__:s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "directory"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Directory"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-agent-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "agent"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Agent"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🤖"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-chat_color-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "chat_color"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Chat color"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🎨"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-check_first-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "check_first"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Check first"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔎"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-createdDate-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "createdDate"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Created date"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📅"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-credentials-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "credentials"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Credentials"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔑"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-description-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "description"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Description"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📝"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-done-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "done"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Done"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "✅"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "checkbox"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-dueDate-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "dueDate"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Due date"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "⏰"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-email-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "email"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Email"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "✉️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "email"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-error-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "error"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Error"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "⚠️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-featuredRelations-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "featuredRelations"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Featured relations"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "⭐"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "relations"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": true
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-iconEmoji-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "iconEmoji"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Icon"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🖼️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "emoji"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": true
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-last_run-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "last_run"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Last run"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🕘"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-model-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "model"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Model"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧬"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "status"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-modifiedDate-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "modifiedDate"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Modified date"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🗓️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "date"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-name-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "name"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Name"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "✏️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-phone-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "phone"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Phone"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📞"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "phone"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-prompt-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "prompt"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "System prompt"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧠"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-repeat-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "repeat"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Repeat"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "↻"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "repeat"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": true
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-repo_path-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "repo_path"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Project folder"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📁"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-served_by-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "served_by"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Served by"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🖥️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-setOf-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "setOf"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Set of"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🗂️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": true
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-skills-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "skills"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Skills"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🛠️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-status-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "status"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Status"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🚦"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "status"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-stuck-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "stuck"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Stuck"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧱"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-system-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "system"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "System"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "⚙️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "checkbox"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-tag-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tag"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Tag"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🏷️"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "tag"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-tool_builtin-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tool_builtin"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Built-in"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔒"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "checkbox"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-tool_inputs-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tool_inputs"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Inputs"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📥"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-tool_version-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tool_version"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Version"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔢"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "number"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-tools-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tools"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Tools"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧰"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "object"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-url-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "url"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "URL"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔗"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "url"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-agent-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "agent"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Agent"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🤖"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-bookmark-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "bookmark"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Bookmark"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔖"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-capability-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "capability"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Capability"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧩"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-credential-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "credential"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Credential"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔑"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-file-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "file"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "File"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📎"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-machine-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "machine"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Computer"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🖥️"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-note-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "note"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Note"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📝"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-page-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Page"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📄"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-person-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "person"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Human"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "👤"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-project-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "project"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Project"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🔨"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-skill-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "skill"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Skill"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🛠️"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-system_prompt-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "system_prompt"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "System prompt"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧠"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-task-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "task"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Task"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "✅"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "task"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "type:bundled-type-tool-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "tool"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Tool"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🧰"
+                      }
+                    ],
+                    [
+                      "layout",
+                      {
+                        "stringValue": "page"
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "count:query:alice",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "count:relation:alice",
+              "value": {
+                "intValue": 32
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "count:type:alice",
+              "value": {
+                "intValue": 14
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "version",
+              "value": {
+                "intValue": 1
               }
             }
           }
@@ -19256,6 +23568,36 @@
               "key": "system",
               "value": {
                 "boolValue": true
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "__directory__",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "directory"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Directory"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "version",
+              "value": {
+                "intValue": 1
               }
             }
           }

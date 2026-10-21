@@ -50,7 +50,7 @@ Graph :: struct {
 	edges: [dynamic]Edge,
 }
 
-COSMOS_HIDDEN :: []string{"program", "typescript", "json", "proto", "relation"}
+COSMOS_HIDDEN :: []string{"program", "typescript", "json", "proto", "relation", core.DIRECTORY_TYPE}
 
 type_color :: proc(kind: string) -> [3]f32 {
 	switch kind {

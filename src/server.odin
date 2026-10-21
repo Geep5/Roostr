@@ -331,7 +331,8 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 // surface. A type hidden on one host and listed on the other is how
 // machines became invisible on localhost and visible on the website.
 // Engine internals only: agents, templates, skills, properties, types and spaces all list.
-HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "peer", "pinned_fact", "milestone", VANISH_LOG_TYPE, "user_prefs", "descriptor", "install", "set", ""}
+// Directories (core/directory.odin) are bookkeeping for partial replicas.
+HIDDEN_LIST_TYPES :: []string{"program", "typescript", "json", "proto", "peer", "pinned_fact", "milestone", VANISH_LOG_TYPE, "user_prefs", "descriptor", "install", "set", core.DIRECTORY_TYPE, ""}
 
 handle_list_objects :: proc(sock: net.TCP_Socket) {
 	Ctx :: struct {

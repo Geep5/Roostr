@@ -12,12 +12,18 @@ Mutation_Input :: struct {
  author: string,
  id_seed: string,
  key_id: i64,
+ // The writing install (payload `device`); "" = the author. Directory
+ // counts are kept per device (directory.odin).
+ device: string,
 }
 Mutation_Plan :: struct {
  changes: [dynamic]Change,
  result: map[string]json.Value,
  vanish_ids: [dynamic]string,
  next_id: int,
+ // Directories a repair in this plan built from the vault after it;
+ // directory_maintain leaves them alone.
+ directories_built: [dynamic]string,
 }
 mutation_id :: proc(plan: ^Mutation_Plan, input: Mutation_Input) -> string {
  n := plan.next_id
@@ -92,6 +98,8 @@ mutation_plan :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Pl
  plan, err := mutation_plan_action(parsed, input)
  if err != "" do return plan, err
  if links_err := mutation_sync_links(&plan, input); links_err != "" do return plan, links_err
+ // Every action, seeding and bootstrap included, keeps the directories in step.
+ directory_maintain(&plan, input)
  vanished := vanished_from_ledger(input.states[VANISH_LOG_ID])
  for &change in plan.changes {
   gone := change_vanished_by(vanished, &change, input.states[change.object_id])
@@ -220,7 +228,7 @@ mutation_sync_links :: proc(plan: ^Mutation_Plan, input: Mutation_Input) -> stri
 }
 
 mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Mutation_Plan, string) {
- plan := Mutation_Plan{changes = make([dynamic]Change, context.temp_allocator), result = jobj(), vanish_ids = make([dynamic]string, context.temp_allocator)}
+ plan := Mutation_Plan{changes = make([dynamic]Change, context.temp_allocator), result = jobj(), vanish_ids = make([dynamic]string, context.temp_allocator), directories_built = make([dynamic]string, context.temp_allocator)}
  if _, ok := parsed.(json.Object); !ok do return plan, "mutation params must be an object"
  action := json_str(parsed, "action")
  if input.author == "" do return plan, "author required"
@@ -1110,6 +1118,9 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 		}
 		mutation_add(&plan, input, id, ops)
 		mutation_seed_space_defaults(&plan, input, id)
+		// A new space's objects are all in this plan: its directory is
+		// complete from the start, even on a device that holds little else.
+		directory_repair(&plan, input, only_space = id)
 		extra := jobj()
 		extra["id"] = json.String(strings.clone(id, context.temp_allocator))
 		extra["key_id"] = json.Integer(1)
@@ -1198,6 +1209,28 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
   return plan, ""
  case "bootstrap_space_defaults":
   mutation_bootstrap_space_defaults(&plan, input)
+  return plan, ""
+ // Rebuild the directories from the whole vault; only right where the whole vault is held.
+ case "directories_repair":
+  directory_repair(&plan, input)
+  return plan, ""
+ // Take every space's bundled All Objects query off the sidebar, once
+ // (pins_unpin_all_once). `object_ids` limits it to those queries.
+ case "unpin_all_objects_once":
+  ids := make([dynamic]string, context.temp_allocator)
+  if value, present := json_field(parsed, "object_ids"); present {
+   items, ok := value.(json.Array)
+   if !ok do return plan, "object_ids must be an array"
+   for item in items {
+    id, is_string := item.(json.String)
+    if !is_string do return plan, "object_ids must be strings"
+    append(&ids, string(id))
+   }
+  } else {
+   for id in input.states do if strings.has_prefix(id, ALL_OBJECTS_PREFIX) do append(&ids, strings.clone(id, context.temp_allocator))
+   slice.sort(ids[:])
+  }
+  pins_unpin_all_once(&plan, input, ids[:])
   return plan, ""
  case:
   return plan, fmt.tprintf("unknown action %q", action)
@@ -1605,12 +1638,14 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 	for key in RETIRED_BUNDLED_TYPES {
 		if e, ok := types[key]; ok do mutation_add(plan, input, e.id, {Operation{kind = .Object_Delete}})
 	}
-	// "All Objects": a query with no source type - every object in the space -
-	// pinned at the top of the space's sidebar. Made once: a binned copy is
+	// "All Objects": a query with no source type - every object in the space,
+	// reachable from Types and search. Not pinned: a sidebar entry listing
+	// the whole space is the one widget a device holding part of the vault
+	// cannot draw without downloading the space. Made once: a binned copy is
 	// still in the states and a vanished one is in the ledger, so deleting it
-	// keeps it gone, and only the run that creates it pins it, so unpinning
-	// keeps it unpinned.
-	all_id := fmt.tprintf("bundled-query-all-%s", prefix)
+	// keeps it gone. It carries the unpin marker, so the migration
+	// (pins_unpin_all_once) never touches it or a pin someone gives it.
+	all_id := fmt.tprintf("%s%s", ALL_OBJECTS_PREFIX, prefix)
 	_, held := input.states[all_id]
 	if !held && all_id not_in vanished {
 		mutation_add(plan, input, all_id, []Operation{
@@ -1621,12 +1656,8 @@ mutation_seed_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input
 			{kind = .Field_Set, key = "setOf", value = list_value({})},
 			{kind = .Field_Set, key = "bundled", value = bool_value(true)},
 			{kind = .Field_Set, key = "system", value = bool_value(true)},
+			{kind = .Field_Set, key = ALL_UNPINNED_KEY, value = bool_value(true)},
 		})
-		// Pinned first: a position before every other pin in the space (a space
-		// made in this same change has none yet). Unpinning clears it for good.
-		first, any := pins_first_key(input.states, channel_id, pins_default_space(input.states))
-		key := pin_key_between("", first, any)
-		mutation_add(plan, input, all_id, {Operation{kind = .Field_Set, key = PIN_KEY, value = string_value(key)}})
 	}
 }
 mutation_bootstrap_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_Input) {
@@ -1704,7 +1735,12 @@ mutation_bootstrap_space_defaults :: proc(plan: ^Mutation_Plan, input: Mutation_
 	// older client writing the list again adds only what it newly pinned).
 	default_space := pins_default_space(input.states)
 	for c in chans do pins_from_list(plan, input, c, default_space)
-
+	// Each space's All Objects leaves the sidebar, once.
+	all_ids := make([dynamic]string, context.temp_allocator)
+	for c in chans do append(&all_ids, fmt.tprintf("%s%s", ALL_OBJECTS_PREFIX, len(c) >= 8 ? c[:8] : c))
+	pins_unpin_all_once(plan, input, all_ids[:])
+	// Last: the directories as the vault stands after everything above.
+	directory_repair(plan, input)
 }
 
 bundled_relation_shipped :: proc(key: string) -> bool {
@@ -2161,7 +2197,7 @@ mutation_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
  timestamp, has_timestamp := json_int(payload, "timestamp")
  if !has_timestamp do return nil, "timestamp required"
  key_id, _ := json_int(payload, "key_id")
- input := Mutation_Input{states = states, timestamp = timestamp, author = json_str(payload, "author"), id_seed = json_str(payload, "id_seed"), key_id = key_id}
+ input := Mutation_Input{states = states, timestamp = timestamp, author = json_str(payload, "author"), id_seed = json_str(payload, "id_seed"), key_id = key_id, device = json_str(payload, "device")}
  plan, err := mutation_plan(json.Object(request), input)
  if err != "" do return nil, err
  changes := make([dynamic]json.Value, context.temp_allocator)

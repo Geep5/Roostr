@@ -147,8 +147,8 @@ mutation_seed_converges :: proc(t: ^testing.T) {
 	for n, i in committed[1:] do testing.expectf(t, n == 0, "run %d committed %d change(s)", i + 2, n)
 }
 
-// Every space gets a pinned "All Objects" query (every object: no source
-// type), made once. Deleting it keeps it gone; unpinning keeps it unpinned.
+// Every space gets an "All Objects" query (every object: no source type),
+// made once and not pinned. Deleting it keeps it gone.
 @(test)
 mutation_seed_all_objects_query :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
@@ -176,6 +176,7 @@ mutation_seed_all_objects_query :: proc(t: ^testing.T) {
 	first := run(states)
 	created := false
 	all_key := ""
+	marked := false
 	for c in first.changes {
 		if c.object_id == ALL {
 			for op in c.ops {
@@ -183,12 +184,14 @@ mutation_seed_all_objects_query :: proc(t: ^testing.T) {
 				if op.kind == .Field_Set && op.key == "setOf" do testing.expect(t, len(op.value.items) == 0, "no source type: every object")
 				if op.kind == .Field_Set && op.key == "name" do testing.expect_value(t, op.value.str, "All Objects")
 				if op.kind == .Field_Set && op.key == PIN_KEY do all_key = op.value.str
+				if op.kind == .Field_Set && op.key == ALL_UNPINNED_KEY do marked = op.value.b
 			}
 		}
 		testing.expect(t, c.object_id != note.id, "the existing pin is not rewritten")
 	}
 	testing.expect(t, created, "the space gets an All Objects query")
-	testing.expect(t, all_key != "" && all_key < "V", "pinned at the top, before the existing pin")
+	testing.expect(t, all_key == "", "not pinned")
+	testing.expect(t, marked, "born with the unpin marker: the migration leaves it alone")
 
 	// Held - unpinned by the user, or binned - it is never made or pinned again.
 	query := new(Object_State)
@@ -196,7 +199,7 @@ mutation_seed_all_objects_query :: proc(t: ^testing.T) {
 	states[ALL] = query
 	again := run(states)
 	testing.expect(t, !touches(again, ALL), "a deleted All Objects stays deleted")
-	testing.expect(t, !touches(again, space.id), "and is not pinned again")
+	testing.expect(t, !touches(again, space.id), "and nothing else moves")
 }
 
 // Pins carry their own positions: a key always fits between two others,

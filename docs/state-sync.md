@@ -281,6 +281,88 @@ owns: base encode/decode/hash, current-base choice,
 live/orphan classification, rebase change construction, replay from base,
 sealing/opening bases.
 
+## Directories: drawing a vault before holding it
+
+A device that holds only part of the vault (a "lite" replica: the web app
+on roostr.space and the iPhone fetch objects as they are opened) draws the
+sidebar, spaces, types, properties and per-type counts from two kinds of
+ordinary synced objects (`core/directory.odin`, type `directory`, hidden from
+untyped queries, object lists and the graph like the vanish ledger):
+
+- `__directory__` (no `channel`: the personal stream) - one field
+  `space:<spaceId>` per live space: Map `{name, icon, created}` (`icon` =
+  `iconImage` when set, else `iconEmoji`; `created` = the space's createdAt).
+- `__directory__:<spaceId>` (`channel` = the space, so it is encrypted and
+  routed with it) - `pin:<id>` Map `{name, icon, type, order, collapsed}`
+  per pinned object, `type:<id>` Map `{key, name, icon, layout, builtin}`,
+  `rel:<id>` Map `{key, name, icon, format, hidden, builtin}`, and
+  `count:<typeKey>:<device>` Int.
+
+Both carry `name` "Directory" and, once a builder completed them, `version`
+1; one without `version` is not ready. Seen through `object_to_json`, a
+directory's `fields` is a JSON object: a Map entry is
+`{"mapValue":{"entries":{"name":{"stringValue":"…"},…}}}` (every key
+present, "" / false when unset), a count `{"intValue":N}`.
+
+**Counts merge per device.** Objects of a type in a space = the sum of its
+`count:<type>:*` fields. A device writes only its own field (`device` in
+the mutation payload, stable per install - the daemon's `<data>/device-id`,
+a replica's kv `roostr-device-id`; the author when absent; never holding
+`:`, so the type key is everything before the last `:`). Concurrent writes
+from different devices never touch the same field. Counted: live objects
+(not binned, not vanished) except spaces and bookkeeping (`directory`,
+`vanish_log`, `user_prefs` and the engine internals the clients hide);
+types and properties count under `type` and `relation`.
+
+**Kept in step by every mutation.** `mutation_plan` ends with
+`directory_maintain`: each object the plan writes or vanishes (and each
+space it leaves) is projected before (stored) and after (stored + the
+plan), and the difference - entries set or deleted, the writer's counts
+moved by the delta - lands on its directory in the same plan, split into
+changes that each fit one relay part. Only directories the vault already
+holds, never one of a space that is gone, never one the plan itself
+writes. A new space's directory is built complete by `channel_create`.
+
+**Rebuilt where the whole vault is held.** `directories_repair` (also the
+last step of `bootstrap_space_defaults`, so every daemon start and full
+replica rebuilds) creates missing directories, rewrites differing entries,
+deletes stale ones, writes its own count fields as the truth minus the
+other devices' fields and sets `version`. Two devices building the same
+directory at once merge into one object (fixed ids); their counts overshoot
+until the next repair. A converged vault plans nothing.
+
+**A lite replica** (`RoostrWebsite/gpui/crates/roostr-replica`,
+`src/sync/lite.rs`). A replica decides once, on its first start, whether it
+holds the vault whole (device kv `roostr-holding` = `full`) or in part
+(`lite`): the browser and the iPhone start lite when their store holds
+nothing yet; a store that already holds a vault (the Svelte import, the
+Swift app's) stays full. A lite session:
+
+- walks whole only the streams it holds whole (store meta `lite-scopes`:
+  the personal stream, and shared spaces by id); every other object it
+  holds is followed by its own blinded `h` tag - in each history pass
+  (`{kinds: DAG, #h: [...]}` since the persisted cursor) and on the live
+  subscription and the watchdog's head check;
+- fetches on start the personal directory and the vanish ledger, every
+  installed or listed space object with its directory, then the `type:` and
+  `rel:` objects the space directories list; the sidebar draws every space
+  and its pins from the directories for what is not held (an unheld pin is
+  an object summary from its `pin:` entry);
+- fetches an object by id when it is opened (or a mutation plan names it):
+  `#h` under the personal tag and every installed space key's, bases first
+  (and their 1080 parts), then of an object holding a base the deltas on it
+  (`#b`) and those since its base's day, of any other its whole history; it
+  is followed from then on under the tag it answered to;
+- loads a space whole on demand: a shared space adds its stream, any other
+  space makes the personal stream whole (every unshared space syncs there);
+- never seeds the bundled catalog or repairs directories (both read the
+  whole vault), never reports `bootstrapped`, and never publishes a space's
+  write allowlist before it holds the space object (its members);
+- writes its directory counts under `device` = kv `roostr-device-id`;
+- becomes full on "Fully sync this device" (`roostr-holding` = `full`, a
+  bootstrap walk as on a fresh device), and at once when the relays hold no
+  event of the identity at all (a new key: nothing to leave out).
+
 ## Files on Blossom (RoostrRelay)
 
 RoostrRelay serves Blossom on its existing port:

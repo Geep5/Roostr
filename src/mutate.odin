@@ -46,6 +46,7 @@ native_mutation_plan :: proc(parsed: json.Value, key_id := i64(0)) -> (core.Muta
  request := Request{parsed = parsed, input = core.Mutation_Input{
   timestamp = unix_ms(), author = author_id(),
   id_seed = new_uuid(context.temp_allocator), key_id = key_id,
+  device = device_id(),
  }}
  with_states(proc(states: map[string]^core.Object_State, user: rawptr) {
   r := cast(^Request)user
@@ -53,6 +54,32 @@ native_mutation_plan :: proc(parsed: json.Value, key_id := i64(0)) -> (core.Muta
   r.plan, r.error = core.mutation_plan(r.parsed, r.input)
  }, &request)
  return request.plan, request.error
+}
+
+g_device_mu: sync.Mutex
+g_device_id: string
+
+/**
+ * This install's stable id (<data>/device-id, made once): the device every
+ * mutation's directory counts are kept under (core/directory.odin). The
+ * identity key is shared by every device of the account, so it cannot be it.
+ */
+device_id :: proc() -> string {
+ sync.lock(&g_device_mu)
+ defer sync.unlock(&g_device_mu)
+ if g_device_id != "" do return g_device_id
+ path, _ := filepath.join({g_store.data_root, "device-id"}, context.temp_allocator)
+ if data, err := os.read_entire_file(path, context.temp_allocator); err == nil {
+  id := strings.trim_space(string(data))
+  if id != "" {
+   g_device_id = strings.clone(id)
+   return g_device_id
+  }
+ }
+ id := new_uuid()
+ if err := os.write_entire_file(path, transmute([]byte)id); err != nil do fmt.eprintfln("[glon-odin] cannot write %s: %v", path, err)
+ g_device_id = id
+ return g_device_id
 }
 
 native_commit_plan :: proc(plan: ^core.Mutation_Plan, create_channel := false) -> bool {

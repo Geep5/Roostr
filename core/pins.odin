@@ -159,3 +159,31 @@ pins_from_list :: proc(plan: ^Mutation_Plan, input: Mutation_Input, space_id: st
 	}
 	mutation_add(plan, input, space_id, {Operation{kind = .Field_Delete, key = PIN_LIST_KEY}})
 }
+
+// Every space's bundled "All Objects" query: ALL_OBJECTS_PREFIX + the space
+// id's first 8 characters (mutation_seed_space_defaults).
+ALL_OBJECTS_PREFIX :: "bundled-query-all-"
+// Set once the query has been taken off the sidebar: a later pin stays.
+ALL_UNPINNED_KEY :: "all_unpinned_once"
+
+/**
+ * Take each held, live All Objects query among `ids` off its sidebar, once:
+ * its position goes and the marker is set, so a person who pins it again
+ * keeps it pinned. Other ids are ignored.
+ */
+pins_unpin_all_once :: proc(plan: ^Mutation_Plan, input: Mutation_Input, ids: []string) {
+	done := make(map[string]bool, context.temp_allocator)
+	vanished := vanished_from_ledger(input.states[VANISH_LOG_ID])
+	for id in ids {
+		if !strings.has_prefix(id, ALL_OBJECTS_PREFIX) || id in done do continue
+		done[id] = true
+		s, held := input.states[id]
+		if !held || s.deleted do continue
+		if _, gone := state_vanished(vanished, s); gone do continue
+		if _, marked := fields_get(s.fields, ALL_UNPINNED_KEY); marked do continue
+		ops := make([dynamic]Operation, context.temp_allocator)
+		if _, pinned := fields_get(s.fields, PIN_KEY); pinned do append(&ops, Operation{kind = .Field_Delete, key = PIN_KEY})
+		append(&ops, Operation{kind = .Field_Set, key = ALL_UNPINNED_KEY, value = bool_value(true)})
+		mutation_add(plan, input, strings.clone(id, context.temp_allocator), ops[:])
+	}
+}

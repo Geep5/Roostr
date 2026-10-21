@@ -64,6 +64,8 @@ const COVERAGE: Record<string, Coverage> = {
 	// ── Engine upkeep ──
 	bootstrap_space_defaults: { reason: "engine start-up convergence of built-in types and properties" },
 	seed_space_defaults: { reason: "engine seeding of a new space's built-in types and properties" },
+	directories_repair: { reason: "engine rebuild of the directories partial replicas read, from the whole vault" },
+	unpin_all_objects_once: { reason: "engine one-time migration taking each space's All Objects off the sidebar" },
 };
 
 /** Every action name in the engine's mutation dispatch; a case line may name several. */
