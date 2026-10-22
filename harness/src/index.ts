@@ -47,7 +47,7 @@ import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvK
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
-import { arm as armScheduler, handleRunRequest, handleStuckChange, retryUnblockedRuns, RUN_REQUEST_KEY, startScheduler } from "./schedule";
+import { arm as armScheduler, clearFinishedStuck, handleRunRequest, handleStuckChange, retryUnblockedRuns, RUN_REQUEST_KEY, startScheduler } from "./schedule";
 import { startGmailPush } from "./gmail-push";
 import { badgeLoginIssues, issuesBadge, takeCredentialIssues } from "./credential-issues";
 import { beginAgentTurn, flagAgent, settleAgentTurn } from "./agent-errors";
@@ -835,6 +835,8 @@ async function serve(): Promise<void> {
 		// A rule edit (repeat_set/clear, an occurrence completed or fired)
 		// may move the earliest occurrence.
 		if (obj.fields["repeat"]) void armScheduler();
+		// The open run closed (finished, Retried, Skipped): its never-finished badge goes with it.
+		if (obj.fields["repeat"] && !obj.deleted) void clearFinishedStuck(obj).catch((err) => console.error(`[schedule] stuck badge ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
 		// Run now, asked for from any device: the computer that serves the object starts it.
 		if (obj.fields[RUN_REQUEST_KEY] && !obj.deleted) void handleRunRequest(obj).catch((err) => console.error(`[schedule] run request ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
 		// Stuck cleared by a person: the held run goes again.

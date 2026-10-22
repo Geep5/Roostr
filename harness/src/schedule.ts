@@ -375,6 +375,19 @@ async function waitingOn(obj: ObjectJSON, last: { author: string; text: string }
 }
 
 /**
+ * An object's repeat rule changed: if it carries the never-finished badge and
+ * no run is open any more (finished, Retried to the end, Skipped), the badge
+ * goes now - not at the next stuck check, up to 10 minutes later.
+ */
+export async function clearFinishedStuck(obj: ObjectJSON): Promise<void> {
+	if (!str(obj.fields, "error").startsWith(STUCK_BADGE)) return;
+	const rule = obj.fields["repeat"]?.mapValue?.entries ?? {};
+	const next = rule["next"]?.intValue;
+	if (next !== undefined && rule["fired_for"]?.intValue === next) return;
+	await deleteField(obj.id, "error");
+}
+
+/**
  * A day-or-longer occurrence that fired but is still open once the next one
  * would have been due is stuck: the schedule waits on it for good. Its
  * object's Error says so - when, whom it waits on (an agent the last message

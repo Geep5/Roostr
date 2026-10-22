@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { credentialBadge, issuesBadge, missingBadge, parseIssuesBadge } from "./credential-issues";
-import { flagStuckRuns, handleStuckChange, isEmptyResult, resetScheduler, retryUnblockedRuns, runNow, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
+import { clearFinishedStuck, flagStuckRuns, handleStuckChange, isEmptyResult, resetScheduler, retryUnblockedRuns, runNow, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -577,4 +577,27 @@ test("an agent with Fresh each run gets a new transcript for every run: the run'
 	await done;
 	expect(freshCalls).toEqual([agentId]);
 	expect(posts).toEqual([newConv.threadId, oldConv.threadId]);
+});
+
+test("the never-finished badge goes as soon as the open run closes, and stays while it is still open", async () => {
+	const deletes: string[] = [];
+	globalThis.fetch = (async (input, init) => {
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		if (body.action === "delete_field") deletes.push(String(body.object_id));
+		return respond({ ok: true });
+	}) as typeof fetch;
+	const badged = (id: string, entries: Record<string, { intValue: number }>) => ({
+		id,
+		typeKey: "task",
+		fields: { error: { stringValue: `${STUCK_BADGE}the Oct 17 at 9:00 AM run is still open` }, repeat: { mapValue: { entries } } },
+		blocks: [],
+		deleted: false,
+		createdAt: 1,
+		updatedAt: 1,
+	});
+	// Still open: fired for the occurrence that is next.
+	await clearFinishedStuck(badged("open", { next: { intValue: 1000 }, fired_for: { intValue: 1000 } }));
+	// Completed: the schedule moved on, nothing fired for the new next.
+	await clearFinishedStuck(badged("done", { next: { intValue: 2000 }, fired_for: { intValue: 1000 } }));
+	expect(deletes).toEqual(["done"]);
 });
