@@ -497,7 +497,8 @@ export async function checkUnserved(obj: ObjectJSON): Promise<void> {
 	if (obj.deleted) return;
 	const lookup = async (id: string): Promise<GuestPin | null> => {
 		const a = await fetchObject(id).catch(() => null);
-		return a && !a.deleted ? { name: str(a.fields, "name") || id.slice(0, 8), pin: str(a.fields, "served_by") } : null;
+		// Only an agent runs anything: a link to another object (a note, say) is no agent - as in the full pass.
+		return a && !a.deleted && a.typeKey === "agent" ? { name: str(a.fields, "name") || id.slice(0, 8), pin: str(a.fields, "served_by") } : null;
 	};
 	await applyUnserved(obj, lookup, await computerIds());
 }

@@ -644,7 +644,8 @@ function unservedDag(objects: Record<string, Record<string, unknown>>, agents: R
 		}
 		if (url.pathname.startsWith("/api/objects/")) {
 			const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
-			return agents[id] ? respond(agentRow(id)) : respond({ error: "not found" }, 404);
+			if (agents[id]) return respond(agentRow(id));
+			return objects[id] ? respond(row(id, "task", objects[id])) : respond({ error: "not found" }, 404);
 		}
 		const v = (body.value as { stringValue?: string } | undefined)?.stringValue;
 		writes.push({ action: String(body.action), id: String(body.object_id), ...(v ? { text: v } : {}) });
@@ -692,11 +693,13 @@ test("one served agent of two is enough: no not-served badge", async () => {
 	expect(unservedBadge([{ name: "Ann", pin: "" }, { name: "Bob", pin: "" }], new Set())).toBe(`${UNSERVED_BADGE}no computer runs Ann and Bob - set Served by on them`);
 });
 
-test("the not-served badge never overwrites another Error, and a repeat with no agents gets none", async () => {
+test("the not-served badge never overwrites another Error, and a repeat with no agents - or only links to non-agents - gets none", async () => {
 	const objects = {
 		person: repeating(["ann"], { error: { stringValue: "Waiting on legal - do not run" } }),
 		stuck: repeating(["ann"], { error: { stringValue: `${STUCK_BADGE}the Oct 17 at 9:00 AM run is still open` } }),
 		lonely: repeating([]),
+		// Its Agent links a plain object, not an agent: still no agents.
+		notAnAgent: repeating(["lonely"]),
 	};
 	const writes = unservedDag(objects, { ann: { name: "Ann" } }, ["mac-1"]);
 	await flagUnservedRepeats();
