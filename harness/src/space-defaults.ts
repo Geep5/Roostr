@@ -25,6 +25,8 @@ import { machineId } from "./roster";
 import { linkIds, linkList } from "./tool-objects";
 
 export const ANTHROPIC_SERVICE = "anthropic";
+/** A space's Default type (what it makes when nobody picks one) until someone chooses another. */
+export const DEFAULT_SPACE_TYPE = "page";
 
 /** The page of a seeded Anthropic credential: what to paste, and where it comes from. */
 const ANTHROPIC_PAGE = [
@@ -108,6 +110,10 @@ async function seedSpace(space: { id: string; name: string }, me: string, out: {
 			system: bv(true),
 		}, freshId);
 	}
+
+	// 0b. The space's Default type: a Page, unless someone already chose one.
+	const spaceFields = (await fetchObject(space.id)).fields;
+	if (str(spaceFields, "default_type") === "") await setField(space.id, "default_type", sv(DEFAULT_SPACE_TYPE));
 
 	// 1. The Anthropic credential.
 	let cred = spaceAnthropicCredential(await queryAll({ type: CREDENTIAL_TYPE }), space.id);

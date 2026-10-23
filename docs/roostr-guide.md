@@ -22,6 +22,7 @@ Everything in Roostr is an object: a note, a task, an email, a person, an agent,
 - A **space** is a shared area: its objects, types, properties, templates, agents and Tools. Each object belongs to one space (its `channel`). A few personal objects belong to no space and are private to one person.
 - A space is **private** (only you) or **shared** (its members). Everything in it is end-to-end encrypted to the space's key and synced over relays; only members can read it. Each object syncs as its latest saved state plus the edits since, so a new device is up to date quickly. Files are stored encrypted on Roostr's relay (Blossom) and also go peer to peer between computers.
 - Members see the same objects. An agent in one space cannot see or act on another space's objects, and agent pickers offer only the space's own agents. When something "is missing", check which space you are in first.
+- A space's **Default type** (in its settings, property `default_type`) is what a new object becomes when Roostr doesn't ask - search's "Create object", a collection's New, the first choice in the New menu. It is **Page** unless someone picks another: a computer sets a blank one to Page for the spaces its person owns, and the app treats a blank one as Page.
 - Deleting a space deletes everything in it, for every member.
 
 ## 4. Computers
