@@ -117,10 +117,25 @@ async function completeOccurrence(d: Due): Promise<void> {
 	await mutate("occurrence_complete", { object_id: d.id, ...localClock() });
 }
 
-/** Error badges a clean run clears: what a failed run or check wrote - never a human's or another writer's message. */
+/** Error badges a clean run clears: what a failed run, check, login or scoring wrote, or a run that never finished - never a human's or another writer's message. */
 async function clearRunBadge(obj: ObjectJSON, alsoNoAgent: boolean): Promise<void> {
 	const badge = str(obj.fields, "error");
-	if (badge.startsWith("run failed:") || badge.startsWith("check failed:") || badge.startsWith(CREDENTIAL_BADGE) || badge.startsWith(CREDENTIAL_MISSING_BADGE) || (alsoNoAgent && badge.startsWith("recurring object has no agent"))) await deleteField(obj.id, "error");
+	const automatic = ["run failed:", "check failed:", "scoring failed:", STUCK_BADGE, CREDENTIAL_BADGE, CREDENTIAL_MISSING_BADGE];
+	if (automatic.some((p) => badge.startsWith(p)) || (alsoNoAgent && badge.startsWith("recurring object has no agent"))) await deleteField(obj.id, "error");
+}
+
+/**
+ * An agent finished cleanly working on this object (a run, or a person's
+ * chat with it there): the object shows working again. Its automatic errors
+ * go, and a run stuck open since before is closed, so the schedule moves on.
+ */
+export async function settleObject(objectId: string): Promise<void> {
+	const obj = await fetchObject(objectId).catch(() => null);
+	if (!obj) return;
+	const rule = obj.fields["repeat"]?.mapValue?.entries;
+	const stuck = str(obj.fields, "error").startsWith(STUCK_BADGE) && rule?.["next"]?.intValue !== undefined && rule["fired_for"]?.intValue === rule["next"].intValue;
+	if (stuck) await mutate("occurrence_complete", { object_id: objectId, ...localClock() });
+	await clearRunBadge(obj, false);
 }
 
 /** setTimeout's ceiling; longer waits re-arm when it elapses. */

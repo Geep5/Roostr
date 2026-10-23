@@ -26,6 +26,11 @@ export function beginAgentTurn(agentId: string): void {
 	raised.delete(agentId);
 }
 
+/** Whether the agent's current turn has raised anything: a turn that did is not a clean one. */
+export function raisedThisTurn(agentId: string): boolean {
+	return raised.has(agentId);
+}
+
 /** Put `text` on the agent's Error (unless it carries an Error this module doesn't own). Never throws. */
 export async function flagAgent(agentId: string, text: string): Promise<void> {
 	raised.add(agentId);

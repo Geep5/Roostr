@@ -47,10 +47,10 @@ import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvK
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
-import { arm as armScheduler, clearFinishedStuck, handleRunRequest, handleStuckChange, retryUnblockedRuns, RUN_REQUEST_KEY, startScheduler } from "./schedule";
+import { arm as armScheduler, clearFinishedStuck, handleRunRequest, settleObject, handleStuckChange, retryUnblockedRuns, RUN_REQUEST_KEY, startScheduler } from "./schedule";
 import { startGmailPush } from "./gmail-push";
 import { badgeLoginIssues, issuesBadge, takeCredentialIssues } from "./credential-issues";
-import { beginAgentTurn, flagAgent, settleAgentTurn } from "./agent-errors";
+import { beginAgentTurn, flagAgent, raisedThisTurn, settleAgentTurn } from "./agent-errors";
 
 /** Spaces whose defaults this run has seeded (boot: all of them); a space appearing later is seeded once. */
 const spacesSeeded = new Set<string>();
@@ -626,7 +626,10 @@ async function serve(): Promise<void> {
 				else report("idle");
 			} else {
 				report("idle");
+				// Clean - nothing raised: the object it worked on shows working again (its own transcript home excepted).
+				const clean = !raisedThisTurn(s.agentId);
 				await settleAgentTurn(s.agentId, "");
+				if (clean && surface.objectId !== s.agentId) await settleObject(surface.objectId).catch((err) => console.error(`[harness] settling ${surface.objectId.slice(0, 8)}:`, err instanceof Error ? err.message : err));
 			}
 		} catch (err) {
 			// Its object or space was deleted mid-turn: one quiet line, and no badge on an agent that may be gone.

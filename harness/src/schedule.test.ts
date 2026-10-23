@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { credentialBadge, issuesBadge, missingBadge, parseIssuesBadge } from "./credential-issues";
-import { clearFinishedStuck, flagStuckRuns, handleStuckChange, isEmptyResult, resetScheduler, retryUnblockedRuns, runNow, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
+import { clearFinishedStuck, settleObject, flagStuckRuns, handleStuckChange, isEmptyResult, resetScheduler, retryUnblockedRuns, runNow, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -600,4 +600,27 @@ test("the never-finished badge goes as soon as the open run closes, and stays wh
 	// Completed: the schedule moved on, nothing fired for the new next.
 	await clearFinishedStuck(badged("done", { next: { intValue: 2000 }, fired_for: { intValue: 1000 } }));
 	expect(deletes).toEqual(["done"]);
+});
+
+test("an agent finishing cleanly on an object shows it working: a stuck run is closed and automatic errors go, a person's note stays", async () => {
+	const writes: Array<{ action: string; id: string }> = [];
+	const objects: Record<string, Record<string, unknown>> = {
+		stuck: { error: { stringValue: `${STUCK_BADGE}the Oct 17 at 9:00 AM run is still open` }, repeat: { mapValue: { entries: { next: { intValue: 1000 }, fired_for: { intValue: 1000 } } } } },
+		failed: { error: { stringValue: "run failed: anthropic 401" } },
+		person: { error: { stringValue: "Waiting on legal - do not run" } },
+	};
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+		if (url.pathname.startsWith("/api/objects/")) return respond({ id, typeKey: "task", fields: objects[id], blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
+		writes.push({ action: String(body.action), id: String(body.object_id) });
+		return respond({ ok: true });
+	}) as typeof fetch;
+	for (const id of Object.keys(objects)) await settleObject(id);
+	expect(writes).toEqual([
+		{ action: "occurrence_complete", id: "stuck" },
+		{ action: "delete_field", id: "stuck" },
+		{ action: "delete_field", id: "failed" },
+	]);
 });
