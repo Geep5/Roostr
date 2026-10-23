@@ -47,7 +47,7 @@ import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvK
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { processInboxMessage } from "./message-turn";
 import { receiveCapabilityRequests, setCapabilityRequestOwner } from "./capability-messages";
-import { arm as armScheduler, clearFinishedStuck, handleRunRequest, settleObject, handleStuckChange, retryUnblockedRuns, RUN_REQUEST_KEY, startScheduler } from "./schedule";
+import { arm as armScheduler, checkUnserved, clearFinishedStuck, flagUnservedRepeats, handleRunRequest, settleObject, handleStuckChange, retryUnblockedRuns, RUN_REQUEST_KEY, startScheduler, UNSERVED_BADGE } from "./schedule";
 import { startGmailPush } from "./gmail-push";
 import { badgeLoginIssues, issuesBadge, takeCredentialIssues } from "./credential-issues";
 import { beginAgentTurn, flagAgent, raisedThisTurn, settleAgentTurn } from "./agent-errors";
@@ -399,7 +399,8 @@ async function serve(): Promise<void> {
 	/**
 	 * An agent's `served_by` edit moves every object that follows its pin:
 	 * refresh the resolver and re-arm the clock (occurrences follow the pin).
-	 * The engine keeps the agent's unserved error in step with the pin.
+	 * The engine keeps the agent's unserved error in step with the pin; the
+	 * scheduler keeps the not-served error of the repeats it runs.
 	 */
 	function notePin(agent: ObjectJSON): void {
 		const pin = str(agent.fields, "served_by");
@@ -407,6 +408,7 @@ async function serve(): Promise<void> {
 		agentPins.set(agent.id, pin);
 		invalidateServing();
 		void armScheduler();
+		void flagUnservedRepeats().catch((err) => console.error("[schedule] unserved check:", err instanceof Error ? err.message : err));
 	}
 
 	/**
@@ -840,6 +842,8 @@ async function serve(): Promise<void> {
 		if (obj.fields["repeat"]) void armScheduler();
 		// The open run closed (finished, Retried, Skipped): its never-finished badge goes with it.
 		if (obj.fields["repeat"] && !obj.deleted) void clearFinishedStuck(obj).catch((err) => console.error(`[schedule] stuck badge ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
+		// Its repeat or agents changed (or the repeat went): the not-served badge follows.
+		if ((obj.fields["repeat"] || str(obj.fields, "error").startsWith(UNSERVED_BADGE)) && !obj.deleted) void checkUnserved(obj).catch((err) => console.error(`[schedule] unserved check ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
 		// Run now, asked for from any device: the computer that serves the object starts it.
 		if (obj.fields[RUN_REQUEST_KEY] && !obj.deleted) void handleRunRequest(obj).catch((err) => console.error(`[schedule] run request ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
 		// Stuck cleared by a person: the held run goes again.
@@ -853,6 +857,8 @@ async function serve(): Promise<void> {
 		if (obj.typeKey === MACHINE_TYPE || obj.typeKey === CAPABILITY_TYPE || obj.fields["served_by"] || obj.fields[SKILLS_KEY]) {
 			invalidateServing();
 			void armScheduler();
+			// A computer came or went: repeats whose agents name it may run (or not) now.
+			if (obj.typeKey === MACHINE_TYPE) void flagUnservedRepeats().catch((err) => console.error("[schedule] unserved check:", err instanceof Error ? err.message : err));
 		}
 		// A File appeared or gained a holder, or a computer's "Keep every
 		// file" flipped: a computer that keeps every file fetches what it lacks.

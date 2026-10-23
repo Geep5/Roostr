@@ -3,7 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { credentialBadge, issuesBadge, missingBadge, parseIssuesBadge } from "./credential-issues";
-import { clearFinishedStuck, settleObject, flagStuckRuns, handleStuckChange, isEmptyResult, resetScheduler, retryUnblockedRuns, runNow, STUCK_BADGE, startScheduler, waitForTurnEnd } from "./schedule";
+import { invalidateServing } from "./machine";
+import { checkUnserved, clearFinishedStuck, settleObject, flagStuckRuns, flagUnservedRepeats, handleStuckChange, isEmptyResult, resetScheduler, retryUnblockedRuns, runNow, STUCK_BADGE, startScheduler, UNSERVED_BADGE, unservedBadge, waitForTurnEnd } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -623,4 +624,90 @@ test("an agent finishing cleanly on an object shows it working: a stuck run is c
 		{ action: "delete_field", id: "stuck" },
 		{ action: "delete_field", id: "failed" },
 	]);
+});
+
+/** A DAG of repeating objects, agents and computers; records error writes. */
+function unservedDag(objects: Record<string, Record<string, unknown>>, agents: Record<string, { name: string; served_by?: string }>, computers: string[]) {
+	invalidateServing();
+	const writes: Array<{ action: string; id: string; text?: string }> = [];
+	const row = (id: string, typeKey: string, fields: Record<string, unknown>) => ({ id, typeKey, fields, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
+	const agentRow = (id: string) => row(id, "agent", { name: { stringValue: agents[id].name }, ...(agents[id].served_by ? { served_by: { stringValue: agents[id].served_by } } : {}) });
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		if (url.pathname === "/api/query") {
+			const records =
+				body.type === "machine" ? computers.map((m) => row(`computer-${m}`, "machine", { machine_id: { stringValue: m } }))
+				: body.type === "agent" ? Object.keys(agents).map(agentRow)
+				: Object.entries(objects).map(([id, fields]) => row(id, "task", fields));
+			return respond({ records, total: records.length });
+		}
+		if (url.pathname.startsWith("/api/objects/")) {
+			const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+			return agents[id] ? respond(agentRow(id)) : respond({ error: "not found" }, 404);
+		}
+		const v = (body.value as { stringValue?: string } | undefined)?.stringValue;
+		writes.push({ action: String(body.action), id: String(body.object_id), ...(v ? { text: v } : {}) });
+		const target = objects[String(body.object_id)];
+		if (body.action === "set_field") target.error = body.value;
+		if (body.action === "delete_field") delete target.error;
+		return respond({ ok: true });
+	}) as typeof fetch;
+	return writes;
+}
+
+const repeating = (agentIds: string[], extra: Record<string, unknown> = {}) => ({
+	repeat: { mapValue: { entries: { next: { intValue: 1000 } } } },
+	agent: { valuesValue: { items: agentIds.map((targetId) => ({ linkValue: { relationKey: "agent", targetId } })) } },
+	...extra,
+});
+
+test("a repeat whose only agent has no Served by says so on its Error, and the badge goes once the agent is served", async () => {
+	const objects = { inbox: repeating(["ann"]) };
+	const agents: Record<string, { name: string; served_by?: string }> = { ann: { name: "Ann" } };
+	let writes = unservedDag(objects, agents, ["mac-1"]);
+	expect(await flagUnservedRepeats()).toBe(1);
+	expect(writes).toEqual([{ action: "set_field", id: "inbox", text: `${UNSERVED_BADGE}no computer runs Ann - set Served by on it` }]);
+
+	// Every computer may look again: the same text is not written twice.
+	writes.length = 0;
+	expect(await flagUnservedRepeats()).toBe(1);
+	expect(writes).toEqual([]);
+
+	// Pinned to a computer that does not exist: still runs nowhere.
+	agents.ann.served_by = "gone-machine";
+	expect(await flagUnservedRepeats()).toBe(1);
+	expect(writes).toEqual([]);
+
+	agents.ann.served_by = "mac-1";
+	writes = unservedDag(objects, agents, ["mac-1"]);
+	expect(await flagUnservedRepeats()).toBe(0);
+	expect(writes).toEqual([{ action: "delete_field", id: "inbox" }]);
+});
+
+test("one served agent of two is enough: no not-served badge", async () => {
+	const writes = unservedDag({ report: repeating(["ann", "bob"]) }, { ann: { name: "Ann" }, bob: { name: "Bob", served_by: "mac-1" } }, ["mac-1"]);
+	expect(await flagUnservedRepeats()).toBe(0);
+	expect(writes).toEqual([]);
+	expect(unservedBadge([{ name: "Ann", pin: "" }, { name: "Bob", pin: "" }], new Set())).toBe(`${UNSERVED_BADGE}no computer runs Ann and Bob - set Served by on them`);
+});
+
+test("the not-served badge never overwrites another Error, and a repeat with no agents gets none", async () => {
+	const objects = {
+		person: repeating(["ann"], { error: { stringValue: "Waiting on legal - do not run" } }),
+		stuck: repeating(["ann"], { error: { stringValue: `${STUCK_BADGE}the Oct 17 at 9:00 AM run is still open` } }),
+		lonely: repeating([]),
+	};
+	const writes = unservedDag(objects, { ann: { name: "Ann" } }, ["mac-1"]);
+	await flagUnservedRepeats();
+	for (const id of Object.keys(objects)) await checkUnserved({ id, typeKey: "task", fields: objects[id as keyof typeof objects] as never, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
+	expect(writes).toEqual([]);
+});
+
+test("a repeat that stops (or loses its agents) drops its not-served badge on its own change", async () => {
+	const badge = { error: { stringValue: `${UNSERVED_BADGE}no computer runs Ann - set Served by on it` } };
+	const objects: Record<string, Record<string, unknown>> = { cleared: { ...badge }, noAgents: repeating([], badge) };
+	const writes = unservedDag(objects, { ann: { name: "Ann" } }, ["mac-1"]);
+	for (const id of Object.keys(objects)) await checkUnserved({ id, typeKey: "task", fields: objects[id] as never, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
+	expect(writes).toEqual([{ action: "delete_field", id: "cleared" }, { action: "delete_field", id: "noAgents" }]);
 });

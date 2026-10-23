@@ -41,7 +41,7 @@ import { deleteField, fetchObject, guestAgents, mutate, queryAll, setField, str,
 import { addConvBlock, convKey, humanRef, type ConvRef } from "./conv";
 import { CREDENTIAL_BADGE, CREDENTIAL_MISSING_BADGE, issuesBadge, parseIssuesBadge, takeCredentialIssues } from "./credential-issues";
 import { agentCredentialIds } from "./credential-objects";
-import { primeServing, servesHere } from "./machine";
+import { machines, primeServing, servesHere } from "./machine";
 import { machineId } from "./roster";
 import { objectText } from "./skills";
 import { linkIds, runToolObject } from "./tool-objects";
@@ -120,7 +120,7 @@ async function completeOccurrence(d: Due): Promise<void> {
 /** Error badges a clean run clears: what a failed run, check, login or scoring wrote, or a run that never finished - never a human's or another writer's message. */
 async function clearRunBadge(obj: ObjectJSON, alsoNoAgent: boolean): Promise<void> {
 	const badge = str(obj.fields, "error");
-	const automatic = ["run failed:", "check failed:", "scoring failed:", STUCK_BADGE, CREDENTIAL_BADGE, CREDENTIAL_MISSING_BADGE];
+	const automatic = ["run failed:", "check failed:", "scoring failed:", STUCK_BADGE, UNSERVED_BADGE, CREDENTIAL_BADGE, CREDENTIAL_MISSING_BADGE];
 	if (automatic.some((p) => badge.startsWith(p)) || (alsoNoAgent && badge.startsWith("recurring object has no agent"))) await deleteField(obj.id, "error");
 }
 
@@ -279,6 +279,7 @@ export async function startScheduler(h: ScheduleHost): Promise<void> {
 	const checks = () => {
 		void flagStuckRuns().catch((err) => console.error("[schedule] stuck-run check:", err instanceof Error ? err.message : err));
 		void retryUnblockedRuns().catch((err) => console.error("[schedule] blocked-run check:", err instanceof Error ? err.message : err));
+		void flagUnservedRepeats().catch((err) => console.error("[schedule] unserved check:", err instanceof Error ? err.message : err));
 	};
 	checks();
 	stuckTimer ??= setInterval(checks, STUCK_CHECK_MS);
@@ -438,6 +439,94 @@ export async function flagStuckRuns(now = Date.now()): Promise<number> {
 	}
 	return stuck;
 }
+
+/** Error-badge prefix for a repeat none of whose agents runs on any computer. */
+export const UNSERVED_BADGE = "not served: ";
+
+/** A guest agent as the unserved check sees it: its name and its pin (`served_by`). */
+interface GuestPin {
+	name: string;
+	pin: string;
+}
+
+/**
+ * The not-served badge for a repeating object's agents, "" when none is due:
+ * no agents, or one of them is pinned to a computer that exists. An agent
+ * runs only on its own computer (`agentRunsOn`), so with none runnable the
+ * repeat fires into nothing.
+ */
+export function unservedBadge(guests: GuestPin[], computers: ReadonlySet<string>): string {
+	if (guests.length === 0 || guests.some((g) => g.pin && computers.has(g.pin))) return "";
+	const names = guests.map((g) => g.name);
+	const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+	return `${UNSERVED_BADGE}no computer runs ${list} - set Served by on ${names.length === 1 ? "it" : "them"}`;
+}
+
+/**
+ * Keep one object's not-served badge in step: set (or reworded) on an
+ * active repeat whose agents all run nowhere, gone otherwise. The text
+ * follows from the data alone, so every computer may evaluate it and only
+ * a change is written. Another Error (a person's, a stuck run) is never
+ * overwritten.
+ */
+async function applyUnserved(obj: { id: string; fields: Record<string, ValueJSON> }, agent: (id: string) => Promise<GuestPin | null>, computers: ReadonlySet<string>): Promise<boolean> {
+	const guests: GuestPin[] = [];
+	if (dueOf(obj)) {
+		for (const id of guestAgents(obj.fields)) {
+			const g = await agent(id);
+			if (g) guests.push(g);
+		}
+	}
+	const want = unservedBadge(guests, computers);
+	const badge = str(obj.fields, "error");
+	if (want) {
+		if ((!badge || badge.startsWith(UNSERVED_BADGE)) && badge !== want) {
+			await setField(obj.id, "error", sv(want));
+			console.log(`[schedule] "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)}) ${want}`);
+		}
+		return true;
+	}
+	if (badge.startsWith(UNSERVED_BADGE)) await deleteField(obj.id, "error");
+	return false;
+}
+
+const computerIds = async (): Promise<Set<string>> => new Set((await machines()).map((m) => m.machineId).filter(Boolean));
+
+/** One object changed (its repeat, agents or Error): its not-served badge follows. */
+export async function checkUnserved(obj: ObjectJSON): Promise<void> {
+	if (obj.deleted) return;
+	const lookup = async (id: string): Promise<GuestPin | null> => {
+		const a = await fetchObject(id).catch(() => null);
+		return a && !a.deleted ? { name: str(a.fields, "name") || id.slice(0, 8), pin: str(a.fields, "served_by") } : null;
+	};
+	await applyUnserved(obj, lookup, await computerIds());
+}
+
+let unservedPass: Promise<number> | null = null;
+let unservedAgain = false;
+/**
+ * Every repeating object's not-served badge, in one pass: on the stuck
+ * check's clock and whenever an agent's pin or a computer changes. Calls
+ * during a pass coalesce into one more. Resolves to how many are unserved.
+ */
+export function flagUnservedRepeats(): Promise<number> {
+	if (unservedPass) {
+		unservedAgain = true;
+		return unservedPass;
+	}
+	unservedPass = (async () => {
+		let unserved = 0;
+		do {
+			unservedAgain = false;
+			unserved = 0;
+			const [rows, agents, computers] = await Promise.all([queryAll({ filters: [{ key: "repeat", condition: "exists" }] }), queryAll({ type: "agent" }), computerIds()]);
+			const byId = new Map(agents.map((a) => [a.id, { name: str(a.fields, "name") || a.id.slice(0, 8), pin: str(a.fields, "served_by") }]));
+			for (const row of rows) if (await applyUnserved(row, async (id) => byId.get(id) ?? null, computers)) unserved += 1;
+		} while (unservedAgain);
+		return unserved;
+	})().finally(() => (unservedPass = null));
+	return unservedPass;
+}
 /** Completion signal for deterministic tests; production ignores it. */
 export function waitForTurnEnd(): Promise<void> {
 	return new Promise((resolve) => {
@@ -459,6 +548,8 @@ export function resetScheduler(): void {
 	generation += 1;
 	clearInterval(stuckTimer);
 	stuckTimer = undefined;
+	unservedPass = null;
+	unservedAgain = false;
 }
 
 /**
