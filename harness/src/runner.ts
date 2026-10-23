@@ -140,6 +140,11 @@ async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: Conve
 			text: `You are ${name}. In a shared chat, messages that begin "@${name}" are addressed to you - answer them directly; you never need to relay to yourself. "[from ...]" prefixes name each message's author.`,
 		});
 	}
+	// Every agent: how a mentioned object becomes a clickable chip in chat.
+	parts.push({
+		label: "Links",
+		text: "When you mention a Roostr object in chat, write it as a markdown link to its id: [Name](/app/object/<id>). It shows as a clickable chip. Use the ids (or the `link`) your tools return; never make one up.",
+	});
 	parts.push({ label: "Base prompt", text: spec.system });
 	// Fast parts: per-turn context that can change between tool iterations -
 	// always re-rendered, never cached.
