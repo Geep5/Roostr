@@ -14,7 +14,7 @@
  * durable: which agents this machine will serve.
  */
 
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 
 interface RosterFile {
 	version: 1;
@@ -32,14 +32,29 @@ function rosterPath(): string {
 	return `${root}/harness.json`;
 }
 
+/**
+ * The roster file. Missing = a new computer (empty). Present but unreadable
+ * or invalid: retried, then an error - never "empty", since every write
+ * rewrites the whole file and an empty read would drop this computer's
+ * `machineId` (a write storm once made a read fail, `setEnabled` wrote the
+ * file back without it, and the harness minted a new identity that served
+ * none of its agents).
+ */
 async function readFile(): Promise<RosterFile> {
-	try {
-		const parsed = (await Bun.file(rosterPath()).json()) as RosterFile;
-		if (parsed?.version === 1 && Array.isArray(parsed.agents)) return parsed;
-	} catch {
-		/* missing/corrupt → empty */
+	const path = rosterPath();
+	let problem = "";
+	for (let attempt = 0; attempt < 3; attempt++) {
+		if (!existsSync(path)) return { version: 1, agents: [] };
+		try {
+			const parsed = (await Bun.file(path).json()) as RosterFile;
+			if (parsed?.version === 1 && Array.isArray(parsed.agents)) return parsed;
+			problem = "not a version-1 roster";
+		} catch (err) {
+			problem = err instanceof Error ? err.message : String(err);
+		}
+		await Bun.sleep(200 * (attempt + 1));
 	}
-	return { version: 1, agents: [] };
+	throw new Error(`${path} is unreadable (${problem}) - fix or restore it; this computer's identity (machineId) lives there`);
 }
 
 /** Whole-file write: every caller passes the file it read, so adding a key
@@ -63,12 +78,26 @@ export async function setEnabled(agentId: string, enabled: boolean): Promise<str
 	return next;
 }
 
-/** This machine's stable id, minted on first use. */
+/** The id this process read or minted, and the roster file it belongs to. */
+let known = { path: "", id: "" };
+
+/** This machine's stable id, minted on first use; once known, this process never changes it. */
 export async function machineId(): Promise<string> {
+	const path = rosterPath();
+	if (known.path === path && known.id) return known.id;
 	const file = await readFile();
-	if (file.machineId) return file.machineId;
+	if (file.machineId) {
+		known = { path, id: file.machineId };
+		return file.machineId;
+	}
 	const id = crypto.randomUUID();
 	writeFile({ ...file, machineId: id });
+	known = { path, id };
 	return id;
+}
+
+/** Test seam: forget the in-memory id. */
+export function resetMachineIdCache(): void {
+	known = { path: "", id: "" };
 }
 
