@@ -626,8 +626,8 @@ test("an agent finishing cleanly on an object shows it working: a stuck run is c
 	]);
 });
 
-/** A DAG of repeating objects, agents and computers; records error writes. */
-function unservedDag(objects: Record<string, Record<string, unknown>>, agents: Record<string, { name: string; served_by?: string }>, computers: string[]) {
+/** A DAG of repeating objects, agents and computers; records error writes. Objects in `dropWrites` never keep a write (a broken or lagging store). */
+function unservedDag(objects: Record<string, Record<string, unknown>>, agents: Record<string, { name: string; served_by?: string }>, computers: string[], dropWrites: ReadonlySet<string> = new Set()) {
 	invalidateServing();
 	const writes: Array<{ action: string; id: string; text?: string }> = [];
 	const row = (id: string, typeKey: string, fields: Record<string, unknown>) => ({ id, typeKey, fields, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
@@ -650,6 +650,7 @@ function unservedDag(objects: Record<string, Record<string, unknown>>, agents: R
 		const v = (body.value as { stringValue?: string } | undefined)?.stringValue;
 		writes.push({ action: String(body.action), id: String(body.object_id), ...(v ? { text: v } : {}) });
 		const target = objects[String(body.object_id)];
+		if (dropWrites.has(String(body.object_id))) return respond({ ok: true });
 		if (body.action === "set_field") target.error = body.value;
 		if (body.action === "delete_field") delete target.error;
 		return respond({ ok: true });
@@ -713,4 +714,16 @@ test("a repeat that stops (or loses its agents) drops its not-served badge on it
 	const writes = unservedDag(objects, { ann: { name: "Ann" } }, ["mac-1"]);
 	for (const id of Object.keys(objects)) await checkUnserved({ id, typeKey: "task", fields: objects[id] as never, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
 	expect(writes).toEqual([{ action: "delete_field", id: "cleared" }, { action: "delete_field", id: "noAgents" }]);
+});
+
+test("an object whose write doesn't read back is not written again on every look: no write storm", async () => {
+	// "Get recent Fansly messages": its writes never stuck, every write was a change
+	// event, every event a re-check - thousands of writes queued the whole store.
+	const objects = { broken: repeating(["ann"]) };
+	const writes = unservedDag(objects, { ann: { name: "Ann" } }, ["mac-1"], new Set(["broken"]));
+	for (let i = 0; i < 5; i++) {
+		await checkUnserved({ id: "broken", typeKey: "task", fields: objects.broken as never, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
+		await flagUnservedRepeats();
+	}
+	expect(writes).toEqual([{ action: "set_field", id: "broken", text: `${UNSERVED_BADGE}no computer runs Ann - set Served by on it` }]);
 });

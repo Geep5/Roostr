@@ -463,11 +463,30 @@ export function unservedBadge(guests: GuestPin[], computers: ReadonlySet<string>
 }
 
 /**
+ * What this computer last wrote as an object's not-served badge ("" = it
+ * removed one), and when. A write whose read-back doesn't show it yet (a
+ * slow or broken object) must not be repeated on every change event: each
+ * write is itself an event, so that loops and floods the store.
+ */
+const unservedWritten = new Map<string, { text: string; at: number }>();
+const UNSERVED_REWRITE_MS = 15 * 60_000;
+
+/** Write `text` ("" = remove) as the badge unless this computer just did. */
+async function writeUnserved(id: string, text: string): Promise<boolean> {
+	const last = unservedWritten.get(id);
+	if (last && last.text === text && Date.now() - last.at < UNSERVED_REWRITE_MS) return false;
+	unservedWritten.set(id, { text, at: Date.now() });
+	if (text) await setField(id, "error", sv(text));
+	else await deleteField(id, "error");
+	return true;
+}
+
+/**
  * Keep one object's not-served badge in step: set (or reworded) on an
  * active repeat whose agents all run nowhere, gone otherwise. The text
  * follows from the data alone, so every computer may evaluate it and only
- * a change is written. Another Error (a person's, a stuck run) is never
- * overwritten.
+ * a change is written - once per 15 minutes at most (`writeUnserved`).
+ * Another Error (a person's, a stuck run) is never overwritten.
  */
 async function applyUnserved(obj: { id: string; fields: Record<string, ValueJSON> }, agent: (id: string) => Promise<GuestPin | null>, computers: ReadonlySet<string>): Promise<boolean> {
 	const guests: GuestPin[] = [];
@@ -480,13 +499,12 @@ async function applyUnserved(obj: { id: string; fields: Record<string, ValueJSON
 	const want = unservedBadge(guests, computers);
 	const badge = str(obj.fields, "error");
 	if (want) {
-		if ((!badge || badge.startsWith(UNSERVED_BADGE)) && badge !== want) {
-			await setField(obj.id, "error", sv(want));
+		if ((!badge || badge.startsWith(UNSERVED_BADGE)) && badge !== want && (await writeUnserved(obj.id, want))) {
 			console.log(`[schedule] "${str(obj.fields, "name")}" (${obj.id.slice(0, 8)}) ${want}`);
 		}
 		return true;
 	}
-	if (badge.startsWith(UNSERVED_BADGE)) await deleteField(obj.id, "error");
+	if (badge.startsWith(UNSERVED_BADGE)) await writeUnserved(obj.id, "");
 	return false;
 }
 
@@ -546,6 +564,7 @@ export function resetScheduler(): void {
 	pushWaiting.clear();
 	pushRetries.clear();
 	running.clear();
+	unservedWritten.clear();
 	generation += 1;
 	clearInterval(stuckTimer);
 	stuckTimer = undefined;
