@@ -295,8 +295,14 @@ changes_import :: proc(parsed: json.Value) -> Op_Result {
 			append(&ids, json.String(hex_str))
 			continue
 		}
-		if !write_change_markers(c.object_id, hex_str, b_hex, false) || os.write_entire_file(path, data) != nil {
-			append(&reasons, json.String("write failed"))
+		// Name the object and the step: "write failed" alone is not actionable.
+		if !write_change_markers(c.object_id, hex_str, b_hex, false) {
+			append(&reasons, json.String(strings.concatenate({"write failed: sidecar for ", c.object_id}, context.temp_allocator)))
+			continue
+		}
+		if werr := os.write_entire_file(path, data); werr != nil {
+			msg := os.error_string(werr)
+			append(&reasons, json.String(strings.concatenate({"write failed: ", c.object_id, " (", msg, ")"}, context.temp_allocator)))
 			continue
 		}
 		archive_link(c.object_id, hex_str, path)
