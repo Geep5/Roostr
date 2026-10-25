@@ -205,7 +205,11 @@ disk_current_base :: proc(object_id: string) -> string {
  * current epoch (siblings) and every epoch-1 base (the pre-migration sweep
  * reads its covered_ids); delete the rest. Then changes folded by a held
  * STRICT ancestor leave changes/ for the archive - never those folded only by
- * the current base, which a concurrent sibling could still lose to.
+ * the current base, which a concurrent sibling could still lose to. Stale
+ * changes go to the archive too: written on a base this device no longer
+ * holds, they are never replayed nor rebased (core.base_classify), so the
+ * object's state does not depend on them - left in changes/ they only pile
+ * up (thousands on an object compacted often) and slow every load.
  */
 retain_bases :: proc(object_id: string) -> (removed: int, pruned: int) {
 	held := load_bases(object_id, context.temp_allocator)
@@ -236,6 +240,12 @@ retain_bases :: proc(object_id: string) -> (removed: int, pruned: int) {
 	}
 	for j in ancestors {
 		for id in cps[j].covered_ids do if archive_change(object_id, core.hex_id(id, context.temp_allocator)) do pruned += 1
+	}
+	h := read_holdings(object_id, context.temp_allocator)
+	cls := core.base_classify(h.cps, h.deltas[:], h.pending, context.temp_allocator)
+	for class, i in cls.classes {
+		if class != .Stale do continue
+		if archive_change(object_id, core.hex_id(h.deltas[i].change.id, context.temp_allocator)) do pruned += 1
 	}
 	if removed + pruned > 0 do store_mark_dirty(object_id)
 	return removed, pruned

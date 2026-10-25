@@ -121,6 +121,44 @@ bases_contract :: proc(t: ^testing.T) {
 
 	base_import_and_state(t)
 	build_prune_rebase(t)
+	stale_changes_archived(t)
+}
+
+/**
+ * A change written on a base this device never held (only a later base came
+ * in) is Stale: never replayed, never rebased. Retention moves it to the
+ * archive like a folded change, and the object reads the same - it no longer
+ * piles up in changes/ on an object compacted often.
+ */
+@(private = "file")
+stale_changes_archived :: proc(t: ^testing.T) {
+	OBJ :: "obj-stale"
+	d0, _ := remote_change(OBJ, "first", nil, create = true)
+	plan1, _ := core.base_compact_plan(nil, []core.Delta{{change = d0}}, nil, nil, unix_ms(), true, context.temp_allocator)
+	d1, _ := remote_change(OBJ, "second", plan1.base.head_ids[:])
+	plan2, _ := core.base_compact_plan([]core.Checkpoint{plan1.base}, []core.Delta{{change = d1, b = plan1.base.base_hash, tagged = true}}, nil, nil, unix_ms(), true, context.temp_allocator)
+	d2, _ := remote_change(OBJ, "third", plan2.base.head_ids[:])
+	plan3, ok3 := core.base_compact_plan([]core.Checkpoint{plan1.base, plan2.base}, []core.Delta{{change = d2, b = plan2.base.base_hash, tagged = true}}, nil, nil, unix_ms(), true, context.temp_allocator)
+	testing.expect(t, ok3 && plan3.base.epoch == 3, "epoch-3 plan")
+	// Only epoch 3 reaches this device.
+	r := bases_import(obj({"bases", str_array(base64.encode(plan3.bytes, allocator = context.temp_allocator))}))
+	testing.expect_value(t, r.error, "")
+	// A change written on epoch 1, which this device never held: it may or may not be folded.
+	e1_hex := core.hex_id(plan1.base.base_hash[:], context.temp_allocator)
+	late, late_b64 := remote_change(OBJ, "late on epoch 1", plan1.base.head_ids[:])
+	late_hex := core.hex_id(late.id, context.temp_allocator)
+	r = changes_import(obj({"changes", tagged_import(late_b64, e1_hex)}))
+	testing.expect_value(t, r.error, "")
+	testing.expect_value(t, core.json_str(row_for(changes_rows(OBJ), late_hex), "class"), "stale")
+	before, _ := object_name(OBJ)
+	testing.expect_value(t, before, "third")
+
+	_, pruned := retain_bases(OBJ)
+	testing.expect_value(t, pruned, 1)
+	testing.expect(t, !os.exists(change_file(OBJ, late_hex, ".pb")) && !os.exists(change_file(OBJ, late_hex, ".b")), "stale change leaves changes/")
+	testing.expect(t, os.exists(archive_file(OBJ, late_hex, ".pb")), "stale change kept in the archive")
+	after, _ := object_name(OBJ)
+	testing.expect_value(t, after, before)
 }
 
 /** POST /api/bases, an object known only by its bases, live deltas, sidecars on import and commit. */
