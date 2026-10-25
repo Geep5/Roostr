@@ -210,7 +210,11 @@ load_object_dir :: proc(object_id: string, alloc := context.allocator) {
 		case .Stale:
 			// Never replayed nor rebased: off to the archive (as retain_bases
 			// does), whichever computer compacts this object.
-			if !archive_change(object_id, core.hex_id(h.deltas[i].change.id, context.temp_allocator)) do info.stale += 1
+			if archive_change(object_id, core.hex_id(h.deltas[i].change.id, context.temp_allocator)) {
+				info.changes -= 1
+			} else {
+				info.stale += 1
+			}
 		}
 	}
 	for c in live {
