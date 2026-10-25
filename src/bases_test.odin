@@ -149,16 +149,18 @@ stale_changes_archived :: proc(t: ^testing.T) {
 	late_hex := core.hex_id(late.id, context.temp_allocator)
 	r = changes_import(obj({"changes", tagged_import(late_b64, e1_hex)}))
 	testing.expect_value(t, r.error, "")
-	testing.expect_value(t, core.json_str(row_for(changes_rows(OBJ), late_hex), "class"), "stale")
-	before, _ := object_name(OBJ)
-	testing.expect_value(t, before, "third")
+	imported, _ := core.json_int(r.out, "imported")
+	testing.expect_value(t, imported, 1)
 
-	_, pruned := retain_bases(OBJ)
-	testing.expect_value(t, pruned, 1)
+	// Loading the object classifies it Stale and parks it in the archive; the object reads the same.
+	name, _ := object_name(OBJ)
+	testing.expect_value(t, name, "third")
 	testing.expect(t, !os.exists(change_file(OBJ, late_hex, ".pb")) && !os.exists(change_file(OBJ, late_hex, ".b")), "stale change leaves changes/")
 	testing.expect(t, os.exists(archive_file(OBJ, late_hex, ".pb")), "stale change kept in the archive")
-	after, _ := object_name(OBJ)
-	testing.expect_value(t, after, before)
+	testing.expect(t, row_for(changes_rows(OBJ), late_hex) == nil, "no longer a held change")
+	store_mark_dirty(OBJ)
+	name, _ = object_name(OBJ)
+	testing.expect_value(t, name, "third")
 }
 
 /** POST /api/bases, an object known only by its bases, live deltas, sidecars on import and commit. */

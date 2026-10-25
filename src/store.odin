@@ -201,13 +201,16 @@ load_object_dir :: proc(object_id: string, alloc := context.allocator) {
 		state, ok = core.compute_state(live, alloc, h.legacy)
 	}
 	if !ok do return
-	for class in cls.classes {
+	for class, i in cls.classes {
 		switch class {
 		case .Live: info.live += 1
 		case .Covered: info.covered += 1
 		case .Premigration_Covered: info.premigration_covered += 1
 		case .Orphan: info.orphan += 1
-		case .Stale: info.stale += 1
+		case .Stale:
+			// Never replayed nor rebased: off to the archive (as retain_bases
+			// does), whichever computer compacts this object.
+			if !archive_change(object_id, core.hex_id(h.deltas[i].change.id, context.temp_allocator)) do info.stale += 1
 		}
 	}
 	for c in live {
