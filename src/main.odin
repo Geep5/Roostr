@@ -54,6 +54,10 @@ main :: proc() {
 		if len(args) > 2 {
 			if p, ok := strconv.parse_int(args[2]); ok do port = p
 		}
+		// Before the first load: the archive becomes the folded index, and
+		// retention applies to bases held under an older policy.
+		migrate_archive()
+		retain_all_bases()
 		bootstrap_space_defaults()
 		serve(port)
 	case:

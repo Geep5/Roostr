@@ -14,8 +14,8 @@ Everything in Roostr is an object: a note, a task, an email, a person, an agent,
 - **Links**: an object-format property (Agent, Credentials, a "Project" field) or a link card in the body. Prefer a property when the link is a fact you will filter or sort by. The engine keeps an object's hidden `links` property equal to the link cards and files in its body (backlinks and the graph read it), in the same write as the body edit - never set `links` yourself.
 - **Templates**: a template stamps out new objects of a type with properties (and a body) already filled in. A type's default template is used for "+ New". Agents themselves are usually made from an Agent template.
 - **Saved views**: a **Query** is a live filter (type plus conditions, e.g. "Emails where Done is unchecked"); a **Collection** is a hand-picked list. Both are objects people use as their map of the space - read them before guessing.
-- **Bin**: deleting moves an object to its space's bin; it can be restored with its text, properties and history.
-- **History**: every change is kept. Nothing is overwritten in place.
+- **Bin**: deleting moves an object to its space's bin; it can be restored with its text and properties.
+- **Saved state, not history**: every object is its latest saved state plus the edits made since. A computer folds those edits into a new saved state now and then, and the folded edits are dropped everywhere - there is no edit-by-edit history to go back through. A device keeps its own edits until a saved state includes them, so nothing it wrote is lost if it was offline.
 
 ## 3. Spaces
 

@@ -75,15 +75,14 @@ note_space_vanished_locked :: proc(object_id: string, entry: core.Vanish_Entry) 
 	g_store.vanish_pending[strings.clone(object_id)] = entry
 }
 
-/** Delete an object's change directory, checkpoint, bases and archive. Returns files removed. */
+/** Delete an object's change directory, checkpoint, bases and folded index. Returns files removed. */
 purge_object_files :: proc(object_id: string) -> int {
 	if object_id == "" || object_id == VANISH_LOG_ID do return 0
 	if strings.contains(object_id, "/") || strings.contains(object_id, "..") do return 0
 	removed := purge_checkpoint(object_id) ? 1 : 0
-	for kind in ([]string{"bases", "archive"}) {
-		dir := data_dir(kind, object_id)
-		if os.exists(dir) && os.remove_all(dir) == nil do removed += 1
-	}
+	bases := data_dir("bases", object_id)
+	if os.exists(bases) && os.remove_all(bases) == nil do removed += 1
+	if folded_purge(object_id) do removed += 1
 	dir_path, _ := filepath.join({g_store.root, object_id}, context.temp_allocator)
 	dir, derr := os.open(dir_path)
 	if derr != nil do return removed

@@ -5,14 +5,14 @@ import "../core"
 // Change export/import — the wire surface the nostr sync daemon rides.
 //
 //   GET  /api/changes              → {objectId: [hexIds]} manifest
-//   GET  /api/changes/<objectId>   → {changes: [{id, b64, b?, pending?, class?}]}
+//   GET  /api/changes/<objectId>   → {changes: [{id, b64, b?, pending?, own?, class?}]}
 //   POST /api/changes              → service-only {changes: [b64 | {b64, b?}…],
 //                                    provenance?: {spaceId,keyId,signer}};
 //                                    shared imports verify installed authority
 //                                    before content-addressed writes. Omitting
 //                                    provenance is the trusted personal path.
-//                                    `b` writes the .b sidecar; a change held
-//                                    only in archive/ is skipped, never revived.
+//                                    `b` writes the .b sidecar; a change in the
+//                                    folded index is skipped, never revived.
 //                                    → {ok, imported, skipped, rejected, dropped,
 //                                    ids, reasons: [why each rejected item was]}
 //
@@ -130,8 +130,9 @@ handle_changes_get :: proc(sock: net.TCP_Socket, object_id: string) {
 }
 
 /**
- * Working-set rows {id, b64, b?, pending?, class?}: `b` from the sidecar,
- * `pending` when written here and not yet published, `class` (core
+ * Working-set rows {id, b64, b?, pending?, own?, class?}: `b` from the
+ * sidecar, `own` when written here and no held base has proven it folded
+ * (`.local`), `pending` when own and not yet published, `class` (core
  * classification) only when the object holds a base. Files that do not
  * decode to their own address are not offered.
  */
@@ -142,13 +143,14 @@ changes_rows :: proc(object_id: string) -> json.Value {
 		h := read_holdings(object_id, context.temp_allocator)
 		cls: core.Classification
 		classified := len(h.cps) > 0
-		if classified do cls = core.base_classify(h.cps, h.deltas[:], h.pending, context.temp_allocator)
+		if classified do cls = core.base_classify(h.cps, h.deltas[:], h.pending, h.own, context.temp_allocator)
 		for &d, i in h.deltas {
 			o := core.jobj()
 			o["id"] = json.String(core.hex_id(d.change.id, context.temp_allocator))
 			o["b64"] = json.String(base64.encode(h.raw[i], allocator = context.temp_allocator))
 			if d.tagged do o["b"] = json.String(core.hex_id(d.b[:], context.temp_allocator))
 			if string(d.change.id) in h.pending do o["pending"] = json.Boolean(true)
+			if string(d.change.id) in h.own do o["own"] = json.Boolean(true)
 			if classified {
 				class: string
 				switch cls.classes[i] {
@@ -289,8 +291,11 @@ changes_import :: proc(parsed: json.Value) -> Op_Result {
 			append(&ids, json.String(hex_str))
 			continue
 		}
-		// Never resurrect: a change pruned or rebased here stays in the archive.
-		if os.exists(archive_file(c.object_id, hex_str, ".pb")) {
+		// Never resurrect: a change that left the working set here (pruned,
+		// stale or rebased) is in the folded index and stays out of changes/.
+		raw_id: [32]byte
+		copy(raw_id[:], c.id)
+		if folded, _ := folded_lookup(c.object_id, raw_id); folded {
 			skipped += 1
 			append(&ids, json.String(hex_str))
 			continue
@@ -305,7 +310,6 @@ changes_import :: proc(parsed: json.Value) -> Op_Result {
 			append(&reasons, json.String(strings.concatenate({"write failed: ", c.object_id, " (", msg, ")"}, context.temp_allocator)))
 			continue
 		}
-		archive_link(c.object_id, hex_str, path)
 		imported += 1
 		append(&ids, json.String(hex_str))
 		// The next item must see accepted creates, membership removals and

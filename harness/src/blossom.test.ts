@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { generateSecretKey, getPublicKey, verifyEvent, type Event } from "nostr-tools";
-import { DEFAULT_BLOSSOM, FRAME, RemoteReadFailed, TAG, decryptBlob, discoverServer, download, encryptBlob, fetchFromBlossom, obtainBlob, sha256Hex, upload } from "./blossom";
+import { DEFAULT_BLOSSOM, FRAME, RemoteReadFailed, TAG, decryptBlob, deleteBlob, discoverServer, download, encryptBlob, fetchFromBlossom, obtainBlob, sha256Hex, upload } from "./blossom";
 
 const originalFetch = globalThis.fetch;
 const originalOverride = process.env.GLON_BLOSSOM_URL;
@@ -119,6 +119,22 @@ test("upload rejects a descriptor for other bytes and reports server refusals", 
 	await expect(upload(cipher, "a", "https://blossom.test", { sk })).rejects.toThrow(/different bytes/);
 	fakeFetch(() => new Response("", { status: 401, headers: { "X-Reason": "pubkey not allowed" } }));
 	await expect(upload(cipher, "a", "https://blossom.test", { sk })).rejects.toThrow(/401 pubkey not allowed/);
+});
+
+test("deleteBlob sends BUD-02 DELETE with a signed delete authorization; a blob already gone counts as deleted", async () => {
+	const sk = generateSecretKey();
+	const sha = "ab".repeat(32);
+	fakeFetch(() => new Response(null, { status: 404 }));
+	await deleteBlob(sha, "https://blossom.test/", { sk });
+	const [req] = requests;
+	expect(req.method).toBe("DELETE");
+	expect(req.url).toBe(`https://blossom.test/${sha}`);
+	const event = JSON.parse(Buffer.from(req.headers.get("Authorization")!.replace(/^Nostr /, ""), "base64").toString()) as Event;
+	expect(verifyEvent(event)).toBe(true);
+	expect(event.pubkey).toBe(getPublicKey(sk));
+	expect(event.tags.slice(0, 2)).toEqual([["t", "delete"], ["x", sha]]);
+	fakeFetch(() => new Response("", { status: 401, headers: { "X-Reason": "not yours" } }));
+	await expect(deleteBlob(sha, "https://blossom.test", { sk })).rejects.toThrow(/401 not yours/);
 });
 
 test("discovery picks the first relay whose NIP-11 lists blossom, as an http(s) origin", async () => {

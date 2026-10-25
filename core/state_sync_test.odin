@@ -60,6 +60,14 @@ on :: proc(c: Change, base: Checkpoint) -> Delta { return Delta{change = c, b = 
 @(private = "file")
 pre :: proc(c: Change) -> Delta { return Delta{change = c} }
 
+/** Raw ids of changes this device wrote (the host's own markers). */
+@(private = "file")
+owned :: proc(cs: ..Change) -> map[string]bool {
+	out := make(map[string]bool, allocator = context.temp_allocator)
+	for c in cs do out[string(c.id)] = true
+	return out
+}
+
 @(private = "file")
 fold :: proc(t: ^testing.T, bases: []Checkpoint, deltas: []Delta, now: i64) -> Checkpoint {
 	plan, ok := base_compact_plan(bases, deltas, nil, nil, now, true, context.temp_allocator)
@@ -167,7 +175,7 @@ classify_live_covered_orphan_stale :: proc(t: ^testing.T) {
 	live_untagged := mk({live_tagged}, 22_000, set("y", "1"))
 	orphan := mk({c3}, 12_000, set("late", "1")) // on b1, never folded by b2
 	deltas := []Delta{pre(c1), pre(c2), pre(c3), on(d1, b1), on(live_tagged, b2), pre(live_untagged), on(orphan, b1)}
-	cls := base_classify({b1, b2}, deltas, nil)
+	cls := base_classify({b1, b2}, deltas, nil, nil)
 	testing.expect_value(t, cls.current, 1)
 	testing.expect_value(t, class_of(cls, deltas, c1), Delta_Class.Premigration_Covered)
 	testing.expect_value(t, class_of(cls, deltas, c3), Delta_Class.Premigration_Covered)
@@ -180,21 +188,21 @@ classify_live_covered_orphan_stale :: proc(t: ^testing.T) {
 	// on it is decidable; a pre-migration change b1 might have folded is not.
 	stray := mk({c2}, 2500, set("old", "1"))
 	gap := []Delta{on(orphan, b1), pre(stray)}
-	cls = base_classify({b2}, gap, nil)
+	cls = base_classify({b2}, gap, nil, nil)
 	testing.expect_value(t, cls.classes[0], Delta_Class.Orphan)
 	testing.expect_value(t, cls.classes[1], Delta_Class.Stale)
 
 	// Two compactions this device never saw: a delta on b1 may be folded.
 	b3 := fold(t, {b2}, {on(live_tagged, b2)}, 30_000)
-	cls = base_classify({b1, b3}, gap, nil)
+	cls = base_classify({b1, b3}, gap, nil, nil)
 	testing.expect_value(t, cls.classes[0], Delta_Class.Stale)
 	// ... unless this device never published it.
 	pending := map[string]bool{string(orphan.id) = true}
-	cls = base_classify({b1, b3}, gap, pending)
+	cls = base_classify({b1, b3}, gap, pending, nil)
 	testing.expect_value(t, cls.classes[0], Delta_Class.Orphan)
 
 	// No base: everything replays as today.
-	cls = base_classify(nil, deltas, nil)
+	cls = base_classify(nil, deltas, nil, nil)
 	testing.expect_value(t, cls.current, -1)
 	for class in cls.classes do testing.expect_value(t, class, Delta_Class.Live)
 }
@@ -233,7 +241,7 @@ rebase_is_deterministic :: proc(t: ^testing.T) {
 	o1 := mk({c3}, 12_000, set("late", "1"))
 	o2 := mk({o1}, 12_500, set("later", "1"))
 	deltas := []Delta{on(d1, b1), on(live, b2), on(o2, b1), on(o1, b1)}
-	cls := base_classify({b1, b2}, deltas, nil)
+	cls := base_classify({b1, b2}, deltas, nil, owned(o1, o2))
 	first := base_rebase(&b2, deltas, cls, nil)
 	second := base_rebase(&b2, deltas, cls, nil)
 	testing.expect_value(t, len(first), 2)
@@ -258,7 +266,7 @@ rebase_is_deterministic :: proc(t: ^testing.T) {
 
 	// Rebased deltas are live on the current base and never replay twice.
 	after := []Delta{on(d1, b1), on(live, b2), on(o2, b1), on(o1, b1), on(r1, b2), on(r2, b2)}
-	cls = base_classify({b1, b2}, after, nil)
+	cls = base_classify({b1, b2}, after, nil, nil)
 	testing.expect_value(t, class_of(cls, after, r1), Delta_Class.Live)
 	testing.expect_value(t, class_of(cls, after, r2), Delta_Class.Live)
 	state, _, _ := base_replay({b1, b2}, after, nil, nil)
@@ -280,8 +288,8 @@ late_orphan_converges_two_devices :: proc(t: ^testing.T) {
 	// Device A and device C hold the same things, received in other orders.
 	a := []Delta{on(d1, b1), on(late, b1), on(d2, b2)}
 	c := []Delta{on(d2, b2), on(late, b1), on(d1, b1)}
-	ra := base_rebase(&b2, a, base_classify({b1, b2}, a, nil), nil)
-	rc := base_rebase(&b2, c, base_classify({b2, b1}, c, nil), nil)
+	ra := base_rebase(&b2, a, base_classify({b1, b2}, a, nil, owned(late)), nil)
+	rc := base_rebase(&b2, c, base_classify({b2, b1}, c, nil, owned(late)), nil)
 	testing.expect(t, len(ra) == 1 && len(rc) == 1, "one orphan each")
 	testing.expect(t, string(ra[0].change.id) == string(rc[0].change.id), "both devices rebase to the same change id")
 
@@ -313,9 +321,9 @@ rebased_copy_of_a_folded_edit_is_not_rebased_again :: proc(t: ^testing.T) {
 	x := mk({d1}, 21_000, set("x", "1"))
 
 	// Device A rebases with no live deltas; device B already holds x.
-	ra := base_rebase(&b2, {on(d1, b1), on(late, b1)}, base_classify({b1, b2}, {on(d1, b1), on(late, b1)}, nil), nil)
+	ra := base_rebase(&b2, {on(d1, b1), on(late, b1)}, base_classify({b1, b2}, {on(d1, b1), on(late, b1)}, nil, owned(late)), nil)
 	rb_in := []Delta{on(d1, b1), on(late, b1), on(x, b2)}
-	rb := base_rebase(&b2, rb_in, base_classify({b1, b2}, rb_in, nil), nil)
+	rb := base_rebase(&b2, rb_in, base_classify({b1, b2}, rb_in, nil, owned(late)), nil)
 	testing.expect(t, len(ra) == 1 && len(rb) == 1, "each device rebases the late edit")
 	testing.expect(t, string(ra[0].change.id) != string(rb[0].change.id), "different live heads, different copies")
 
@@ -324,7 +332,7 @@ rebased_copy_of_a_folded_edit_is_not_rebased_again :: proc(t: ^testing.T) {
 
 	// B's copy lands after b3: same edit, already folded - covered, never rebased.
 	after := []Delta{on(d1, b1), on(late, b1), on(x, b2), on(ra[0].change, b2), on(rb[0].change, b2)}
-	cls := base_classify({b1, b2, b3}, after, nil)
+	cls := base_classify({b1, b2, b3}, after, nil, owned(late, rb[0].change))
 	testing.expect_value(t, class_of(cls, after, rb[0].change), Delta_Class.Covered)
 	testing.expect_value(t, class_of(cls, after, late), Delta_Class.Covered)
 	testing.expect_value(t, len(base_rebase(&b3, after, cls, nil)), 0)
@@ -345,7 +353,7 @@ orphan_copies_of_one_edit_rebase_once :: proc(t: ^testing.T) {
 	copy_b := mk({c2}, 15_000, set("note", "n"))
 	child := mk({copy_b}, 16_000, set("more", "m"))
 	deltas := []Delta{on(d1, b1), on(copy_a, b1), on(copy_b, b1), on(child, b1)}
-	cls := base_classify({b1, b2}, deltas, nil)
+	cls := base_classify({b1, b2}, deltas, nil, owned(copy_a, copy_b, child))
 	testing.expect_value(t, class_of(cls, deltas, copy_a), Delta_Class.Orphan)
 	testing.expect_value(t, class_of(cls, deltas, copy_b), Delta_Class.Orphan)
 	out := base_rebase(&b2, deltas, cls, nil)
@@ -355,6 +363,99 @@ orphan_copies_of_one_edit_rebase_once :: proc(t: ^testing.T) {
 	has_parent := false
 	for p in out[1].change.parent_ids do if string(p) == string(kept.id) do has_parent = true
 	testing.expect(t, has_parent, "the child of the dropped copy hangs off the one kept")
+}
+
+// "Own changes until a base proves them; everyone else's leftovers are
+// discarded": only the device that wrote an orphan rebases it, every other
+// device drops it; a published own change this device cannot decide is kept.
+@(test)
+own_orphans_rebase_others_are_discarded :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	c1, c2, c3 := history()
+	b1 := fold(t, nil, {pre(c1), pre(c2), pre(c3)}, 10_000)
+	d1 := mk({c3}, 11_000, set("title", "B"))
+	b2 := fold(t, {b1}, {on(d1, b1)}, 20_000)
+	mine := mk({c3}, 12_000, set("mine", "1")) // published here; the compactor missed it
+	theirs := mk({c3}, 12_500, set("theirs", "1")) // another device's, missed too
+	deltas := []Delta{on(d1, b1), on(mine, b1), on(theirs, b1)}
+	cls := base_classify({b1, b2}, deltas, nil, owned(mine))
+	testing.expect_value(t, cls.classes[1], Delta_Class.Orphan)
+	testing.expect_value(t, cls.classes[2], Delta_Class.Orphan)
+	testing.expect(t, cls.own[1] && !cls.discard[1], "an own orphan is kept")
+	testing.expect(t, !cls.own[2] && cls.discard[2], "another device's orphan is discarded")
+	testing.expect(t, !cls.discard[0] && !cls.proven[0], "covered by the current base: neither")
+	rebased := base_rebase(&b2, deltas, cls, nil)
+	testing.expect(t, len(rebased) == 1 && string(rebased[0].orphan) == string(mine.id), "only the own orphan rebases")
+	testing.expect_value(t, len(base_rebase(&b2, deltas, cls, owned(theirs))), 0)
+	// Never published counts as own without an own marker.
+	cls = base_classify({b1, b2}, deltas, owned(theirs), nil)
+	testing.expect(t, cls.own[2] && !cls.discard[2] && cls.discard[1], "pending is own")
+
+	// A device that missed b2 (holds b1 and b3) cannot tell whether b2
+	// folded either: its own published change stays held, never rebased;
+	// another device's is discarded.
+	b3 := fold(t, {b1, b2}, {on(d1, b1), on(rebased[0].change, b2)}, 30_000)
+	gap := []Delta{on(mine, b1), on(theirs, b1)}
+	cls = base_classify({b1, b3}, gap, nil, owned(mine))
+	testing.expect_value(t, cls.classes[0], Delta_Class.Stale)
+	testing.expect(t, !cls.discard[0] && len(base_rebase(&b3, gap, cls, nil)) == 0, "own stale: kept, not rebased")
+	testing.expect(t, cls.classes[1] == .Stale && cls.discard[1], "another device's stale change is discarded")
+}
+
+// An own change is proven only by a held strict ancestor of the current
+// base: a concurrent sibling of the current base could still win without it.
+@(test)
+own_change_proven_by_a_strict_ancestor :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	c1, c2, c3 := history()
+	b1 := fold(t, nil, {pre(c1), pre(c2), pre(c3)}, 10_000)
+	mine := mk({c3}, 11_000, set("title", "B")) // written and published here
+	b2 := fold(t, {b1}, {on(mine, b1)}, 20_000)
+	deltas := []Delta{on(mine, b1)}
+	cls := base_classify({b1, b2}, deltas, nil, owned(mine))
+	testing.expect(t, cls.classes[0] == .Covered && cls.own[0] && !cls.proven[0] && !cls.discard[0], "kept while only the current base folds it")
+	x := mk({mine}, 21_000, set("x", "1"))
+	b3 := fold(t, {b1, b2}, {on(mine, b1), on(x, b2)}, 30_000)
+	cls = base_classify({b2, b3}, deltas, nil, owned(mine))
+	testing.expect(t, cls.classes[0] == .Covered && cls.proven[0], "proven once a held ancestor folded it")
+	cls = base_classify({b2, b3}, deltas, nil, nil)
+	testing.expect(t, !cls.proven[0] && !cls.discard[0], "not own: nothing to prove")
+
+	// An older device rebased this device's late edit; that copy was folded.
+	late := mk({mine}, 22_000, set("note", "offline"))
+	theirs_in := []Delta{on(mine, b1), on(x, b2), on(late, b1)}
+	copy_of := base_rebase(&b3, theirs_in, base_classify({b2, b3}, theirs_in, nil, owned(late)), nil)
+	testing.expect_value(t, len(copy_of), 1)
+	b4 := fold(t, {b2, b3}, {on(x, b2), on(copy_of[0].change, b3)}, 40_000)
+	y := mk({copy_of[0].change}, 41_000, set("y", "1"))
+	b5 := fold(t, {b3, b4}, {on(copy_of[0].change, b3), on(y, b4)}, 50_000)
+	held := []Delta{on(late, b1), on(copy_of[0].change, b3)}
+	cls = base_classify({b2, b3, b4}, held, nil, owned(late))
+	testing.expect(t, cls.classes[0] == .Covered && !cls.proven[0], "its copy is folded by the current base only")
+	cls = base_classify({b2, b3, b4, b5}, held, nil, owned(late))
+	testing.expect(t, cls.classes[0] == .Covered && cls.proven[0], "proven by edit once an ancestor folded the copy")
+}
+
+// A change on a base (or parent) this device cannot place, written after its
+// current base was created, is waiting for it - never discarded; one written
+// before the current base existed is a leftover.
+@(test)
+discard_waits_for_a_base_on_its_way :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	c1, c2, c3 := history()
+	b1 := fold(t, nil, {pre(c1), pre(c2), pre(c3)}, 10_000)
+	d1 := mk({c3}, 11_000, set("title", "B"))
+	b2 := fold(t, {b1}, {on(d1, b1)}, 20_000)
+	y := mk({d1}, 21_000, set("y", "1"))
+	b3 := fold(t, {b1, b2}, {on(d1, b1), on(y, b2)}, 30_000)
+	on_b3 := mk({y}, 31_000, set("z", "1"))
+	old := mk({mk(nil, 1, set("q", "q"))}, 15_000, set("old", "1"))
+	deltas := []Delta{on(d1, b1), on(on_b3, b3), on(old, b3)}
+	cls := base_classify({b1, b2}, deltas, nil, nil)
+	testing.expect(t, cls.classes[1] != .Live && !cls.discard[1], "b3 not here yet: waiting")
+	testing.expect(t, cls.classes[2] != .Live && cls.discard[2], "written before b2 existed: discarded")
+	cls = base_classify({b1, b2, b3}, deltas, nil, nil)
+	testing.expect_value(t, cls.classes[1], Delta_Class.Live)
 }
 
 @(test)
@@ -374,9 +475,10 @@ concurrent_compaction_converges :: proc(t: ^testing.T) {
 	// parents are the winner's heads, so it is live without a rebase.
 	e := mk({d1}, 21_500, set("e", "1"))
 
+	// This device wrote d2 and d3: it rebases them.
 	deltas := []Delta{on(d1, b1), on(d2, b1), on(d3, loser), on(e, loser)}
-	x := base_classify({b1, winner, loser}, deltas, nil)
-	y := base_classify({loser, b1, winner}, deltas, nil)
+	x := base_classify({b1, winner, loser}, deltas, nil, owned(d2, d3))
+	y := base_classify({loser, b1, winner}, deltas, nil, owned(d2, d3))
 	testing.expect(t, ([]Checkpoint{b1, winner, loser})[x.current].base_hash == winner.base_hash, "device X picks the winner")
 	testing.expect(t, ([]Checkpoint{loser, b1, winner})[y.current].base_hash == winner.base_hash, "device Y picks the same winner")
 	testing.expect(t, slice.equal(x.classes, y.classes), "both devices classify alike")
@@ -408,7 +510,7 @@ rebased_block_add_with_missing_target_appends :: proc(t: ^testing.T) {
 	b2 := fold(t, {b1}, {on(gone, b1)}, 20_000)
 	orphan := mk({c3}, 12_000, add("n", "t", POS_BOTTOM))
 	deltas := []Delta{on(gone, b1), on(orphan, b1)}
-	cls := base_classify({b1, b2}, deltas, nil)
+	cls := base_classify({b1, b2}, deltas, nil, owned(orphan))
 	rebased := base_rebase(&b2, deltas, cls, nil)
 	testing.expect_value(t, len(rebased), 1)
 	state, _, ok := base_replay({b1, b2}, {on(gone, b1), on(orphan, b1), on(rebased[0].change, b2)}, nil, nil)
@@ -630,6 +732,127 @@ state_sync_base_wire_scenario :: proc(t: ^testing.T) {
 	testing.expect_value(t, queued_b, hex_id(small.base_hash[:]))
 }
 
+// Runs inside sync_session_contract. docs/state-sync.md "Oversized bases".
+state_sync_pointer_base_scenario :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	c1 := mk(nil, 1000, create(), set("body", strings.repeat("y", 2_000_000)))
+	big := fold(t, nil, {pre(c1)}, 5000)
+	text := base64.encode(encode_checkpoint(big))
+	testing.expect(t, len(text) > WIRE_CHUNK_CHARS * WIRE_MAX_CHUNKS, "fixture exceeds the chunk limit")
+	hash := hex_id(big.base_hash[:])
+
+	// Too big for parts and no blob yet: the key to encrypt the blob with.
+	seal := jobj()
+	seal["base"] = json.String(text)
+	seal["conversationKey"] = json.String(CONV)
+	seal["secret"] = json.String(SECRET)
+	first := call(t, "seal_base", seal)
+	needs, _ := json_bool(first, "needsBlob")
+	testing.expect(t, needs, "an oversized base asks for a blob")
+	_, has_event := json_field(first, "event")
+	testing.expect(t, !has_event, "no inline event for an oversized base")
+	blob_key := json_str(first, "blobKey")
+	testing.expect(t, is_hex_pubkey(blob_key), "blob key is 32 bytes hex")
+	testing.expect_value(t, json_str(call(t, "seal_base", seal), "blobKey"), blob_key)
+	testing.expect_value(t, json_str(first, "hash"), hash)
+
+	// With the uploaded blob: a pointer 31078, no parts.
+	sha := strings.repeat("ab", 32)
+	blob := jobj()
+	blob["sha256"] = json.String(sha)
+	blob["size"] = json.Integer(1_500_016)
+	url := strings.concatenate({"https://blossom.example/", sha})
+	blob["url"] = json.String(url)
+	seal["blob"] = json.Object(blob)
+	sealed := call(t, "seal_base", seal)
+	testing.expect_value(t, len(json_array(sealed, "parts")), 0)
+	sealed_blob, _ := json_field(sealed, "blob")
+	testing.expect_value(t, json_str(sealed_blob, "key"), blob_key)
+	event, _ := json_field(sealed, "event")
+	kind, _ := json_int(event, "kind")
+	testing.expect_value(t, kind, SYNC_BASE_KIND)
+	secret, _ := hex_bytes(SECRET)
+	d, _ := tag_value(event, "d")
+	testing.expect_value(t, d, wire_blind(secret, "base:" + OBJ))
+	epoch, _ := tag_value(event, "epoch")
+	testing.expect_value(t, epoch, "1")
+	_, chunked := tag_value(event, "c")
+	testing.expect_value(t, chunked, 0)
+	tag_sha, tags := tag_value(event, "blob")
+	testing.expect(t, tags == 1 && tag_sha == sha, "one blob tag naming the blob")
+	conv, _ := hex_bytes(CONV)
+	plain, dok := nip44_decrypt(json_str(event, "content"), conv)
+	testing.expect(t, dok && !wire_part_ok(plain), "the pointer is not a base64 part: old readers drop it")
+	pointer, pok := json.parse(transmute([]byte)plain, parse_integers = true)
+	testing.expect(t, pok == nil && json_str(pointer, "hash") == hash && json_str(pointer, "key") == blob_key, "pointer names base and key")
+
+	session := jobj()
+	session["pk"] = json.String(PK)
+	session["conversationKey"] = json.String(CONV)
+	session["secret"] = json.String(SECRET)
+	call(t, "session", session)
+	defer sync_session_close()
+	ingest := proc(t: ^testing.T, event: json.Value) -> json.Value {
+		fields := jobj()
+		fields["event"] = event
+		fields["nowMs"] = json.Integer(1)
+		return call(t, "ingest", fields)
+	}
+	got := ingest(t, event_of(event, SYNC_BASE_KIND, 80))
+	item, has_item := json_field(got, "item")
+	testing.expect(t, has_item, "a pointer base is an item")
+	_, has_base := json_field(item, "base")
+	testing.expect(t, !has_base && json_str(item, "bytes") == "", "the base itself comes from the blob")
+	item_blob, _ := json_field(item, "blob")
+	size, _ := json_int(item_blob, "size")
+	testing.expect(t, json_str(item_blob, "hash") == hash && json_str(item_blob, "sha256") == sha && size == 1_500_016, "blob named")
+	testing.expect_value(t, json_str(item_blob, "key"), blob_key)
+	testing.expect_value(t, json_str(item_blob, "url"), url)
+	cursor, _ := json_int(got, "cursor")
+	testing.expect_value(t, cursor, 80)
+
+	// The decrypted blob opens exactly like an inline base.
+	open := jobj()
+	open["hash"] = json.String(hash)
+	open["bytes"] = json.String(text)
+	opened := call(t, "base_open_blob", open)
+	summary, _ := json_field(opened, "base")
+	testing.expect_value(t, json_str(summary, "hash"), hash)
+	testing.expect_value(t, json_str(opened, "bytes"), text)
+	small := fold(t, nil, {pre(mk(nil, 1000, create()))}, 6000)
+	open["bytes"] = json.String(base64.encode(encode_checkpoint(small)))
+	open["action"] = json.String("base_open_blob")
+	_, mismatch := sync_dispatch(json.Object(open))
+	testing.expect_value(t, mismatch, "base blob does not match its pointer")
+
+	// A blob tag naming other bytes than the pointer: not an item.
+	forged := event_of(event, SYNC_BASE_KIND, 81).(json.Object)
+	forged_tags := make([dynamic]json.Value)
+	for entry in json_array(event, "tags") {
+		arr := entry.(json.Array)
+		append(&forged_tags, tag_string(arr, 0) == "blob" ? tag("blob", strings.repeat("cd", 32), "1500016") : entry)
+	}
+	forged["tags"] = json.Array(forged_tags)
+	refused := ingest(t, json.Object(forged))
+	_, forged_item := json_field(refused, "item")
+	failed, _ := json_bool(refused, "decodeFailure")
+	testing.expect(t, !forged_item && failed, "a pointer must match its blob tag")
+	// Without the blob tag (how a reader that predates pointers sees it): dropped.
+	untagged := event_of(event, SYNC_BASE_KIND, 82).(json.Object)
+	plain_tags := make([dynamic]json.Value)
+	for entry in json_array(event, "tags") do if tag_string(entry.(json.Array), 0) != "blob" do append(&plain_tags, entry)
+	untagged["tags"] = json.Array(plain_tags)
+	dropped := ingest(t, json.Object(untagged))
+	_, untagged_item := json_field(dropped, "item")
+	testing.expect(t, !untagged_item, "a pointer is never read as base64")
+
+	// A bad blob description is refused at seal time.
+	blob["sha256"] = json.String("AB")
+	seal["action"] = json.String("seal_base")
+	_, bad := sync_dispatch(json.Object(seal))
+	testing.expect_value(t, bad, "blob sha256 must be 64-char lowercase hex")
+}
+
 @(test)
 seal_base_shared_space_tags :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
@@ -738,6 +961,17 @@ state_sync_dispatch_json :: proc(t: ^testing.T) {
 	testing.expect(t, slice.equal(list(cls, "covered"), []string{hex_id(d1.id)}), "covered")
 	testing.expect_value(t, len(list(cls, "premigrationCovered")), 3)
 	testing.expect(t, slice.equal(list(cls, "orphan"), []string{hex_id(orphan.id)}), "orphan")
+	testing.expect(t, slice.equal(list(cls, "discard"), []string{hex_id(orphan.id)}), "another device's orphan: discard")
+	testing.expect_value(t, len(list(cls, "rebase")), 0)
+	none_rebased := call(t, "rebase", fields)
+	testing.expect_value(t, len(json_array(none_rebased, "changes")), 0)
+
+	// Written here: rebase it.
+	fields["own"] = json.Array([dynamic]json.Value{json.String(hex_id(orphan.id))})
+	cls = call(t, "classify", fields)
+	testing.expect(t, slice.equal(list(cls, "rebase"), []string{hex_id(orphan.id)}), "own orphan: rebase")
+	testing.expect_value(t, len(list(cls, "discard")), 0)
+	testing.expect_value(t, len(list(cls, "proven")), 0)
 	testing.expect(t, slice.equal(list(cls, "liveHeads"), []string{hex_id(live.id)}), "live heads")
 
 	first := call(t, "rebase", fields)

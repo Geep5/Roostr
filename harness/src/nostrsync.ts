@@ -29,6 +29,7 @@ import { API, VANISH_LOG_ID, apiFetch, mutate, subscribe, vanishedEntries, type 
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { machines, serverOf, servesHere } from "./machine";
 import { machineId } from "./roster";
+import { blossomServer, decryptBlob, deleteBlob, download, encryptBlob, sha256Hex, upload } from "./blossom";
 
 const CHANGE_KIND = 1078;
 /** One Checkpoint (docs/checkpoint-sync.md) per object: a replay cache, same envelope as 1078. */
@@ -96,6 +97,8 @@ interface SyncState {
 	compactions?: Record<string, PendingCompaction>;
 	/** Objects whose pre-migration 1078/1079 history every relay accepted the deletion of. */
 	premigrationSwept?: Record<string, true>;
+	/** Blossom blobs of superseded pointer bases still to BUD-02 DELETE (sha256 -> true); retried every compaction pass. */
+	blobDeletes?: Record<string, true>;
 }
 
 interface PublishedBase {
@@ -109,6 +112,8 @@ interface PublishedBase {
 	createdAt: number;
 	/** Every configured relay accepted every event. */
 	everywhere: boolean;
+	/** sha256 of the Blossom blob of a pointer base (docs/state-sync.md "Oversized bases"): deleted with the base. */
+	blob?: string;
 }
 
 interface PendingCompaction {
@@ -137,11 +142,11 @@ function statePath(): string {
 async function readState(): Promise<SyncState> {
 	try {
 		const parsed = (await Bun.file(statePath()).json()) as SyncState;
-		if (parsed?.version === 1) return { ...parsed, pendingChunkGroups: parsed.pendingChunkGroups ?? {}, vanishScanVersion: 2, vanishRequested: parsed.vanishScanVersion === 2 ? (parsed.vanishRequested ?? {}) : {}, publishedSpace: parsed.publishedSpace ?? {}, sharedQueued: parsed.sharedQueued ?? {}, invitesSent: parsed.invitesSent ?? {}, wrapsSeen: parsed.wrapsSeen ?? {}, checkpoints: parsed.checkpoints ?? {}, checkpointDeletes: parsed.checkpointDeletes ?? {}, bases: parsed.bases ?? {}, compactions: parsed.compactions ?? {}, premigrationSwept: parsed.premigrationSwept ?? {} };
+		if (parsed?.version === 1) return { ...parsed, pendingChunkGroups: parsed.pendingChunkGroups ?? {}, vanishScanVersion: 2, vanishRequested: parsed.vanishScanVersion === 2 ? (parsed.vanishRequested ?? {}) : {}, publishedSpace: parsed.publishedSpace ?? {}, sharedQueued: parsed.sharedQueued ?? {}, invitesSent: parsed.invitesSent ?? {}, wrapsSeen: parsed.wrapsSeen ?? {}, checkpoints: parsed.checkpoints ?? {}, checkpointDeletes: parsed.checkpointDeletes ?? {}, bases: parsed.bases ?? {}, compactions: parsed.compactions ?? {}, premigrationSwept: parsed.premigrationSwept ?? {}, blobDeletes: parsed.blobDeletes ?? {} };
 	} catch {
 		/* fresh */
 	}
-	return { version: 1, published: {}, cursor: 0, pendingChunkGroups: {}, vanishScanVersion: 2, vanishRequested: {}, publishedSpace: {}, sharedQueued: {}, invitesSent: {}, wrapsSeen: {}, checkpoints: {}, checkpointDeletes: {}, bases: {}, compactions: {}, premigrationSwept: {} };
+	return { version: 1, published: {}, cursor: 0, pendingChunkGroups: {}, vanishScanVersion: 2, vanishRequested: {}, publishedSpace: {}, sharedQueued: {}, invitesSent: {}, wrapsSeen: {}, checkpoints: {}, checkpointDeletes: {}, bases: {}, compactions: {}, premigrationSwept: {}, blobDeletes: {} };
 }
 
 function writeState(state: SyncState): void {
@@ -441,6 +446,8 @@ interface LocalChange {
 	b?: string;
 	/** Written here and never confirmed published. */
 	pending?: boolean;
+	/** Written here and no held base has proven it folded yet (published or not). */
+	own?: boolean;
 	class?: "live" | "covered" | "premigrationCovered" | "orphan" | "stale";
 }
 
@@ -491,6 +498,10 @@ interface BaseRow {
 	orphan: number;
 	stale: number;
 	pending: number;
+	/** Changes written here that no held base has proven folded. */
+	own: number;
+	/** Own orphans: POST /api/bases/rebase has work (another device's orphans are discarded, never rebased here). */
+	rebase: number;
 	/** unix ms of the oldest live change (0 when none). */
 	oldestMs: number;
 	compact: boolean;
@@ -543,8 +554,46 @@ interface SealedBase {
 	epoch: number;
 	d: string;
 	gid: string;
-	event: EventTemplate;
-	parts: EventTemplate[];
+	event?: EventTemplate;
+	parts?: EventTemplate[];
+	/** Oversized, no event yet: encrypt the base bytes under blobKey, upload, seal again with `blob`. */
+	needsBlob?: boolean;
+	blobKey?: string;
+	/** A pointer base: the blob it names. */
+	blob?: { sha256: string; size: number; key: string };
+}
+
+/** A pointer base's content (docs/state-sync.md "Oversized bases"). */
+interface BasePointer {
+	/** base_hash of the blob's plaintext. */
+	hash: string;
+	/** sha256 of the blob: its Blossom name. */
+	sha256: string;
+	size: number;
+	/** hex AES-256-GCM key, blossom.ts frame format. */
+	key: string;
+	url?: string;
+}
+
+const HEX64 = /^[0-9a-f]{64}$/;
+const BLOB_MAX_BYTES = 512 * 1024 * 1024;
+
+/** The pointer a 31078's decrypted content carries, checked against its ["blob", sha256, size] tag; null for anything else (an unknown version too). */
+function basePointerOf(blobTag: string[], part: string): BasePointer | null {
+	if (part.length > 4096) return null;
+	let raw: unknown;
+	try {
+		raw = JSON.parse(part);
+	} catch {
+		return null;
+	}
+	if (!raw || typeof raw !== "object") return null;
+	const p = raw as Record<string, unknown>;
+	if (p.v !== 1 || typeof p.hash !== "string" || typeof p.sha256 !== "string" || typeof p.key !== "string" || typeof p.size !== "number") return null;
+	if (!HEX64.test(p.hash) || !HEX64.test(p.sha256) || !HEX64.test(p.key) || !Number.isSafeInteger(p.size) || p.size < 1 || p.size > BLOB_MAX_BYTES) return null;
+	if (p.url !== undefined && (typeof p.url !== "string" || p.url.length > 2048 || !/^https?:\/\//.test(p.url))) return null;
+	if (blobTag[1] !== p.sha256 || blobTag[2] !== String(p.size)) return null;
+	return { hash: p.hash, sha256: p.sha256, size: p.size, key: p.key, ...(p.url ? { url: p.url as string } : {}) };
 }
 
 interface CheckpointRow {
@@ -979,7 +1028,8 @@ export async function startNostrSync(): Promise<void> {
 					if (item.space) state.publishedSpace![doneKey] = true;
 					else state.published[item.changeHex] = true;
 					noteDeltaEvents(item.changeHex, eventIds);
-					// The daemon stops counting it as never published (core `pending`).
+					// The daemon stops counting it as never published (core `pending`); it
+					// stays this computer's own (`.local`) until a held base proves it folded.
 					if (item.pending) void localPost("/api/changes/published", { published: { [item.objectId]: [item.changeHex] } }).catch((err) => console.error(`[sync] publish confirmation failed for ${item.changeHex.slice(0, 8)}:`, err instanceof Error ? err.message : err));
 				}
 				queued.delete(doneKey);
@@ -998,7 +1048,8 @@ export async function startNostrSync(): Promise<void> {
 	/**
 	 * Queue an object's unpublished working-set changes. With a base held the
 	 * daemon classifies each one: only live deltas go out (with their `b`);
-	 * covered ones were folded, stale ones may have been, orphans are rebased.
+	 * covered ones were folded, stale ones may have been, own orphans are
+	 * rebased and another device's orphans discarded by the daemon.
 	 */
 	async function publishObject(objectId: string): Promise<void> {
 		try {
@@ -1071,13 +1122,15 @@ export async function startNostrSync(): Promise<void> {
 			previous.eventIds = [...new Set([...previous.eventIds, ...copy.eventIds])];
 			previous.everywhere ||= copy.everywhere;
 			previous.createdAt = Math.max(previous.createdAt, copy.createdAt);
+			if (copy.blob) previous.blob = copy.blob;
 		} else {
 			state.bases![objectId] = copy;
 		}
 		dirty = true;
 	}
 
-	async function importBaseB64(b64: string, space: SharedSpace | null, signer: string, eventIds: string[], createdAt: number): Promise<ImportedBase | undefined> {
+	/** `blob`: the Blossom blob a pointer base came from. */
+	async function importBaseB64(b64: string, space: SharedSpace | null, signer: string, eventIds: string[], createdAt: number, blob?: string): Promise<ImportedBase | undefined> {
 		const provenance = space ? { spaceId: space.spaceId, keyId: space.keyId, signer } : undefined;
 		const res = await localPost<{ rejected: number; items: ImportedBase[] }>("/api/bases", { bases: [b64], provenance });
 		if (res.rejected > 0) throw new Error("Base import rejected");
@@ -1085,9 +1138,9 @@ export async function startNostrSync(): Promise<void> {
 		const row = res.items[0];
 		if (!row) return undefined;
 		if (row.current && signer === id!.pk && (!space || (space.owner ?? id!.pk) === id!.pk)) {
-			recordBaseCopy(row.objectId, { scope: space ? `${space.spaceId}/${space.keyId}` : "", hash: row.hash, epoch: row.epoch, eventIds, createdAt, everywhere: false });
+			recordBaseCopy(row.objectId, { scope: space ? `${space.spaceId}/${space.keyId}` : "", hash: row.hash, epoch: row.epoch, eventIds, createdAt, everywhere: false, ...(blob ? { blob } : {}) });
 		}
-		// A newer base can turn held deltas (ours never published, too) into orphans.
+		// A newer base can turn our held deltas (published or not) into orphans.
 		if (row.stored && sweepReady) void rebasePass();
 		return row;
 	}
@@ -1181,6 +1234,29 @@ export async function startNostrSync(): Promise<void> {
 		if (kind === BASE_KIND) return { base: await importBaseB64(b64, space, signer, eventIds, createdAt) };
 		await importB64(b64, space, signer, eventIds, b);
 		return {};
+	}
+
+	/**
+	 * A pointer base's bytes (docs/state-sync.md "Oversized bases"): the blob
+	 * from the URL its writer recorded, else from our Blossom server; it must
+	 * hash to its name, decrypt under the pointer's key and hash to the base
+	 * the pointer names (writers never serialize base_hash). Base64, as an
+	 * inline base arrives.
+	 */
+	async function fetchPointerBase(pointer: BasePointer): Promise<string> {
+		let last: unknown = new Error("No Blossom server to ask.");
+		for (const source of pointer.url ? [pointer.url, ""] : [""]) {
+			try {
+				const cipher = await download(pointer.sha256, source || (await blossomServer(id!.relays)));
+				if (cipher.byteLength !== pointer.size) throw new Error("Base blob has the wrong size.");
+				const plain = decryptBlob(cipher, Buffer.from(pointer.key, "hex"));
+				if (sha256Hex(plain) !== pointer.hash) throw new Error("Base blob does not match its pointer.");
+				return Buffer.from(plain).toString("base64");
+			} catch (err) {
+				last = err;
+			}
+		}
+		throw last;
 	}
 
 	/** Try self key, then every shared-space key. */
@@ -1301,8 +1377,17 @@ export async function startNostrSync(): Promise<void> {
 			if (chunkTags.length === 0) {
 				// A 1080 is only ever part 2..n of a base: without `c` it is nothing.
 				if (event.kind === BASE_PART_KIND) return;
-				importing = true;
-				await importEvent(event.kind, part, space, event.pubkey, [event.id], baseTagOf(event), event.created_at);
+				const blobTag = event.kind === BASE_KIND ? event.tags.find((t) => t[0] === "blob") : undefined;
+				if (blobTag && part.startsWith("{")) {
+					// A pointer base; an unknown pointer version is skipped, as readers older than pointers skip them all.
+					const pointer = basePointerOf(blobTag, part);
+					if (!pointer) return;
+					importing = true;
+					await importBaseB64(await fetchPointerBase(pointer), space, event.pubkey, [event.id], event.created_at, pointer.sha256);
+				} else {
+					importing = true;
+					await importEvent(event.kind, part, space, event.pubkey, [event.id], baseTagOf(event), event.created_at);
+				}
 			} else {
 				const [, gid, idxStr, totalStr] = chunkTags[0];
 				if (!gid || !/^[0-9a-f]{16}$/.test(gid) || !/^(0|[1-9][0-9]*)$/.test(idxStr ?? "") || !/^[1-9][0-9]*$/.test(totalStr ?? "")) return;
@@ -1848,7 +1933,10 @@ export async function startNostrSync(): Promise<void> {
 	// this side decides who may, publishes, and asks the relays to delete
 	// what a published base folded.
 
-	/** Personal objects always; a space's objects only for a writer of the space. */
+	/**
+	 * Own orphans only (the daemon never rebases another device's, it discards
+	 * them): personal objects always; a space's objects only for a writer of the space.
+	 */
 	let rebaseBusy = false;
 	let rebaseAgain = false;
 	async function rebasePass(): Promise<void> {
@@ -1862,7 +1950,7 @@ export async function startNostrSync(): Promise<void> {
 				rebaseAgain = false;
 				let rebased = 0;
 				for (const [objectId, row] of Object.entries(await localBases())) {
-					if (!row.hash || row.orphan === 0 || vanished.has(objectId)) continue;
+					if (!row.hash || !row.rebase || vanished.has(objectId)) continue;
 					const space = sharedSpaces.get(spaceMap.get(objectId) ?? "");
 					if (space && !space.writers.has(id!.pk)) continue;
 					try {
@@ -1874,7 +1962,7 @@ export async function startNostrSync(): Promise<void> {
 						console.error(`[sync] rebase failed for ${objectId.slice(0, 8)}:`, err instanceof Error ? err.message : err);
 					}
 				}
-				if (rebased > 0) console.log(`[sync] rebased ${rebased} orphan change(s) onto current bases`);
+				if (rebased > 0) console.log(`[sync] rebased ${rebased} own orphan change(s) onto current bases`);
 			} while (rebaseAgain);
 		} catch (err) {
 			console.error("[sync] rebase pass failed:", err instanceof Error ? err.message : err);
@@ -1905,12 +1993,22 @@ export async function startNostrSync(): Promise<void> {
 	 * events a second per connection ("rate-limited: too many events").
 	 */
 	async function publishBase(objectId: string, b64: string, space: SharedSpace | null): Promise<boolean> {
-		const sealed = await localPost<SealedBase>("/api/bases/seal", {
+		const request = {
 			base: b64,
 			conversationKey: Buffer.from(space ? space.convKey : id!.conversationKey).toString("hex"),
 			space: space ? { keyHex: space.keyHex, spaceId: space.spaceId, owner: space.owner ?? id!.pk } : undefined,
-		});
-		const templates = [...sealed.parts, sealed.event];
+		};
+		let sealed = await localPost<SealedBase>("/api/bases/seal", request);
+		if (sealed.needsBlob && sealed.blobKey) {
+			// Too big for 64 parts (docs/state-sync.md "Oversized bases"): the
+			// encrypted base goes to Blossom and the 31078 carries a pointer.
+			const { cipher } = encryptBlob(Buffer.from(b64, "base64"), Buffer.from(sealed.blobKey, "hex"));
+			const stored = await upload(cipher, "base", await blossomServer(id!.relays), id!);
+			sealed = await localPost<SealedBase>("/api/bases/seal", { ...request, blob: { sha256: stored.sha256, size: cipher.byteLength, url: stored.url } });
+			console.log(`[sync] base for ${objectId.slice(0, 8)} is ${(cipher.byteLength / 1e6).toFixed(1)} MB: stored on Blossom as ${stored.sha256.slice(0, 12)}`);
+		}
+		if (!sealed.event) throw new Error("Sealing the base returned no event.");
+		const templates = [...(sealed.parts ?? []), sealed.event];
 		const eventIds: string[] = [];
 		let everywhere = true;
 		let createdAt = 0;
@@ -1928,7 +2026,7 @@ export async function startNostrSync(): Promise<void> {
 			eventIds.push(event.id);
 			if (template.kind === BASE_KIND) createdAt = event.created_at;
 		}
-		recordBaseCopy(objectId, { scope: space ? `${space.spaceId}/${space.keyId}` : "", hash: sealed.hash, epoch: sealed.epoch, eventIds, createdAt, everywhere });
+		recordBaseCopy(objectId, { scope: space ? `${space.spaceId}/${space.keyId}` : "", hash: sealed.hash, epoch: sealed.epoch, eventIds, createdAt, everywhere, ...(sealed.blob ? { blob: sealed.blob.sha256 } : {}) });
 		const pending = state.compactions![objectId];
 		if (pending?.hash === sealed.hash) pending.createdAt = createdAt;
 		return everywhere;
@@ -1978,7 +2076,8 @@ export async function startNostrSync(): Promise<void> {
 	 * After a base reached every relay (or a newer base was built on it):
 	 * NIP-09 the deltas it folded (`e`, k 1078) and our previous copies at its
 	 * address (`a` dated just before our copy, so the copy itself stays, plus
-	 * `e` for their 1080 parts). Kept and retried until every relay accepted.
+	 * `e` for their 1080 parts). Kept and retried until every relay accepted;
+	 * then the Blossom blobs of previous pointer bases join `blobDeletes`.
 	 */
 	async function cleanupCompaction(objectId: string, space: SharedSpace | null, row: BaseRow): Promise<void> {
 		const pending = state.compactions![objectId];
@@ -2015,10 +2114,36 @@ export async function startNostrSync(): Promise<void> {
 			}
 		}
 		if (complete) {
+			// Only once every relay took the deletion: a pointer a relay still serves must still resolve.
+			const keepBlob = copy?.hash === pending.hash ? copy.blob : undefined;
+			for (const previous of pending.previous) if (previous.blob && previous.blob !== keepBlob) state.blobDeletes![previous.blob] = true;
 			delete state.compactions![objectId];
 			if (deleted > 0 || pending.prevBase) console.log(`[sync] compaction of ${objectId.slice(0, 8)} (epoch ${pending.epoch}): deleted ${deleted} event(s)${pending.prevBase ? " and the previous base" : ""}`);
+			await deleteSupersededBlobs();
 		}
 		dirty = true;
+	}
+
+	/**
+	 * BUD-02 DELETE every queued blob of a superseded pointer base. A failure
+	 * (server down, a server without DELETE) leaves it queued for the next
+	 * pass and never holds back a compaction: an orphaned blob only costs
+	 * storage.
+	 */
+	async function deleteSupersededBlobs(): Promise<void> {
+		const queued = Object.keys(state.blobDeletes!);
+		if (queued.length === 0) return;
+		const server = await blossomServer(id!.relays);
+		for (const sha of queued) {
+			try {
+				await deleteBlob(sha, server, id!);
+				delete state.blobDeletes![sha];
+				dirty = true;
+				console.log(`[sync] deleted superseded base blob ${sha.slice(0, 12)} from Blossom`);
+			} catch (err) {
+				console.error(`[sync] deleting base blob ${sha.slice(0, 12)} failed (retried next pass):`, err instanceof Error ? err.message : err);
+			}
+		}
 	}
 
 	/**
@@ -2067,7 +2192,7 @@ export async function startNostrSync(): Promise<void> {
 
 	/**
 	 * Compaction (on unless GLON_STATE_SYNC_COMPACT=0; replaces the 1079 checkpoint loop): rebase
-	 * orphans, then for every object compacted here that the core says is due,
+	 * own orphans, then for every object compacted here that the core says is due,
 	 * build the next base, publish it and clean up. Shared spaces: only spaces
 	 * this identity owns. Unbased fallback: every object with no base whose
 	 * oldest change is older than UNBASED_FALLBACK_MS gets its epoch-1 base
@@ -2100,10 +2225,7 @@ export async function startNostrSync(): Promise<void> {
 	 * An Error someone else wrote (a run, a person) is left alone.
 	 */
 	async function syncBadge(objectId: string, message: string, ours: boolean): Promise<void> {
-		const why = /exceeds chunk limit/.test(message)
-			? "its history is too big to sync as one piece (over 2.5 MB). Its new changes still sync, but a new device must replay all of them."
-			: message;
-		const text = `${SYNC_BADGE}${why}`.slice(0, 300);
+		const text = `${SYNC_BADGE}${message}`.slice(0, 300);
 		try {
 			const res = await apiFetch(`${API}/api/objects/${encodeURIComponent(objectId)}`);
 			if (!res.ok) return;
@@ -2142,6 +2264,7 @@ export async function startNostrSync(): Promise<void> {
 				}
 			}
 			if (built > 0) console.log(`[sync] compaction pass: ${built} base(s) built`);
+			await deleteSupersededBlobs();
 		} catch (err) {
 			console.error("[sync] compaction pass failed:", err instanceof Error ? err.message : err);
 		} finally {
@@ -2353,7 +2476,7 @@ export async function startNostrSync(): Promise<void> {
 	// An owner's signal in the backfill may have vanished a shared space: stop syncing it.
 	if ([...sharedSpaces.keys()].some((spaceId) => vanished.has(spaceId))) await refreshShared();
 	await chaseVanished();
-	// Orphans first: their rebased changes go out with everything else.
+	// Own orphans first: their rebased changes go out with everything else.
 	await rebasePass();
 
 	// Publish local changes the relays don't have (published set carries

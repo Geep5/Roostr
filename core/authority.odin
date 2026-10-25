@@ -368,7 +368,10 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		return sync_state_json(), ""
 	case "ingest":
 		// {event: {pubkey, created_at, kind, tags, content}, nowMs} → {cursor, item?, faultAt?, replayGroups?, decryptFailure?, decodeFailure?, hTag?, spaceVanished?}
-		// The host has already verified the event signature.
+		// The host has already verified the event signature. A pointer base
+		// (31078 with ["blob", ...]) yields item {bytes: "", blob: {hash, sha256,
+		// size, key, url?}, provenance?}: the host fetches and decrypts the blob,
+		// then base_open_blob turns it into the inline base item fields.
 		if !sync_session.active do return nil, "no sync session"
 		event, present := json_field(payload, "event")
 		if _, ok := event.(json.Object); !present || !ok do return nil, "ingest needs an event object"
@@ -456,7 +459,7 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		out["pending"] = json.Integer(i64(outbox_pending()))
 		return json.Object(out), ""
 	// ── State sync: bases, classification, rebase, compaction (state_sync.odin) ──
-	case "base_decode", "base_current", "classify", "replay_from_base", "rebase", "compact_plan", "seal_base":
+	case "base_decode", "base_current", "classify", "replay_from_base", "rebase", "compact_plan", "seal_base", "base_open_blob":
 		return state_sync_dispatch(payload)
 	}
 	return nil, "unknown sync action"

@@ -14,7 +14,7 @@ import { mkdirSync, renameSync, rmSync } from "node:fs";
 import { SimplePool, finalizeEvent, nip44, type Event } from "nostr-tools";
 import { RTCPeerConnection, type RTCDataChannel } from "werift";
 import { createObject, deleteField, iv, lv, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
-import { RemoteReadFailed, discoverServer, encryptBlob, fetchFromBlossom, obtainBlob, upload, type BlobRef } from "./blossom";
+import { RemoteReadFailed, blossomServer, encryptBlob, fetchFromBlossom, obtainBlob, upload, type BlobRef } from "./blossom";
 import { machines } from "./machine";
 import { dataRoot, loadIdentity, type Identity } from "./nostrsync";
 import { machineId } from "./roster";
@@ -79,21 +79,6 @@ async function writeBlob(hash: string, bytes: Uint8Array): Promise<void> {
 	const tmp = `${blobPath(hash)}.part-${crypto.randomUUID()}`;
 	await Bun.write(tmp, bytes);
 	renameSync(tmp, blobPath(hash));
-}
-
-// ── Blossom ──────────────────────────────────────────────────────
-
-const servers = new Map<string, Promise<string>>();
-
-/** The Blossom server for these relays, discovered once per process. */
-function blossomServer(relays: string[]): Promise<string> {
-	const key = relays.join(" ");
-	let server = servers.get(key);
-	if (!server) {
-		server = discoverServer(relays);
-		servers.set(key, server);
-	}
-	return server;
 }
 
 /** The Blossom copy a File object records, if any. */

@@ -118,6 +118,19 @@ export async function discoverServer(relays: string[]): Promise<string> {
 	return DEFAULT_BLOSSOM;
 }
 
+const servers = new Map<string, Promise<string>>();
+
+/** The Blossom server for these relays, discovered once per process. */
+export function blossomServer(relays: string[]): Promise<string> {
+	const key = relays.join(" ");
+	let server = servers.get(key);
+	if (!server) {
+		server = discoverServer(relays);
+		servers.set(key, server);
+	}
+	return server;
+}
+
 /** BUD-02 blob descriptor. */
 export interface BlobDescriptor {
 	url: string;
@@ -127,22 +140,32 @@ export interface BlobDescriptor {
 	uploaded?: number;
 }
 
-/** The `Authorization` header for uploading `sha`: a signed kind-24242 event (BUD-11). */
-export function uploadAuth(identity: Pick<Identity, "sk">, sha: string, name: string, now = Math.floor(Date.now() / 1000)): string {
+/** A BUD-11 `Authorization` header: a signed kind-24242 event allowing `verb` ("upload", "delete") on `sha`. */
+function authorization(identity: Pick<Identity, "sk">, verb: string, sha: string, content: string, now: number): string {
 	const event = finalizeEvent(
 		{
 			kind: AUTH_KIND,
 			created_at: now,
 			tags: [
-				["t", "upload"],
+				["t", verb],
 				["x", sha],
 				["expiration", String(now + AUTH_TTL_S)],
 			],
-			content: `Upload ${name}`,
+			content,
 		},
 		identity.sk,
 	);
 	return `Nostr ${Buffer.from(JSON.stringify(event)).toString("base64")}`;
+}
+
+/** The `Authorization` header for uploading `sha`: a signed kind-24242 event (BUD-11). */
+export function uploadAuth(identity: Pick<Identity, "sk">, sha: string, name: string, now = Math.floor(Date.now() / 1000)): string {
+	return authorization(identity, "upload", sha, `Upload ${name}`, now);
+}
+
+/** The `Authorization` header for deleting `sha` (BUD-02 DELETE). */
+export function deleteAuth(identity: Pick<Identity, "sk">, sha: string, now = Math.floor(Date.now() / 1000)): string {
+	return authorization(identity, "delete", sha, `Delete ${sha}`, now);
 }
 
 async function failure(res: Response, what: string): Promise<Error> {
@@ -182,6 +205,13 @@ export async function download(sha: string, source: string): Promise<Uint8Array>
 	const cipher = new Uint8Array(await res.arrayBuffer());
 	if (sha256Hex(cipher) !== sha) throw new Error("Blossom sent bytes that do not match the file.");
 	return cipher;
+}
+
+/** BUD-02 DELETE of our blob `sha` on `server`; a blob already gone counts as deleted. */
+export async function deleteBlob(sha: string, server: string, identity: Pick<Identity, "sk">): Promise<void> {
+	if (!SHA_RE.test(sha)) throw new Error("Not a blob hash.");
+	const res = await fetch(`${server.replace(/\/+$/, "")}/${sha}`, { method: "DELETE", headers: { Authorization: deleteAuth(identity, sha) } });
+	if (!res.ok && res.status !== 404) throw await failure(res, "Blossom delete");
 }
 
 /** What a File object says about its Blossom copy. */

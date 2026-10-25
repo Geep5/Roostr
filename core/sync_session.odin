@@ -241,7 +241,11 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 	created_at, _ := json_int(event, "created_at")
 	content := json_str(event, "content")
 
-	part, opened := sync_open(content, sync_session.conversation_key)
+	// A 31078 tagged ["blob", sha256, size] may carry a pointer JSON instead
+	// of base64 (docs/state-sync.md "Oversized bases").
+	blob_tag, pointer_ok := event_tag(tags, "blob")
+	pointer_ok = pointer_ok && kind == SYNC_BASE_KIND
+	part, opened := sync_open(content, sync_session.conversation_key, pointer_ok)
 	space: ^Sync_Space
 	if opened {
 		if pubkey != sync_session.pk do return
@@ -252,7 +256,7 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 				if arr, ok := tag.(json.Array); ok && tag_string(arr, 0) == "h" && tag_string(arr, 1) == candidate.space_tag { tagged = true; break }
 			}
 			if !tagged do continue
-			if part, opened = sync_open(content, candidate.key_hex); opened {
+			if part, opened = sync_open(content, candidate.key_hex, pointer_ok); opened {
 				space = &candidate
 				break
 			}
@@ -268,6 +272,28 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 	// A base part only exists as a piece of a split base.
 	if kind == SYNC_BASE_PART_KIND && chunk_tags == 0 do return
 	if created_at > sync_session.cursor do sync_session.cursor = created_at
+
+	if pointer_ok && len(part) > 0 && part[0] == '{' {
+		// Never chunked; an unknown pointer version is skipped, not faulted:
+		// no later read of the same event could make it importable.
+		pointer, pok := wire_open_base_pointer(part, blob_tag)
+		if chunk_tags > 0 || !pok {
+			r.decode_failure = true
+			return
+		}
+		item := jobj()
+		item["bytes"] = json.String("")
+		blob := jobj()
+		blob["hash"] = json.String(pointer.hash)
+		blob["sha256"] = json.String(pointer.sha256)
+		blob["size"] = json.Integer(pointer.size)
+		blob["key"] = json.String(pointer.key)
+		if pointer.url != "" do blob["url"] = json.String(pointer.url)
+		item["blob"] = json.Object(blob)
+		sync_provenance(&item, space, pubkey)
+		r.item = json.Object(item)
+		return
+	}
 
 	full := part
 	replay_at := created_at
@@ -384,13 +410,7 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 	}
 	if chunk_key != "" do sync_session.importing_groups[chunk_key] = true
 	if chunk_key != "" do item["chunkKey"] = json.String(chunk_key)
-	if space != nil {
-		provenance := jobj()
-		provenance["spaceId"] = json.String(space.space_id)
-		provenance["keyId"] = json.Integer(space.key_id)
-		provenance["signer"] = json.String(pubkey)
-		item["provenance"] = json.Object(provenance)
-	}
+	sync_provenance(&item, space, pubkey)
 	r.item = json.Object(item)
 	return
 }
@@ -409,12 +429,24 @@ sync_space_deleted :: proc(event: json.Value) -> string {
 	return ""
 }
 
-sync_open :: proc(content, conversation_key: string) -> (string, bool) {
+// Shared-space events carry provenance: the host authorizes before import.
+sync_provenance :: proc(item: ^map[string]json.Value, space: ^Sync_Space, pubkey: string) {
+	if space == nil do return
+	provenance := jobj()
+	provenance["spaceId"] = json.String(space.space_id)
+	provenance["keyId"] = json.Integer(space.key_id)
+	provenance["signer"] = json.String(pubkey)
+	item["provenance"] = json.Object(provenance)
+}
+
+// `pointer_ok`: a 31078 with a blob tag may open to a pointer JSON.
+sync_open :: proc(content, conversation_key: string, pointer_ok := false) -> (string, bool) {
 	key, ok := hex_bytes(conversation_key)
 	if !ok do return "", false
 	part, dok := nip44_decrypt(content, key, context.temp_allocator)
-	if !dok || !wire_part_ok(part) do return "", false
-	return part, true
+	if !dok do return "", false
+	if wire_part_ok(part) || pointer_ok && len(part) > 0 && part[0] == '{' do return part, true
+	return "", false
 }
 
 // Import outcome for a reassembled group: success retires its replay

@@ -6,6 +6,7 @@ package core
 // harness/src/nostrsync.ts did in TypeScript; core/wire_fixtures.json pins the
 // bytes. Signing and ECDH stay with the host (secp256k1).
 
+import "core:crypto/hmac"
 import "core:encoding/hex"
 import "core:encoding/json"
 import "core:fmt"
@@ -15,6 +16,20 @@ import "core:strings"
 WIRE_CHUNK_CHARS :: 40_000
 WIRE_MAX_CHUNKS :: 64
 WIRE_TAG_LEN :: 16
+// Oversized bases (docs/state-sync.md "Oversized bases"): a base whose
+// base64 needs more than WIRE_MAX_CHUNKS parts rides on Blossom as one
+// encrypted blob; its 31078 carries a pointer instead of inline parts.
+WIRE_BLOB_MAX_BYTES :: 512 * 1024 * 1024
+WIRE_BLOB_URL_MAX :: 2048
+WIRE_BLOB_KEY_INFO :: "roostr-base-blob-v1"
+
+Wire_Base_Pointer :: struct {
+	hash:   string, // hex base_hash of the blob's plaintext
+	sha256: string, // hex sha256 of the blob (ciphertext), its Blossom name
+	size:   i64, // blob bytes
+	key:    string, // hex AES-256-GCM key of the blob (blossom frame format)
+	url:    string, // where the writer uploaded it; "" = ask the Blossom server
+}
 
 // Blinded relay tag: first 16 hex chars of sha256(prefix || utf8(id)).
 // Personal objects use the raw secret key as prefix; shared spaces use the
@@ -208,11 +223,20 @@ wire_seal_parts :: proc(text: string, key, nonce: []byte, tags: []json.Value, fi
 	return gid, parts, ""
 }
 
-// {base: base64 Checkpoint (epoch >= 1), conversationKey, secret? | space?: {keyHex, spaceId, owner?}, nonce?}
+// {base: base64 Checkpoint (epoch >= 1), conversationKey, secret? | space?: {keyHex, spaceId, owner?}, nonce?,
+//  blob?: {sha256, size, url?}}
 // → {hash, objectId, epoch, d, gid, event: {kind: 31078, content, tags}, parts: [{kind: 1080, content, tags}]}.
 // Part 0 rides in the addressable 31078 event (d, h…, owner?, epoch, c?);
 // parts 1..n-1 are kind-1080 events (h…, owner?, c) the host publishes
 // BEFORE the 31078 so a reader of the base can always fetch them by #c.
+//
+// Oversized (more than WIRE_MAX_CHUNKS parts) and no `blob`: no event, but
+// {hash, objectId, epoch, d, gid: "", needsBlob: true, blobKey} - the host
+// encrypts the raw base bytes under blobKey (blossom frame format), uploads
+// them and seals again with `blob` = the upload's {sha256, size, url}.
+// With `blob` the 31078 is a pointer: tags d, h…, owner?, epoch,
+// ["blob", sha256, size]; content NIP-44 of the pointer JSON
+// {v: 1, hash, sha256, size, key, url?}; no parts. Output adds `blob`.
 wire_seal_base :: proc(payload: json.Value) -> (json.Value, string) {
 	text := json_str(payload, "base")
 	bytes, bok := bytes_from_base64(text, context.temp_allocator)
@@ -231,8 +255,45 @@ wire_seal_base :: proc(payload: json.Value) -> (json.Value, string) {
 	append(&first, tag("d", d))
 	append(&first, ..tags[:])
 	append(&first, tag("epoch", fmt.tprintf("%d", base.epoch)))
+	out := jobj()
+	out["hash"] = json.String(hex_id(base.base_hash[:], context.temp_allocator))
+	out["objectId"] = json.String(base.object_id)
+	out["epoch"] = json.Integer(base.epoch)
+	out["d"] = json.String(d)
+	out["gid"] = json.String("")
+	blob_key := wire_base_blob_key(key, base.base_hash)
+	if blob, has_blob := json_field(payload, "blob"); has_blob {
+		pointer := Wire_Base_Pointer{
+			hash = hex_id(base.base_hash[:], context.temp_allocator),
+			sha256 = json_str(blob, "sha256"),
+			key = blob_key,
+			url = json_str(blob, "url"),
+		}
+		pointer.size, _ = json_int(blob, "size")
+		if perr := wire_pointer_check(pointer); perr != "" do return nil, perr
+		content, eok := nip44_encrypt(string(marshal(wire_pointer_json(pointer))), key, nonce, context.temp_allocator)
+		if !eok do return nil, "nip44 encrypt rejected the blob pointer"
+		append(&first, tag("blob", pointer.sha256, fmt.tprintf("%d", pointer.size)))
+		event := jobj()
+		event["kind"] = json.Integer(SYNC_BASE_KIND)
+		event["content"] = json.String(content)
+		event["tags"] = json.Array(first)
+		sealed_blob := jobj()
+		sealed_blob["sha256"] = json.String(pointer.sha256)
+		sealed_blob["size"] = json.Integer(pointer.size)
+		sealed_blob["key"] = json.String(blob_key)
+		out["event"] = json.Object(event)
+		out["parts"] = json.Array(make([dynamic]json.Value, context.temp_allocator))
+		out["blob"] = json.Object(sealed_blob)
+		return json.Object(out), ""
+	}
+	if (len(text) + WIRE_CHUNK_CHARS - 1) / WIRE_CHUNK_CHARS > WIRE_MAX_CHUNKS {
+		out["needsBlob"] = json.Boolean(true)
+		out["blobKey"] = json.String(blob_key)
+		return json.Object(out), ""
+	}
 	gid, parts, serr := wire_seal_parts(text, key, nonce, tags[:], first[:])
-	if serr != "" do return nil, serr == "change exceeds chunk limit" ? "base exceeds chunk limit" : serr
+	if serr != "" do return nil, serr
 	event := parts[0].(json.Object)
 	event["kind"] = json.Integer(SYNC_BASE_KIND)
 	rest := make([dynamic]json.Value, context.temp_allocator)
@@ -241,14 +302,77 @@ wire_seal_base :: proc(payload: json.Value) -> (json.Value, string) {
 		p["kind"] = json.Integer(SYNC_BASE_PART_KIND)
 		append(&rest, json.Object(p))
 	}
-	out := jobj()
-	out["hash"] = json.String(hex_id(base.base_hash[:], context.temp_allocator))
-	out["objectId"] = json.String(base.object_id)
-	out["epoch"] = json.Integer(base.epoch)
-	out["d"] = json.String(d)
 	out["gid"] = json.String(gid)
 	out["event"] = json.Object(event)
 	out["parts"] = json.Array(rest)
+	return json.Object(out), ""
+}
+
+// Blob key of a base: HMAC-SHA256(conversation key, WIRE_BLOB_KEY_INFO ||
+// base_hash). Deterministic, so a retried seal of the same base uploads the
+// same blob; distinct per base, so the frame nonces (0, 1, ...) never repeat
+// under one key. Readers never derive it: the pointer carries it.
+wire_base_blob_key :: proc(conversation_key: []byte, base_hash: [32]byte, allocator := context.temp_allocator) -> string {
+	msg: [len(WIRE_BLOB_KEY_INFO) + 32]byte
+	copy(msg[:], WIRE_BLOB_KEY_INFO)
+	hash := base_hash
+	copy(msg[len(WIRE_BLOB_KEY_INFO):], hash[:])
+	out: [32]byte
+	hmac.sum(.SHA256, out[:], msg[:], conversation_key)
+	return hex_id(out[:], allocator)
+}
+
+wire_pointer_check :: proc(p: Wire_Base_Pointer) -> string {
+	if !is_hex_pubkey(p.hash) do return "blob pointer hash must be 64-char lowercase hex"
+	if !is_hex_pubkey(p.sha256) do return "blob sha256 must be 64-char lowercase hex"
+	if !is_hex_pubkey(p.key) do return "blob key must be 64-char lowercase hex"
+	if p.size < 1 || p.size > WIRE_BLOB_MAX_BYTES do return "blob size out of range"
+	if p.url != "" && (len(p.url) > WIRE_BLOB_URL_MAX || !strings.has_prefix(p.url, "https://") && !strings.has_prefix(p.url, "http://")) do return "blob url must be http(s)"
+	return ""
+}
+
+wire_pointer_json :: proc(p: Wire_Base_Pointer) -> json.Value {
+	out := jobj()
+	out["v"] = json.Integer(1)
+	out["hash"] = json.String(p.hash)
+	out["sha256"] = json.String(p.sha256)
+	out["size"] = json.Integer(p.size)
+	out["key"] = json.String(p.key)
+	if p.url != "" do out["url"] = json.String(p.url)
+	return json.Object(out)
+}
+
+// A decrypted 31078 content as a blob pointer. `blob_tag` is the event's
+// ["blob", sha256, size] tag, which must name the same blob. Any other
+// version, field shape or mismatch is not a pointer.
+wire_open_base_pointer :: proc(text: string, blob_tag: json.Array) -> (p: Wire_Base_Pointer, ok: bool) {
+	if len(text) == 0 || text[0] != '{' || len(text) > 4096 do return
+	parsed, perr := json.parse(transmute([]byte)text, allocator = context.temp_allocator, parse_integers = true)
+	if perr != nil do return
+	version, vok := json_int(parsed, "v")
+	if !vok || version != 1 do return
+	p.hash, p.sha256, p.key, p.url = json_str(parsed, "hash"), json_str(parsed, "sha256"), json_str(parsed, "key"), json_str(parsed, "url")
+	size, sok := json_int(parsed, "size")
+	if !sok do return
+	p.size = size
+	if wire_pointer_check(p) != "" do return
+	if tag_string(blob_tag, 1) != p.sha256 || tag_string(blob_tag, 2) != fmt.tprintf("%d", p.size) do return
+	return p, true
+}
+
+// {hash, bytes: base64 of the decrypted blob} → {bytes, base: summary}: the
+// blob must be a base of epoch >= 1 whose base_hash is the pointer's `hash`.
+// The host verified the blob's sha256 and decrypted it with the pointer's key.
+wire_open_base_blob :: proc(payload: json.Value) -> (json.Value, string) {
+	text := json_str(payload, "bytes")
+	bytes, bok := bytes_from_base64(text, context.temp_allocator)
+	if !bok do return nil, "base blob needs bytes base64"
+	base, dok := decode_checkpoint(bytes, context.temp_allocator)
+	if !dok || base.epoch < 1 do return nil, "base blob is not a base"
+	if hex_id(base.base_hash[:], context.temp_allocator) != json_str(payload, "hash") do return nil, "base blob does not match its pointer"
+	out := jobj()
+	out["bytes"] = json.String(text)
+	out["base"] = base_summary_json(&base)
 	return json.Object(out), ""
 }
 

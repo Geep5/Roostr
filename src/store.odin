@@ -57,6 +57,7 @@ unix_ms :: proc() -> i64 {
 store_init :: proc(data_root: string) {
 	g_store.data_root = data_root
 	g_store.root, _ = filepath.join({data_root, "changes"})
+	folded_reset()
 }
 
 store_invalidate :: proc() {
@@ -180,7 +181,7 @@ load_object_dir :: proc(object_id: string, alloc := context.allocator) {
 	if len(h.deltas) == 0 && len(h.cps) == 0 && h.legacy == nil do return
 
 	context.allocator = alloc
-	cls := core.base_classify(h.cps, h.deltas[:], h.pending, context.temp_allocator)
+	cls := core.base_classify(h.cps, h.deltas[:], h.pending, h.own, context.temp_allocator)
 	info := Base_Info{bases = len(h.cps), changes = len(h.deltas)}
 	state: core.Object_State
 	ok: bool
@@ -201,27 +202,40 @@ load_object_dir :: proc(object_id: string, alloc := context.allocator) {
 		state, ok = core.compute_state(live, alloc, h.legacy)
 	}
 	if !ok do return
+	// Another device's not-live leftovers (orphan or stale: its writer
+	// rebases what needs it) and own changes proven folded (core
+	// base_classify): never replayed, so the state does not depend on them -
+	// into the folded index, markers and all; left in changes/ they only pile
+	// up and slow every load. Own orphans stay for POST /api/bases/rebase,
+	// own stale ones (a base this computer missed may have folded them) stay
+	// held, never rebased.
+	gone := make([dynamic]Folded_Record, context.temp_allocator)
 	for class, i in cls.classes {
+		if cls.discard[i] || cls.proven[i] {
+			r: Folded_Record
+			copy(r.id[:], h.deltas[i].change.id)
+			append(&gone, r)
+			continue
+		}
 		switch class {
 		case .Live: info.live += 1
 		case .Covered: info.covered += 1
 		case .Premigration_Covered: info.premigration_covered += 1
-		case .Orphan: info.orphan += 1
-		case .Stale:
-			// Never replayed nor rebased: off to the archive (as retain_bases
-			// does), whichever computer compacts this object.
-			if archive_change(object_id, core.hex_id(h.deltas[i].change.id, context.temp_allocator)) {
-				info.changes -= 1
-			} else {
-				info.stale += 1
-			}
+		case .Orphan:
+			info.orphan += 1
+			if cls.own[i] do info.rebase += 1
+		case .Stale: info.stale += 1
 		}
+		if cls.own[i] do info.own += 1
+		if string(h.deltas[i].change.id) in h.pending do info.pending += 1
 	}
+	// A record the index could not take stays in changes/ until the next load.
+	folded, _ := fold_changes(object_id, gone[:])
+	info.changes -= folded
 	for c in live {
 		info.live_bytes += len(core.encode_change(c, false, context.temp_allocator))
 		if info.oldest_ms == 0 || c.timestamp < info.oldest_ms do info.oldest_ms = c.timestamp
 	}
-	for d in h.deltas do if string(d.change.id) in h.pending do info.pending += 1
 	sp := new(core.Object_State, alloc)
 	sp^ = state
 	// Map keys live in the arena too (object_id is arena-allocated via decode).
@@ -295,11 +309,11 @@ commit_change :: proc(c: ^core.Change) -> (string, bool) {
 	hex_str := string(hex.encode(c.id, context.temp_allocator))
 
 	// Markers before the .pb, so a .pb never exists without them: `.local`
-	// (written here, not yet published) and `.b` = the base it builds on.
+	// (written here: kept until a held base proves it folded) and `.b` = the
+	// base it builds on.
 	if !write_change_markers(c.object_id, hex_str, current_base_hex(c.object_id), local = true) do return "", false
 	path := change_file(c.object_id, hex_str, ".pb")
 	if !write_file_durable(path, full) do return "", false
-	archive_link(c.object_id, hex_str, path)
 
 	store_mark_dirty(c.object_id)
 	return strings.clone(hex_str), true

@@ -102,6 +102,7 @@ store_durability_contract :: proc(t: ^testing.T) {
 	checkpoint_replaces_history(t, root)
 	space_vanish_contract(t)
 	bases_contract(t)
+	folded_contract(t)
 	device_record_contract(t)
 }
 

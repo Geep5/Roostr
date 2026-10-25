@@ -2,29 +2,34 @@ package glon
 
 // State-sync bases on disk (docs/state-sync.md): GLON_DATA/bases/<objectId>/<hashhex>.pb,
 // change sidecars (changes/<objectId>/<hex>.b = base hash hex the change was
-// written on, <hex>.local = written here and not yet confirmed published) and
-// the append-only local archive (archive/<objectId>/<hex>.pb, <hex>.rebased).
+// written on, <hex>.local = written on this computer and no held base has
+// proven it folded yet, <hex>.published = that own change is on the relays)
+// and the folded-id index of changes that left the working set
+// (folded/<objectId>, src/folded.odin).
 //
 //   GET  /api/bases               → {objectId: {hash, epoch, createdAt, prevBase, bases, changes, live,
 //                                    liveBytes, oldestMs, covered, premigrationCovered, orphan, stale,
-//                                    pending, compact, reason}}
+//                                    pending, own, rebase, compact, reason}}
 //   GET  /api/bases/<objectId>    → {objectId, current, bases: [{hash, epoch, createdAt, prevBase, current, b64}]}
 //   POST /api/bases               → service-only {bases: [b64…], provenance?} → {ok, imported, skipped,
 //                                    rejected, dropped, items: [{objectId, hash, epoch, prevBase, stored, current}]}
 //   POST /api/bases/build         → service-only {objectId, force?} → compaction plan (+ the stored base);
 //                                    409 when GLON_STATE_SYNC_COMPACT=0 (the supervisor's environment)
-//   POST /api/bases/seal          → service-only {base, conversationKey, space?} → core seal_base output
+//   POST /api/bases/seal          → service-only {base, conversationKey, space?, blob?} → core seal_base output
+//                                    (oversized without blob: {needsBlob, blobKey}; with blob: a pointer 31078)
 //   POST /api/bases/rebase        → service-only {objectId, orphans?} → {objectId, base, changes: [{orphan, id, b64}]}
+//                                    (own orphans only)
 //   POST /api/bases/covered       → service-only {objectId, ids} → {premigration: [hex], covered: [hex]}
-//   POST /api/changes/published   → service-only {published: {objectId: [hex]}} → {ok, cleared}
+//   POST /api/changes/published   → service-only {published: {objectId: [hex]}} → {ok, marked}
 //
 // A base file is valid only when it decodes, names its directory's object,
 // has epoch >= 1 and its file name is the hex of its base_hash; anything else
-// is parked under bases/.quarantine (loud). The archive is never published
-// and never read for sync: it only keeps imports from resurrecting a change
-// this computer already pruned or rebased.
+// is parked under bases/.quarantine (loud). The folded index is never
+// published and never read for sync: it only keeps imports from resurrecting
+// a change this computer already pruned or rebased.
 
 import "../core"
+import "base:runtime"
 import "core:encoding/base64"
 import "core:encoding/hex"
 import "core:encoding/json"
@@ -37,7 +42,7 @@ import "core:strings"
 import "core:sync"
 
 /** Ancestors of the current base kept through prev_base (plus siblings and epoch-1 bases). */
-BASE_KEEP_ANCESTORS :: 3
+BASE_KEEP_ANCESTORS :: 1
 
 /** Per-object summary cached alongside g_store.states (strings in the store arena). */
 Base_Info :: struct {
@@ -54,7 +59,9 @@ Base_Info :: struct {
 	premigration_covered: int,
 	orphan:               int,
 	stale:                int,
-	pending:              int,
+	pending:              int, // own and never published
+	own:                  int, // written here, not yet proven folded (.local)
+	rebase:               int, // own orphans: POST /api/bases/rebase has work
 }
 
 Held_Base :: struct {
@@ -68,7 +75,8 @@ Holdings :: struct {
 	cps:     []core.Checkpoint, // parallel to bases
 	deltas:  [dynamic]core.Delta,
 	raw:     [dynamic][]byte, // file bytes, parallel to deltas
-	pending: map[string]bool, // raw ids with a .local marker
+	pending: map[string]bool, // raw ids with a .local and no .published marker: never published
+	own:     map[string]bool, // raw ids with a .local marker: written here, not yet proven folded
 	legacy:  ^core.Checkpoint,
 }
 
@@ -91,10 +99,6 @@ change_file :: proc(object_id: string, hex_id: string, suffix: string) -> string
 	return file_in(data_dir("changes", object_id), hex_id, suffix)
 }
 
-archive_file :: proc(object_id: string, hex_id: string, suffix: string) -> string {
-	return file_in(data_dir("archive", object_id), hex_id, suffix)
-}
-
 @(private = "file")
 make_data_dirs :: proc(kind: string, object_id: string) {
 	os.make_directory(g_store.data_root)
@@ -107,7 +111,7 @@ hash_hex_valid :: proc(text: string) -> bool {
 	return core.is_hex_pubkey(text) // same shape: 32 bytes, lowercase hex
 }
 
-@(private = "file")
+/** Raw bytes of a 64-char lowercase hex id. */
 hash_raw :: proc(text: string) -> (out: [32]byte, ok: bool) {
 	if !hash_hex_valid(text) do return {}, false
 	raw, hok := hex.decode(transmute([]byte)text, context.temp_allocator)
@@ -203,13 +207,15 @@ disk_current_base :: proc(object_id: string) -> string {
  * Retention then prune for one object: keep the current base, up to
  * BASE_KEEP_ANCESTORS ancestors reached through prev_base, every base of the
  * current epoch (siblings) and every epoch-1 base (the pre-migration sweep
- * reads its covered_ids); delete the rest. Then changes folded by a held
- * STRICT ancestor leave changes/ for the archive - never those folded only by
- * the current base, which a concurrent sibling could still lose to. Stale
- * changes go to the archive too: written on a base this device no longer
- * holds, they are never replayed nor rebased (core.base_classify), so the
- * object's state does not depend on them - left in changes/ they only pile
- * up (thousands on an object compacted often) and slow every load.
+ * reads its covered_ids through POST /api/bases/covered); delete the rest.
+ * First, what every held STRICT ancestor folded - kept or about to go - is
+ * recorded in the folded index and leaves changes/: never what only the
+ * current base folded, which a concurrent sibling could still lose to. Ids
+ * this computer never held are recorded too, so a slow relay delivering one
+ * after its base is gone is refused at import instead of turning stale.
+ * No base is deleted while the index cannot be written. Another device's
+ * orphan/stale leftovers and own changes proven folded by edit fold on load
+ * (load_object_dir).
  */
 retain_bases :: proc(object_id: string) -> (removed: int, pruned: int) {
 	held := load_bases(object_id, context.temp_allocator)
@@ -219,9 +225,9 @@ retain_bases :: proc(object_id: string) -> (removed: int, pruned: int) {
 	keep := make(map[[32]byte]bool, allocator = context.temp_allocator)
 	keep[cps[cur].base_hash] = true
 	for b in cps do if b.epoch == cps[cur].epoch || b.epoch == 1 do keep[b.base_hash] = true
-	ancestors := make([dynamic]int, context.temp_allocator)
+	folded := make([dynamic]Folded_Record, context.temp_allocator)
 	link := cur
-	for _ in 0 ..< BASE_KEEP_ANCESTORS {
+	for depth := 0;; depth += 1 {
 		l := &cps[link]
 		if l.epoch <= 1 || len(l.prev_base) != 32 do break
 		next := -1
@@ -230,28 +236,44 @@ retain_bases :: proc(object_id: string) -> (removed: int, pruned: int) {
 			break
 		}
 		if next < 0 do break
-		keep[cps[next].base_hash] = true
-		append(&ancestors, next)
+		if depth < BASE_KEEP_ANCESTORS do keep[cps[next].base_hash] = true
+		for id in cps[next].covered_ids do if len(id) == 32 {
+			r: Folded_Record
+			copy(r.id[:], id)
+			append(&folded, r)
+		}
 		link = next
 	}
-	for &b in cps {
-		if b.base_hash in keep do continue
-		if os.remove(base_path(object_id, core.hex_id(b.base_hash[:], context.temp_allocator))) == nil do removed += 1
-	}
-	for j in ancestors {
-		for id in cps[j].covered_ids do if archive_change(object_id, core.hex_id(id, context.temp_allocator)) do pruned += 1
-	}
-	h := read_holdings(object_id, context.temp_allocator)
-	cls := core.base_classify(h.cps, h.deltas[:], h.pending, context.temp_allocator)
-	for class, i in cls.classes {
-		if class != .Stale do continue
-		if archive_change(object_id, core.hex_id(h.deltas[i].change.id, context.temp_allocator)) do pruned += 1
+	ok: bool
+	pruned, ok = fold_changes(object_id, folded[:])
+	if ok {
+		for &b in cps {
+			if b.base_hash in keep do continue
+			if os.remove(base_path(object_id, core.hex_id(b.base_hash[:], context.temp_allocator))) == nil do removed += 1
+		}
 	}
 	if removed + pruned > 0 do store_mark_dirty(object_id)
 	return removed, pruned
 }
 
-// ── Change sidecars and the archive ─────────────────────────────────
+/** Serve start: retention over every based object, so a lowered BASE_KEEP_ANCESTORS reaches bases already held. */
+retain_all_bases :: proc() {
+	ids := based_object_ids(context.allocator)
+	defer {
+		for id in ids do delete(id)
+		delete(ids)
+	}
+	removed, pruned := 0, 0
+	for id in ids {
+		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+		r, p := retain_bases(id)
+		removed += r
+		pruned += p
+	}
+	if removed + pruned > 0 do fmt.printfln("[store] retention: %d superseded bases removed, %d folded changes left changes/", removed, pruned)
+}
+
+// ── Change sidecars ──────────────────────────────────────────────────
 
 /**
  * Write a change's markers ahead of its .pb: `.b` durably (its content is
@@ -265,48 +287,18 @@ write_change_markers :: proc(object_id: string, hex_id: string, base_hex: string
 	return true
 }
 
-/** Hard-link a change file into the archive (copy when linking fails). */
-archive_link :: proc(object_id: string, hex_id: string, src: string) {
-	dst := archive_file(object_id, hex_id, ".pb")
-	if os.exists(dst) do return
-	make_data_dirs("archive", object_id)
-	if os.link(src, dst) == nil do return
-	if os.copy_file(dst, src) != nil do fmt.eprintfln("[store] could not archive change %s/%s", object_id, hex_id)
-}
-
-/** Move a change out of changes/ into the archive (with its sidecars). False when it was not there. */
-archive_change :: proc(object_id: string, hex_id: string) -> bool {
-	src := change_file(object_id, hex_id, ".pb")
-	if !os.exists(src) do return false
-	dst := archive_file(object_id, hex_id, ".pb")
-	if os.exists(dst) {
-		os.remove(src)
-	} else {
-		make_data_dirs("archive", object_id)
-		if os.rename(src, dst) != nil {
-			if os.copy_file(dst, src) != nil {
-				fmt.eprintfln("[store] could not archive change %s/%s - left in place", object_id, hex_id)
-				return false
-			}
-			os.remove(src)
-		}
-	}
-	os.remove(change_file(object_id, hex_id, ".b"))
-	os.remove(change_file(object_id, hex_id, ".local"))
-	return true
-}
-
 /**
- * Bases, working-set changes (with `b` from their sidecar), `.local`
- * markers and the legacy checkpoint of one object. Change bytes and bases
- * live in `alloc`; bookkeeping in the temp allocator. `quarantine` parks
- * damaged change files (the load path); other readers skip them.
+ * Bases, working-set changes (with `b` from their sidecar), `.local` /
+ * `.published` markers and the legacy checkpoint of one object. Change bytes
+ * and bases live in `alloc`; bookkeeping in the temp allocator. `quarantine`
+ * parks damaged change files (the load path); other readers skip them.
  */
 read_holdings :: proc(object_id: string, alloc := context.allocator, quarantine := false) -> Holdings {
 	h: Holdings
 	h.deltas = make([dynamic]core.Delta, context.temp_allocator)
 	h.raw = make([dynamic][]byte, context.temp_allocator)
 	h.pending = make(map[string]bool, allocator = context.temp_allocator)
+	h.own = make(map[string]bool, allocator = context.temp_allocator)
 	h.bases = load_bases(object_id, alloc)
 	h.cps = held_checkpoints(h.bases[:])
 	if cp, ok := load_checkpoint(object_id, alloc); ok do h.legacy = new_clone(cp, alloc)
@@ -318,16 +310,20 @@ read_holdings :: proc(object_id: string, alloc := context.allocator, quarantine 
 	files, ferr := os.read_dir(dir, -1, context.temp_allocator)
 	if ferr != nil do return h
 	tags := make(map[string][32]byte, allocator = context.temp_allocator)
+	published := make(map[string]bool, allocator = context.temp_allocator)
 	for f in files {
 		switch {
 		case strings.has_suffix(f.name, ".local"):
-			if raw, ok := hash_raw(f.name[:len(f.name) - 6]); ok do h.pending[strings.clone(string(raw[:]), context.temp_allocator)] = true
+			if raw, ok := hash_raw(f.name[:len(f.name) - len(".local")]); ok do h.own[strings.clone(string(raw[:]), context.temp_allocator)] = true
+		case strings.has_suffix(f.name, ".published"):
+			if raw, ok := hash_raw(f.name[:len(f.name) - len(".published")]); ok do published[strings.clone(string(raw[:]), context.temp_allocator)] = true
 		case strings.has_suffix(f.name, ".b"):
 			data, rerr := os.read_entire_file(f.fullpath, context.temp_allocator)
 			if rerr != nil do continue
 			if raw, ok := hash_raw(strings.trim_space(string(data))); ok do tags[f.name[:len(f.name) - 2]] = raw
 		}
 	}
+	for id in h.own do if id not_in published do h.pending[id] = true
 	for f in files {
 		if !strings.has_suffix(f.name, ".pb") do continue
 		// The filename IS the hash: a torn or foreign file is never replayed.
@@ -434,6 +430,8 @@ bases_list :: proc() -> json.Value {
 		o["premigrationCovered"] = json.Integer(i64(info.premigration_covered))
 		o["orphan"] = json.Integer(i64(info.orphan))
 		o["stale"] = json.Integer(i64(info.stale))
+		o["own"] = json.Integer(i64(info.own))
+		o["rebase"] = json.Integer(i64(info.rebase))
 		o["pending"] = json.Integer(i64(info.pending))
 		compact, reason := base_compact_due(info, now)
 		o["compact"] = json.Boolean(compact)
@@ -636,11 +634,14 @@ bases_seal :: proc(parsed: json.Value) -> Op_Result {
 }
 
 /**
- * POST /api/bases/rebase: core rebase of the object's orphans (pending from
- * .local). Each rebased change is written durably with `.b` = the base and
- * `.local`, and linked into the archive; each orphan gets its `.rebased`
- * marker and leaves changes/. A rebased change already held (another device
- * published the same deterministic rebase) is left unmarked as pending.
+ * POST /api/bases/rebase: core rebase of the object's own orphans (`.local`;
+ * pending = no `.published` beside it). Another device's orphan is never
+ * rebased here: load_object_dir discards it. Each rebased change is written
+ * durably with `.b` = the base and `.local` (own, unpublished); then every
+ * orphan goes to the folded index with its rebased id and leaves changes/.
+ * A rebased change already held without `.local` (another device published
+ * the same deterministic rebase) becomes own and published: it now carries
+ * this computer's edit.
  */
 bases_rebase :: proc(parsed: json.Value) -> Op_Result {
 	object_id := core.json_str(parsed, "objectId")
@@ -654,37 +655,47 @@ bases_rebase :: proc(parsed: json.Value) -> Op_Result {
 		only[strings.clone(string(raw[:]), context.temp_allocator)] = true
 	}
 	h := read_holdings(object_id, context.temp_allocator)
-	cls := core.base_classify(h.cps, h.deltas[:], h.pending, context.temp_allocator)
+	cls := core.base_classify(h.cps, h.deltas[:], h.pending, h.own, context.temp_allocator)
 	if cls.current < 0 do return fail("rebase needs a base", "409 Conflict")
 	base := &h.cps[cls.current]
 	base_hex := core.hex_id(base.base_hash[:], context.temp_allocator)
 	items := make([dynamic]json.Value, context.temp_allocator)
 	rebased := core.base_rebase(base, h.deltas[:], cls, only, context.temp_allocator)
+	folds := make([dynamic]Folded_Record, 0, len(rebased), context.temp_allocator)
 	for r in rebased {
 		bytes := core.encode_change(r.change, false, context.temp_allocator)
 		id_hex := core.hex_id(r.change.id, context.temp_allocator)
-		orphan_hex := core.hex_id(r.orphan, context.temp_allocator)
 		path := change_file(object_id, id_hex, ".pb")
 		if !os.exists(path) {
 			if !write_change_markers(object_id, id_hex, base_hex, true) || !write_file_durable(path, bytes) {
+				fold_changes(object_id, folds[:]) // the orphans whose replacement is already written
 				store_mark_dirty(object_id)
 				return fail("cannot write rebased change", "500 Internal Server Error")
 			}
-		} else if !os.exists(change_file(object_id, id_hex, ".b")) {
-			write_change_markers(object_id, id_hex, base_hex, false)
+		} else {
+			if !os.exists(change_file(object_id, id_hex, ".b")) do write_change_markers(object_id, id_hex, base_hex, false)
+			if !os.exists(change_file(object_id, id_hex, ".local")) {
+				if os.write_entire_file(change_file(object_id, id_hex, ".published"), nil) != nil ||
+				   os.write_entire_file(change_file(object_id, id_hex, ".local"), nil) != nil {
+					fold_changes(object_id, folds[:])
+					store_mark_dirty(object_id)
+					return fail("cannot mark rebased change", "500 Internal Server Error")
+				}
+				sync_directory(data_dir("changes", object_id))
+			}
 		}
-		archive_link(object_id, id_hex, path)
-		make_data_dirs("archive", object_id)
-		if !write_file_durable(archive_file(object_id, orphan_hex, ".rebased"), transmute([]byte)id_hex) {
-			fmt.eprintfln("[store] could not mark %s/%s rebased", object_id, orphan_hex)
-		}
-		archive_change(object_id, orphan_hex)
+		fold: Folded_Record
+		copy(fold.id[:], r.orphan)
+		copy(fold.rebased[:], r.change.id)
+		append(&folds, fold)
 		item := core.jobj()
-		item["orphan"] = json.String(orphan_hex)
+		item["orphan"] = json.String(core.hex_id(r.orphan, context.temp_allocator))
 		item["id"] = json.String(id_hex)
 		item["b64"] = json.String(base64.encode(bytes, allocator = context.temp_allocator))
 		append(&items, json.Object(item))
 	}
+	// An orphan the index could not take stays in changes/: the next pass rebases it to the same id.
+	fold_changes(object_id, folds[:])
 	if len(rebased) > 0 {
 		store_mark_dirty(object_id)
 		sse_broadcast(object_id)
@@ -731,12 +742,16 @@ bases_covered :: proc(parsed: json.Value) -> Op_Result {
 	return {out = json.Object(out)}
 }
 
-/** POST /api/changes/published: the listed changes are on the relays - drop their `.local` markers. */
+/**
+ * POST /api/changes/published: the listed own changes are on the relays -
+ * mark them `.published` (no longer pending, never re-published). `.local`
+ * stays until a held base proves the change folded: published is not folded.
+ */
 changes_published :: proc(parsed: json.Value) -> Op_Result {
 	published, present := core.json_field(parsed, "published")
 	objects, ook := published.(json.Object)
 	if !present || !ook do return fail("published object required")
-	cleared := 0
+	marked := 0
 	for object_id, list in objects {
 		if !object_id_safe(object_id) do continue
 		arr, aok := list.(json.Array)
@@ -745,16 +760,20 @@ changes_published :: proc(parsed: json.Value) -> Op_Result {
 		for item in arr {
 			text, _ := item.(json.String)
 			if !hash_hex_valid(string(text)) do continue
-			if os.remove(change_file(object_id, string(text), ".local")) == nil {
-				cleared += 1
-				touched = true
-			}
+			if !os.exists(change_file(object_id, string(text), ".local")) do continue
+			path := change_file(object_id, string(text), ".published")
+			if os.exists(path) || os.write_entire_file(path, nil) != nil do continue
+			marked += 1
+			touched = true
 		}
-		if touched do store_mark_dirty(object_id)
+		if touched {
+			sync_directory(data_dir("changes", object_id))
+			store_mark_dirty(object_id)
+		}
 	}
 	out := core.jobj()
 	out["ok"] = json.Boolean(true)
-	out["cleared"] = json.Integer(i64(cleared))
+	out["marked"] = json.Integer(i64(marked))
 	return {out = json.Object(out)}
 }
 

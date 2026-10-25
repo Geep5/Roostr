@@ -581,4 +581,5 @@ sync_session_contract :: proc(t: ^testing.T) {
 	sync_session_outbox_order_backoff_and_sealing(t)
 	sync_session_outbox_wake_clears_backoff(t)
 	state_sync_base_wire_scenario(t)
+	state_sync_pointer_base_scenario(t)
 }

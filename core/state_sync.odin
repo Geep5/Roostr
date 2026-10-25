@@ -30,7 +30,7 @@ Delta :: struct {
  *   Covered              - folded into the base chain (never replayed again);
  *   Premigration_Covered - an untagged change folded by the epoch-1 base
  *                          (the pre-migration sweep may delete it);
- *   Orphan               - neither, and provably never folded: rebase it;
+ *   Orphan               - neither, and provably never folded: its writer rebases it;
  *   Stale                - neither, but a base this device never held may
  *                          have folded it: never replayed, never rebased.
  */
@@ -42,9 +42,25 @@ Delta_Class :: enum u8 {
 	Stale,
 }
 
+/**
+ * Per held change, parallel to the deltas: its class, and what the device
+ * does with it under "own changes until a base proves them; everyone else's
+ * leftovers are discarded":
+ *   own     - written on THIS device (host marker: pending or own), kept until
+ *             a base proves it folded; only own orphans are ever rebased;
+ *   discard - not own, not live, not waiting for a base still on its way:
+ *             another device's leftover, dropped (folded away), never rebased;
+ *   proven  - own and folded by a held STRICT ancestor of the current base
+ *             (by id, or a copy of its edit is): drop the marker, fold it away.
+ *             Folded by the current base alone is not proof: a concurrent
+ *             sibling base that wins later may not have folded it.
+ */
 Classification :: struct {
 	current: int, // index into the bases; -1 = no base (everything is Live)
 	classes: []Delta_Class,
+	own:     []bool,
+	discard: []bool,
+	proven:  []bool,
 }
 
 /** Encode `cp` and stamp its base_hash (sha256 of the encoding: field 8 is never written). */
@@ -90,15 +106,31 @@ base_current :: proc(bases: []Checkpoint) -> int {
  * of epoch e → floor <= e; pre-migration or on an unknown base → floor == 1.
  * `pending` (raw id bytes) are changes this device never published: no
  * compactor can have folded them, so they are always decidable.
+ *
+ * `own` (raw id bytes; `pending` counts as own too) are changes written on
+ * this device and not yet proven folded: see Classification. A non-own
+ * change written after the current base was created (timestamp >= its
+ * created_at) on a base or parent this device cannot place yet is waiting
+ * - most likely that base or parent is still on its way (a pointer base
+ * whose blob did not load, events out of order) - and is not discarded.
  */
-base_classify :: proc(bases: []Checkpoint, deltas: []Delta, pending: map[string]bool, allocator := context.allocator) -> Classification {
-	out := Classification{current = base_current(bases), classes = make([]Delta_Class, len(deltas), allocator)}
+base_classify :: proc(bases: []Checkpoint, deltas: []Delta, pending: map[string]bool, own: map[string]bool, allocator := context.allocator) -> Classification {
+	n := len(deltas)
+	out := Classification{
+		current = base_current(bases),
+		classes = make([]Delta_Class, n, allocator),
+		own = make([]bool, n, allocator),
+		discard = make([]bool, n, allocator),
+		proven = make([]bool, n, allocator),
+	}
+	for d, i in deltas do out.own[i] = string(d.change.id) in pending || string(d.change.id) in own
 	if out.current < 0 do return out
 	cur := &bases[out.current]
 
 	by_hash := make(map[[32]byte]int, allocator = context.temp_allocator)
 	for b, i in bases do if b.epoch >= 1 do by_hash[b.base_hash] = i
 	chain_epoch := make(map[[32]byte]i64, allocator = context.temp_allocator)
+	// Covered id → folded by a strict ancestor (false: by the current base only).
 	covered := make(map[string]bool, allocator = context.temp_allocator)
 	first := make(map[string]bool, allocator = context.temp_allocator)
 	floor := cur.epoch
@@ -106,7 +138,7 @@ base_classify :: proc(bases: []Checkpoint, deltas: []Delta, pending: map[string]
 		chain_epoch[link.base_hash] = link.epoch
 		floor = link.epoch
 		for id in link.covered_ids {
-			covered[string(id)] = true
+			covered[string(id)] = covered[string(id)] || link != cur
 			if link.epoch == 1 do first[string(id)] = true
 		}
 		next: ^Checkpoint
@@ -121,7 +153,7 @@ base_classify :: proc(bases: []Checkpoint, deltas: []Delta, pending: map[string]
 
 	heads := make(map[string]bool, allocator = context.temp_allocator)
 	for h in cur.head_ids do heads[string(h)] = true
-	changes := make([]Change, len(deltas), context.temp_allocator)
+	changes := make([]Change, n, context.temp_allocator)
 	index := make(map[string]int, allocator = context.temp_allocator)
 	for d, i in deltas {
 		changes[i] = d.change
@@ -145,6 +177,7 @@ base_classify :: proc(bases: []Checkpoint, deltas: []Delta, pending: map[string]
 		if built_on_base do live[id] = true
 	}
 
+	orphans := 0
 	for &d, i in deltas {
 		id := string(d.change.id)
 		switch {
@@ -152,6 +185,7 @@ base_classify :: proc(bases: []Checkpoint, deltas: []Delta, pending: map[string]
 			out.classes[i] = .Live
 		case id in covered:
 			out.classes[i] = !d.tagged && id in first ? .Premigration_Covered : .Covered
+			out.proven[i] = out.own[i] && covered[id]
 		case:
 			decidable := floor <= 1 || id in pending
 			if !decidable && d.tagged {
@@ -162,24 +196,52 @@ base_classify :: proc(bases: []Checkpoint, deltas: []Delta, pending: map[string]
 				}
 			}
 			out.classes[i] = decidable ? .Orphan : .Stale
+			if decidable do orphans += 1
 		}
 	}
 
 	// An orphan whose edit is already live or folded here - another device's
 	// rebased copy of it, or the original of a copy - is applied: Covered.
 	// Rebasing it again made a new copy each time; a busy object compacting
-	// between those copies orphaned every one in turn, without end.
-	orphans := 0
-	for c in out.classes do if c == .Orphan do orphans += 1
-	if orphans == 0 do return out
-	applied := make(map[[32]byte]bool, allocator = context.temp_allocator)
-	for &d, i in deltas do if out.classes[i] == .Live || out.classes[i] == .Covered || out.classes[i] == .Premigration_Covered {
-		applied[edit_key(d.change)] = true
+	// between those copies orphaned every one in turn, without end. Another
+	// device's such copy is discarded; an own one is proven once the copy
+	// applied is folded by a strict ancestor.
+	if orphans > 0 {
+		applied := make(map[[32]byte]bool, allocator = context.temp_allocator) // edit key → folded by a strict ancestor
+		for &d, i in deltas do if out.classes[i] == .Live || out.classes[i] == .Covered || out.classes[i] == .Premigration_Covered {
+			key := edit_key(d.change)
+			applied[key] = applied[key] || (out.classes[i] != .Live && covered[string(d.change.id)])
+		}
+		for &d, i in deltas do if out.classes[i] == .Orphan {
+			folded, hit := applied[edit_key(d.change)]
+			if !hit do continue
+			out.classes[i] = .Covered
+			out.proven[i] = out.own[i] && folded
+			out.discard[i] = !out.own[i]
+		}
 	}
-	for &d, i in deltas do if out.classes[i] == .Orphan && edit_key(d.change) in applied {
-		out.classes[i] = .Covered
+
+	for &d, i in deltas {
+		if out.own[i] || (out.classes[i] != .Orphan && out.classes[i] != .Stale) do continue
+		out.discard[i] = !waiting(&d, cur, chain_epoch, by_hash, index, heads, covered)
 	}
 	return out
+}
+
+/**
+ * A not-live change this device cannot place yet that was written after the
+ * current base was created: tagged with a base neither held nor named by the
+ * held chain, or naming a parent neither held, a base head nor covered.
+ */
+@(private = "file")
+waiting :: proc(d: ^Delta, cur: ^Checkpoint, chain_epoch: map[[32]byte]i64, by_hash: map[[32]byte]int, index: map[string]int, heads: map[string]bool, covered: map[string]bool) -> bool {
+	if d.change.timestamp < cur.created_at do return false
+	if d.tagged && d.b not_in chain_epoch && d.b not_in by_hash do return true
+	for p in d.change.parent_ids {
+		id := string(p)
+		if id not_in index && id not_in heads && id not_in covered do return true
+	}
+	return false
 }
 
 /**
@@ -223,7 +285,7 @@ state_from_base :: proc(base: ^Checkpoint, live: []Change, allocator := context.
  * orphan and stale changes are never replayed. has = false: nothing to show.
  */
 base_replay :: proc(bases: []Checkpoint, deltas: []Delta, pending: map[string]bool, legacy: ^Checkpoint, allocator := context.allocator) -> (state: Object_State, has: bool, ok: bool) {
-	cls := base_classify(bases, deltas, pending, context.temp_allocator)
+	cls := base_classify(bases, deltas, pending, nil, context.temp_allocator)
 	if cls.current >= 0 {
 		state, ok = state_from_base(&bases[cls.current], deltas_of(deltas, cls, .Live, context.temp_allocator), allocator)
 		return state, true, ok
@@ -250,13 +312,14 @@ Rebased :: struct {
 }
 
 /**
- * Rebase the orphans among `deltas` (or only those in `only`, raw ids, when
- * non-empty) onto `base`. Each new change keeps object_id, ops, author and
- * timestamp; its parent_ids are the base heads ∪ the current live heads ∪ the
- * rebased ids of any orphan parents being rebased with it (so a chain of
- * orphans stays a chain), sorted and deduplicated. Orphans go in Kahn order;
- * the id is the content address. Same inputs → byte-identical changes on
- * every device. The host publishes each with ["b", base hash].
+ * Rebase this device's own orphans among `deltas` (or only those in `only`,
+ * raw ids, when non-empty; another device's orphan is never rebased here:
+ * its writer does that) onto `base`. Each new change keeps object_id, ops,
+ * author and timestamp; its parent_ids are the base heads ∪ the current live
+ * heads ∪ the rebased ids of any orphan parents being rebased with it (so a
+ * chain of orphans stays a chain), sorted and deduplicated. Orphans go in
+ * Kahn order; the id is the content address. Same inputs → byte-identical
+ * changes on every device. The host publishes each with ["b", base hash].
  */
 base_rebase :: proc(base: ^Checkpoint, deltas: []Delta, cls: Classification, only: map[string]bool, allocator := context.allocator) -> [dynamic]Rebased {
 	live := deltas_of(deltas, cls, .Live, context.temp_allocator)
@@ -266,7 +329,7 @@ base_rebase :: proc(base: ^Checkpoint, deltas: []Delta, cls: Classification, onl
 
 	orphans := make([dynamic]Change, context.temp_allocator)
 	for d, i in deltas {
-		if cls.classes[i] != .Orphan do continue
+		if cls.classes[i] != .Orphan || !cls.own[i] do continue
 		if len(only) > 0 && string(d.change.id) not_in only do continue
 		append(&orphans, d.change)
 	}
@@ -321,11 +384,12 @@ Compact_Plan :: struct {
  * deltas folded (Kahn order), head_ids = the replayed heads, state = current
  * base + live deltas. With no base this is the epoch-1 migration: every held
  * change is folded - over a legacy checkpoint when one seeds the replay, whose
- * covered ids are then folded too. Orphans are never folded: the host rebases
- * them first (the plan reports how many remain).
+ * covered ids are then folded too. Orphans are never folded: their writer
+ * rebases them, every other device discards them (the plan reports how many
+ * remain).
  */
 base_compact_plan :: proc(bases: []Checkpoint, deltas: []Delta, pending: map[string]bool, legacy: ^Checkpoint, now_ms: i64, force: bool, allocator := context.allocator) -> (plan: Compact_Plan, ok: bool) {
-	cls := base_classify(bases, deltas, pending, context.temp_allocator)
+	cls := base_classify(bases, deltas, pending, nil, context.temp_allocator)
 	for class in cls.classes {
 		#partial switch class {
 		case .Orphan: plan.orphans += 1
@@ -412,15 +476,17 @@ State_Input :: struct {
 	bases:   [dynamic]Checkpoint,
 	deltas:  [dynamic]Delta,
 	pending: map[string]bool,
+	own:     map[string]bool,
 	legacy:  ^Checkpoint,
 }
 
-// {bases?: [base64], changes?: [ChangeJSON & {b?: hex}], pending?: [hex], checkpoint?: base64}
+// {bases?: [base64], changes?: [ChangeJSON & {b?: hex}], pending?: [hex], own?: [hex], checkpoint?: base64}
 @(private = "file")
 state_input :: proc(payload: json.Value) -> (input: State_Input, err: string) {
 	input.bases = make([dynamic]Checkpoint, context.temp_allocator)
 	input.deltas = make([dynamic]Delta, context.temp_allocator)
 	input.pending = make(map[string]bool, allocator = context.temp_allocator)
+	input.own = make(map[string]bool, allocator = context.temp_allocator)
 	object_id := ""
 	same_object :: proc(object_id: ^string, id: string) -> bool {
 		if object_id^ == "" do object_id^ = id
@@ -454,11 +520,14 @@ state_input :: proc(payload: json.Value) -> (input: State_Input, err: string) {
 		}
 		append(&input.deltas, d)
 	}
-	for item in json_array(payload, "pending") {
-		text, _ := item.(json.String)
-		raw, ok := hex_bytes(string(text))
-		if !ok || len(raw) != 32 do return input, "pending entries are 32-byte hex change ids"
-		input.pending[string(raw)] = true
+	for key in ([]string{"pending", "own"}) {
+		into := key == "pending" ? &input.pending : &input.own
+		for item in json_array(payload, key) {
+			text, _ := item.(json.String)
+			raw, ok := hex_bytes(string(text))
+			if !ok || len(raw) != 32 do return input, key == "pending" ? "pending entries are 32-byte hex change ids" : "own entries are 32-byte hex change ids"
+			into^[string(raw)] = true
+		}
 	}
 	legacy, lerr := optional_checkpoint(payload)
 	if lerr != "" do return input, lerr
@@ -471,28 +540,38 @@ state_input :: proc(payload: json.Value) -> (input: State_Input, err: string) {
  * State-sync actions of sync_dispatch. Bases travel as base64 Checkpoint
  * protobuf (epoch >= 1); changes as ChangeJSON plus `b` (hex hash of the base
  * named by the event's ["b", …] tag, absent = pre-migration); `pending` lists
- * change ids this device has never published. No session is required.
+ * change ids this device has never published; `own` the ones written on
+ * this device that no base has proven folded yet (pending ones count as own
+ * without repeating them). No session is required.
  *
  *   base_decode      {base} → {objectId, hash, epoch, prevBase, createdAt, headIds, covered, coveredIds, state: ObjectJSON}
  *   base_current     {bases} → {index, hash, epoch} | null
- *   classify         {bases, changes, pending?} → {base: {hash, epoch} | null, live, covered,
- *                    premigrationCovered, orphan, stale, liveHeads} (hex id lists)
+ *   classify         {bases, changes, pending?, own?} → {base: {hash, epoch} | null, live, covered,
+ *                    premigrationCovered, orphan, stale, liveHeads, rebase, discard, proven}
+ *                    (hex id lists; rebase = own orphans, discard = other devices' leftovers
+ *                    to drop, proven = own changes a held strict ancestor folded)
  *   replay_from_base {bases, changes, pending?, checkpoint?} → ObjectJSON | null
  *                    (`checkpoint`: legacy 1079, only used when there is no base)
- *   rebase           {bases, changes, pending?, orphans?: [hex]} → {base: hex, changes:
- *                    [{orphan, id, change: ChangeJSON, bytes: base64}]} in publish order
+ *   rebase           {bases, changes, pending?, own?, orphans?: [hex]} → {base: hex, changes:
+ *                    [{orphan, id, change: ChangeJSON, bytes: base64}]} in publish order (own
+ *                    orphans only)
  *   compact_plan     {bases, changes, nowMs, pending?, checkpoint?, force?} → {compact, reason,
  *                    live, liveBytes, oldestMs, orphans, stale, base?: base64, hash?, epoch?,
  *                    prevBase?, folded?: [hex]}
- *   seal_base        {base, conversationKey, secret? | space?: {keyHex, spaceId, owner?}, nonce?}
+ *   seal_base        {base, conversationKey, secret? | space?: {keyHex, spaceId, owner?}, nonce?,
+ *                    blob?: {sha256, size, url?}}
  *                    → {hash, objectId, epoch, d, gid, event: {kind: 31078, content, tags},
- *                    parts: [{kind: 1080, content, tags}]}
+ *                    parts: [{kind: 1080, content, tags}], blob?} | oversized without blob:
+ *                    {hash, objectId, epoch, d, gid, needsBlob: true, blobKey} (wire_seal_base)
+ *   base_open_blob   {hash, bytes: base64 decrypted blob} → {bytes, base: summary}
  */
 state_sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	action := json_str(payload, "action")
 	switch action {
 	case "seal_base":
 		return wire_seal_base(payload)
+	case "base_open_blob":
+		return wire_open_base_blob(payload)
 	case "base_decode":
 		bytes, ok := bytes_from_base64(json_str(payload, "base"), context.temp_allocator)
 		if !ok do return nil, "invalid base64 base"
@@ -524,10 +603,19 @@ state_sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		out["epoch"] = json.Integer(bases[i].epoch)
 		return json.Object(out), ""
 	case "classify":
-		cls := base_classify(bases, deltas, input.pending, context.temp_allocator)
+		cls := base_classify(bases, deltas, input.pending, input.own, context.temp_allocator)
 		lists: [Delta_Class][dynamic]json.Value
 		for &list in lists do list = make([dynamic]json.Value, context.temp_allocator)
-		for d, i in deltas do append(&lists[cls.classes[i]], json.String(hex_id(d.change.id, context.temp_allocator)))
+		rebase := make([dynamic]json.Value, context.temp_allocator)
+		discard := make([dynamic]json.Value, context.temp_allocator)
+		proven := make([dynamic]json.Value, context.temp_allocator)
+		for d, i in deltas {
+			id := json.String(hex_id(d.change.id, context.temp_allocator))
+			append(&lists[cls.classes[i]], id)
+			if cls.classes[i] == .Orphan && cls.own[i] do append(&rebase, id)
+			if cls.discard[i] do append(&discard, id)
+			if cls.proven[i] do append(&proven, id)
+		}
 		out := jobj()
 		out["base"] = json.Null{}
 		if cls.current >= 0 {
@@ -544,6 +632,9 @@ state_sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		heads := live_heads(deltas_of(deltas, cls, .Live, context.temp_allocator), context.temp_allocator)
 		slice.sort_by(heads[:], proc(a, b: []byte) -> bool { return string(a) < string(b) })
 		out["liveHeads"] = hex_list(heads[:])
+		out["rebase"] = json.Array(rebase)
+		out["discard"] = json.Array(discard)
+		out["proven"] = json.Array(proven)
 		return json.Object(out), ""
 	case "replay_from_base":
 		state, has, ok := base_replay(bases, deltas, input.pending, input.legacy, context.temp_allocator)
@@ -560,7 +651,7 @@ state_sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		object["heads"] = json.Array(heads)
 		return object, ""
 	case "rebase":
-		cls := base_classify(bases, deltas, input.pending, context.temp_allocator)
+		cls := base_classify(bases, deltas, input.pending, input.own, context.temp_allocator)
 		if cls.current < 0 do return nil, "rebase needs a base"
 		only := make(map[string]bool, allocator = context.temp_allocator)
 		for item in json_array(payload, "orphans") {

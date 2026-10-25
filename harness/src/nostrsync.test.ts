@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { finalizeEvent, getPublicKey, nip44, SimplePool, type Event, type Filter } from "nostr-tools";
 import * as api from "./api";
+import { decryptBlob, encryptBlob, sha256Hex } from "./blossom";
 import * as auth from "./local-api-auth";
 import { changeIdOfPart, startNostrSync, vanishOnRelays } from "./nostrsync";
 
@@ -24,7 +25,7 @@ let liveSubscriptions: number;
 let liveFilters: Filter[];
 let importChange: (b64: string) => Promise<Response>;
 /** Local daemon's change manifest (objectId -> change hexes) and each change's bytes (+ state-sync row fields). */
-let localChangeRows: Record<string, Array<{ id: string; b64: string; b?: string; pending?: boolean; class?: string }>>;
+let localChangeRows: Record<string, Array<{ id: string; b64: string; b?: string; pending?: boolean; own?: boolean; class?: string }>>;
 let checkpointRows: Record<string, unknown>;
 let importCheckpoint: (body: { checkpoints: string[]; provenance?: unknown }) => Promise<Response>;
 let buildCheckpoint: (objectId: string) => Promise<Response>;
@@ -681,7 +682,7 @@ function deltaEvent(b64: string, created_at: number, base?: string): Event {
 }
 /** GET /api/bases row for an object holding base `hash`. */
 function baseRow(hash: string, fields: Record<string, unknown> = {}) {
-	return { hash, epoch: 1, createdAt: 1_000_000_000, prevBase: "", live: 0, orphan: 0, stale: 0, pending: 0, compact: false, reason: "", ...fields };
+	return { hash, epoch: 1, createdAt: 1_000_000_000, prevBase: "", live: 0, orphan: 0, stale: 0, pending: 0, own: 0, rebase: 0, compact: false, reason: "", ...fields };
 }
 
 test("the change id of a sealed part is read from its leading id field", () => {
@@ -778,19 +779,24 @@ test("only live deltas are published, each with the base it was written on; cove
 	expect(out.map(decrypt).sort()).toEqual(["QUJD", "TU5P"]);
 	expect(out.find((item) => decrypt(item) === "QUJD")!.tags).toContainEqual(["b", H1]);
 	expect(out.find((item) => decrypt(item) === "TU5P")!.tags.some((tag) => tag[0] === "b")).toBe(false);
-	// The daemon stops counting the published change as pending.
+	// The daemon stops counting the published change as pending (it stays own until a base proves it folded).
 	expect(basePosts).toContainEqual({ path: "/api/changes/published", body: { published: { obj: ["c1"] } } });
 });
 
-test("orphans are rebased by the daemon and published; a space this identity may not write is left alone", async () => {
+test("only own orphans are rebased by the daemon and published; another device's orphans and a space this identity may not write are left alone", async () => {
 	process.env.GLON_STATE_SYNC_COMPACT = "0";
 	await keyring({ viewed: { key: KEY_A, owner: admin } });
 	spaceObjects = { viewed: spaceWithMembers("viewed", [admin]) };
 	objectRows = [{ id: "shared", channelId: "viewed" }];
-	baseRows = { obj: baseRow(H2, { orphan: 1 }), shared: baseRow(H1, { orphan: 1 }) };
+	baseRows = {
+		obj: baseRow(H2, { orphan: 1, own: 1, rebase: 1 }),
+		// Another device's orphan: its writer rebases it, the daemon discards it here.
+		other: baseRow(H2, { orphan: 1 }),
+		shared: baseRow(H1, { orphan: 1, own: 1, rebase: 1 }),
+	};
 	baseReply = (path, body) => {
 		if (path !== "/api/bases/rebase") return Response.json({ rejected: 0, items: [] });
-		localChangeRows[body.objectId as string] = [{ id: "r1", b64: "UkVC", b: H2, pending: true, class: "live" }];
+		localChangeRows[body.objectId as string] = [{ id: "r1", b64: "UkVC", b: H2, pending: true, own: true, class: "live" }];
 		return Response.json({ objectId: body.objectId, base: H2, changes: [{ orphan: "o1", id: "r1", b64: "UkVC" }] });
 	};
 	realTimers();
@@ -851,6 +857,145 @@ test("compaction publishes the next base, then deletes the deltas it folded and 
 	const after = (await state()) as unknown as { bases: Record<string, { hash: string; eventIds: string[]; everywhere: boolean }>; compactions: Record<string, unknown> };
 	expect(after.bases.obj).toMatchObject({ hash: H2, eventIds: [base.id], everywhere: true });
 	expect(after.compactions).toEqual({});
+});
+
+// ── Oversized bases on Blossom (docs/state-sync.md "Oversized bases") ──
+
+interface FakeBlossom {
+	blobs: Map<string, Uint8Array>;
+	requests: Array<{ method: string; path: string; auth: string | null }>;
+}
+/** A Blossom server on any origin: PUT /upload, GET and DELETE /<sha>; `deleteStatus` answers every DELETE instead. */
+function fakeBlossom(deleteStatus?: number): FakeBlossom {
+	const blobs = new Map<string, Uint8Array>();
+	const requests: FakeBlossom["requests"] = [];
+	const original = globalThis.fetch;
+	globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+		const url = new URL(String(input));
+		const method = init?.method ?? "GET";
+		requests.push({ method, path: url.pathname, auth: new Headers(init?.headers).get("Authorization") });
+		if (method === "PUT" && url.pathname === "/upload") {
+			const body = new Uint8Array(init!.body as Uint8Array);
+			const sha = sha256Hex(body);
+			blobs.set(sha, body);
+			return Response.json({ url: `${url.origin}/${sha}`, sha256: sha, size: body.byteLength });
+		}
+		const sha = url.pathname.slice(1);
+		if (method === "DELETE") return new Response(null, { status: deleteStatus ?? (blobs.delete(sha) ? 200 : 404) });
+		if (method === "GET" && blobs.has(sha)) return new Response(blobs.get(sha));
+		return new Response("not found", { status: 404 });
+	}) as typeof fetch;
+	restore.push(() => {
+		globalThis.fetch = original;
+	});
+	return { blobs, requests };
+}
+/** The BUD-11 event inside an Authorization header. */
+function authEvent(header: string | null): Event {
+	return JSON.parse(Buffer.from(header!.replace(/^Nostr /, ""), "base64").toString()) as Event;
+}
+/** A pointer 31078 as the core seals it. */
+function pointerEvent(pointer: Record<string, unknown>, created_at: number, tag = [String(pointer.sha256), String(pointer.size)]): Event {
+	return finalizeEvent({ kind: 31078, created_at, tags: [["d", blindPersonal("base:obj")], ["h", blindPersonal("obj")], ["epoch", "1"], ["blob", ...tag]], content: nip44.encrypt(JSON.stringify(pointer), conversationKey) }, sk);
+}
+
+/** obj's relay copy is pointer base H1 (blob ee…); the pass builds H2, too big for parts. */
+async function compactToBlossom(blossom: FakeBlossom) {
+	const previousBlob = "ee".repeat(32);
+	blossom.blobs.set(previousBlob, new Uint8Array([1]));
+	process.env.GLON_STATE_SYNC_COMPACT = "1";
+	await writeFile(join(root, "sync-state.json"), JSON.stringify({ version: 1, cursor: 100, published: {}, vanishRequested: {}, bases: { obj: { scope: "", hash: H1, epoch: 1, eventIds: ["0f".repeat(32)], createdAt: 999_000, everywhere: true, blob: previousBlob } } }));
+	baseRows = { obj: baseRow(H1, { compact: true, reason: "deltas", live: 25 }) };
+	const key = "4b".repeat(32);
+	const d = blindPersonal("base:obj");
+	baseReply = (path, body) => {
+		if (path === "/api/bases/build") return Response.json({ objectId: body.objectId, compact: true, reason: "deltas", b64: "TkVX", hash: H2, epoch: 2, prevBase: H1, folded: [changeHex(1)] });
+		if (path === "/api/bases/seal") {
+			if (!body.blob) return Response.json({ hash: H2, objectId: "obj", epoch: 2, d, gid: "", needsBlob: true, blobKey: key });
+			const blob = body.blob as { sha256: string; size: number; url: string };
+			const content = nip44.encrypt(JSON.stringify({ v: 1, hash: H2, ...blob, key }), conversationKey);
+			return Response.json({ hash: H2, objectId: "obj", epoch: 2, d, gid: "", event: { kind: 31078, content, tags: [["d", d], ["h", blindPersonal("obj")], ["epoch", "2"], ["blob", blob.sha256, String(blob.size)]] }, parts: [], blob: { sha256: blob.sha256, size: blob.size, key } });
+		}
+		return Response.json({ rejected: 0, items: [] });
+	};
+	realTimers();
+	await startNostrSync();
+	await until(() => blossom.requests.some((r) => r.method === "DELETE"));
+	await settle();
+	return { previousBlob, key, d };
+}
+
+test("a base too big for 64 parts goes to Blossom encrypted, its 31078 is a pointer, and the previous base's blob is deleted after it", async () => {
+	const blossom = fakeBlossom();
+	const { previousBlob, key, d } = await compactToBlossom(blossom);
+	// The upload is the base bytes under the core's blob key; the second seal names exactly that blob.
+	const put = blossom.requests.find((r) => r.method === "PUT")!;
+	expect(authEvent(put.auth).tags).toContainEqual(["t", "upload"]);
+	const [uploaded] = [...blossom.blobs.keys()];
+	expect(Buffer.from(decryptBlob(blossom.blobs.get(uploaded)!, Buffer.from(key, "hex"))).toString("base64")).toBe("TkVX");
+	const seals = basePosts.filter((post) => post.path === "/api/bases/seal");
+	expect(seals.map((post) => post.body.blob)).toEqual([undefined, { sha256: uploaded, size: blossom.blobs.get(uploaded)!.byteLength, url: expect.stringMatching(new RegExp(`/${uploaded}$`)) }]);
+	const base = published.find((item) => item.kind === 31078)!;
+	expect(base.tags).toContainEqual(["blob", uploaded, String(blossom.blobs.get(uploaded)!.byteLength)]);
+	expect(published.some((item) => item.kind === 1080)).toBe(false);
+	// Only after the relays took the previous base's deletion: BUD-02 DELETE of its blob, never of the new one.
+	const deletes = blossom.requests.filter((r) => r.method === "DELETE");
+	expect(deletes.map((r) => r.path)).toEqual([`/${previousBlob}`]);
+	expect(authEvent(deletes[0].auth).tags).toEqual(expect.arrayContaining([["t", "delete"], ["x", previousBlob]]));
+	expect(blossom.requests.indexOf(deletes[0])).toBeGreaterThan(blossom.requests.indexOf(put));
+	expect(published.find((item) => item.kind === 5 && item.tags.some((tag) => tag[0] === "a"))!.tags).toContainEqual(["a", `31078:${pk}:${d}`]);
+	const after = (await state()) as unknown as { bases: Record<string, { hash: string; blob?: string }>; compactions: Record<string, unknown>; blobDeletes: Record<string, true> };
+	expect(after.bases.obj).toMatchObject({ hash: H2, blob: uploaded });
+	expect(after.compactions).toEqual({});
+	expect(after.blobDeletes).toEqual({});
+});
+
+test("a Blossom that refuses the DELETE never holds back the compaction: the blob stays queued for the next pass", async () => {
+	const blossom = fakeBlossom(405);
+	const { previousBlob } = await compactToBlossom(blossom);
+	const after = (await state()) as unknown as { compactions: Record<string, unknown>; blobDeletes: Record<string, true> };
+	expect(after.compactions).toEqual({});
+	expect(after.blobDeletes).toEqual({ [previousBlob]: true });
+});
+
+test("a pointer base is fetched from Blossom, checked and imported like an inline base", async () => {
+	const blossom = fakeBlossom();
+	const plain = Buffer.from("BASE");
+	const key = "4c".repeat(32);
+	const { cipher } = encryptBlob(plain, Buffer.from(key, "hex"));
+	const sha = sha256Hex(cipher);
+	blossom.blobs.set(sha, cipher);
+	const pointer = { v: 1, hash: sha256Hex(plain), sha256: sha, size: cipher.byteLength, key, url: `https://blossom.test/${sha}` };
+	const base = pointerEvent(pointer, 1_000_000);
+	history = [base];
+	const imported: unknown[] = [];
+	baseReply = (path, body) => {
+		if (path === "/api/bases") imported.push(...(body.bases as unknown[]));
+		return Response.json({ rejected: 0, items: [{ objectId: "obj", hash: pointer.hash, epoch: 1, stored: true, current: true }] });
+	};
+	await startNostrSync();
+	expect(imported).toEqual([plain.toString("base64")]);
+	expect(blossom.requests.filter((r) => r.method === "GET").map((r) => r.path)).toEqual([`/${sha}`]);
+	const after = (await state()) as unknown as { replaySince?: number; bases: Record<string, { hash: string; eventIds: string[]; blob?: string }> };
+	expect(after.bases.obj).toMatchObject({ hash: pointer.hash, eventIds: [base.id], blob: sha });
+	expect(after.replaySince).toBeUndefined();
+});
+
+test("a pointer base whose blob does not match, or whose tag names another blob, is not imported; an unknown pointer version is not even fetched", async () => {
+	const blossom = fakeBlossom();
+	const key = "4c".repeat(32);
+	const { cipher } = encryptBlob(Buffer.from("BASE"), Buffer.from(key, "hex"));
+	const sha = sha256Hex(cipher);
+	blossom.blobs.set(sha, cipher);
+	// Decrypts fine, but is not the base the pointer names.
+	const wrong = pointerEvent({ v: 1, hash: "aa".repeat(32), sha256: sha, size: cipher.byteLength, key }, 1_000_000);
+	const future = pointerEvent({ v: 2, hash: "aa".repeat(32), sha256: sha, size: cipher.byteLength, key }, 1_000_001);
+	const mislabeled = pointerEvent({ v: 1, hash: sha256Hex(Buffer.from("BASE")), sha256: sha, size: cipher.byteLength, key }, 1_000_002, ["dd".repeat(32), String(cipher.byteLength)]);
+	history = [wrong, future, mislabeled];
+	await startNostrSync();
+	expect(basePosts.some((post) => post.path === "/api/bases")).toBe(false);
+	// Only the v1 pointer was fetched (from the server: it names no url).
+	expect(blossom.requests.filter((r) => r.method === "GET").map((r) => r.path)).toEqual([`/${sha}`]);
 });
 
 test("a joined space's objects are compacted by its owner's computer, not here", async () => {

@@ -15,15 +15,17 @@ address) and Blossom for blobs. Roostr now syncs **state**, not history:
 - each object has one **base** - its state at an epoch - kept by relays as
   an addressable event, so only the newest survives;
 - changes made since that base are **live deltas** (kind 1078, as before);
-- a device holding a delta written against an older base **rebases** it:
-  re-applies its ops on top of the current base as a new delta;
+- the device that wrote a delta against an older base **rebases** it when
+  the newer base missed it: re-applies its ops on top of the current base as
+  a new delta; every other device discards it;
 - a computer periodically **compacts**: folds the live deltas into a new
   base, then deletes the folded deltas from the relays (NIP-09);
 - files are encrypted and stored on **Blossom** (BUD-01/02/11) served by
   RoostrRelay itself; objects reference them by hash.
 
-Each computer keeps an append-only **local archive** of the changes it has
-held (`<GLON_DATA>/archive/`), never published and never required for sync.
+Each computer keeps a local **folded-id index** of the changes that left its
+working set (`<GLON_DATA>/folded/`): ids only, never published and never
+required for sync; it keeps imports from bringing a folded change back.
 
 ## Objects and epochs
 
@@ -81,16 +83,38 @@ its `b` names an older base and the current base's `covered_ids` does not
 contain it (the compactor never saw it), or it is pre-migration and not in
 an epoch-1 base's `covered_ids`.
 
-Rebase (any device that holds an orphan; personal vault devices share the
-key; in a shared space only a writer of that space):
+**Own changes until a base proves them; everyone else's leftovers are
+discarded.** "Own" means written on *this device* - a device-local marker
+(daemon `.local`, replica `own:` mark), never the author pubkey: personal
+vault devices share one key and author, and a shared space's writers are
+many.
+
+- A device keeps every change it wrote - published or not - until it holds
+  a base whose covered chain proves it folded (below). Publishing is not
+  folding: a published change the compactor missed is exactly what used to
+  become an orphan nobody answered for.
+- When a newer base does not cover an own change and it is not live, the
+  device **rebases** it (in a shared space only while it may write there)
+  and publishes the copy; the copy is own, the original is folded away.
+- Everyone else's held changes that are not live under the current base -
+  orphan or stale, another device's or another author's - are **discarded**
+  (folded away), never rebased by this device: their writer does that.
+- Once an own change is proven folded, its marker goes and it is folded
+  away.
+
+Rebase:
 
 1. new change: same `object_id`, same ops, same `author`, same
    `timestamp`; `parent_ids` = current base `head_ids` ∪ the live deltas
    that were heads when the orphan was found; `b` = current base hash.
 2. Because changes are content-addressed and every field above is derived
-   deterministically, two devices rebasing the same orphan produce the
-   **same change id**; the second publish is a duplicate and dedupes.
-3. The orphan itself is marked rebased locally (archived), never replayed.
+   deterministically, rebasing the same orphan again with the same holdings
+   produces the **same change id**; a repeated publish dedupes.
+3. The orphan itself is marked rebased locally (folded index), never replayed.
+
+Mixed versions: a device older than this rule still rebases every orphan it
+holds. Harmless: its copy carries the same edit key, so the writer's own
+orphan is Covered by it (never rebased twice), and copies dedupe (Decisions).
 
 Ops are intent-level (set field, add block after X, update block, move,
 remove). Applying them on a newer state is well-defined: a `block_add`
@@ -124,15 +148,35 @@ conservatively:
   held sibling base of epoch `e` and every chain base from `e` is held;
   pre-migration or on an unknown base and the chain is held back to epoch 1;
   or the host lists it as `pending` (never published - no compactor can have
-  seen it). Rebasing a folded change would silently revert later edits;
-  stale only ever hides something another device already handled.
+  seen it). Rebasing a folded change would silently revert later edits. An
+  own stale change (published, then this device missed a compaction) stays
+  held with its marker - never replayed, rebased or discarded; another
+  device's is discarded.
+- **Own** = the host's `own` ids plus its `pending` ids (never published
+  implies written here).
+- **Proven folded** = the own change's id is in `covered_ids` of a held
+  *strict ancestor* of the current base, or it is an orphan whose edit key
+  matches a change such an ancestor folded (an older device's copy of it).
+  Folded by the current base alone is not proof: a concurrent sibling base
+  that wins later may not have folded it, and only its writer would rebase
+  it. So the marker outlives one more compaction.
+- **Discard** = not own, and Orphan, Stale, or an orphan Covered only by
+  edit key (another device's copy of an applied edit) - except a change
+  **waiting** for a base or parent still on its way: written at or after the
+  current base's `created_at`, and tagged with a base neither held nor named
+  by the held chain, or naming a parent neither held, a base head nor
+  covered (a pointer base whose blob has not loaded, events out of order).
+  Waiting changes stay held, unreplayed; once a later base exists they are
+  leftovers like any other. Folding away a waiting change would refuse it
+  for good when its base lands.
 - **Pre-migration covered**: an untagged change in the epoch-1 base's
   `covered_ids` (what the pre-migration sweep may delete).
-- **Rebase of several orphans**: all orphans of an object are rebased in one
-  call against the same live heads, in Kahn order; an orphan whose parent is
-  also being rebased additionally names that parent's *rebased* id, so a
+- **Rebase of several orphans**: all own orphans of an object are rebased in
+  one call against the same live heads, in Kahn order; an orphan whose parent
+  is also being rebased additionally names that parent's *rebased* id, so a
   chain of orphans stays a chain. Parents are sorted bytewise (= hex order).
-  The rebased change carries no legacy in-DAG snapshot.
+  The rebased change carries no legacy in-DAG snapshot. `orphans` naming
+  another device's orphan rebases nothing for it.
 - **One edit, many copies**: the "same change id" promise above only holds
   for devices that saw the same live heads. Copies made with different heads
   differ in id, and a copy that lands after the compactor folded another
@@ -143,7 +187,10 @@ conservatively:
   an orphan whose edit key matches a live or covered change is **Covered**
   (already applied; never rebased, never replayed), and copies of one edit
   among the orphans rebase once (the others map onto that copy for their
-  children's parents).
+  children's parents). With rebasing limited to own changes, new copies only
+  come from retries and from older devices; a replica that strips covered
+  changes from its requests keeps the covered ones sharing author and
+  timestamp with a held own change, so this check still sees them.
 
 ## Compaction
 
@@ -172,11 +219,13 @@ How:
 1. Compute state = current base + live deltas (as above).
 2. New base: epoch+1, `prev_base` = current base hash (empty if none),
    `covered_ids` = the live deltas folded, `head_ids` = their heads.
-3. Publish the base (below). Once every configured relay accepted every
+3. Publish the base (below; an oversized one goes to Blossom first, see
+   "Oversized bases"). Once every configured relay accepted every
    part, delete the folded deltas' events (NIP-09 kind 5, `e` tags, `k`
    1078, <= 254 per event) and the previous base (`a` tag
    `31078:<pubkey>:<d>` covers all older versions at that address; parts
-   of a chunked base are deleted by `e`).
+   of a chunked base are deleted by `e`; a pointer base's blob by BUD-02
+   DELETE once that deletion reached every relay).
 4. Epoch 1 (migration): `covered_ids` = every change the computer holds for
    the object; after **every device has upgraded** the computer deletes
    all pre-migration 1078/1079 events from the relays.
@@ -184,7 +233,8 @@ How:
 Concurrent compaction (two computers, rare): both bases exist briefly;
 every device picks the same current base (rule above); deltas the losing
 base folded that the winner did not are orphans relative to the winner
-and get rebased. Nothing is lost.
+and their writers rebase them - which is why a marker survives a fold by
+the current base alone. Nothing is lost while the writer runs.
 
 Decisions (core): the thresholds (`COMPACT_MIN_DELTAS` 20,
 `COMPACT_MIN_BYTES` 48 KiB of encoded change protobuf, `COMPACT_MAX_AGE_MS`
@@ -193,7 +243,8 @@ makes them due at once, while objects created after the last base wait like
 any other; `force` compacts anything with a live delta (imports, manual
 migration). Epoch 1 over a legacy 1079 checkpoint folds the checkpoint's
 `covered_ids` plus exactly the tail the replay applied. Orphans and stale
-changes are never folded (the plan reports their counts: rebase first).
+changes are never folded (the plan reports their counts: their writers
+rebase them, every other device discards them).
 `created_at` = the host's `nowMs`. A delta only the losing base folded that
 builds solely on the winner's heads is live by descent rather than an
 orphan: same state, no new id.
@@ -205,11 +256,11 @@ shared space key) and existing blinded `h` tags (`core/wire.odin`).
 
 | Event | Kind | Tags | Content |
 |---|---|---|---|
-| Base | **31078** (addressable) | `["d", blind(prefix,"base:"+objectId)]`, `["h", <object stream tag>]`, space tag + `owner` as 1078, `["epoch", n]`, chunk `["c", gid, i, n]` when split | NIP-44(base64(Checkpoint.pb)) |
+| Base | **31078** (addressable) | `["d", blind(prefix,"base:"+objectId)]`, `["h", <object stream tag>]`, space tag + `owner` as 1078, `["epoch", n]`, chunk `["c", gid, i, n]` when split, `["blob", sha256, size]` when a pointer | NIP-44(base64(Checkpoint.pb)), or NIP-44(pointer JSON) |
 | Base part (2..n) | **1080** (regular) | `["h", ...]`, `["c", gid, i, n]` | one part |
 | Delta | 1078 | as today + `["b", base_hash]` | as today |
 | Deletion | 5 | `e` (deltas, base parts), `a` (old base), `k` | - |
-| Blob auth | 24242 | BUD-11 | - |
+| Blob auth | 24242 | BUD-11 (`t` upload / delete, `x` sha256) | - |
 
 A base that fits one part (the common case) is a single 31078 event. A
 larger base: part 1 rides in the 31078 event, parts 2..n are kind-1080
@@ -220,8 +271,8 @@ the group id, so a device fetching the 31078 queries `kinds:[1080],
 Part size: base64 parts of at most `WIRE_CHUNK_CHARS` = 40,000 characters
 (unchanged) so a sealed part stays under strfry's default `maxEventSize`
 (65,536 bytes) and under 65,535 bytes of NIP-44 plaintext for libraries
-without the extended length prefix. Large payloads (files, images, video)
-never ride in events: they go to Blossom.
+without the extended length prefix. Large payloads (files, images, video,
+oversized bases) never ride in events: they go to Blossom.
 
 Kind 1079 checkpoints are retired; readers keep importing them until the
 pre-migration sweep removes them.
@@ -236,10 +287,62 @@ is not an item. Ingest does not check the `d` tag: authenticity comes from
 the key the content opened under plus the signer rule (`authorizeBase` for
 space objects). `b` is taken from a 1078 only as 64-char lowercase hex.
 
+### Oversized bases
+
+A base whose base64 needs more than `WIRE_MAX_CHUNKS` (64) parts - over
+2.56 MB, e.g. a long-running agent's transcript - is stored as one
+**Blossom blob** and its 31078 carries a pointer instead of parts:
+
+- Blob: the raw Checkpoint protobuf (not base64) encrypted in the Blossom
+  file format (AES-256-GCM over 4 MiB frames, frame i's nonce = i;
+  `harness/src/blossom.ts`, `roostr_core::blossom`) under
+  `key = HMAC-SHA256(<the base's NIP-44 key>, "roostr-base-blob-v1" ||
+  base_hash)` - the personal conversation key or the space key, exactly
+  what seals the event's content. Deterministic, so a retried seal uploads
+  the same blob; one key per base, so frame nonces never repeat under a key.
+  Uploaded with BUD-02 `PUT /upload` (BUD-11 `t=upload`), named by the
+  sha256 of the ciphertext.
+- 31078: the usual tags (`d`, `h`…, `owner`, `epoch`), no `c`, plus
+  `["blob", <sha256 hex>, <size>]`; no 1080 parts. Content = NIP-44 of
+  `{"v":1,"hash":<base_hash hex>,"sha256":<blob sha256>,"size":<bytes>,"key":<hex>,"url"?:<upload URL>}`.
+  The key travels only inside the encrypted content, as a File object's
+  `blob_key` does.
+- Sealing (core `seal_base`): without `blob`, an oversized base returns
+  `{hash, objectId, epoch, d, gid: "", needsBlob: true, blobKey}` and no
+  event; the host encrypts, uploads and seals again with
+  `blob: {sha256, size, url}`, which returns the pointer event plus
+  `blob: {sha256, size, key}`. Bases that fit are sealed inline as before.
+- Reading: a 31078 with a `blob` tag whose content opens to `{` is a pointer
+  (core ingest item `{bytes: "", blob: {hash, sha256, size, key, url?}}`;
+  the harness parses it the same way). The reader GETs the blob from `url`,
+  else `<Blossom server>/<sha256>`, checks sha256 and size, decrypts, and
+  the plaintext must be a base whose `base_hash` is `hash` (core
+  `base_open_blob {hash, bytes}` → `{bytes, base}`; the harness compares
+  sha256 of the plaintext, writers never serialize field 8). Then it is
+  imported exactly like an inline base (authorization included). A fetch or
+  verification failure imports nothing: the replica leaves the event unheld
+  (asked for again) with a replay fault; the harness records a replay fault.
+  A pointer whose version is not 1, whose fields are malformed, or whose
+  `blob` tag names another blob/size is not an item (no fault: no later read
+  can make it one).
+- Deleting: when a compaction's NIP-09 of the previous base reached every
+  relay, the previous base's blob (recorded with our relay copy) is queued
+  in `sync-state.json` `blobDeletes` and BUD-02 `DELETE /<sha256>`
+  (BUD-11 `t=delete`) is sent; 404 counts as deleted. A refused delete stays
+  queued and is retried every compaction pass; it never holds back the
+  compaction (an orphaned blob only costs storage).
+- Readers older than pointers: the content is not base64, so the core's
+  part check drops it (web/iOS: "decrypt failure", the event stays unheld
+  and is asked for again; nothing is imported) and an old harness's daemon
+  import refuses it (logged, a replay fault). They keep the object's previous
+  state: they never mis-parse the pointer as a base. Until they upgrade they
+  miss that one object's newer base (its deltas on it look stale to them).
+
 ## Sync on a device
 
 1. **Bases first.** NIP-77 reconcile `{kinds:[31078], authors:[me]}` plus
-   each space stream (`#h`), fetch missing bases and their 1080 parts.
+   each space stream (`#h`), fetch missing bases and their 1080 parts (or,
+   for a pointer base, its Blossom blob).
    Every object renders from its base as soon as it lands.
 2. **Live deltas.** For objects whose base is held: reconcile
    `{kinds:[1078], #b:[...current base hashes]}` in batches, plus deltas of
@@ -280,6 +383,19 @@ hosted by `RoostrIOS`). The core (`core/`, linked natively and as WASM)
 owns: base encode/decode/hash, current-base choice,
 live/orphan classification, rebase change construction, replay from base,
 sealing/opening bases.
+
+Replica own marks (`roostr-replica-store`): a local write stores the
+change, its publication obligation and meta `own:<changeId>` = object id in
+one transaction; publishing removes only the obligation. After every import
+batch and history pass (over the objects touched, plus every object with an
+obligation or an own mark) `resolve_orphans` classifies with `pending` and
+`own`, folds away (`mark_rebased`, which also drops own marks) the core's
+`discard` and `proven` plus the own changes a held strict ancestor covers
+by id, and rebases `rebase` (`add_rebased` moves the own mark to the copy).
+Its requests strip what the base chain covers except covered changes
+sharing author and timestamp with a held own change (edit-key copies).
+Obligations imported from the Svelte store get own marks; an own change
+published before this rule (no mark) is treated as another device's.
 
 ## Directories: drawing a vault before holding it
 
@@ -433,8 +549,8 @@ Decisions (RoostrRelay implementation):
 ## Rollout
 
 1. Core + tests; relay (31078/1080 acceptance, `#b`/`#c` indexing, Blossom).
-2. Hosts read bases and live deltas and rebase orphans, while still
-   accepting pre-migration history (dual read).
+2. Hosts read bases and live deltas and rebase their own orphans, while
+   still accepting pre-migration history (dual read).
 3. Computers start compacting (epoch 1 bases for every object).
 4. Every device upgraded (web is live on deploy; iOS via TestFlight;
    every computer pulled and restarted) -> computers sweep pre-migration
@@ -443,26 +559,53 @@ Decisions (RoostrRelay implementation):
 
 ## Computers: daemon and harness
 
-### Daemon (`src/bases.odin`, `src/store.odin`, `src/sync.odin`)
+### Daemon (`src/bases.odin`, `src/folded.odin`, `src/store.odin`, `src/sync.odin`)
 
 Disk (`<GLON_DATA>`):
 
 - `bases/<objectId>/<hash>.pb` - every held base, bytes as received, named
   by `base_hash` (damage goes to `bases/.quarantine/`). Retention after any
-  base lands: the current base, up to 3 ancestors through `prev_base`,
-  same-epoch siblings, and every epoch-1 base (the pre-migration sweep reads
-  its `covered_ids`); older ones are deleted. Dropping an ancestor only ever
-  turns what it folded into *stale*, never *orphan* (core Decisions).
+  base lands, and over every based object at serve start: the current base,
+  one ancestor through `prev_base` (`BASE_KEEP_ANCESTORS`), same-epoch
+  siblings, and every epoch-1 base; older ones are deleted. Epoch-1 bases
+  stay because `POST /api/bases/covered` answers the harness's pre-migration
+  sweep from their `covered_ids` (and the core's `premigrationCovered`
+  reads them); state does not need them. Dropping an ancestor only ever
+  turns what it folded into *stale*, never *orphan* (core Decisions). With
+  one ancestor held, a change written on the base two epochs back is still
+  decidable (the ancestor's `prev_base` names it); one written on an older
+  base is stale unless its writer still holds it pending and rebases it.
 - `changes/<objectId>/<hex>.b` - the base hash the change's event carried
   (imports) or the object's current base at commit time (local commits);
-  `<hex>.local` - written here and not yet confirmed published: the core's
-  `pending`. Both are written before the `.pb`.
-- `archive/<objectId>/` - the local archive: every change written into
-  `changes/` is hard-linked here (copy when linking fails); a change leaving
-  the working set (covered by a strict ancestor of the current base, or a
-  rebased orphan, `<hex>.rebased` naming its replacement) stays here. Never
-  published or read for sync; an import never brings an archived change back
-  into `changes/`. Vanish purges `bases/<id>` and `archive/<id>` too.
+  `<hex>.local` - written on this computer and not yet proven folded (the
+  core's `own`); `<hex>.published` beside it - that own change is confirmed
+  on the relays. Pending (the core's `pending`) = `.local` without
+  `.published`. `.b` and `.local` are written before the `.pb`; both
+  markers go with the change when it is folded away, which for an own change
+  happens only once proven folded (a held strict ancestor folded it:
+  retention; or an older device's copy of it was: on load). Existing
+  `.local` files keep their meaning (own, unpublished): no migration.
+- `folded/<objectId>` - the folded-id index: one fixed 64-byte record
+  `[id 32][rebased 32]` per change that left the working set - everything a
+  held strict ancestor of the current base folded (ids never held here
+  included, recorded before that ancestor may be deleted), another device's
+  orphan/stale leftovers and own changes proven folded (on load: the core's
+  `discard` / `proven`), and rebased own orphans, whose `rebased` names the
+  replacement (zero otherwise). Append-only, fsynced before the change's
+  `.pb`/`.b`/`.local`/`.published` are deleted; a torn last record (crash
+  mid-append) is ignored on read and cut off by the next append. Never
+  published or read for sync: an import of an indexed id is skipped, never
+  written back into `changes/` - including a dropped ancestor's fold
+  arriving late from a slow relay. Vanish purges `bases/<id>` and
+  `folded/<id>` too.
+- `archive/` (older daemons: hard links of every change ever written plus
+  `<hex>.rebased`) is folded into the index once at serve start
+  (`migrate_archive`): per object, the archived ids no longer held in
+  `changes/` (or its quarantine) and every `.rebased` mapping are appended,
+  then `archive/<objectId>` is deleted. Idempotent and resumable; it logs one
+  summary line (`objects, ids, MB freed`). A change that left `changes/` any
+  other way (quarantine) is no longer refused at import, so a good copy can
+  heal it.
 
 Object state everywhere (objects API, queries, the state cache) is the core's
 base replay: current base + live deltas, or every change (over a legacy 1079
@@ -473,15 +616,15 @@ HTTP (POSTs are service-only, like `/api/checkpoints`):
 
 | Endpoint | Does |
 |---|---|
-| `GET /api/bases` | per object: `hash` (`""` without a base), `epoch`, `createdAt`, `prevBase`, `bases`, `changes`, `live`, `liveBytes`, `oldestMs`, `covered`, `premigrationCovered`, `orphan`, `stale`, `pending`, `compact`, `reason` (core thresholds) |
+| `GET /api/bases` | per object: `hash` (`""` without a base), `epoch`, `createdAt`, `prevBase`, `bases`, `changes`, `live`, `liveBytes`, `oldestMs`, `covered`, `premigrationCovered`, `orphan`, `stale`, `pending`, `own` (held `.local` changes), `rebase` (own orphans: `POST /api/bases/rebase` has work), `compact`, `reason` (core thresholds) |
 | `GET /api/bases/<id>` | held bases newest first `{hash, epoch, createdAt, prevBase, current, b64}` |
 | `POST /api/bases` | import `{bases: [b64], provenance?}` (space bases: owner only, `authorizeBase` rules) → items `{objectId, hash, epoch, createdAt, prevBase, stored, current}` |
 | `POST /api/bases/build` | `{objectId, force?}` → core `compact_plan`; when due the new base is stored (now current) and returned with `folded`. 409 `history incomplete` for an epoch 1 over a DAG with missing parents. 409 `compaction is off on this computer` when the daemon's environment has `GLON_STATE_SYNC_COMPACT=0` (the supervisor gives daemon and sync the same environment): a base sync never publishes would hold the changes it folded only locally |
 | `POST /api/bases/seal` | `{base, conversationKey, space?}` → core `seal_base`; personal bases get the secret from `nostr.json` |
-| `POST /api/bases/rebase` | `{objectId, orphans?}` → rebased changes written (with `.b`, `.local`), orphans archived |
+| `POST /api/bases/rebase` | `{objectId, orphans?}` → own orphans only: rebased changes written (with `.b`, `.local`: own and pending), orphans folded (index maps each to its rebased id). A rebased id already held without `.local` (an identical copy imported) gets `.local` + `.published`: it carries this computer's edit now |
 | `POST /api/bases/covered` | `{objectId, ids}` → `{premigration, covered}` (ids folded by a held epoch-1 base / by any held base) |
-| `POST /api/changes/published` | `{published: {objectId: [hex]}}` clears `.local` |
-| `GET /api/changes/<id>` | rows add `b`, `pending`, and `class` (`live`/`covered`/`premigrationCovered`/`orphan`/`stale`) when a base is held |
+| `POST /api/changes/published` | `{published: {objectId: [hex]}}` → `{ok, marked}`: writes `.published` beside each `.local` (no longer pending, never re-published); `.local` stays until a held base proves the change folded |
+| `GET /api/changes/<id>` | rows add `b`, `pending`, `own`, and `class` (`live`/`covered`/`premigrationCovered`/`orphan`/`stale`) when a base is held |
 | `POST /api/changes` | items may be `{b64, b}`: `b` is stored with the change; `reasons` says why each rejected item was refused (the sync logs it once per event) |
 
 ### Harness (`harness/src/nostrsync.ts`)
@@ -500,10 +643,13 @@ HTTP (POSTs are service-only, like `/api/checkpoints`):
   REQ paging stands in for NIP-77 reconciliation (one 31078 per object).
 - Deltas go out with `["b", <base>]` from the daemon's `b`; only `live`
   (or unclassified) working-set changes are published. A published pending
-  change is confirmed to the daemon.
-- Orphans: every pass (and whenever a newer base lands) the daemon rebases
-  them - personal objects always, a space's only for a writer of it - and
-  the rebased changes are published.
+  change is confirmed to the daemon, which marks it published and keeps it
+  own (confirmation is not "forget").
+- Own orphans: every pass (and whenever a newer base lands) the daemon
+  rebases those of objects whose row has `rebase` > 0 - personal objects
+  always, a space's only for a writer of it - and the rebased changes are
+  published. Another device's orphans are never rebased here: the daemon
+  folds them away when it loads the object.
 - Compaction (on unless `GLON_STATE_SYNC_COMPACT=0`; replaces the 1079
   checkpoint loop, which otherwise runs as before and skips objects that
   hold a base): at startup and every 10 minutes, for each object this
@@ -559,6 +705,9 @@ Shared request fields:
 - `changes`: `ChangeJSON` (as `codec`/`replay` use) plus `"b": "<hex>"` when
   the change's event carried a `b` tag (absent = pre-migration).
 - `pending`: hex ids of changes this device has never published.
+- `own`: hex ids of changes written on this device that no held base has
+  proven folded yet, published or not (`classify`, `rebase`; pending ones
+  count as own without repeating them).
 - `checkpoint`: a legacy kind-1079 checkpoint (base64), only used when
   there is no base (exactly like `replay`).
 
@@ -582,14 +731,18 @@ All bases and changes must belong to one object.
 ### `classify`
 
 ```json
-{"action":"classify","bases":["…"],"changes":[{…,"b":"5e50…"},{…}],"pending":["9f0c…"]}
+{"action":"classify","bases":["…"],"changes":[{…,"b":"5e50…"},{…}],"pending":["9f0c…"],"own":["7d1e…"]}
 → {"base":{"hash":"5e50…","epoch":2},            // null: no base, every change is live
    "live":["…"],"covered":["…"],"premigrationCovered":["…"],
-   "orphan":["…"],"stale":["…"],"liveHeads":["…"]}
+   "orphan":["…"],"stale":["…"],"liveHeads":["…"],
+   "rebase":["7d1e…"],"discard":["…"],"proven":["…"]}
 ```
 
-Hosts replay `live`, rebase `orphan`, may archive `covered` /
-`premigrationCovered`, and keep `stale` archived (never replay, never publish).
+Hosts replay `live`, rebase `rebase` (own orphans), fold away `discard`
+(another device's not-live leftovers, never rebased) and `proven` (own
+changes a held strict ancestor folded: drop the own marker), may archive
+`covered` / `premigrationCovered`, and keep an own `stale` change held with
+its marker (never replay, never publish, never rebase).
 
 ### `replay_from_base`
 
@@ -604,16 +757,17 @@ Current base state + live deltas in Kahn order; with no base, identical to
 ### `rebase`
 
 ```json
-{"action":"rebase","bases":["…"],"changes":[…],"pending":[…],"orphans":["…"]}
+{"action":"rebase","bases":["…"],"changes":[…],"pending":[…],"own":[…],"orphans":["…"]}
 → {"base":"5e50…",
    "changes":[{"orphan":"7d1e…","id":"c09a…","change":{ChangeJSON},"bytes":"CiDA…"}]}
 ```
 
-`orphans` is optional (default: every orphan). Output is in publish order.
+Only own orphans (`own` ∪ `pending`) are rebased; `orphans` is optional
+(default: every own orphan) and narrows that set. Output is in publish order.
 Publish each through the outbox with `base` = the returned hash
 (`outbox_enqueue {pending: {…, base}}` or `wire seal {…, base}` add
-`["b", hash]`), then mark the orphan rebased locally. Two devices with the
-same holdings produce the same ids.
+`["b", hash]`), then mark the orphan rebased locally and move its own
+marker to the copy. The same holdings produce the same ids.
 
 ### `compact_plan`
 

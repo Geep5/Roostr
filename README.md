@@ -400,7 +400,10 @@ delete the folded deltas from the relays - unless
 `GLON_STATE_SYNC_COMPACT=0` (read by the daemon too: it then refuses to build
 bases); `GLON_STATE_SYNC_SWEEP_PREMIGRATION=dry-run|1` counts or deletes
 pre-migration history (the Roostr relay was swept on 2026-10-11).
-Each computer keeps every change it held in `GLON_DATA/archive/`.
+Each computer records the ids of changes that left its working set (folded,
+stale, rebased) in `GLON_DATA/folded/`, so imports never bring them back; the
+older `GLON_DATA/archive/` of full change bytes is folded into it and deleted
+at daemon start.
 Permanent deletion uses the synced `__vanished__`
 ledger plus acknowledged NIP-09 cleanup, not manual file removal.
 
