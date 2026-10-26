@@ -450,7 +450,11 @@ its loopback port (paired auth). A harness missing the bytes asks a holder over
 a WebRTC data channel (`harness/src/files.ts`, werift); the relay only carries
 the introduction, as owner-signed, self-encrypted ephemeral events (kind 21078).
 With no holder online it fetches the File's blob from Blossom. Received bytes
-are verified against the hash; when neither works the File's `error` says so.
+are verified against the hash; when neither works the device that asked shows
+why (`GET /files/<hash>` answers 503 with the reason) - nothing is written to
+the File, since another device may reach the holders fine. A computer holding
+a File's bytes clears an `error` left on it (older builds wrote one), at start
+and every ten minutes.
 `GLON_BLOSSOM_BACKFILL=1` uploads existing files once. A computer whose
 Computer object has **Keep every file** (`keep_all_files`, a checkbox the
 harness seeds in every space with computers) fetches every File's bytes it

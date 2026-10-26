@@ -6,8 +6,8 @@
  * file at a time, adding itself to `available_on` as each lands. Files whose
  * holders are all offline wait with a growing delay instead of being retried
  * on every pass, and one offline holder is asked once per pass, not per file.
- * Background fetches never write a File's `error`; that is for a person
- * opening the file.
+ * No fetch writes a File's `error`: a device that cannot reach the holders
+ * is told so where it asked (files.ts `ensureBlob`).
  */
 
 import { existsSync, readdirSync } from "node:fs";
@@ -85,7 +85,7 @@ async function pass(): Promise<void> {
 			continue;
 		}
 		try {
-			await ensureBlob(hash, { record: false });
+			await ensureBlob(hash);
 			backoff.delete(hash);
 			fetched += 1;
 		} catch (err) {

@@ -68,9 +68,25 @@ async function markHeld(hash: string): Promise<void> {
 	}
 }
 
-async function markError(hash: string, error: string): Promise<void> {
-	for (const row of await fileObjects(hash)) if (str(row.fields, "error") !== error) await setField(row.id, "error", sv(error));
+/**
+ * Errors left on Files this computer holds: a File's `error` used to record
+ * one device failing to reach the holders, synced to every device and never
+ * cleared. A computer that has the bytes is proof they are reachable, so it
+ * clears the error (and lists itself as a holder). Runs at start and every
+ * {@link HELD_ERROR_SWEEP_MS}.
+ */
+export async function clearHeldFileErrors(): Promise<number> {
+	let cleared = 0;
+	for (const row of await queryAll({ type: FILE_TYPE })) {
+		const hash = str(row.fields, "file_hash");
+		if (!str(row.fields, "error") || !(await hasBlob(hash))) continue;
+		await markHeld(hash);
+		cleared++;
+	}
+	return cleared;
 }
+
+export const HELD_ERROR_SWEEP_MS = 10 * 60_000;
 
 /** Write bytes into the store under their hash (atomically). */
 async function writeBlob(hash: string, bytes: Uint8Array): Promise<void> {
@@ -393,10 +409,11 @@ async function fetchRemote(hash: string): Promise<void> {
 /**
  * Make sure this computer holds the bytes: fetched from a computer in
  * `available_on`, else from the File's Blossom copy. Throws when neither
- * hands them over, recording why as the File's `error` unless `record` is
- * off (background fetches stay quiet).
+ * hands them over; the caller shows why to whoever asked. Nothing is written
+ * to the File: one device failing to reach the holders is that device's
+ * moment, not the File's state, and every other device would read it.
  */
-export async function ensureBlob(hash: string, { record = true }: { record?: boolean } = {}): Promise<void> {
+export async function ensureBlob(hash: string): Promise<void> {
 	if (!HASH_RE.test(hash)) throw new Error("Not a file hash.");
 	if (await hasBlob(hash)) return;
 	let job = inflight.get(hash);
@@ -404,12 +421,7 @@ export async function ensureBlob(hash: string, { record = true }: { record?: boo
 		job = fetchRemote(hash).finally(() => inflight.delete(hash));
 		inflight.set(hash, job);
 	}
-	try {
-		await job;
-	} catch (err) {
-		if (record && err instanceof BlobUnavailable) await markError(hash, err.message);
-		throw err;
-	}
+	await job;
 }
 
 /** Listen for introductions from the owner's other computers. */
@@ -426,4 +438,10 @@ export async function startFilePeer(): Promise<void> {
 		onevent: (event) => void onSignal(event),
 	});
 	console.log("[files] peer-to-peer files listening");
+	const sweep = () =>
+		void clearHeldFileErrors()
+			.then((n) => n > 0 && console.log(`[files] cleared ${n} stale file error(s) on files held here`))
+			.catch((err) => console.error("[files] stale file errors:", err instanceof Error ? err.message : err));
+	sweep();
+	setInterval(sweep, HELD_ERROR_SWEEP_MS);
 }
