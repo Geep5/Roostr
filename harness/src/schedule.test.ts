@@ -201,9 +201,10 @@ interface FrameBlock {
 
 /**
  * A minute-repeat object whose Check first links a custom Tool running
- * `code`, owned by a served agent. Returns the daemon calls and turns.
+ * `code`, owned by a served agent (or, `withAgent` false, an import page
+ * with no agent). Returns the daemon calls and turns.
  */
-async function checkFirstRun(code: string): Promise<{ calls: Array<{ path: string; body: Record<string, unknown> }>; turns: string[] }> {
+async function checkFirstRun(code: string, withAgent = true): Promise<{ calls: Array<{ path: string; body: Record<string, unknown> }>; turns: string[] }> {
 	const now = Date.now();
 	const objectId = "0b6c86a7-7063-4dcd-81d8-3c5707bbeb83";
 	const toolId = "7a1d0c3e-0000-4000-8000-000000000003";
@@ -228,7 +229,7 @@ async function checkFirstRun(code: string): Promise<{ calls: Array<{ path: strin
 			return respond({
 				id: objectId,
 				typeKey: "task",
-				fields: { name: { stringValue: "Check support inbox" }, agent: { valuesValue: { items: [{ stringValue: agentId }] } }, check_first: { valuesValue: { items: [{ linkValue: { targetId: toolId } }] } }, repeat },
+				fields: { name: { stringValue: "Check support inbox" }, ...(withAgent ? { agent: { valuesValue: { items: [{ stringValue: agentId }] } } } : {}), check_first: { valuesValue: { items: [{ linkValue: { targetId: toolId } }] } }, repeat },
 				blocks: [{ id: "b", childrenIds: [], content: { text: { text: "Triage each new email.", style: 0 } } }],
 				deleted: false,
 				createdAt: now,
@@ -293,6 +294,16 @@ test("a check that finds something puts it in the turn's frame ahead of the inst
 	expect(text.indexOf("Refund please")).toBeLessThan(text.indexOf("Triage each new email."));
 	// A minute repeat: the scheduler completes the run itself once the turn ends.
 	expect(calls.some((c) => c.body.action === "occurrence_complete")).toBe(true);
+});
+
+test("an import page (a Check first, no agent) just imports: no 'no agent' error, no reminder, the run recorded", async () => {
+	const { calls, turns } = await checkFirstRun('return [{ id: "sms-1", from: "Ann" }];', false);
+	expect(turns).toEqual([]);
+	const mutations = calls.filter((c) => c.path === "/api/mutate").map((c) => c.body);
+	expect(mutations.some((m) => m.action === "set_field" && m.key === "error")).toBe(false);
+	expect(mutations.some((m) => m.action === "block_add")).toBe(false);
+	expect(mutations.find((m) => m.action === "run_record")?.run).toMatchObject({ machine: "test-machine", result: "imported" });
+	expect(mutations.some((m) => m.action === "occurrence_complete")).toBe(true);
 });
 
 test("an occurrence still open when the next would be due is flagged on its Error, quoting the chat; finishing it clears the flag", async () => {

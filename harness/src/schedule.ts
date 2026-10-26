@@ -662,8 +662,9 @@ async function ownerOf(obj: ObjectJSON): Promise<{ agentId: string; conv: ConvRe
 	}
 	// No agent named at all: there is no default mind to fall back to. Say
 	// so on the object's Error badge (the same honest-error convention as
-	// capability holdups) and do not fire.
-	if (candidates.length === 0) await setField(obj.id, "error", sv("recurring object has no agent; add one to its Agent property"));
+	// capability holdups) and do not fire - unless its Check first does the
+	// work (an import page: it needs no agent).
+	if (candidates.length === 0 && linkIds(obj.fields, "check_first").length === 0) await setField(obj.id, "error", sv("recurring object has no agent; add one to its Agent property"));
 	return undefined;
 }
 
@@ -774,6 +775,13 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = "
 		if (!owner) {
 			// A push with no agent to tell: the check already did the work.
 			if (kind === "push") return;
+			// An import page (a Check first, no agent): the check was the run.
+			if (checkId && agentIdsOf(obj.fields["agent"]).length + agentIdsOf(obj.fields["assignee"]).length === 0) {
+				await clearRunBadge(obj, true);
+				if (obj.fields.repeat) await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, result: "imported" } });
+				await completeOccurrence(d);
+				return;
+			}
 			await postScheduled(humanRef(obj.id), kind === "extra" ? `\u21bb "${name}" was run now` : kind === "retry" ? `\u21bb "${name}" (due ${when}) was retried` : `\u21bb "${name}" is due (${when})`, d, me);
 			if (subDaily(obj)) await completeOccurrence(d);
 			console.log(`[schedule] reminded "${name}" (${obj.id.slice(0, 8)}) - no served agent owns it`);
