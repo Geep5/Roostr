@@ -722,11 +722,17 @@ async function serve(): Promise<void> {
 	 * A scheduler-started turn on the agent's chat. The framed occurrence is
 	 * already posted (origin-tagged, so no watermark path ever ingests it);
 	 * this waits for the agent's slot rather than queueing a surface, then
-	 * runs one turn. Not human-rooted: no agent_ask.
+	 * runs one turn. Not human-rooted: no agent_ask. Resolves to the turn's
+	 * failure ("" when clean) and the agent's final reply.
 	 */
-	async function driveScheduled(s: Served, systemSuffix: string): Promise<string> {
+	async function driveScheduled(s: Served, systemSuffix: string): Promise<{ error: string; reply: string }> {
 		await awaitSlot(s);
-		return withTurn(s, s.conv, () => runTurn(s.agentId, s.conv, { spawn: spawnSubagent, systemSuffix, a2aTurn: true }));
+		let reply = "";
+		const error = await withTurn(s, s.conv, async () => {
+			reply = await runTurn(s.agentId, s.conv, { spawn: spawnSubagent, systemSuffix, a2aTurn: true });
+			return reply;
+		});
+		return { error, reply: error ? "" : reply };
 	}
 
 	/**
@@ -961,7 +967,7 @@ async function serve(): Promise<void> {
 		},
 		turn(agentId, systemSuffix) {
 			const s = served.get(agentId);
-			if (!s) return Promise.resolve("agent no longer served on this machine");
+			if (!s) return Promise.resolve({ error: "agent no longer served on this machine", reply: "" });
 			return driveScheduled(s, systemSuffix);
 		},
 		async fresh(agentId) {

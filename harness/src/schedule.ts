@@ -37,7 +37,7 @@
  */
 
 import { flagAgent } from "./agent-errors";
-import { deleteField, fetchObject, guestAgents, mutate, queryAll, setField, str, sv, wasDeleted, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { chatPost, deleteField, fetchObject, guestAgents, mutate, queryAll, setField, str, sv, wasDeleted, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { addConvBlock, convKey, humanRef, type ConvRef } from "./conv";
 import { CREDENTIAL_BADGE, CREDENTIAL_MISSING_BADGE, issuesBadge, parseIssuesBadge, takeCredentialIssues } from "./credential-issues";
 import { agentCredentialIds } from "./credential-objects";
@@ -62,8 +62,8 @@ export function foundIds(value: unknown): string[] {
 export interface ScheduleHost {
 	/** The agent's holistic transcript when this machine serves it; undefined otherwise. */
 	served(agentId: string): Promise<{ agentId: string; conv: ConvRef } | undefined>;
-	/** One scheduler-started turn on the agent's transcript, serialized with its other turns. Resolves to the failure message, "" on success. */
-	turn(agentId: string, systemSuffix: string): Promise<string>;
+	/** One scheduler-started turn on the agent's transcript, serialized with its other turns. Resolves to the failure message ("" on success) and the agent's final reply ("" when it ended without one). */
+	turn(agentId: string, systemSuffix: string): Promise<{ error: string; reply: string }>;
 	/** Drop the agent's home transcript and open a new one (its Fresh each run): the transcript the run then posts into. */
 	fresh(agentId: string): Promise<ConvRef>;
 }
@@ -803,7 +803,7 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = "
 		await postScheduled(conv, frame, d, me);
 		console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) → agent ${owner.agentId.slice(0, 8)}`);
 		takeCredentialIssues(owner.agentId); // a chat turn's leftovers are not this run's
-		const error = await host.turn(owner.agentId, kind === "extra" ? RUN_NOW_SUFFIX : kind === "push" ? PUSH_SUFFIX : TURN_SUFFIX);
+		const { error, reply } = await host.turn(owner.agentId, kind === "extra" ? RUN_NOW_SUFFIX : kind === "push" ? PUSH_SUFFIX : TURN_SUFFIX);
 		const blockedBy = takeCredentialIssues(owner.agentId);
 		const run: Record<string, unknown> = { at: Date.now(), machine: me, conversation: convKey(conv) };
 		if (error) run.error = error;
@@ -822,6 +822,12 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = "
 			await flagAgent(owner.agentId, issuesBadge(blockedBy));
 		}
 		else await clearRunBadge(obj, true);
+		// The run's answer also lands where the run lives: the object's own
+		// chat, as the agent - its transcript is on the agent's page, so the
+		// object otherwise showed nothing of what its run did.
+		if (!error && reply.trim() && obj.id !== owner.agentId) {
+			await chatPost(obj.id, reply, owner.agentId).catch((err) => console.error(`[schedule] posting the run's answer on ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
+		}
 		if (subDaily(obj)) await completeOccurrence(d);
 	} finally {
 		turnEnded?.();

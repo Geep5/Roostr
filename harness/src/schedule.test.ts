@@ -100,7 +100,7 @@ test("a scheduled object fires to the served agent on its guest list", async () 
 		},
 		async turn(agentId) {
 			turns.push(agentId);
-			return "";
+			return { error: "", reply: "Removed 1 tournament that had already started." };
 		},
 	});
 	await turnDone;
@@ -110,6 +110,10 @@ test("a scheduled object fires to the served agent on its guest list", async () 
 	// that object's root and not onto the scheduled object's discussion.
 	expect(schedulerMessages.some((c) => c.body.object_id === transcriptObject && c.body.target_id === transcriptThread && c.body.position === 5)).toBe(true);
 	expect(schedulerMessages.some((c) => c.body.object_id === objectId)).toBe(false);
+	// The run's answer lands on the object's own chat too, as the agent.
+	const answer = calls.find((c) => c.path === "/api/mutate" && c.body.action === "chat_post" && c.body.object_id === objectId);
+	expect(answer?.body.text).toBe("Removed 1 tournament that had already started.");
+	expect(answer?.body.as_author).toBe(guestAgentId);
 	const runs = calls.filter((c) => c.path === "/api/mutate" && c.body.action === "run_record");
 	expect((runs[0]?.body.run as Record<string, unknown>)?.conversation).toBe(`${transcriptObject}:${transcriptThread}`);
 });
@@ -171,7 +175,7 @@ test("a scheduled object with no agent gets an error badge and no turn", async (
 		},
 		async turn(agentId) {
 			turns.push(agentId);
-			return "";
+			return { error: "", reply: "" };
 		},
 	});
 	await turnDone;
@@ -263,7 +267,7 @@ async function checkFirstRun(code: string): Promise<{ calls: Array<{ path: strin
 		},
 		async turn(id) {
 			turns.push(id);
-			return "";
+			return { error: "", reply: "" };
 		},
 	});
 	await turnDone;
@@ -373,7 +377,7 @@ test("a run a login blocked retries itself once that login is fixed - once, sayi
 			return id === agentId ? { agentId, conv: { objectId: agentId, threadId: "thread" } } : undefined;
 		},
 		async turn() {
-			return "";
+			return { error: "", reply: "" };
 		},
 	});
 
@@ -427,7 +431,7 @@ test("Stuck holds an open run: never flagged as unfinished, and clearing it asks
 	}) as typeof fetch;
 	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
 	await startScheduler({
-		fresh: unusedFresh, async served() { return undefined; }, async turn() { return ""; } });
+		fresh: unusedFresh, async served() { return undefined; }, async turn() { return { error: "", reply: "" }; } });
 
 	expect(await flagStuckRuns()).toBe(0);
 	expect(fields.error).toBeUndefined();
@@ -478,7 +482,7 @@ test("a minute repeat whose run a restart cut off is finished at boot, so it kee
 	}) as typeof fetch;
 	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
 	await startScheduler({
-		fresh: unusedFresh, async served() { return undefined; }, async turn() { return ""; } });
+		fresh: unusedFresh, async served() { return undefined; }, async turn() { return { error: "", reply: "" }; } });
 	expect(actions).toContain("occurrence_complete");
 });
 
@@ -516,7 +520,7 @@ test("a push run that fails while the store is down is retried until it gets thr
 	globalThis.setTimeout = ((fn: () => void, ms?: number) => realSetTimeout(fn, (ms ?? 0) >= 60_000 ? 5 : ms)) as typeof setTimeout;
 	try {
 		await startScheduler({
-		fresh: unusedFresh, async served() { return undefined; }, async turn() { return ""; } });
+		fresh: unusedFresh, async served() { return undefined; }, async turn() { return { error: "", reply: "" }; } });
 		runNow(objectId, "new mail in grant@");
 		for (let i = 0; i < 100 && errorWrites.length === 0; i++) await Bun.sleep(5);
 		expect(errorWrites[0]).toStartWith("run failed: Unable to connect");
@@ -559,7 +563,7 @@ test("an agent with Fresh each run gets a new transcript for every run: the run'
 			return id === agentId ? { agentId, conv: oldConv } : undefined;
 		},
 		async turn() {
-			return "";
+			return { error: "", reply: "" };
 		},
 		async fresh(id) {
 			freshCalls.push(id);
