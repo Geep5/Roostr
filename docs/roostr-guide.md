@@ -15,6 +15,7 @@ Everything in Roostr is an object: a note, a task, an email, a person, an agent,
 - **Templates**: a template stamps out new objects of a type with properties (and a body) already filled in. A type's default template is used for "+ New". Agents themselves are usually made from an Agent template.
 - **Saved views**: a **Query** is a live filter (type plus conditions, e.g. "Emails where Done is unchecked"); a **Collection** is a hand-picked list. Both are objects people use as their map of the space - read them before guessing.
 - **Bin**: deleting moves an object to its space's bin; it can be restored with its text and properties.
+- **Cover**: a page (not a chat object) can have a banner image above its title - the **Cover** property links its File, **Cover position** (0 top … 1 bottom, 0.5 when empty) says which band shows. In the app: hover the top of a page → Add cover (or the page's ⋯ menu on a phone); on a cover: Change cover, Reposition, Remove, Generate. Generate writes `cover_request` on the page; the computer serving the space's **OpenAI** credential answers on `cover_generation` (the idea, then the image), and the person picks one with Use this. To give a page a cover yourself, set Cover to a File in its space; never write `cover_request` or `cover_generation` unless a person asked for a generated cover.
 - **Saved state, not history**: every object is its latest saved state plus the edits made since. A computer folds those edits into a new saved state now and then, and the folded edits are dropped everywhere - there is no edit-by-edit history to go back through. A device keeps its own edits until a saved state includes them, so nothing it wrote is lost if it was offline.
 
 ## 3. Spaces
@@ -102,6 +103,7 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 - A Credential's browser or Google sign-in is done by a person: **Connect** opens the sign-in window on the computer the app is paired with, and Roostr hands the login to the credential's Served by computer, which tries it on the site and says so in Error if the site refuses a login made elsewhere. An agent can create the credential and ask a person to press Connect; it cannot do that sign-in itself.
 - An agent can sign in to a site on its own with Headless Chrome: `browserless --profile <name> --eval '<js>' <url>` runs JavaScript in the page with a Chrome profile kept on its computer, so it fills the login form once and later runs stay signed in (the Headless Chrome skill says how). The login it types comes from its own instructions - a system prompt or a skill only it can read.
 - An agent uses a credential only if its Credentials property lists it. Having the credential is the permission; what to do with it is in the agent's instructions.
+- Every space you own also has an **OpenAI** credential with an empty "API key": paste an OpenAI key (`sk-…`) there to generate page covers (about $0.20 an image at high quality, billed to that key). The computer in its Served by makes the calls; a blank or refused key shows on its Error and in the cover panel.
 
 ## 9. Tools and Skills
 

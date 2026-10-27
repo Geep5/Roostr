@@ -136,6 +136,13 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 		note: "Moonshot API key for Kimi models. Agents whose Model is a kimi model use it on any computer.",
 		passwordFields: [{ key: "api_key", label: "API key", secret: true }],
 	},
+	// Generated page covers (covers.ts): the computer serving the space's OpenAI credential asks OpenAI with its key.
+	{
+		key: "openai",
+		label: "OpenAI",
+		note: "OpenAI API key (sk-…) from platform.openai.com → API keys. Generate on a page's cover uses it: the art director (gpt-6-astra) writes the idea, gpt-image-2.5-sunburst paints it at high quality, about $0.20 an image on this key. The computer in Served by makes the calls.",
+		passwordFields: [{ key: "api_key", label: "API key", secret: true }],
+	},
 	// Judges (judges.ts) ask TypeSafe's Jev; a Judge's Credentials carry the key.
 	{
 		key: "typesafe",

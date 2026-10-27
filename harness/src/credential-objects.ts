@@ -39,6 +39,7 @@ import { removeGoogleAccount } from "./google";
 import { machines } from "./machine";
 import { machineId } from "./roster";
 import { checkPostgres, POSTGRES_SERVICE } from "./sql";
+import { checkCredentialKey, keyRefusal, OPENAI_SERVICE } from "./openai";
 import { CREDENTIAL_BADGE, credentialBadge } from "./credential-issues";
 
 export const CREDENTIAL_TYPE = "credential";
@@ -66,6 +67,12 @@ let mine: CredentialRow[] = [];
 
 export function localCredentials(): CredentialRow[] {
 	return mine;
+}
+
+/** The space's credential for `service` (anthropic, openai): an active one if it has several, else the oldest. */
+export function spaceCredential(creds: QueryRow[], space: string, service: string): QueryRow | undefined {
+	const mine = creds.filter((c) => str(c.fields, "channel") === space && str(c.fields, "service") === service).sort((a, b) => a.createdAt - b.createdAt);
+	return mine.find((c) => str(c.fields, "status") === "active") ?? mine[0];
 }
 
 /**
@@ -291,7 +298,28 @@ async function browserState(row: CredentialRow, me: string, force = false): Prom
 async function servedState(row: CredentialRow, me: string, force = false): Promise<LiveState | undefined> {
 	if (row.service === GOOGLE_SERVICE) return force ? googleCheck(row) : googleState(row);
 	if (row.service === POSTGRES_SERVICE) return force ? postgresCheck(row) : postgresState(row);
+	if (row.service === OPENAI_SERVICE) return openaiState(row, force);
 	return browserState(row, me, force);
+}
+
+/**
+ * An OpenAI key OpenAI refused - on a Check (`force`, which asks OpenAI now)
+ * or when a cover was generated with it (covers.ts) - is broken, with
+ * OpenAI's message, until the key changes or a Check passes. A blank key is
+ * liveState's "No key yet"; otherwise a filled key is taken as working.
+ */
+async function openaiState(row: CredentialRow, force: boolean): Promise<LiveState | undefined> {
+	const key = credentialKeys(row.fields)?.api_key ?? "";
+	if (!key) return undefined;
+	let refused = keyRefusal(row.id, key);
+	if (force) {
+		try {
+			refused = await checkCredentialKey(row.id, key);
+		} catch (err) {
+			return { status: row.status || "missing", auth: row.auth, error: `Could not check the key with OpenAI from ${hostname()}: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300) };
+		}
+	}
+	return refused ? { status: "broken", auth: "", error: `OpenAI refused the key: ${refused}`.slice(0, 300) } : undefined;
 }
 
 /**
@@ -546,6 +574,18 @@ export async function checkCredential(id: string): Promise<CredentialRow> {
 	const row = await checkNow(await keptHere(id), await machineId());
 	mine = [...mine.filter((c) => c.id !== row.id), row];
 	return row;
+}
+
+/**
+ * Write one credential's state again on the computer serving it, without a
+ * full refresh: covers.ts after OpenAI refused its key, or found it blank.
+ */
+export async function republishCredential(id: string): Promise<void> {
+	const row = await credentialObject(id);
+	const me = await machineId();
+	if (row.servedBy !== me) return;
+	const next = await publishState(row, false, await servedState(row, me));
+	mine = [...mine.filter((c) => c.id !== next.id), next];
 }
 
 /** PostgreSQL credentials this computer checked since it started: what was checked (URL and ssh host, hashed) and when. */

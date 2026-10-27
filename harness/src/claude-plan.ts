@@ -14,9 +14,9 @@ import { apiFetch, API, deleteField, iv, ownedSpaces, queryAll, setField, str, s
 import { ANTHROPIC_AUTHORIZE_URL, ANTHROPIC_CLIENT_ID, ANTHROPIC_REDIRECT_URI, ANTHROPIC_SCOPES, ANTHROPIC_TOKEN_URL, generatePkce, refreshAnthropicToken } from "./auth";
 import { PLAN_ACCOUNT, PLAN_ERROR, PLAN_EXPIRES, PLAN_FIELDS, PLAN_REFRESH, PLAN_TOKEN, anthropicState, hasPlan } from "./anthropic-plan";
 import { openInDefaultBrowser, visitedUrlsLike } from "./browser";
-import { refreshCredentials } from "./credential-objects";
+import { refreshCredentials, spaceCredential } from "./credential-objects";
 import { machineId } from "./roster";
-import { ANTHROPIC_SERVICE, spaceAnthropicCredential } from "./space-defaults";
+import { ANTHROPIC_SERVICE } from "./space-defaults";
 
 const CREDENTIAL_TYPE = "credential";
 /** Renew this long before the token expires: the credential check runs every 5 minutes. */
@@ -47,7 +47,7 @@ async function planCredentials(): Promise<Array<{ space: { id: string; name: str
 	const creds = await queryAll({ type: CREDENTIAL_TYPE });
 	return (await ownedSpaces()).map((space) => {
 		const holding = creds.find((c) => str(c.fields, "channel") === space.id && str(c.fields, "service") === ANTHROPIC_SERVICE && hasPlan(c.fields));
-		return { space, credential: holding ?? spaceAnthropicCredential(creds, space.id) };
+		return { space, credential: holding ?? spaceCredential(creds, space.id, ANTHROPIC_SERVICE) };
 	});
 }
 

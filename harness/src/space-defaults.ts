@@ -6,6 +6,9 @@
  *   New agents list it (website create.ts, `setup`), so an agent with no
  *   key says so on its Error and names this credential, instead of quietly
  *   running on - or failing on - one computer's own Claude sign-in.
+ * - **An "OpenAI" credential**, its key empty: generated page covers
+ *   (covers.ts) use it, on the computer it is served by.
+ * - **The Cover and Cover position properties** a page's cover is kept in.
  * - **"<Space> Space"**: the space's setup-and-upkeep agent, with its own
  *   System prompt naming the space, served by the computer that seeded it,
  *   on the space's guest list.
@@ -18,8 +21,10 @@
 
 import { bv, createDefault, fetchObject, iv, lv, ownedSpaces, queryAll, setField, str, sv, type QueryRow } from "./api";
 import { FRESH_RUNS_KEY } from "./schedule";
-import { CREDENTIAL_TYPE } from "./credential-objects";
+import { CREDENTIAL_TYPE, spaceCredential } from "./credential-objects";
 import { fillCredential } from "./credential-seeds";
+import { COVER_PROPERTIES } from "./covers";
+import { OPENAI_SERVICE } from "./openai";
 import { SYSTEM_PROMPT_TYPE, DEFAULT_MODEL, writePageText } from "./prompts";
 import { machineId } from "./roster";
 import { linkIds, linkList } from "./tool-objects";
@@ -35,6 +40,13 @@ const ANTHROPIC_PAGE = [
 	"- your Claude plan: Settings → Claude plan → Sign in with Claude (it goes onto every space you own, and one computer keeps it fresh), then",
 	"- an API key pasted into API key or token: an Anthropic API key (sk-ant-api…) from console.anthropic.com → API keys, or a Claude subscription token (sk-ant-oat…) from `claude setup-token`.",
 	"With neither, an agent that lists this credential stops and says so on its Error.",
+].join("\n");
+
+/** The page of a seeded OpenAI credential: what it is for and what to paste. */
+const OPENAI_PAGE = [
+	"The OpenAI key this space's generated page covers use (a page's cover → Generate).",
+	"Paste an OpenAI API key (sk-…) from platform.openai.com → API keys into API key. Roostr never ships one.",
+	"The computer in Served by makes the calls: the art director (gpt-6-astra) writes an image idea from the page's title, type, text and properties, then gpt-image-2.5-sunburst paints it at high quality - about $0.20 an image, billed to this key.",
 ].join("\n");
 
 /** The standing prompt of a space's "<Space> Space" agent. */
@@ -57,12 +69,6 @@ Reuse what exists: existing properties, types, templates and queries before new 
 Problems go on the object's Error (object_flag_error), so they show where people look.
 Keep replies short: what changed, or the one question you need answered.
 When creating new agents, make them terse by default.`;
-}
-
-/** The space's Anthropic credential: an active one if it has several, else the oldest. */
-export function spaceAnthropicCredential(creds: QueryRow[], space: string): QueryRow | undefined {
-	const mine = creds.filter((c) => str(c.fields, "channel") === space && str(c.fields, "service") === ANTHROPIC_SERVICE).sort((a, b) => a.createdAt - b.createdAt);
-	return mine.find((c) => str(c.fields, "status") === "active") ?? mine[0];
 }
 
 /**
@@ -115,8 +121,42 @@ async function seedSpace(space: { id: string; name: string }, me: string, out: {
 	const spaceFields = (await fetchObject(space.id)).fields;
 	if (str(spaceFields, "default_type") === "") await setField(space.id, "default_type", sv(DEFAULT_SPACE_TYPE));
 
+	// 0c. A page's cover and its position (covers.ts): ordinary properties, so they show and sync like any.
+	for (const p of COVER_PROPERTIES) {
+		const id = `rel-${p.key}-${space.id}`;
+		if (relations.some((r) => str(r.fields, "channel") === space.id && str(r.fields, "key") === p.key) || (await everMade(id))) continue;
+		await createDefault(p.name, "relation", {
+			channel: sv(space.id),
+			key: sv(p.key),
+			name: sv(p.name),
+			description: sv(p.description),
+			format: sv(p.format),
+			iconEmoji: sv(p.emoji),
+			hidden: bv(false),
+			readOnly: bv(false),
+			maxCount: iv(1),
+			options: lv([]),
+			bundled: bv(false),
+			system: bv(true),
+			// The Cover picker lists the space's Files (its bundled File type), as Agent's lists agents.
+			...(p.pickerType ? { object_types: lv([`bundled-type-${p.pickerType}-${space.id.slice(0, 8)}`]) } : {}),
+		}, id);
+	}
+
+	const creds = await queryAll({ type: CREDENTIAL_TYPE });
+	// 0d. The OpenAI credential generated covers use, key empty: served by the seeding computer, which keeps its Status and Error.
+	const openaiId = `${OPENAI_SERVICE}-${space.id}`;
+	if (!spaceCredential(creds, space.id, OPENAI_SERVICE) && !(await everMade(openaiId))) {
+		if (await createDefault("OpenAI", CREDENTIAL_TYPE, { channel: sv(space.id), service: sv(OPENAI_SERVICE), served_by: sv(me) }, openaiId)) {
+			const made = await fetchObject(openaiId);
+			await fillCredential(made);
+			if (made.blocks.length === 0) await writePageText(openaiId, OPENAI_PAGE);
+			out.credentials += 1;
+		}
+	}
+
 	// 1. The Anthropic credential.
-	let cred = spaceAnthropicCredential(await queryAll({ type: CREDENTIAL_TYPE }), space.id);
+	let cred = spaceCredential(creds, space.id, ANTHROPIC_SERVICE);
 	const credId = `anthropic-${space.id}`;
 	if (!cred && !(await everMade(credId))) {
 		// Served by the seeding computer: it keeps Status and Error ("No key yet - paste …"), and marks it active once a key is pasted.

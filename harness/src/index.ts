@@ -18,10 +18,11 @@ import { DEFAULT_MODEL, PROMPT_SEEDS } from "./prompts";
 import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
-import { migrateLoginInstalls, refreshCredentials, CREDENTIAL_TYPE } from "./credential-objects";
+import { migrateLoginInstalls, refreshCredentials, spaceCredential, CREDENTIAL_TYPE } from "./credential-objects";
 import { installGwsAs } from "./google-credentials";
 import { fillCredential, seedCredentials } from "./credential-seeds";
-import { seedSpaceDefaults, spaceAnthropicCredential } from "./space-defaults";
+import { ANTHROPIC_SERVICE, seedSpaceDefaults } from "./space-defaults";
+import { takeCoverRequest, takePendingCoverRequests } from "./covers";
 import { checkProjectFolder } from "./workspace";
 import { seedJev } from "./jev";
 import { nudgeViewActions, startViewActions } from "./view-actions";
@@ -113,11 +114,11 @@ async function setup(): Promise<void> {
 	// The model is the agent's own Model property (nothing falls back to anything): the kind's default unless the template sets one.
 	if (!fields.model) fields.model = lv([PROMPT_SEEDS.find((s) => s.key === kindKey)?.model ?? DEFAULT_MODEL]);
 	// Its model login: the space's Anthropic credential (seeded with an empty key when the space has none).
-	let modelCred = spaceAnthropicCredential(await queryAll({ type: "credential" }), space);
+	let modelCred = spaceCredential(await queryAll({ type: "credential" }), space, ANTHROPIC_SERVICE);
 	if (!modelCred) {
 		await seedCredentials();
 		await seedSpaceDefaults();
-		modelCred = spaceAnthropicCredential(await queryAll({ type: "credential" }), space);
+		modelCred = spaceCredential(await queryAll({ type: "credential" }), space, ANTHROPIC_SERVICE);
 	}
 	if (modelCred && !fields.credentials) fields.credentials = linkList("credentials", [modelCred.id]);
 	// A normal agent can run commands and fetch the web: list both built-ins
@@ -328,8 +329,10 @@ async function serve(): Promise<void> {
 		// Service presets become Credential templates - before the check below reads those recipes.
 		{ name: "credential seeds", run: () => seedCredentials() },
 		{ name: "credential check", run: () => refreshCredentials() },
-		// Every space of yours starts with an Anthropic credential (key empty) and its "<Space> Space" agent.
+		// Every space of yours starts with Anthropic and OpenAI credentials (keys empty), the Cover properties and its "<Space> Space" agent.
 		{ name: "space defaults", run: () => seedSpaceDefaults() },
+		// Cover requests written while this computer was off - after the credentials above say who serves which.
+		{ name: "cover requests", run: async () => ({ taken: await takePendingCoverRequests() }) },
 		// The Computer page's "Keep every file" and "Starts automatically" checkboxes.
 		{ name: "computer properties", run: async () => ({ seeded: await seedComputerProperties() }) },
 		// Jev Skills' Answer / Writes to properties in every space.
@@ -779,6 +782,8 @@ async function serve(): Promise<void> {
 			// current without a roster round-trip.
 			const agent = await fetchObject(objectId).catch(() => null);
 			if (agent) {
+				// A cover asked for on the agent's own page (covers.ts).
+				void takeCoverRequest(agent);
 				notePin(agent);
 				// Its Served by was cleared or moved to another computer: this
 				// one stops answering now, not at the next restart.
@@ -802,6 +807,7 @@ async function serve(): Promise<void> {
 		if (!agents.has(objectId)) {
 			const maybe = await fetchObject(objectId).catch(() => null);
 			if (maybe?.typeKey === "agent") {
+				void takeCoverRequest(maybe);
 				notePin(maybe);
 				if (str(maybe.fields, "external_responder")) externalAgents.add(objectId);
 				else externalAgents.delete(objectId);
@@ -831,6 +837,8 @@ async function serve(): Promise<void> {
 		} catch {
 			return;
 		}
+		// A generated cover asked for from any device: the computer serving the space's OpenAI credential paints it (covers.ts).
+		void takeCoverRequest(obj);
 		// A space (a new one included) holds the built-ins as Tool objects.
 		if (obj.typeKey === "channel" && !obj.deleted) void ensureBuiltinTools(obj.id).catch((err) => console.error(`[tools] built-in Tool objects for ${obj.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
 		// A space new since boot gets the credential properties and presets, then its defaults - once per run.

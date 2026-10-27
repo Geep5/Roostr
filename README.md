@@ -290,8 +290,8 @@ you add named "Key: App ID" (`key_app_id`) is a key too. Status, Error and
 Served by are the built-in properties; the Status popover carries Connect /
 Check now / Disconnect.
 
-The presets (X, LinkedIn, Discord bot, Anthropic, Kimi, and any a private
-extension adds) are
+The presets (X, LinkedIn, Discord bot, Anthropic, Kimi, OpenAI, and any a
+private extension adds) are
 Credential **templates** seeded once per space; like system prompts, a seed
 only upgrades a template nobody edited. Setting Service on a credential that
 says nothing yet about signing in copies that service's template onto it
@@ -343,6 +343,51 @@ Agents use browser credentials through `credential_fetch` (read a page) and
 `credential_action` (act), which inject the cookies into a throwaway headless
 Chrome on whichever computer runs the agent. A page that lands on a login wall
 is reported as signed out; nothing is done there.
+
+### Page covers and the OpenAI credential
+
+Any page with the object header (not a chat object) can have a **cover**: a
+banner above its icon and title. It is two ordinary properties the harness
+seeds in every space you own (`harness/src/space-defaults.ts`, not
+engine-bundled, so an older engine never retires them): `cover` ("Cover", a
+link to the cover's File - an ordinary upload, `harness/src/files.ts`) and
+`cover_y` ("Cover position", 0 = the image's top band shows … 1 = its bottom,
+0.5 when unset). Remove the cover by clearing both.
+
+Every space you own also gets an **"OpenAI" credential** (`openai-<space id>`,
+service `openai`, one key `key_api_key` "API key", left empty - Roostr never
+ships a key), served by the computer that seeded it, with the usual Status /
+Error / Served by. A blank key reads `No key yet - paste "API key" to use it.`;
+a key OpenAI refuses (on Check, or when a cover is generated) makes it
+`broken` with `OpenAI refused the key: <OpenAI's message>` until the key
+changes or a Check passes.
+
+**Generated covers** travel on the page the way Run now does
+(`harness/src/covers.ts`): any device writes `cover_request`
+`{at, action, prompt}` and the computer serving the space's OpenAI credential
+claims it (deletes it) and writes the session on `cover_generation`
+`{at, action, status, machine, credential, prompt, prompts, tries, error,
+needs_key}`, which the app's cover panel renders:
+
+1. **Art director** - the Responses API, model `gpt-6-astra`, with the
+   standing instruction `ART_DIRECTOR_INSTRUCTIONS` (`harness/src/openai.ts`)
+   and only what the page shows: its title, type name, visible properties as
+   `name: value` and the first 3000 characters of its text (`status` `writing`).
+2. **Image** - `POST /v1/images/generations`, model `gpt-image-2.5-sunburst`,
+   `quality: "high"`, `size: "3072x1024"` (3:1, the widest aspect the model
+   takes, the largest size below its experimental range), `n: 1`, JPEG; the
+   bytes become an ordinary File in the page's space (`painting` → `done`,
+   appended to `tries`).
+
+`action` is `generate` (steps 1 and 2; with a `prompt`, the person's own text
+goes straight to step 2), `reroll` (step 2 again on the current prompt) or
+`new_idea` (step 1 again, told every earlier prompt of the session so it
+varies, then step 2). OpenAI's own message (bad key, quota, content refusal)
+is the session's `error`; a blank or refused key also sets `needs_key`. The
+app sets `cover` to the try the person picks, vanishes the others and removes
+`cover_generation` when the panel closes; a session closed mid-paint keeps
+nothing. Requests written while the serving computer was off are taken when it
+starts. `OPENAI_BASE_URL` points the calls elsewhere (the tests' fake server).
 
 ### Private extensions
 
