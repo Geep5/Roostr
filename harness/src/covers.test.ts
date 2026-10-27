@@ -17,7 +17,7 @@ import { COVER_GENERATION_KEY, COVER_REQUEST_KEY, coverGeneration, NEEDS_KEY, ta
 import { checkCredential } from "./credential-objects";
 import { seedSpaceDefaults } from "./space-defaults";
 import { hasBlob } from "./files";
-import { ART_DIRECTOR_INSTRUCTIONS, ART_DIRECTOR_MODEL, COVER_SIZE, IMAGE_MODEL } from "./openai";
+import { ART_DIRECTOR_INSTRUCTIONS, ART_DIRECTOR_MODEL, COVER_SIZE, COVER_STYLE, IMAGE_MODEL } from "./openai";
 import { resetMachineIdCache } from "./roster";
 
 const ME = "test-machine";
@@ -218,10 +218,10 @@ test("Generate writes an idea from the page, paints a high-quality wide image, s
 	expect(input).not.toContain("chat says");
 	expect(input).not.toContain("Name:");
 
-	// Step 2: the Images API, with that prompt.
+	// Step 2: the Images API, with that prompt in the house style (a real, minimal photograph).
 	const painted = seen.filter((s) => s.path === "/v1/images/generations");
 	expect(painted).toHaveLength(1);
-	expect(painted[0]!.body).toEqual({ model: IMAGE_MODEL, prompt: "Idea 1", n: 1, size: "3072x1024", quality: "high", output_format: "jpeg" });
+	expect(painted[0]!.body).toEqual({ model: IMAGE_MODEL, prompt: `Idea 1\n\n${COVER_STYLE}`, n: 1, size: "3072x1024", quality: "high", output_format: "jpeg" });
 
 	// The request is taken, the run is over, and the image is the page's cover, focused in the middle.
 	const page = objects.get(PAGE)!.fields;

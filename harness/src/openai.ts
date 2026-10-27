@@ -37,11 +37,20 @@ export const IMAGE_FORMAT = "jpeg";
  * type, body text and properties as the page shows them.
  */
 export const ART_DIRECTOR_INSTRUCTIONS = [
-	"You are an art director. Write one vivid image prompt for a WIDE website banner (a page cover, about 3:1, shown cropped behind the page's title) that fits the page described below.",
-	"The image must contain no text, letters, numbers, logos, signatures or watermarks.",
-	"Be concrete: name the subject, the style or medium, the color palette and the composition (wide landscape framing, calm space at the edges).",
-	"At most 80 words. Reply with the prompt only - no title, quotes or explanation.",
+	"You are an art director. Write one image prompt for a WIDE website banner (a page cover, about 3:1, shown cropped behind the page's title) that fits the page described below.",
+	"House style: a real photograph, abstract and minimal. Suggest the page's subject obliquely - a close crop of a material, surface, texture, light or shadow, water, sky or architecture that echoes it - never a literal scene, characters, mascots or objects arranged to tell the story.",
+	"Natural light, a quiet muted palette (one or two colours at most), lots of empty space, shallow depth of field or soft focus where it helps. It must look like an unretouched photo from a good camera: no illustration, painting, 3D render, glow, sparkles, fantasy or sci-fi, no HDR, no surreal compositions.",
+	"The image must contain no people, text, letters, numbers, logos, signatures or watermarks.",
+	"Be concrete: name the subject, the light, the palette, the lens or framing (wide landscape, calm space at the edges).",
+	"At most 60 words. Reply with the prompt only - no title, quotes or explanation.",
 ].join("\n");
+
+/**
+ * Sent with every cover prompt to the image model: the house style holds
+ * even when the art director's prompt drifts toward illustration.
+ */
+export const COVER_STYLE =
+	"Style: a real, unretouched photograph - abstract, minimal, natural light, muted palette, generous negative space, fine film grain. Not an illustration, painting or 3D render; no glow, fantasy, surreal elements, people or text.";
 
 /** How long one call may take: high-quality images take tens of seconds. */
 const TEXT_TIMEOUT_MS = 120_000;
@@ -107,7 +116,7 @@ interface ResponsesBody {
  * new one must differ from (New idea).
  */
 export async function writeCoverPrompt(key: string, brief: string, earlier: string[] = []): Promise<string> {
-	const input = earlier.length === 0 ? brief : `${brief}\n\nEarlier ideas for this cover - write a clearly different take (another subject, style or palette):\n${earlier.map((p) => `- ${p}`).join("\n")}`;
+	const input = earlier.length === 0 ? brief : `${brief}\n\nEarlier ideas for this cover - write a clearly different take in the same house style (another subject, crop or palette):\n${earlier.map((p) => `- ${p}`).join("\n")}`;
 	const body = (await call(key, "/v1/responses", {
 		method: "POST",
 		body: { model: ART_DIRECTOR_MODEL, instructions: ART_DIRECTOR_INSTRUCTIONS, input, reasoning: { effort: "low" }, store: false },
@@ -128,7 +137,7 @@ interface ImagesBody {
 export async function paintCover(key: string, prompt: string): Promise<Uint8Array> {
 	const body = (await call(key, "/v1/images/generations", {
 		method: "POST",
-		body: { model: IMAGE_MODEL, prompt, n: 1, size: COVER_SIZE, quality: IMAGE_QUALITY, output_format: IMAGE_FORMAT },
+		body: { model: IMAGE_MODEL, prompt: `${prompt}\n\n${COVER_STYLE}`, n: 1, size: COVER_SIZE, quality: IMAGE_QUALITY, output_format: IMAGE_FORMAT },
 		timeoutMs: IMAGE_TIMEOUT_MS,
 	})) as ImagesBody | null;
 	const b64 = body?.data?.[0]?.b64_json;
