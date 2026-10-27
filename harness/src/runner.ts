@@ -19,7 +19,7 @@ import { buildConversationView, estimateAskTokens, estimateTokens, type Conversa
 import { callLLM, isContextOverflowError, modelProvider } from "./llm";
 import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
 import { agentModelKey, credentialsPromptLine } from "./credential-objects";
-import { dispatchTool, toolDefs, type ToolContext } from "./tools";
+import { dispatchTool, missingToolsNote, toolDefs, type ToolContext } from "./tools";
 import { agentToolset } from "./tool-objects";
 import { checkProjectFolder, workspaceAt, workspacePromptSection, workspaceSummary } from "./workspace";
 import { genesisCalls, genesisFingerprint, lastGenesis } from "./genesis";
@@ -145,6 +145,9 @@ async function buildSystemParts(agent: ObjectJSON, host: ObjectJSON, view: Conve
 		label: "Links",
 		text: "When you mention a Roostr object in chat, write it as a markdown link to its id: [Name](/app/object/<id>). It shows as a clickable chip. Use the ids (or the `link`) your tools return; never make one up.",
 	});
+	// The gated built-ins it lacks, so it can say what to add instead of guessing.
+	const missing = missingToolsNote(granted);
+	if (missing) parts.push({ label: "Missing tools", text: missing });
 	parts.push({ label: "Base prompt", text: spec.system });
 	// Fast parts: per-turn context that can change between tool iterations -
 	// always re-rendered, never cached.

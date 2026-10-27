@@ -10,7 +10,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { contentHash, type ObjectTool } from "./tool-runtime";
-import { dispatchTool, toolDefs, type Toolset } from "./tools";
+import { dispatchTool, missingToolsNote, toolDefs, type Toolset } from "./tools";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -89,4 +89,18 @@ test("calling a custom tool runs its code with the model's input and the turn's 
 	const res = await dispatchTool("echo_input", { word: "hello" }, ctx);
 	expect(res.isError).toBe(false);
 	expect(JSON.parse(res.content)).toEqual({ got: "hello", on: "obj-9" });
+});
+
+// An agent asked to clone a repo without shell_exec told the person the tool
+// was "listed but not exposed": its prompt now names what it lacks and how a
+// person grants it.
+test("the prompt names the gated tools an agent lacks and where a person adds them", () => {
+	const none = missingToolsNote(new Set());
+	expect(none).toContain("shell_exec");
+	expect(none).toContain("web_fetch");
+	expect(none).toContain("Tools property");
+	const webOnly = missingToolsNote(new Set(["web_fetch"]));
+	expect(webOnly).toContain("shell_exec");
+	expect(webOnly).not.toContain("web_fetch");
+	expect(missingToolsNote(new Set(["shell_exec", "web_fetch"]))).toBe("");
 });

@@ -58,6 +58,21 @@ type Handler = (input: Record<string, unknown>, ctx: ToolContext) => Promise<str
  */
 const GATED_TOOLS: Readonly<Record<string, true>> = { shell_exec: true, web_fetch: true };
 
+/** What each gated built-in does, as the prompt names a missing one. */
+const GATED_WHAT: Readonly<Record<string, string>> = { shell_exec: "run commands on this computer (clone repos, install, build)", web_fetch: "read web pages" };
+
+/**
+ * The prompt line for the gated built-ins the agent lacks, "" when it has
+ * them all: without it an agent asked to clone a repo saw `shell_exec` named
+ * in its space and told the person the tool was "listed but not exposed".
+ */
+export function missingToolsNote(granted: ReadonlySet<string>): string {
+	const missing = Object.keys(GATED_TOOLS).filter((name) => !granted.has(name));
+	if (missing.length === 0) return "";
+	const list = missing.map((name) => `${name} (${GATED_WHAT[name]})`).join(", ");
+	return `You do not have: ${list}. A person gives you one by adding it to your Tools property (on your agent page); a Tool object's own Agent property does not. When a request needs one, say that plainly - don't guess why it is missing.`;
+}
+
 /** What an agent runs from Tool objects (tool-objects.ts): the gated built-ins its Tools list, and every tool whose code is a Tool object's - its space's built-ins and its custom tools - by name. */
 export interface Toolset {
 	granted: ReadonlySet<string>;
