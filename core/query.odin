@@ -491,6 +491,8 @@ run_query :: proc(
 	}
 	if len(sorts) > 0 {
 		slice.sort_by_with_data(out[:], sort_less, &sorts)
+	} else if text != "" {
+		rank_text_matches(out[:], text)
 	}
 
 	// Paging. The full match count goes out before the slice.
@@ -501,7 +503,7 @@ run_query :: proc(
 	// tiebreak on id; an unsorted one is in map order, which rehashes on
 	// insert — so consecutive pages could repeat or skip a record. Order
 	// by id when paging, and only then: full reads pay nothing.
-	if len(sorts) == 0 && (has_offset || has_limit) {
+	if len(sorts) == 0 && text == "" && (has_offset || has_limit) {
 		slice.sort_by(out[:], proc(a, b: ^Object_State) -> bool {return a.id < b.id})
 	}
 	start := has_offset ? int(clamp(offset, 0, i64(len(out)))) : 0
@@ -510,6 +512,47 @@ run_query :: proc(
 	copy(out[:count], out[start:start + count])
 	resize(&out, count)
 	return out
+}
+
+/**
+ * How well an object's title answers a text query: 0 the whole title, 1 its
+ * start, 2 the start of a word in it, 3 anywhere in it, 4 only elsewhere
+ * (other properties, the page's text). Case-insensitive.
+ */
+text_rank :: proc(s: ^Object_State, needle: string) -> int {
+	n := strings.to_lower(needle, context.temp_allocator)
+	v, ok := fields_get(s.fields, "name")
+	if !ok do return 4
+	p := value_to_plain(v)
+	if p.kind != .String do return 4
+	name := strings.to_lower(strings.trim_space(p.str), context.temp_allocator)
+	if name == n do return 0
+	if strings.has_prefix(name, n) do return 1
+	at := strings.index(name, n)
+	if at < 0 do return 4
+	for at >= 0 {
+		before := name[at - 1] if at > 0 else ' '
+		if !(before >= 'a' && before <= 'z') && !(before >= '0' && before <= '9') do return 2
+		next := strings.index(name[at + 1:], n)
+		at = next < 0 ? -1 : at + 1 + next
+	}
+	return 3
+}
+
+/** An unsorted text query's order: title matches first (`text_rank`), then the most recently updated, then id. */
+rank_text_matches :: proc(out: []^Object_State, text: string) {
+	Ranked :: struct {
+		s:    ^Object_State,
+		rank: int,
+	}
+	ranked := make([]Ranked, len(out), context.temp_allocator)
+	for s, i in out do ranked[i] = Ranked{s, text_rank(s, text)}
+	slice.sort_by(ranked, proc(a, b: Ranked) -> bool {
+		if a.rank != b.rank do return a.rank < b.rank
+		if a.s.updated_at != b.s.updated_at do return a.s.updated_at > b.s.updated_at
+		return a.s.id < b.s.id
+	})
+	for r, i in ranked do out[i] = r.s
 }
 
 sort_less :: proc(a, b: ^Object_State, user_data: rawptr) -> bool {

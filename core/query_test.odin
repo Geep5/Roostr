@@ -191,3 +191,42 @@ query_filters_a_map_property_by_empty_and_not_empty :: proc(t: ^testing.T) {
 	empty := ids(states, "empty")
 	testing.expect(t, len(empty) == 1 && empty[0] == "once", "empty finds the one-off task")
 }
+
+// Search ranks titles first: a text query with no sort used to come back in
+// id order, so a page merely mentioning the word could bury (or, at the
+// limit, cut) the object named by it.
+@(test)
+query_text_ranks_title_matches_first :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	states := make(map[string]^Object_State)
+	add :: proc(states: ^map[string]^Object_State, id, name, body: string, updated: i64) {
+		s := new(Object_State)
+		s.id = id
+		s.type_key = "page"
+		s.updated_at = updated
+		s.fields = make([dynamic]Value_Entry)
+		s.blocks = make([dynamic]Block)
+		if name != "" do append(&s.fields, Value_Entry{key = "name", value = string_value(name)})
+		b: Block
+		b.id = "b"
+		b.content.kind = .Text
+		b.content.text.text = body
+		append(&s.blocks, b)
+		states[id] = s
+	}
+	// Ids in reverse of the wanted order: id order alone gets it wrong.
+	add(&states, "a-body-new", "Notes", "talked about the invoice", 9)
+	add(&states, "b-body-old", "Other", "invoice attached", 1)
+	add(&states, "c-inside", "Reinvoiced items", "", 5)
+	add(&states, "d-word", "Paid invoice", "", 5)
+	add(&states, "e-prefix", "Invoice 42", "", 5)
+	add(&states, "f-exact", "invoice", "", 5)
+	body := jobj()
+	body["textQuery"] = json.String("Invoice")
+	body["limit"] = json.Integer(5)
+	result := query_result(states, json.Object(body), 0)
+	records := json_array(result, "records")
+	want := []string{"f-exact", "e-prefix", "d-word", "c-inside", "a-body-new"}
+	testing.expect_value(t, len(records), len(want))
+	for id, i in want do if i < len(records) do testing.expect_value(t, json_str(records[i], "id"), id)
+}
