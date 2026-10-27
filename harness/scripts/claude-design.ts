@@ -135,7 +135,11 @@ process.on("exit", () => {
 
 // 1. Draft it in a background session.
 const name = `roostr-design-${Date.now()}`;
-const prompt = `/design ${brief}\n\nWhen it is published, reply with only the artifact URL.`;
+// Claude Design's page runtime lives on claude.ai: loops and variables in an
+// artboard only expand there. The session writes a static copy of each
+// artboard, which Roostr screenshots; it knows the format, this script doesn't.
+const exportDir = join(DESIGN_DIR, `export-${name}`);
+const prompt = `/design ${brief}\n\nAfter it is published, also write a static copy of every artboard to ${exportDir}/<artboard file name> (for example ${exportDir}/Main.dc.html): plain self-contained HTML at the artboard's exact size that looks the same, with every template value, variable and repeated item written out, no scripts and no x-dc runtime; web fonts may stay as <link> tags.\n\nThen reply with only the artifact URL.`;
 const started = await run(["claude", "--bg", "-n", name, "--permission-prompts", "none", prompt]);
 if (started.code !== 0) fail(`Claude Code would not start the design: ${(started.err || started.out).trim().slice(0, 300)}`);
 
@@ -210,20 +214,23 @@ for (const board of canvas.order ?? Object.keys(canvas.boards ?? {})) {
 	const meta = canvas.boards?.[board];
 	if (!meta) continue;
 	const out = join(dir, `${board.replace(/\W+/g, "-")}.png`);
-	// Claude Design fills an artboard's {{variables}} (accent colour, sliders)
-	// from their defaults in its data-props when it shows the page; render a
-	// copy with them filled, or those styles drop to the browser's defaults.
-	const html = await readFile(join(dir, board), "utf8");
-	const props = html.match(/data-props='([^']*)'/)?.[1];
-	let filled = html;
-	try {
-		const defs = props ? (JSON.parse(props) as Record<string, { default?: unknown }>) : {};
-		filled = html.replace(/\{\{(\w+)\}\}/g, (all, key: string) => (defs[key]?.default !== undefined ? String(defs[key].default) : all));
-	} catch {
-		// Props it can't read: render as written.
+	// The session's static copy when it wrote one; else the artboard with its
+	// {{variables}} filled from their data-props defaults (loops stay unexpanded).
+	const exported = join(exportDir, board.split("/").pop() ?? board);
+	let page = exported;
+	if (!(await Bun.file(exported).exists())) {
+		const html = await readFile(join(dir, board), "utf8");
+		const props = html.match(/data-props='([^']*)'/)?.[1];
+		let filled = html;
+		try {
+			const defs = props ? (JSON.parse(props) as Record<string, { default?: unknown }>) : {};
+			filled = html.replace(/\{\{(\w+)\}\}/g, (all, key: string) => (defs[key]?.default !== undefined ? String(defs[key].default) : all));
+		} catch {
+			// Props it can't read: render as written.
+		}
+		page = join(dir, `.render-${board}`);
+		await Bun.write(page, filled);
 	}
-	const page = join(dir, `.render-${board}`);
-	await Bun.write(page, filled);
 	const shot = await run([browser, "--headless=new", "--hide-scrollbars", "--disable-gpu", `--window-size=${meta.w},${meta.h}`, `--screenshot=${out}`, `file://${page}`], dir);
 	const png = Bun.file(out);
 	if (shot.code !== 0 || !(await png.exists())) fail(`Rendering ${board} failed: ${shot.err.trim().slice(0, 300)}`);
