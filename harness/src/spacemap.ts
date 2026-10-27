@@ -83,7 +83,6 @@ export interface TypeDef {
 	key: string;
 	name: string;
 	emoji: string;
-	definition: string;
 }
 
 export async function typeDefs(spaceId: string): Promise<Map<string, TypeDef>> {
@@ -98,7 +97,6 @@ export async function typeDefs(spaceId: string): Promise<Map<string, TypeDef>> {
 			key,
 			name: str(r.fields, "name") || key,
 			emoji: str(r.fields, "iconEmoji"),
-			definition: str(r.fields, "description"),
 		});
 	}
 	return out;
@@ -178,9 +176,8 @@ export async function buildSpaceMap(spaceId: string): Promise<string> {
 	const typeLines: string[] = [];
 	for (const t of types.values()) {
 		const total = await queryTotal({ type: t.key, filters: [sf] });
-		if (total === 0 && !t.definition) continue;
-		const def = t.definition ? ` — "${t.definition.slice(0, 90)}"` : "";
-		typeLines.push(`${t.emoji ? t.emoji + " " : ""}${t.name} ×${total}${def}`);
+		if (total === 0) continue;
+		typeLines.push(`${t.emoji ? t.emoji + " " : ""}${t.name} ×${total}`);
 	}
 	lines.push(`Types here: ${typeLines.join(" · ") || "(none)"}`);
 
@@ -219,7 +216,7 @@ export async function buildTypeContext(obj: ObjectJSON, spaceId: string): Promis
 	const lines: string[] = [];
 	const label = t ? `${t.emoji ? t.emoji + " " : ""}${t.name}` : obj.typeKey;
 	const siblings = await queryTotal({ type: obj.typeKey, filters: [sf] });
-	lines.push(`You are a ${label} (${siblings} of these exist here).${t?.definition ? ` The human defines this type as: "${t.definition}"` : ""}`);
+	lines.push(`You are a ${label} (${siblings} of these exist here).`);
 
 	// Property meanings for the fields this object actually carries.
 	const propLines: string[] = [];
