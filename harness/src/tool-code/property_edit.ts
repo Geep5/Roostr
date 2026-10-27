@@ -6,12 +6,11 @@ export const description =
 export const inputs =
 	"key: string - the property's key or name, e.g. 'main_games' or 'Main games'\nname?: string - new name\nemoji?: string - new emoji ('' removes it)\nobject_types?: string[] - object format only: type keys the value may link to; [] = any type\nadd_options?: string[] - status/tag/select formats: option texts to add";
 
-const OPTION_FORMATS = ["status", "tag", "select", "multi_select"];
-const PALETTE = ["grey", "red", "orange", "amber", "yellow", "lime", "green", "teal", "cyan", "blue", "indigo", "violet", "purple", "pink"];
-
-const strings = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").map((s) => s.trim()) : undefined);
-
 export default async function (input: Record<string, unknown>, roostr: Roostr) {
+	// Inside the function: only its body runs in the Tool object (tool-code.ts shippedBody).
+	const OPTION_FORMATS = ["status", "tag", "select", "multi_select"];
+	const PALETTE = ["grey", "red", "orange", "amber", "yellow", "lime", "green", "teal", "cyan", "blue", "indigo", "violet", "purple", "pink"];
+	const strings = (v: unknown): string[] | undefined => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").map((s) => s.trim()) : undefined);
 	const asked = typeof input.key === "string" ? input.key.trim() : "";
 	if (!asked) return "error: nothing changed. Say which property: key or name.";
 	const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");

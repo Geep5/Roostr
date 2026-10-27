@@ -77,6 +77,9 @@ export function shippedBody(source: string): string {
 	const start = lines.indexOf(TOOL_HEADER);
 	if (start < 0 || lines.at(-1) !== "}") throw new Error("a shipped tool file ends with its default export, opened by TOOL_HEADER");
 	if (lines.slice(0, start).some((line) => line.startsWith("import ") && !line.startsWith("import type "))) throw new Error("a shipped tool file imports only types: its body runs alone in its Tool object");
+	// Only `description` and `inputs` may sit outside the function: anything else declared there is missing when the body runs.
+	const outside = lines.slice(0, start).find((line) => /^(export )?(const|let|var|function|async function|class|enum) /.test(line) && !/^export const (description|inputs)\b/.test(line));
+	if (outside) throw new Error(`a shipped tool file declares everything inside its default export (its body runs alone in its Tool object): move "${outside.trim().slice(0, 60)}" inside`);
 	return lines
 		.slice(start + 1, -1)
 		.map((line) => line.replace(/^\t/, ""))
