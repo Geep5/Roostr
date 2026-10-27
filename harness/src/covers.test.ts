@@ -151,10 +151,11 @@ function world(key: string, servedBy = ME): void {
 	);
 }
 
-async function ask(entries: Record<string, ValueJSON>): Promise<CoverGeneration> {
+/** Ask for a cover; the page's run afterwards (null once it ended in a cover). */
+async function ask(entries: Record<string, ValueJSON>): Promise<CoverGeneration | null> {
 	objects.get(PAGE)!.fields[COVER_REQUEST_KEY] = { mapValue: { entries } };
 	await takeCoverRequest(await fetchObject(PAGE));
-	return coverGeneration(objects.get(PAGE)!.fields)!;
+	return coverGeneration(objects.get(PAGE)!.fields);
 }
 
 let root = "";
@@ -193,7 +194,7 @@ afterAll(() => {
 	openai.stop(true);
 });
 
-test("a request becomes an art-director prompt, then a high-quality wide image, stored as a File and shown on the page", async () => {
+test("Generate writes an idea from the page, paints a high-quality wide image, stores it as a File and makes it the cover", async () => {
 	world("sk-test-123");
 	const g = await ask({ at: { intValue: 1 }, action: sv("generate") });
 
@@ -222,14 +223,15 @@ test("a request becomes an art-director prompt, then a high-quality wide image, 
 	expect(painted).toHaveLength(1);
 	expect(painted[0]!.body).toEqual({ model: IMAGE_MODEL, prompt: "Idea 1", n: 1, size: "3072x1024", quality: "high", output_format: "jpeg" });
 
-	// The request is taken; the session says what happened.
-	expect(objects.get(PAGE)!.fields[COVER_REQUEST_KEY]).toBeUndefined();
-	expect(g).toMatchObject({ at: 1, action: "generate", status: "done", machine: ME, credential: CRED, prompt: "Idea 1", prompts: ["Idea 1"], error: "", needsKey: false });
-	expect(g.tries).toHaveLength(1);
-	expect(g.tries[0]!.prompt).toBe("Idea 1");
+	// The request is taken, the run is over, and the image is the page's cover, focused in the middle.
+	const page = objects.get(PAGE)!.fields;
+	expect(page[COVER_REQUEST_KEY]).toBeUndefined();
+	expect(g).toBeNull();
+	const fileId = page.cover?.linkValue?.targetId ?? "";
+	expect(page.cover_y).toEqual({ floatValue: 0.5 });
 
 	// The image is an ordinary File in the page's space, its bytes kept here.
-	const file = objects.get(g.tries[0]!.file)!;
+	const file = objects.get(fileId)!;
 	expect(file.typeKey).toBe("file");
 	expect(file.fields.channel?.stringValue).toBe(SPACE);
 	expect(file.fields.name?.stringValue).toBe("Cover - Launch the rooftop garden.jpg");
@@ -237,36 +239,12 @@ test("a request becomes an art-director prompt, then a high-quality wide image, 
 	expect(file.fields.file_size?.intValue).toBe(TINY_PNG.byteLength);
 	expect(file.fields.available_on?.valuesValue?.items.map((i) => i.stringValue)).toEqual([ME]);
 	expect(await hasBlob(file.fields.file_hash!.stringValue!)).toBe(true);
-});
 
-test("reroll repaints the same prompt; new idea asks the art director again for a different take; an edited prompt skips the art director", async () => {
-	world("sk-test-123");
-	await ask({ at: { intValue: 1 }, action: sv("generate") });
-	seen = [];
-
-	const rerolled = await ask({ at: { intValue: 2 }, action: sv("reroll") });
-	expect(seen.map((s) => s.path)).toEqual(["/v1/images/generations"]);
-	expect(seen[0]!.body.prompt).toBe("Idea 1");
-	expect(rerolled.tries.map((t) => t.prompt)).toEqual(["Idea 1", "Idea 1"]);
-	expect(rerolled.prompts).toEqual(["Idea 1"]);
-	seen = [];
-
-	const fresh = await ask({ at: { intValue: 3 }, action: sv("new_idea") });
-	expect(seen.map((s) => s.path)).toEqual(["/v1/responses", "/v1/images/generations"]);
-	expect(String(seen[0]!.body.input)).toContain("Earlier ideas for this cover");
-	expect(String(seen[0]!.body.input)).toContain("- Idea 1");
-	expect(seen[1]!.body.prompt).toBe("Idea 2");
-	expect(fresh).toMatchObject({ status: "done", prompt: "Idea 2", prompts: ["Idea 1", "Idea 2"] });
-	expect(fresh.tries).toHaveLength(3);
-	seen = [];
-
-	const edited = await ask({ at: { intValue: 4 }, action: sv("generate"), prompt: sv("A watercolor fox among tomato vines") });
-	expect(seen.map((s) => s.path)).toEqual(["/v1/images/generations"]);
-	expect(seen[0]!.body.prompt).toBe("A watercolor fox among tomato vines");
-	expect(edited).toMatchObject({ status: "done", prompt: "A watercolor fox among tomato vines", prompts: ["Idea 1", "Idea 2"] });
-	expect(edited.tries).toHaveLength(4);
-	// Every try is its own File.
-	expect(new Set(edited.tries.map((t) => t.file)).size).toBe(4);
+	// Generating again replaces the cover with a new File.
+	await ask({ at: { intValue: 2 }, action: sv("generate") });
+	const next = objects.get(PAGE)!.fields.cover?.linkValue?.targetId ?? "";
+	expect(next).not.toBe("");
+	expect(next).not.toBe(fileId);
 });
 
 test("a blank key asks OpenAI nothing: the session and the credential's Error say to add one", async () => {
@@ -283,8 +261,7 @@ test("a blank key asks OpenAI nothing: the session and the credential's Error sa
 test("a key OpenAI refuses fails the session with OpenAI's message and breaks the credential", async () => {
 	world("sk-bad");
 	const g = await ask({ at: { intValue: 1 }, action: sv("generate") });
-	expect(g).toMatchObject({ status: "failed", needsKey: true });
-	expect(g.error).toBe("Incorrect API key provided: sk-bad.");
+	expect(g).toMatchObject({ status: "failed", needsKey: true, error: "Incorrect API key provided: sk-bad." });
 	const cred = objects.get(CRED)!.fields;
 	expect(cred.status?.stringValue).toBe("broken");
 	expect(cred.error?.stringValue).toBe("OpenAI refused the key: Incorrect API key provided: sk-bad.");
@@ -294,7 +271,8 @@ test("a content refusal shows OpenAI's message on the session, and the key stays
 	world("sk-test-123");
 	onImage = async () => Response.json({ error: { message: "Your request was rejected by the safety system.", type: "image_generation_user_error", code: "moderation_blocked" } }, { status: 400 });
 	const g = await ask({ at: { intValue: 1 }, action: sv("generate"), prompt: sv("something refused") });
-	expect(g).toMatchObject({ status: "failed", error: "Your request was rejected by the safety system.", needsKey: false, prompt: "something refused", tries: [] });
+	expect(g).toMatchObject({ status: "failed", error: "Your request was rejected by the safety system.", needsKey: false });
+	expect(objects.get(PAGE)!.fields.cover).toBeUndefined();
 	expect(objects.get(CRED)!.fields.error).toBeUndefined();
 });
 

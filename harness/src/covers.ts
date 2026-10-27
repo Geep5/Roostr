@@ -9,17 +9,14 @@
  * harness should do the work claims it (deletes it) and writes its progress
  * where every device sees it.
  *
- * - `cover_request` {at, action, prompt}: the app's ask - `generate`
- *   (the art director writes the idea, then it is painted; with `prompt`,
- *   the person's own text is painted as it is), `reroll` (paint the same
- *   prompt again), `new_idea` (a different idea than every one so far, then
- *   paint it).
+ * - `cover_request` {at, action: "generate"}: the app's ask - the art
+ *   director writes an idea from the page, then it is painted.
  * - `cover_generation` {at, action, status, machine, credential, prompt,
- *   prompts, tries, error, needs_key}: the session the cover panel renders -
- *   `writing` → `painting` → `done` (or `failed`, with OpenAI's own message),
- *   every art-director prompt so far and every image painted (`tries`, each
- *   an ordinary File in the page's space). The app picks one (`cover`), then
- *   vanishes the rest and removes this field when the panel closes.
+ *   error, needs_key}: the run in progress, which the app shows as a
+ *   spinner - `writing` → `painting`. When the image is stored it becomes
+ *   the page's `cover` and this field goes; when it fails it stays as
+ *   `failed`, with OpenAI's own message, until the next ask or the person
+ *   dismisses it.
  *
  * The work runs on the computer serving the space's OpenAI credential (its
  * Served by): the harness holding the key. A key that is blank or refused
@@ -51,14 +48,8 @@ export const COVER_PROPERTIES: Array<{ key: string; name: string; format: string
 	{ key: COVER_Y_KEY, name: "Cover position", format: "number", emoji: "↕️", description: "Which band of the cover shows, from 0 (its top) to 1 (its bottom); 0.5 when empty." },
 ];
 
-export type CoverAction = "generate" | "reroll" | "new_idea";
-export type CoverStatus = "writing" | "painting" | "done" | "failed";
-
-export interface CoverTry {
-	file: string;
-	prompt: string;
-	at: number;
-}
+export type CoverAction = "generate";
+export type CoverStatus = "writing" | "painting" | "failed";
 
 export interface CoverGeneration {
 	at: number;
@@ -67,34 +58,24 @@ export interface CoverGeneration {
 	machine: string;
 	credential: string;
 	prompt: string;
-	prompts: string[];
-	tries: CoverTry[];
 	error: string;
 	needsKey: boolean;
 }
 
-const ACTIONS: CoverAction[] = ["generate", "reroll", "new_idea"];
-const STATUSES: CoverStatus[] = ["writing", "painting", "done", "failed"];
+const STATUSES: CoverStatus[] = ["writing", "painting", "failed"];
 
-/** The session on a page, as its `cover_generation` holds it; null when there is none. */
+/** The run on a page, as its `cover_generation` holds it; null when there is none. */
 export function coverGeneration(fields: Record<string, ValueJSON>): CoverGeneration | null {
 	const e = fields[COVER_GENERATION_KEY]?.mapValue?.entries;
 	if (!e) return null;
-	const action = e["action"]?.stringValue ?? "";
 	const status = e["status"]?.stringValue ?? "";
 	return {
 		at: e["at"]?.intValue ?? 0,
-		action: ACTIONS.find((a) => a === action) ?? "generate",
-		status: STATUSES.find((s) => s === status) ?? "done",
+		action: "generate",
+		status: STATUSES.find((s) => s === status) ?? "failed",
 		machine: e["machine"]?.stringValue ?? "",
 		credential: e["credential"]?.stringValue ?? "",
 		prompt: e["prompt"]?.stringValue ?? "",
-		prompts: (e["prompts"]?.valuesValue?.items ?? []).map((i) => i.stringValue ?? "").filter(Boolean),
-		tries: (e["tries"]?.valuesValue?.items ?? []).flatMap((i) => {
-			const t = i.mapValue?.entries;
-			const file = t?.["file"]?.stringValue ?? "";
-			return file ? [{ file, prompt: t?.["prompt"]?.stringValue ?? "", at: t?.["at"]?.intValue ?? 0 }] : [];
-		}),
 		error: e["error"]?.stringValue ?? "",
 		needsKey: e["needs_key"]?.boolValue === true,
 	};
@@ -108,8 +89,6 @@ function generationValue(g: CoverGeneration): ValueJSON {
 		machine: { stringValue: g.machine },
 		credential: { stringValue: g.credential },
 		prompt: { stringValue: g.prompt },
-		prompts: { valuesValue: { items: g.prompts.map((p) => ({ stringValue: p })) } },
-		tries: { valuesValue: { items: g.tries.map((t) => ({ mapValue: { entries: { file: { stringValue: t.file }, prompt: { stringValue: t.prompt }, at: { intValue: t.at } } } })) } },
 	};
 	if (g.error) entries["error"] = { stringValue: g.error };
 	if (g.needsKey) entries["needs_key"] = { boolValue: true };
@@ -204,23 +183,9 @@ async function runCoverRequest(page: ObjectJSON, ask: Record<string, ValueJSON>)
 	const me = await machineId();
 	if (!cred || (await pinOf(cred.fields)) !== me) return;
 	const at = ask["at"]?.intValue ?? Date.now();
-	const action = ACTIONS.find((a) => a === ask["action"]?.stringValue) ?? "generate";
-	const asked = (ask["prompt"]?.stringValue ?? "").trim();
 	await deleteField(page.id, COVER_REQUEST_KEY);
 
-	const prior = coverGeneration(page.fields);
-	const session: CoverGeneration = {
-		at,
-		action,
-		status: "writing",
-		machine: me,
-		credential: cred.id,
-		prompt: prior?.prompt ?? "",
-		prompts: prior?.prompts ?? [],
-		tries: prior?.tries ?? [],
-		error: "",
-		needsKey: false,
-	};
+	const session: CoverGeneration = { at, action: "generate", status: "writing", machine: me, credential: cred.id, prompt: "", error: "", needsKey: false };
 	const publish = (next: Partial<CoverGeneration>) => {
 		Object.assign(session, next);
 		return setField(page.id, COVER_GENERATION_KEY, generationValue(session));
@@ -234,17 +199,11 @@ async function runCoverRequest(page: ObjectJSON, ask: Record<string, ValueJSON>)
 		return;
 	}
 	try {
-		// The person's prompt is painted as it is; a reroll repaints the current one; otherwise the art director writes a new idea.
-		let prompt = action === "new_idea" ? "" : asked || (action === "reroll" ? session.prompt : "");
-		if (!prompt) {
-			await publish({ status: "writing" });
-			const earlier = [...new Set([...session.prompts, ...(session.prompt ? [session.prompt] : [])])];
-			prompt = await writeCoverPrompt(key, await pageBrief(page), earlier);
-			session.prompts = [...session.prompts, prompt];
-		}
+		await publish({ status: "writing" });
+		const prompt = await writeCoverPrompt(key, await pageBrief(page));
 		await publish({ status: "painting", prompt });
 		const bytes = await paintCover(key, prompt);
-		// Closed while it painted: nothing to keep.
+		// Dismissed while it painted: nothing to keep.
 		if (!(await stillAsked(page.id, at))) return;
 		const title = str(page.fields, "name") || "Untitled";
 		const file = await storeUpload(bytes, `Cover - ${title}.jpg`, "image/jpeg", space);
@@ -252,7 +211,10 @@ async function runCoverRequest(page: ObjectJSON, ask: Record<string, ValueJSON>)
 			await mutate("vanish", { object_ids: [file.id] });
 			return;
 		}
-		await publish({ status: "done", tries: [...session.tries, { file: file.id, prompt, at: Date.now() }] });
+		// The new image is the cover, focused in the middle; the run is over.
+		await setField(page.id, COVER_KEY, { linkValue: { relationKey: COVER_KEY, targetId: file.id } });
+		await setField(page.id, COVER_Y_KEY, { floatValue: 0.5 });
+		await deleteField(page.id, COVER_GENERATION_KEY);
 	} catch (err) {
 		const refused = err instanceof OpenAIError && err.keyRefused;
 		if (refused) noteKeyRefused(cred.id, key, err.message);
