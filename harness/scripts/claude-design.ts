@@ -15,6 +15,7 @@
  * account (`claude` then `/login`), and runs in DESIGN_DIR, which Claude
  * Code must trust (run `claude` there once and accept the prompt).
  */
+import { unlinkSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -105,21 +106,73 @@ if (!/"loggedIn":\s*true/.test(status.out) || !/"authMethod":\s*"claude\.ai"/.te
 	fail("Claude Code on this computer is not signed in to a claude.ai account: run `claude`, then /login, then /design consent.");
 }
 
+// One design at a time on a computer: two background sessions started
+// together left the second with its prompt half-typed and blocked.
+const lock = join(DESIGN_DIR, ".roostr-design.lock");
+for (const until = Date.now() + TIMEOUT_MS; ; await Bun.sleep(3_000)) {
+	const held = await Bun.file(lock).text().catch(() => "");
+	const holder = Number(held.trim());
+	const alive = holder > 0 && (() => {
+		try {
+			process.kill(holder, 0);
+			return true;
+		} catch {
+			return false;
+		}
+	})();
+	if (!alive) break;
+	if (Date.now() > until) fail("Another design has been running on this computer for over 20 minutes; try again later.");
+}
+await Bun.write(lock, String(process.pid));
+process.on("exit", () => {
+	try {
+		unlinkSync(lock);
+	} catch {}
+});
+
 // 1. Draft it in a background session.
 const name = `roostr-design-${Date.now()}`;
 const prompt = `/design ${brief}\n\nWhen it is published, reply with only the artifact URL.`;
 const started = await run(["claude", "--bg", "-n", name, "--permission-prompts", "none", prompt]);
 if (started.code !== 0) fail(`Claude Code would not start the design: ${(started.err || started.out).trim().slice(0, 300)}`);
 
-// 2. Wait for it to finish.
+/** Claude's final reply has landed: the transcript ends on assistant text with no tool call after it. */
+function finished(entries: Array<Record<string, unknown>>): boolean {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const ps = parts(entries[i]);
+		if (ps.some((p) => p.type === "tool_use" || p.type === "tool_result")) return false;
+		if (entries[i]["type"] === "assistant" && ps.some((p) => p.type === "text" && p.text)) return true;
+	}
+	return false;
+}
+
+// 2. Wait for its final reply. A new session reads "not busy" before it
+// starts, so only a finished transcript, seen twice, counts as done.
 const deadline = Date.now() + TIMEOUT_MS;
 let session: Session | undefined;
+let doneTwice = 0;
+let blockedSince = 0;
 for (;;) {
-	session = (await sessions()).find((s) => s.name === name);
-	if (session && session.status !== "busy") break;
-	if (!session && Date.now() > deadline - TIMEOUT_MS + 30_000) fail("The design session disappeared before it finished.");
-	if (Date.now() > deadline) fail(`The design took over ${TIMEOUT_MS / 60_000} minutes; it is still running as "${name}" (claude agents).`);
 	await Bun.sleep(5_000);
+	session = (await sessions()).find((s) => s.name === name);
+	if (!session) {
+		if (Date.now() > deadline - TIMEOUT_MS + 60_000) fail("The design session disappeared before it finished.");
+		continue;
+	}
+	const state = (session as Session & { state?: string }).state ?? "";
+	if (state === "blocked") {
+		blockedSince ||= Date.now();
+		if (Date.now() - blockedSince > 60_000) {
+			await run(["claude", "stop", session.id]);
+			fail(`The design session stopped to ask for something and was stopped (attach with \`claude attach ${session.id}\` on this computer to see it).`);
+		}
+	} else blockedSince = 0;
+	doneTwice = session.status !== "busy" && finished(await transcript(session.sessionId)) ? doneTwice + 1 : 0;
+	if (doneTwice >= 2) break;
+	if (Date.now() > deadline) {
+		await run(["claude", "stop", session.id]);
+		fail(`The design took over ${TIMEOUT_MS / 60_000} minutes and was stopped.`);
+	}
 }
 
 // 3. What it published: the artifact's URL and the canvas it wrote.
