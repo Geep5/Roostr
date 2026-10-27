@@ -17,6 +17,7 @@ import objectClearRepeat from "./tool-code/object_clear_repeat";
 import objectSetField from "./tool-code/object_set_field";
 import objectSetRepeat from "./tool-code/object_set_repeat";
 import objectSetType from "./tool-code/object_set_type";
+import propertyEdit from "./tool-code/property_edit";
 import { createRoostr, harnessCalls, type Roostr } from "./tool-sdk";
 
 /** These tools never ask the harness anything. */
@@ -53,7 +54,15 @@ const relation = (key: string, name: string, format: string, extra: Record<strin
 	mailbox: [],
 });
 
-const RELATIONS = [relation("done", "Done", "checkbox"), relation("dueDate", "Due date", "date"), relation("createdDate", "Created date", "date", { readOnly: { boolValue: true } }), relation("served_by", "Served by", "object")];
+const RELATIONS = [
+	relation("done", "Done", "checkbox"),
+	relation("dueDate", "Due date", "date"),
+	relation("createdDate", "Created date", "date", { readOnly: { boolValue: true } }),
+	relation("served_by", "Served by", "object"),
+	relation("main_games", "Main games", "object"),
+	relation("stage", "Stage", "status", { options: { valuesValue: { items: [{ mapValue: { entries: { id: { stringValue: "o1" }, text: { stringValue: "Lead" }, color: { stringValue: "grey" }, orderId: { stringValue: "000000" } } } }] } } }),
+	relation("bundled_one", "Bundled one", "shorttext", { bundled: { boolValue: true } }),
+];
 const MACHINES: ObjectJSON[] = [{ id: "computer-obj", typeKey: "machine", fields: { name: { stringValue: "Sharky's Mac Studio" }, machine_id: { stringValue: "820d3a06" } }, blocks: [], deleted: false, createdAt: 0, updatedAt: 0, mailbox: [] }];
 
 const typeRow = (key: string, name: string): ObjectJSON => ({
@@ -83,6 +92,8 @@ function daemon(task: ObjectJSON) {
 	globalThis.fetch = (async (input, init) => {
 		const url = new URL(input instanceof Request ? input.url : String(input));
 		if (url.pathname === `/api/objects/${task.id}`) return Response.json(task);
+		const rel = RELATIONS.find((r) => url.pathname === `/api/objects/${r.id}`);
+		if (rel) return Response.json(rel);
 		if (url.pathname === "/api/channels") return Response.json([{ id: "space" }]);
 		if (url.pathname === "/api/query") {
 			const body = JSON.parse(String(init?.body));
@@ -131,6 +142,7 @@ const task = (fields: Record<string, ValueJSON> = {}): ObjectJSON => ({
 
 const SHIPPED: Record<string, (input: Record<string, unknown>, roostr: Roostr) => Promise<string>> = {
 	object_add_property: objectAddProperty,
+	property_edit: propertyEdit,
 	object_clear_field: objectClearField,
 	object_clear_repeat: objectClearRepeat,
 	object_set_field: objectSetField,
@@ -298,4 +310,35 @@ test("object_set_type retypes to a space type and never into or out of infrastru
 	agentObj.typeKey = "agent";
 	daemon(agentObj);
 	expect((await call("object_set_type", { type: "task" }))).toStartWith("error: nothing changed");
+});
+
+test("property_edit limits an existing object property to types, renames, adds options; built-ins stay locked", async () => {
+	const mutations = daemon(task());
+	const sets = () => mutations.filter((m) => m.action === "set_field").map((m) => [m.object_id, m.key, m.value]);
+	// Limit by type key or name; [] lifts it.
+	expect(await call("property_edit", { key: "Main games", object_types: ["task", "Person"] })).toBe("Main games: links only to Task, Person. Everyone in this space sees the change.");
+	expect(sets()).toEqual([["rel-main_games", "object_types", { valuesValue: { items: [{ stringValue: "type-task" }, { stringValue: "type-person" }] } }]]);
+	expect(await call("property_edit", { key: "main_games", object_types: [] })).toContain("links to any type");
+	// Rename and emoji in one call.
+	expect(await call("property_edit", { key: "stage", name: "Deal stage", emoji: "📈" })).toContain("renamed to Deal stage; emoji 📈");
+	// Options: new ones appended after the existing, duplicates skipped.
+	expect(await call("property_edit", { key: "stage", add_options: ["lead", "Won"] })).toContain("options added: Won");
+	const options = mutations.at(-1)?.value as ValueJSON;
+	expect(options.valuesValue?.items.map((i) => i.mapValue?.entries.text?.stringValue)).toEqual(["Lead", "Won"]);
+	const before = mutations.length;
+	for (const [input, says] of [
+		[{ key: "nope", name: "x" }, 'no "nope" property'],
+		[{ key: "bundled_one", name: "x" }, "built into Roostr"],
+		[{ key: "createdDate", name: "x" }, "built into Roostr"],
+		[{ key: "done", object_types: ["task"] }, "only object properties"],
+		[{ key: "main_games", object_types: ["spaceship"] }, 'No type "spaceship"'],
+		[{ key: "done", add_options: ["x"] }, "only status, tag and select"],
+		[{ key: "done", name: "Due date" }, "already has a property named Due date"],
+		[{ key: "done" }, "Say what to change"],
+	] as const) {
+		const reply = await call("property_edit", input);
+		expect(reply).toStartWith("error: nothing changed");
+		expect(reply).toContain(says);
+	}
+	expect(mutations.length).toBe(before);
 });

@@ -26,6 +26,7 @@ import * as memory_upsert_milestone from "./tool-code/memory_upsert_milestone";
 import * as neighborhood from "./tool-code/neighborhood";
 import * as object_add_link from "./tool-code/object_add_link";
 import * as object_add_property from "./tool-code/object_add_property";
+import * as property_edit from "./tool-code/property_edit";
 import * as object_add_text from "./tool-code/object_add_text";
 import * as object_check from "./tool-code/object_check";
 import * as object_clear_field from "./tool-code/object_clear_field";
@@ -97,6 +98,7 @@ const FILES: ReadonlyArray<[string, { description: string; inputs: string }]> = 
 	["object_set_repeat", object_set_repeat],
 	["object_clear_repeat", object_clear_repeat],
 	["object_add_property", object_add_property],
+	["property_edit", property_edit],
 	["object_clear_field", object_clear_field],
 	["object_set_type", object_set_type],
 	["occurrence_complete", occurrence_complete],
