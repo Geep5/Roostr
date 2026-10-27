@@ -100,20 +100,29 @@ type ChatRow = { id: string; block: BlockJSON };
 
 /**
  * Whether `msgs[at]` answers a question guest `agentId` asked: it is another
- * agent's first post since the guest's latest message, and that message
- * @-mentioned the answering agent. Agents rarely tag the asker back, so
- * without this the asker never sees the answer it is waiting for.
+ * agent's first post since the guest's latest message, that message
+ * @-mentioned the answering agent, and nobody else tagged the answering
+ * agent in between - then it is answering them. Agents rarely tag the asker
+ * back, so without this the asker never sees the answer it is waiting for.
+ * A person asked "@Marco Dev Bot" for stats after an agent's message merely
+ * suggested asking Marco, and Marco's answer woke that agent.
  * `msgs` is chronological.
  */
 export async function answersGuestQuestion(msgs: ChatRow[], at: number, agentId: string): Promise<boolean> {
 	const author = msgs[at].block.content.custom?.meta?.["author"] ?? "";
 	if (!isAgentAuthor(author) || author === agentId) return false;
+	const answerer = await fetchObject(author).catch(() => null);
+	const answererName = answerer ? str(answerer.fields, "name") : "";
+	if (!answererName) return false;
 	for (let i = at - 1; i >= 0; i--) {
 		const meta = msgs[i].block.content.custom?.meta ?? {};
 		if (meta["author"] === author) return false; // it already answered
-		if (meta["author"] !== agentId) continue;
-		const answerer = await fetchObject(author).catch(() => null);
-		return !!answerer && mentions(meta["text"] ?? "", str(answerer.fields, "name"));
+		if (meta["author"] !== agentId) {
+			// Someone else asked the answerer since: the answer is theirs.
+			if (mentions(meta["text"] ?? "", answererName)) return false;
+			continue;
+		}
+		return mentions(meta["text"] ?? "", answererName);
 	}
 	return false;
 }

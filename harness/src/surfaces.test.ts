@@ -196,3 +196,24 @@ test("an agent's answer to a guest's question is that guest's to read, once", as
 	expect(await pendingMessages(untagged, humanRef(untagged.id), AGENT, "Support Helper")).toEqual([]);
 	fetchSpy.mockRestore();
 });
+
+test("an agent's answer to a person who asked it since is not the earlier guest's", async () => {
+	// Matcherino Space suggested "we could ask @Marco Dev Bot"; later a person
+	// asked @Marco Dev Bot for stats. Marco's answer is the person's - it woke
+	// Matcherino Space, which picked up an old task unasked.
+	const names: Record<string, string> = { [AGENT]: "Matcherino Space", [OTHER_AGENT]: "Marco Dev Bot" };
+	const fetchSpy = spyOn(api, "fetchObject").mockImplementation(async (id: string) => ({ id, typeKey: "agent", fields: { name: { stringValue: names[id] ?? "" } }, blocks: [] }) as unknown as ObjectJSON);
+	const obj = objectWith("person-asked", {
+		threadId: HUMAN_THREAD,
+		order: [
+			msg("p0", HUMAN, 100, "@Matcherino Space can you clone this?"),
+			msg("p1", AGENT, 200, "I can't. We could ask @Marco Dev Bot who has shell access."),
+			msg("p2", HUMAN, 300, "@Marco Dev Bot stats for October please"),
+			msg("p3", OTHER_AGENT, 400, "October: 10 tournaments."),
+		],
+	});
+	const chat = humanRef(obj.id);
+	await setMark(chat, "p1");
+	expect(await pendingMessages(obj, chat, AGENT, "Matcherino Space")).toEqual([]);
+	fetchSpy.mockRestore();
+});
