@@ -375,6 +375,24 @@ A base whose base64 needs more than `WIRE_MAX_CHUNKS` (64) parts - over
    1080, 5.
 5. Never walks a stream holding a base from event zero again; below the
    floor only the unbased sweep reads, and only events no held base covers.
+6. **A pass always ends.** Other devices compact while a pass runs, and
+   their NIP-09 deletions race it. An id a reconcile listed but the fetch
+   did not return is reconciled again: gone from the relay's list too, it
+   was deleted and counts as settled (only an id still listed and withheld
+   leaves the pass incomplete). After a pass that reconciled every stream
+   whole without a fault, `retire` with `changesBefore` (now minus the
+   group TTL, 300 s) also drops change groups whose newest part is older:
+   compaction folded the change and deleted its events, and no relay holds
+   the rest (a part that turns up later is unheld, so the next reconcile
+   fetches every part again). Base and checkpoint groups retire as before
+   (orphan 1080s of a superseded, deleted 31078 stay on relays). A pass's
+   progress counts events settled (fetched, or gone), not payloads
+   imported, so a split base or chunked change reaches 100%; the status
+   stops counting when the pass ends. History `REQ` pages go one at a time
+   per relay (RoostrRelay drops a connection whose outbound queue passes
+   ~10 MiB), and resolving orphans at the end of a pass releases the
+   import lock every 16 objects, so a live change to an open object lands
+   between them.
 
 Hosts: daemon + harness (`glonOdin`), and the Rust replica
 (`RoostrWebsite/gpui/crates/roostr-replica`, `src/sync/history.rs`) shared
@@ -675,6 +693,17 @@ HTTP (POSTs are service-only, like `/api/checkpoints`):
   `dry-run` logs how many untagged 1078s an epoch-1 base folded and how many
   1079s of every object holding a base; `1` (needs compaction on)
   deletes them, per object, until every relay accepted.
+- Unassembled chunk groups (`pendingChunkGroups`) are retired at the end of
+  a complete scan of every stream from their floor (or from the lowest
+  stream floor, below which nothing is re-walked) once their newest part is
+  older than the 5-minute chunk TTL: a change group only when the scan
+  delivered none of its parts (compaction deleted them all), a base or
+  checkpoint group even with orphan parts still served (its 31078/1079 part
+  0 was superseded and deleted). Without this every watchdog tick re-read
+  history from the floor (thousands of events a minute) and `replaySince`
+  never cleared. History pages go one at a time per relay, so concurrent
+  scans cannot overflow the relay's per-connection outbound budget (it
+  drops the connection, failing every scan and the head query on it).
 
 ### Files (`harness/src/blossom.ts`, `harness/src/files.ts`)
 

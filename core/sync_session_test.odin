@@ -390,6 +390,54 @@ sync_session_retire_drops_only_checkpoint_groups :: proc(t: ^testing.T) {
 	testing.expect(t, floor == 400)
 }
 
+// A scan that reconciled every stream whole (`changesBefore`) also retires
+// change groups whose parts are gone - compaction folded the change and
+// deleted its events - but keeps one whose newest part is still recent (being
+// published), and drops a restored obligation no part reopened.
+@(private = "file")
+sync_session_retire_drops_gone_change_groups :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	open_session(t)
+	writer := strings.repeat("ef", 32, context.temp_allocator)
+	gone := seal_events(t, wire_change(t, "gone-c", 70_000), "gone-c", true, writer, 400)
+	fresh := seal_events(t, wire_change(t, "fresh-c", 70_000), "fresh-c", true, writer, 900)
+	ingest(t, gone[0], 1_000)
+	ingest(t, fresh[0], 1_000)
+	retire := jobj()
+	retire["since"] = json.Integer(0)
+	retire["changesBefore"] = json.Integer(800)
+	r := call(t, "retire", retire)
+	groups, changed := json_field(r, "replayGroups")
+	testing.expect(t, changed && len(groups.(json.Array)) == 1, "the change group last seen at 400 is retired")
+	state := call(t, "state", jobj())
+	open_groups, _ := json_int(state, "groups")
+	floor, _ := json_int(state, "replayFloor")
+	testing.expectf(t, open_groups == 1 && floor == 900, "groups=%d floor=%d", open_groups, floor)
+	// The retired change's part, delivered again, reopens it: nothing is lost.
+	ingest(t, gone[1], 2_000)
+	state = call(t, "state", jobj())
+	open_groups, _ = json_int(state, "groups")
+	testing.expectf(t, open_groups == 2, "groups=%d", open_groups)
+	sync_session_close()
+
+	pairs := make([dynamic]json.Value, context.temp_allocator)
+	pair := make([dynamic]json.Value, context.temp_allocator)
+	append(&pair, json.String(`["x","",0,"0000000000000000"]`), json.Integer(42))
+	append(&pairs, json.Array(pair))
+	fields := jobj()
+	fields["pk"] = json.String(PK)
+	fields["conversationKey"] = json.String(CONV)
+	fields["cursor"] = json.Integer(7)
+	fields["replayGroups"] = json.Array(pairs)
+	call(t, "session", fields)
+	defer sync_session_close()
+	retire["since"] = json.Integer(0)
+	retire["changesBefore"] = json.Integer(100)
+	r = call(t, "retire", retire)
+	groups, changed = json_field(r, "replayGroups")
+	testing.expect(t, changed && len(groups.(json.Array)) == 0, "a restored change obligation no part reopened is retired")
+}
+
 
 @(private = "file")
 enqueue :: proc(t: ^testing.T, key, object_id, change_id, change: string, space_id := "", key_id: i64 = 0, has_events := false) -> json.Value {
@@ -578,6 +626,7 @@ sync_session_contract :: proc(t: ^testing.T) {
 	sync_session_faults_on_conflict_expiry_and_limits(t)
 	sync_session_restores_replay_groups_and_rejects_without_session(t)
 	sync_session_retire_drops_only_checkpoint_groups(t)
+	sync_session_retire_drops_gone_change_groups(t)
 	sync_session_outbox_order_backoff_and_sealing(t)
 	sync_session_outbox_wake_clears_backoff(t)
 	state_sync_base_wire_scenario(t)

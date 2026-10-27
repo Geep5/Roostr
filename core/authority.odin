@@ -396,13 +396,15 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		if sync_settle(json_str(payload, "chunkKey"), imported) do out["replayGroups"] = sync_replay_groups_json()
 		return json.Object(out), ""
 	case "retire":
-		// {since} → {replayGroups?}: a complete scan from `since` could not
-		// resolve these groups; drop the obligations instead of re-scanning forever.
+		// {since, changesBefore?} → {replayGroups?}: a complete scan from `since`
+		// could not resolve these groups; drop the obligations instead of
+		// re-scanning forever (change groups only with `changesBefore`, see sync_retire).
 		if !sync_session.active do return nil, "no sync session"
 		since, has_since := json_int(payload, "since")
 		if !has_since do return nil, "retire needs since"
+		changes_before, _ := json_int(payload, "changesBefore")
 		out := jobj()
-		if sync_retire(since) do out["replayGroups"] = sync_replay_groups_json()
+		if sync_retire(since, changes_before) do out["replayGroups"] = sync_replay_groups_json()
 		return json.Object(out), ""
 	case "state":
 		if !sync_session.active do return nil, "no sync session"

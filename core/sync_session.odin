@@ -48,7 +48,9 @@ Sync_Group :: struct {
 	parts:   map[int]string,
 	bytes:   int,
 	expires: i64,
+	// Oldest part (or the persisted obligation's) and newest part, created_at.
 	at:      i64,
+	newest:  i64,
 }
 
 Sync_Session :: struct {
@@ -343,6 +345,7 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 			sync_session.groups[key] = group
 		}
 		group.at = min(group.at, created_at)
+		group.newest = max(group.newest, created_at)
 		if _, has_part := group.parts[index]; !has_part {
 			if sync_session.group_bytes + len(part) > SYNC_MAX_GROUP_BYTES {
 				sync_fault(&r, group.at)
@@ -474,18 +477,33 @@ sync_key_is_checkpoint :: proc(key: string) -> bool {
 }
 
 // A history scan from `since` finished on every relay without completing
-// these CHECKPOINT or BASE groups: the publisher superseded that checkpoint
-// (or compacted past that base) and NIP-09 took its chunks, so the parts
-// will never arrive and the newer one already covers the object. Keeping the
-// obligation would re-scan forever. Change groups are never retired: a change
-// no relay returned is missing data, and the floor must stay until a
-// covering repair. Groups still being imported are the host's to settle.
-sync_retire :: proc(since: i64) -> (changed: bool) {
+// these groups. CHECKPOINT and BASE groups: the publisher superseded that
+// checkpoint (or compacted past that base) and NIP-09 took its chunks, so the
+// parts will never arrive and the newer one already covers the object.
+// Keeping the obligation would re-scan forever. Change groups too when
+// `changes_before` > 0 - the host says the scan reconciled every stream
+// whole, so the relays hold no other part of them: compaction folded the
+// change into a base and deleted its events (a part that turns up later is
+// unheld, so the next reconcile fetches every part again). Only a group
+// whose newest part predates `changes_before` (seconds) goes: one still being
+// published keeps its parts. Groups still being imported are the host's to
+// settle.
+sync_retire :: proc(since: i64, changes_before: i64 = 0) -> (changed: bool) {
+	retired := proc(key: string, newest, changes_before: i64) -> bool {
+		if key in sync_session.importing_groups do return false
+		return sync_key_is_checkpoint(key) || changes_before > 0 && newest < changes_before
+	}
 	obligations := make([dynamic]string, context.temp_allocator)
-	for key, at in sync_session.replay_groups do if at >= since && key not_in sync_session.importing_groups && sync_key_is_checkpoint(key) do append(&obligations, key)
+	for key, at in sync_session.replay_groups {
+		if at < since do continue
+		// An open group's newest part decides; an obligation alone has only its oldest.
+		newest := at
+		if group, open := sync_session.groups[key]; open do newest = max(at, group.newest)
+		if retired(key, newest, changes_before) do append(&obligations, key)
+	}
 	for key in obligations do delete_key(&sync_session.replay_groups, key)
 	partial := make([dynamic]string, context.temp_allocator)
-	for key, group in sync_session.groups do if group.at >= since && key not_in sync_session.importing_groups && sync_key_is_checkpoint(key) do append(&partial, key)
+	for key, group in sync_session.groups do if group.at >= since && retired(key, max(group.at, group.newest), changes_before) do append(&partial, key)
 	for key in partial do sync_group_destroy(key, sync_session.groups[key])
 	return len(obligations) > 0 || len(partial) > 0
 }

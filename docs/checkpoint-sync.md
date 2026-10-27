@@ -137,8 +137,11 @@ Every replica, every startup, regardless of what it held before:
 2. Live subscriptions carry both kinds from `cursor + 1`.
 3. At EOSE on every relay without faults, `sync {action:"retire"}` drops open
    **1079** chunk groups (a chunk dropped, or a publish that never finished):
-   a checkpoint is only a cache. Change groups are never retired: a missing
-   change is missing data and keeps the replay floor until a covering repair.
+   a checkpoint is only a cache. Change groups stay (a missing change is
+   missing data and keeps the replay floor until a covering repair) unless
+   the pass reconciled every stream whole and passes `changesBefore`: then
+   one whose newest part is older was compacted away (`state-sync.md`, "A
+   pass always ends").
 
 Under its own key the harness treats a received 1079 as *the relay's copy* of
 that object only when the daemon reports `held` (it stored these exact bytes,

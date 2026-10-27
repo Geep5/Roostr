@@ -684,8 +684,30 @@ const HTAG_BATCH = 100;
 // response budget; a 500-event page can exceed it during code/history import.
 const HISTORY_PAGE_SIZE = 128;
 
-/** Unlike querySync, a failed subscription is not a successful empty page. */
+/** Per relay, the history page in flight: one at a time. */
+const historyPageTurns = new Map<string, Promise<void>>();
+
+/**
+ * Unlike querySync, a failed subscription is not a successful empty page.
+ * One page at a time per relay: concurrent scans (catch-up, compaction's
+ * event lookups) each answered with megabytes of large events outgrow the
+ * relay's outbound budget for one connection, and it drops the connection -
+ * failing every scan and query in flight on it.
+ */
 async function relayHistoryPage(pool: SimplePool, relay: string, filter: Filter): Promise<Event[]> {
+	const previous = historyPageTurns.get(relay) ?? Promise.resolve();
+	const turn = Promise.withResolvers<void>();
+	historyPageTurns.set(relay, turn.promise);
+	await previous;
+	try {
+		return await fetchHistoryPage(pool, relay, filter);
+	} finally {
+		turn.resolve();
+		if (historyPageTurns.get(relay) === turn.promise) historyPageTurns.delete(relay);
+	}
+}
+
+async function fetchHistoryPage(pool: SimplePool, relay: string, filter: Filter): Promise<Event[]> {
 	const connection = await pool.ensureRelay(relay, { connectionTimeout: 15_000 });
 	return new Promise<Event[]>((resolve, reject) => {
 		const events: Event[] = [];
@@ -1064,7 +1086,9 @@ export async function startNostrSync(): Promise<void> {
 	const MAX_CHUNK_GROUPS = 128;
 	const MAX_CHUNK_BYTES = 16 * 1024 * 1024;
 	const CHUNK_TTL_MS = 5 * 60_000;
-	const chunkGroups = new Map<string, { total: number; parts: Map<number, string>; eventIds: string[]; bytes: number; expires: number; since: number; b?: string; anchorAt?: number }>();
+	const chunkGroups = new Map<string, { total: number; parts: Map<number, string>; eventIds: string[]; bytes: number; expires: number; since: number; newest: number; b?: string; anchorAt?: number }>();
+	/** Group key -> when (ms) a part of it last arrived: a scan that delivered none saw no part on any relay. */
+	const chunkPartSeenAt = new Map<string, number>();
 	let chunkBytes = 0;
 	function dropChunkGroup(key: string): void {
 		const group = chunkGroups.get(key);
@@ -1318,17 +1342,50 @@ export async function startNostrSync(): Promise<void> {
 		since: number;
 		faults: number;
 		generation: number;
+		startedMs: number;
 	}
 	function beginReplayScan(since: number): ReplayScan {
 		// Persist the in-flight range too: a crash must not advance past it.
 		retainReplaySince(since);
 		activeReplayScans++;
-		return { since, faults: replayFaultGeneration, generation: ++replayScanGeneration };
+		return { since, faults: replayFaultGeneration, generation: ++replayScanGeneration, startedMs: Date.now() };
+	}
+	/**
+	 * A complete scan of every stream from `since` left these groups unassembled,
+	 * and their parts will never arrive: compaction folded a change into a base
+	 * and deleted its events (no part came back at all), or superseded a base or
+	 * checkpoint whose part 0 is gone for good (an addressable 31078 replaced and
+	 * deleted) while orphan parts linger. Keeping them re-scans history from the
+	 * floor every minute, forever. A change with parts still on the relays stays
+	 * (missing data), and so does any group a writer may still be publishing.
+	 */
+	function retireChunkGroups(scan: ReplayScan): void {
+		const cutoff = Math.floor(Date.now() / 1000) - CHUNK_TTL_MS / 1000;
+		let retired = 0;
+		for (const [key, at] of Object.entries(state.pendingChunkGroups!)) {
+			// Older than the floor: bases cover it and nothing re-walks it.
+			if (Math.max(at, historyFloor) < scan.since) continue;
+			const group = chunkGroups.get(key);
+			if (group && group.parts.size === group.total) continue; // being imported
+			if (Math.max(at, group?.newest ?? at) >= cutoff) continue;
+			const touched = (chunkPartSeenAt.get(key) ?? 0) >= scan.startedMs;
+			// A key is `[kind, pubkey, spaceId, keyId, gid]`; only a base or checkpoint goes with parts still listed.
+			const kind = (JSON.parse(key) as unknown[])[0];
+			if (touched && kind !== BASE_KIND && kind !== CHECKPOINT_KIND) continue;
+			delete state.pendingChunkGroups![key];
+			dropChunkGroup(key);
+			chunkPartSeenAt.delete(key);
+			retired++;
+		}
+		if (retired === 0) return;
+		dirty = true;
+		console.log(`[sync] retired ${retired} chunk group(s) whose remaining parts no relay holds (compacted away)`);
 	}
 	function finishReplayScan(scan: ReplayScan, complete: boolean, allStreams: boolean): void {
 		activeReplayScans--;
 		if (!complete) recordReplayFault(scan.since);
 		expireChunkGroups();
+		if (complete && allStreams && scan.faults === replayFaultGeneration) retireChunkGroups(scan);
 		// A partial-space scan cannot retire the global floor. Neither can a
 		// scan overtaken by another scan, new faults, imports, or older gaps.
 		if (!complete || !allStreams || activeReplayScans > 0 || activeImports > 0 || chunkGroups.size > 0
@@ -1415,6 +1472,7 @@ export async function startNostrSync(): Promise<void> {
 				}
 				// Eviction/expiry never implies receipt: keep the durable replay floor.
 				retainReplaySince(event.created_at);
+				chunkPartSeenAt.set(groupKey, Date.now());
 				const pendingSince = state.pendingChunkGroups![groupKey];
 				if (pendingSince === undefined || event.created_at < pendingSince) {
 					state.pendingChunkGroups![groupKey] = event.created_at;
@@ -1432,10 +1490,11 @@ export async function startNostrSync(): Promise<void> {
 						recordReplayFault(event.created_at);
 						return;
 					}
-					group = { total, parts: new Map(), eventIds: [], bytes: 0, expires: Date.now() + CHUNK_TTL_MS, since: event.created_at };
+					group = { total, parts: new Map(), eventIds: [], bytes: 0, expires: Date.now() + CHUNK_TTL_MS, since: event.created_at, newest: event.created_at };
 					chunkGroups.set(groupKey, group);
 				}
 				group.since = Math.min(group.since, event.created_at);
+				group.newest = Math.max(group.newest, event.created_at);
 				if (!group.parts.has(index)) {
 					if (chunkBytes + part.length > MAX_CHUNK_BYTES) {
 						recordReplayFault(group.since);
@@ -1466,6 +1525,7 @@ export async function startNostrSync(): Promise<void> {
 					if (chunkGroups.get(groupKey) === group) {
 						completedChunkGroups.add(groupKey);
 						delete state.pendingChunkGroups![groupKey];
+						chunkPartSeenAt.delete(groupKey);
 						dirty = true;
 					}
 				} finally {

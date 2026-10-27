@@ -353,8 +353,8 @@ test("a store rejection is logged with its reason, once per event however often 
 	expect(new Set(lines).size).toBe(lines.length);
 });
 
-test("restart and empty complete history cannot discharge an unresolved group", async () => {
-	const complete = chunks();
+test("restart and empty complete history cannot discharge a group still being published", async () => {
+	const complete = chunks(Math.floor(Date.now() / 1000) - 10);
 	history = complete.slice(1);
 	await startNostrSync();
 	expect((await state()).replaySince).toBe(0);
@@ -368,15 +368,51 @@ test("restart and empty complete history cannot discharge an unresolved group", 
 	expect((await state()).replaySince).toBeUndefined();
 });
 
-test("expired byte buffers and empty complete history retain unresolved group identity", async () => {
-	history = chunks().slice(0, 1);
+test("expired byte buffers and empty complete history retain a group still being published", async () => {
+	const later = Date.now() + 10 * 60_000;
+	history = chunks(Math.floor(later / 1000) - 10).slice(0, 1);
 	await startNostrSync();
-	const clock = spyOn(Date, "now").mockReturnValue(Date.now() + 10 * 60_000);
+	const clock = spyOn(Date, "now").mockReturnValue(later);
 	restore.push(() => clock.mockRestore());
 	intervals.filter((timer) => timer.ms === 60_000)[0].callback();
 	history = [];
 	await watchdog();
 	expect((await state()).replaySince).toBe(0);
+});
+
+test("a change group whose parts compaction deleted is retired by the next complete scan, ending the repair scans", async () => {
+	history = chunks(10).slice(0, 1);
+	await startNostrSync();
+	expect((await state()).replaySince).toBe(0); // its other part is missing data while part 0 is served
+	history = []; // another device folded the change into a base and deleted its events
+	await watchdog();
+	expect(filters.at(-1)?.since).toBe(0);
+	expect((await state()).replaySince).toBeUndefined();
+	await watchdog();
+	expect(filters.at(-1)?.since).toBe(100);
+});
+
+test("orphan parts of a base whose 31078 was superseded and deleted are retired though the relay still serves them", async () => {
+	await startNostrSync();
+	const orphan = chunks(10, 1080)[1];
+	history = [orphan];
+	liveEvent(orphan);
+	expect((await state()).replaySince).toBe(orphan.created_at);
+	await watchdog();
+	expect(filters.at(-1)?.since).toBe(0);
+	expect((await state()).replaySince).toBeUndefined();
+	await watchdog();
+	expect(filters.at(-1)?.since).toBe(100);
+});
+
+test("a base group still being published is kept", async () => {
+	await startNostrSync();
+	const part = chunks(Math.floor(Date.now() / 1000) - 10, 1080)[1];
+	history = [part];
+	liveEvent(part);
+	await watchdog();
+	expect(filters.at(-1)?.since).toBe(0);
+	expect((await state()).replaySince).toBe(0); // the repair scan's floor stays
 });
 
 test("a new suffix-only group fetches its unseen prefix older than the observed replay floor", async () => {
