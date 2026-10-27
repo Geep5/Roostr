@@ -189,7 +189,7 @@ These are enforced by the harness for every agent; follow them in any prompt you
 ### Designs with Claude Design
 
 1. On the computer that will make them: Claude Code signed in to a claude.ai plan (`claude`, then `/login`, then `/design consent`), Google Chrome, and a trusted design folder (`~/projekt/3/roostr-design`, or `DESIGN_DIR`; run `claude` there once and accept the prompt).
-2. An agent served by that computer, with `shell_exec` in its Tools and a "Claude Design" Skill that runs `bun harness/scripts/claude-design.ts --space <space id> --brief "..."` (Roostr repo).
+2. An agent served by that computer, with `shell_exec` in its Tools and a "Claude Design" Skill that runs `bun harness/scripts/claude-design.ts --space <space id>` with the brief on standard input in a quoted heredoc (`<<'BRIEF'`), so the shell leaves `$` and quotes alone (Roostr repo).
 3. The script drafts the design with Claude Code's `/design` in a background session (`claude -p` cannot publish designs), then stores a PNG of each artboard as a File in the space and prints the claude.ai link. The agent links the Files on the object and posts the link.
 4. It uses the claude.ai plan's limits, not an API key.
 

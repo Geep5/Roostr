@@ -4,7 +4,9 @@
  * (a Claude Design canvas published on claude.ai), render each artboard to a
  * PNG and store the PNGs as File objects in a space.
  *
- *   bun harness/scripts/claude-design.ts --space <space id> --brief "<what to design>"
+ *   bun harness/scripts/claude-design.ts --space <space id> <<'BRIEF'
+ *   <what to design - $ and quotes are safe inside the quoted heredoc>
+ *   BRIEF
  *
  * Prints one JSON line: {"url": <claude.ai link>, "title", "files": [{"id", "name", "board"}]}
  * or {"error": "..."} with exit 1.
@@ -98,9 +100,10 @@ async function upload(bytes: Uint8Array, name: string, space: string): Promise<s
 }
 
 const space = arg("space");
-const brief = arg("brief").trim();
-if (!space || !brief) fail('Usage: claude-design.ts --space <space id> --brief "<what to design>"');
-
+// The brief on standard input, untouched: in a double-quoted --brief the
+// shell ate "$1" from "$1.3M", and the poster read "$[X].3M".
+const brief = (arg("brief") || (process.stdin.isTTY ? "" : await Bun.stdin.text())).trim();
+if (!space || !brief) fail("Usage: claude-design.ts --space <space id> <<'BRIEF'\n<what to design>\nBRIEF");
 const status = await run(["claude", "auth", "status"]);
 if (!/"loggedIn":\s*true/.test(status.out) || !/"authMethod":\s*"claude\.ai"/.test(status.out)) {
 	fail("Claude Code on this computer is not signed in to a claude.ai account: run `claude`, then /login, then /design consent.");
@@ -207,7 +210,21 @@ for (const board of canvas.order ?? Object.keys(canvas.boards ?? {})) {
 	const meta = canvas.boards?.[board];
 	if (!meta) continue;
 	const out = join(dir, `${board.replace(/\W+/g, "-")}.png`);
-	const shot = await run([browser, "--headless=new", "--hide-scrollbars", "--disable-gpu", `--window-size=${meta.w},${meta.h}`, `--screenshot=${out}`, `file://${join(dir, board)}`], dir);
+	// Claude Design fills an artboard's {{variables}} (accent colour, sliders)
+	// from their defaults in its data-props when it shows the page; render a
+	// copy with them filled, or those styles drop to the browser's defaults.
+	const html = await readFile(join(dir, board), "utf8");
+	const props = html.match(/data-props='([^']*)'/)?.[1];
+	let filled = html;
+	try {
+		const defs = props ? (JSON.parse(props) as Record<string, { default?: unknown }>) : {};
+		filled = html.replace(/\{\{(\w+)\}\}/g, (all, key: string) => (defs[key]?.default !== undefined ? String(defs[key].default) : all));
+	} catch {
+		// Props it can't read: render as written.
+	}
+	const page = join(dir, `.render-${board}`);
+	await Bun.write(page, filled);
+	const shot = await run([browser, "--headless=new", "--hide-scrollbars", "--disable-gpu", `--window-size=${meta.w},${meta.h}`, `--screenshot=${out}`, `file://${page}`], dir);
 	const png = Bun.file(out);
 	if (shot.code !== 0 || !(await png.exists())) fail(`Rendering ${board} failed: ${shot.err.trim().slice(0, 300)}`);
 	const title = `${canvas.title || "Design"} - ${meta.title || board}.png`;
