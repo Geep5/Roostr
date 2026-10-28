@@ -40,7 +40,7 @@ export const IMAGE_FORMAT = "jpeg";
  */
 export const ART_DIRECTOR_INSTRUCTIONS = [
 	"You are an art director. Write one image prompt for a WIDE website banner (a page cover, about 3:1, shown cropped behind the page's title) that fits the page described below.",
-	"House style: a real photograph, abstract and minimal. Suggest the page's subject obliquely - a close crop of a material, surface, texture, light or shadow, water, sky or architecture that echoes it - never a literal scene, characters, mascots or objects arranged to tell the story.",
+	"House style: a real photograph, abstract and minimal. Suggest the page's subject obliquely - either through nature (a landscape, weather, season, time of day, a plant, water, stone or sky whose mood or meaning echoes the page: growth for a launch, calm water for planning, a storm for a crisis) or a close crop of a material, surface, texture, light, shadow or architecture that echoes it - never a literal scene, characters, mascots or objects arranged to tell the story. Choose whichever conveys the page's context best.",
 	"Natural light, a quiet muted palette (one or two colours at most), lots of empty space, shallow depth of field or soft focus where it helps. It must look like an unretouched photo from a good camera: no illustration, painting, 3D render, glow, sparkles, fantasy or sci-fi, no HDR, no surreal compositions.",
 	"The image must contain no people, text, letters, numbers, logos, signatures or watermarks.",
 	"Be concrete: name the subject, the light, the palette, the lens or framing (wide landscape, calm space at the edges).",
@@ -53,7 +53,7 @@ export const ART_DIRECTOR_INSTRUCTIONS = [
  * prompts are painted without it.
  */
 export const COVER_STYLE =
-	"Style: a real, unretouched photograph - abstract, minimal, natural light, muted palette, generous negative space, fine film grain. Not an illustration, painting or 3D render; no glow, fantasy, surreal elements, people or text.";
+	"Style: a real, unretouched photograph - abstract or natural, minimal, natural light, muted palette, generous negative space, fine film grain. Not an illustration, painting or 3D render; no glow, fantasy, surreal elements, people or text.";
 
 /** How long one call may take: high-quality images take tens of seconds. */
 const TEXT_TIMEOUT_MS = 120_000;
