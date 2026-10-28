@@ -9,14 +9,14 @@
  * harness should do the work claims it (deletes it) and writes its progress
  * where every device sees it.
  *
- * - `cover_request` {at, action: "generate"}: the app's ask - the art
- *   director writes an idea from the page, then it is painted.
- * - `cover_generation` {at, action, status, machine, credential, prompt,
- *   error, needs_key}: the run in progress, which the app shows as a
- *   spinner - `writing` → `painting`. When the image is stored it becomes
- *   the page's `cover` and this field goes; when it fails it stays as
- *   `failed`, with OpenAI's own message, until the next ask or the person
- *   dismisses it.
+ * - `cover_request` {at, prompt}: the app's ask - the person's prompt is
+ *   painted as written; an empty one ("Choose for me") has the art director
+ *   write an idea from the page first, painted in the house style.
+ * - `cover_generation` {at, status, machine, credential, prompt, error,
+ *   needs_key}: the run in progress, which the app shows as a spinner -
+ *   (`writing` →) `painting`. When the image is stored it becomes the page's
+ *   `cover` and this field goes; when it fails it stays as `failed`, with
+ *   OpenAI's own message, until the next ask or the person dismisses it.
  *
  * The work runs on the computer serving the space's OpenAI credential (its
  * Served by): the harness holding the key. A key that is blank or refused
@@ -27,7 +27,7 @@ import { deleteField, fetchObject, mutate, queryAll, setField, str, type ObjectJ
 import { CREDENTIAL_TYPE, pinOf, republishCredential, spaceCredential } from "./credential-objects";
 import { credentialKeys, hideCredentialSecrets } from "./credentials";
 import { storeUpload } from "./files";
-import { noteKeyRefused, OpenAIError, OPENAI_SERVICE, paintCover, writeCoverPrompt } from "./openai";
+import { COVER_STYLE, noteKeyRefused, OpenAIError, OPENAI_SERVICE, paintCover, writeCoverPrompt } from "./openai";
 import { pageText } from "./prompts";
 import { machineId } from "./roster";
 
@@ -48,12 +48,10 @@ export const COVER_PROPERTIES: Array<{ key: string; name: string; format: string
 	{ key: COVER_Y_KEY, name: "Cover position", format: "number", emoji: "↕️", description: "Which band of the cover shows, from 0 (its top) to 1 (its bottom); 0.5 when empty." },
 ];
 
-export type CoverAction = "generate";
 export type CoverStatus = "writing" | "painting" | "failed";
 
 export interface CoverGeneration {
 	at: number;
-	action: CoverAction;
 	status: CoverStatus;
 	machine: string;
 	credential: string;
@@ -71,7 +69,6 @@ export function coverGeneration(fields: Record<string, ValueJSON>): CoverGenerat
 	const status = e["status"]?.stringValue ?? "";
 	return {
 		at: e["at"]?.intValue ?? 0,
-		action: "generate",
 		status: STATUSES.find((s) => s === status) ?? "failed",
 		machine: e["machine"]?.stringValue ?? "",
 		credential: e["credential"]?.stringValue ?? "",
@@ -84,7 +81,6 @@ export function coverGeneration(fields: Record<string, ValueJSON>): CoverGenerat
 function generationValue(g: CoverGeneration): ValueJSON {
 	const entries: Record<string, ValueJSON> = {
 		at: { intValue: g.at },
-		action: { stringValue: g.action },
 		status: { stringValue: g.status },
 		machine: { stringValue: g.machine },
 		credential: { stringValue: g.credential },
@@ -183,9 +179,10 @@ async function runCoverRequest(page: ObjectJSON, ask: Record<string, ValueJSON>)
 	const me = await machineId();
 	if (!cred || (await pinOf(cred.fields)) !== me) return;
 	const at = ask["at"]?.intValue ?? Date.now();
+	const asked = (ask["prompt"]?.stringValue ?? "").trim();
 	await deleteField(page.id, COVER_REQUEST_KEY);
 
-	const session: CoverGeneration = { at, action: "generate", status: "writing", machine: me, credential: cred.id, prompt: "", error: "", needsKey: false };
+	const session: CoverGeneration = { at, status: asked ? "painting" : "writing", machine: me, credential: cred.id, prompt: asked, error: "", needsKey: false };
 	const publish = (next: Partial<CoverGeneration>) => {
 		Object.assign(session, next);
 		return setField(page.id, COVER_GENERATION_KEY, generationValue(session));
@@ -199,10 +196,16 @@ async function runCoverRequest(page: ObjectJSON, ask: Record<string, ValueJSON>)
 		return;
 	}
 	try {
-		await publish({ status: "writing" });
-		const prompt = await writeCoverPrompt(key, await pageBrief(page));
+		// The person's words are painted as written; "Choose for me" has the art director write the idea, painted in the house style.
+		let prompt = asked;
+		let painted = asked;
+		if (!prompt) {
+			await publish({ status: "writing" });
+			prompt = await writeCoverPrompt(key, await pageBrief(page));
+			painted = `${prompt}\n\n${COVER_STYLE}`;
+		}
 		await publish({ status: "painting", prompt });
-		const bytes = await paintCover(key, prompt);
+		const bytes = await paintCover(key, painted);
 		// Dismissed while it painted: nothing to keep.
 		if (!(await stillAsked(page.id, at))) return;
 		const title = str(page.fields, "name") || "Untitled";

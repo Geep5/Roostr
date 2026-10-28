@@ -1,13 +1,15 @@
 /**
  * OpenAI, called with a space's OpenAI credential (service `openai`, its key
- * in `key_api_key`) by the computer that serves that credential. Two calls,
- * both for generated page covers (covers.ts):
+ * in `key_api_key`) by the computer that serves that credential, for
+ * generated page covers (covers.ts):
  *
- * - the art director: the Responses API (`POST /v1/responses`, model
- *   {@link ART_DIRECTOR_MODEL}) turns a page's visible content into one image
- *   prompt, following {@link ART_DIRECTOR_INSTRUCTIONS};
  * - the painter: the Images API (`POST /v1/images/generations`, model
- *   {@link IMAGE_MODEL}, high quality, {@link COVER_SIZE}) paints it.
+ *   {@link IMAGE_MODEL}, high quality, {@link COVER_SIZE}) paints a prompt
+ *   as given - the person's own words;
+ * - "Choose for me": first the art director, the Responses API (`POST
+ *   /v1/responses`, model {@link ART_DIRECTOR_MODEL}), turns a page's
+ *   visible content into one image prompt, following
+ *   {@link ART_DIRECTOR_INSTRUCTIONS}, painted in {@link COVER_STYLE}.
  *
  * A key OpenAI refuses (401/403) is remembered per credential and key, so
  * the credential's Error says so (credential-objects.ts) until the key
@@ -46,8 +48,9 @@ export const ART_DIRECTOR_INSTRUCTIONS = [
 ].join("\n");
 
 /**
- * Sent with every cover prompt to the image model: the house style holds
- * even when the art director's prompt drifts toward illustration.
+ * Added to the art director's prompt for the image model: the house style
+ * holds even when the idea drifts toward illustration. The person's own
+ * prompts are painted without it.
  */
 export const COVER_STYLE =
 	"Style: a real, unretouched photograph - abstract, minimal, natural light, muted palette, generous negative space, fine film grain. Not an illustration, painting or 3D render; no glow, fantasy, surreal elements, people or text.";
@@ -110,16 +113,11 @@ interface ResponsesBody {
 	output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string; refusal?: string }> }>;
 }
 
-/**
- * Step 1: the art director's image prompt for a page (`brief`, its visible
- * content). `earlier`: prompts it wrote before for this cover, which the
- * new one must differ from (New idea).
- */
-export async function writeCoverPrompt(key: string, brief: string, earlier: string[] = []): Promise<string> {
-	const input = earlier.length === 0 ? brief : `${brief}\n\nEarlier ideas for this cover - write a clearly different take in the same house style (another subject, crop or palette):\n${earlier.map((p) => `- ${p}`).join("\n")}`;
+/** "Choose for me": the art director's image prompt for a page (`brief`, its visible content). */
+export async function writeCoverPrompt(key: string, brief: string): Promise<string> {
 	const body = (await call(key, "/v1/responses", {
 		method: "POST",
-		body: { model: ART_DIRECTOR_MODEL, instructions: ART_DIRECTOR_INSTRUCTIONS, input, reasoning: { effort: "low" }, store: false },
+		body: { model: ART_DIRECTOR_MODEL, instructions: ART_DIRECTOR_INSTRUCTIONS, input: brief, reasoning: { effort: "low" }, store: false },
 		timeoutMs: TEXT_TIMEOUT_MS,
 	})) as ResponsesBody | null;
 	const parts = (body?.output ?? []).filter((o) => o.type === "message").flatMap((o) => o.content ?? []);
@@ -133,11 +131,11 @@ interface ImagesBody {
 	data?: Array<{ b64_json?: string }>;
 }
 
-/** Step 2: paint `prompt` as a cover; the JPEG's bytes. */
+/** Paint `prompt` as a cover, as given; the JPEG's bytes. */
 export async function paintCover(key: string, prompt: string): Promise<Uint8Array> {
 	const body = (await call(key, "/v1/images/generations", {
 		method: "POST",
-		body: { model: IMAGE_MODEL, prompt: `${prompt}\n\n${COVER_STYLE}`, n: 1, size: COVER_SIZE, quality: IMAGE_QUALITY, output_format: IMAGE_FORMAT },
+		body: { model: IMAGE_MODEL, prompt, n: 1, size: COVER_SIZE, quality: IMAGE_QUALITY, output_format: IMAGE_FORMAT },
 		timeoutMs: IMAGE_TIMEOUT_MS,
 	})) as ImagesBody | null;
 	const b64 = body?.data?.[0]?.b64_json;

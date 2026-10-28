@@ -1,8 +1,8 @@
 /**
  * Generated covers, end to end on one computer: a `cover_request` on a page
- * → the art director's prompt (from the page's visible content only) → the
- * image → an ordinary File in the page's space → the session on the page's
- * `cover_generation`. OpenAI is a fake HTTP server (Bun.serve) that checks
+ * → the person's prompt as written, or ("Choose for me") the art director's
+ * (from the page's visible content only) in the house style → the image →
+ * an ordinary File in the page's space → the page's cover. OpenAI is a fake HTTP server (Bun.serve) that checks
  * what it is sent; the store is a fake daemon answering the harness's HTTP
  * calls from an in-memory map.
  */
@@ -194,9 +194,9 @@ afterAll(() => {
 	openai.stop(true);
 });
 
-test("Generate writes an idea from the page, paints a high-quality wide image, stores it as a File and makes it the cover", async () => {
+test("Choose for me writes an idea from the page, paints a high-quality wide image, stores it as a File and makes it the cover", async () => {
 	world("sk-test-123");
-	const g = await ask({ at: { intValue: 1 }, action: sv("generate") });
+	const g = await ask({ at: { intValue: 1 } });
 
 	// Step 1: the Responses API, given only what the page shows.
 	const director = seen.filter((s) => s.path === "/v1/responses");
@@ -241,15 +241,24 @@ test("Generate writes an idea from the page, paints a high-quality wide image, s
 	expect(await hasBlob(file.fields.file_hash!.stringValue!)).toBe(true);
 
 	// Generating again replaces the cover with a new File.
-	await ask({ at: { intValue: 2 }, action: sv("generate") });
+	await ask({ at: { intValue: 2 }, prompt: sv("A red barn") });
 	const next = objects.get(PAGE)!.fields.cover?.linkValue?.targetId ?? "";
 	expect(next).not.toBe("");
 	expect(next).not.toBe(fileId);
 });
 
+test("the person's prompt is painted as written: no art director, no house style", async () => {
+	world("sk-test-123");
+	const g = await ask({ at: { intValue: 1 }, prompt: sv("  A misty pine forest at dawn  ") });
+	expect(seen.map((s) => s.path)).toEqual(["/v1/images/generations"]);
+	expect(seen[0]!.body).toEqual({ model: IMAGE_MODEL, prompt: "A misty pine forest at dawn", n: 1, size: "3072x1024", quality: "high", output_format: "jpeg" });
+	expect(g).toBeNull();
+	expect(objects.get(PAGE)!.fields.cover?.linkValue?.targetId).toBeDefined();
+});
+
 test("a blank key asks OpenAI nothing: the session and the credential's Error say to add one", async () => {
 	world("");
-	const g = await ask({ at: { intValue: 1 }, action: sv("generate") });
+	const g = await ask({ at: { intValue: 1 } });
 	expect(seen).toEqual([]);
 	expect(g).toMatchObject({ status: "failed", error: NEEDS_KEY, needsKey: true, credential: CRED });
 	expect(objects.get(PAGE)!.fields[COVER_REQUEST_KEY]).toBeUndefined();
@@ -260,7 +269,7 @@ test("a blank key asks OpenAI nothing: the session and the credential's Error sa
 
 test("a key OpenAI refuses fails the session with OpenAI's message and breaks the credential", async () => {
 	world("sk-bad");
-	const g = await ask({ at: { intValue: 1 }, action: sv("generate") });
+	const g = await ask({ at: { intValue: 1 } });
 	expect(g).toMatchObject({ status: "failed", needsKey: true, error: "Incorrect API key provided: sk-bad." });
 	const cred = objects.get(CRED)!.fields;
 	expect(cred.status?.stringValue).toBe("broken");
@@ -270,7 +279,7 @@ test("a key OpenAI refuses fails the session with OpenAI's message and breaks th
 test("a content refusal shows OpenAI's message on the session, and the key stays good", async () => {
 	world("sk-test-123");
 	onImage = async () => Response.json({ error: { message: "Your request was rejected by the safety system.", type: "image_generation_user_error", code: "moderation_blocked" } }, { status: 400 });
-	const g = await ask({ at: { intValue: 1 }, action: sv("generate"), prompt: sv("something refused") });
+	const g = await ask({ at: { intValue: 1 }, prompt: sv("something refused") });
 	expect(g).toMatchObject({ status: "failed", error: "Your request was rejected by the safety system.", needsKey: false });
 	expect(objects.get(PAGE)!.fields.cover).toBeUndefined();
 	expect(objects.get(CRED)!.fields.error).toBeUndefined();
@@ -283,14 +292,14 @@ test("a session closed while it painted keeps nothing", async () => {
 		delete objects.get(PAGE)!.fields[COVER_GENERATION_KEY];
 		return null;
 	};
-	await ask({ at: { intValue: 1 }, action: sv("generate") });
+	await ask({ at: { intValue: 1 } });
 	expect(objects.get(PAGE)!.fields[COVER_GENERATION_KEY]).toBeUndefined();
 	expect([...objects.values()].filter((o) => o.typeKey === "file")).toEqual([]);
 });
 
 test("only the computer serving the space's OpenAI credential takes the request", async () => {
 	world("sk-test-123", "other-machine");
-	objects.get(PAGE)!.fields[COVER_REQUEST_KEY] = { mapValue: { entries: { at: { intValue: 1 }, action: sv("generate") } } };
+	objects.get(PAGE)!.fields[COVER_REQUEST_KEY] = { mapValue: { entries: { at: { intValue: 1 } } } };
 	await takeCoverRequest(await fetchObject(PAGE));
 	expect(seen).toEqual([]);
 	expect(objects.get(PAGE)!.fields[COVER_REQUEST_KEY]).toBeDefined();
