@@ -168,6 +168,32 @@ export const CATALOG: CatalogEntry[] = [
 			"Write helpers: `+reply`, `+reply-all`, `+forward`, `+send` (they handle threading). Calendar and Drive follow the same shape: `gws calendar events list --params '{\"calendarId\":\"primary\"}'`, `gws drive files list --params '{\"pageSize\":10}'`.\n" +
 			"Read before you write: list/search first, and never send mail or modify events unless the task explicitly asks.",
 	},
+	{
+		key: "claude-design",
+		name: "Claude Design",
+		description: "Make designs (social posts, posters, landing pages, UI mockups) with Claude Design: publishes a canvas on claude.ai and keeps a PNG of each artboard on the object.",
+		// The harness itself links `roostr-design` (harness/bin) into
+		// ~/.local/bin at start; the install only brings Claude Code and Chrome.
+		installPrompt:
+			"Make Claude Code and Google Chrome ready on this Mac for Claude Design. " +
+			"If `command -v claude` fails, install Claude Code with its official installer: `curl -fsSL https://claude.ai/install.sh | bash`; otherwise run `claude update`. " +
+			"If Google Chrome is not in /Applications, install it with `brew install --cask google-chrome` when Homebrew is present; if that is not possible, stop and say a person must install Google Chrome. " +
+			"NEVER use sudo or anything that can prompt for a password. Do NOT sign Claude Code in or run /login: a person does that. " +
+			"Finish only when `roostr-design --check` exits 0; if `roostr-design` is not found, say the harness needs a restart to put it on PATH.",
+		uninstallPrompt:
+			"Claude Design needs nothing removed: Claude Code and Chrome are the person's own apps. Remove only the `roostr-design` link from ~/.local/bin if it is there, and finish.",
+		checkCmd: "roostr-design --check",
+		authCheckCmd: "roostr-design --auth-check",
+		authHint: "On this computer run `claude`, sign in with /login (a claude.ai Pro, Max, Team or Enterprise account), then run /design consent; then Re-check in Settings → Skills.",
+		skillBody:
+			"Use this when someone asks for a design: a social post, poster, flyer, landing page, UI mockup or screen flow, one-pager, ad, thumbnail. Claude Design (Claude Code's /design) drafts it as artboards on a canvas published on claude.ai; Roostr keeps a PNG of each artboard as a File.\n" +
+			"Make one with shell_exec (about a minute, up to 20; one at a time per computer, a second run waits):\n" +
+			"roostr-design --space <this space's id> <<'BRIEF'\n<the brief>\nBRIEF\n" +
+			"Always pass the brief in that quoted <<'BRIEF' block, never as a \"...\" argument: the shell would eat \"$1\" from \"$1.3M\". Write it like a designer's brief: what it is and its size (\"a 1080x1080 Instagram post\", \"a 1080x1350 poster\", \"a landing page hero at 1440 wide\"), the exact text to show, the audience, and the look (style, colors, mood). Use the real facts from the object - names, dates, numbers - never placeholders unless asked for a template.\n" +
+			"It prints one JSON line: `url` (the design on claude.ai - private to the computer's claude.ai account until shared there; people edit it in a desktop browser and can export PNG or PDF), `files` (one File object per artboard, `id` and `name`, already stored in the space), or `error` (what went wrong, in words).\n" +
+			"Then: put each File on the object with object_add_link, and reply with the claude.ai link and what you made. To change a design, run it again with a brief that says what to change, and replace the old File link on the object with the new one.\n" +
+			"When it fails, say so plainly and put it on the object's Error (object_flag_error): \"not signed in\" means a person must run `claude` on this computer, then /login and /design consent; a usage limit means the Claude plan's limit is reached until it resets. Never retry in a loop.",
+	},
 ];
 
 // -- Object-backed state ------------------------------------------

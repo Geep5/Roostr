@@ -2,22 +2,24 @@
 /**
  * Claude Design for Roostr agents: draft a design with Claude Code's `/design`
  * (a Claude Design canvas published on claude.ai), render each artboard to a
- * PNG and store the PNGs as File objects in a space.
+ * PNG and store the PNGs as File objects in a space. Run as `roostr-design`
+ * (harness/bin, linked into ~/.local/bin by the harness):
  *
- *   bun harness/scripts/claude-design.ts --space <space id> <<'BRIEF'
+ *   roostr-design --space <space id> <<'BRIEF'
  *   <what to design - $ and quotes are safe inside the quoted heredoc>
  *   BRIEF
  *
  * Prints one JSON line: {"url": <claude.ai link>, "title", "files": [{"id", "name", "board"}]}
- * or {"error": "..."} with exit 1.
+ * or {"error": "..."} with exit 1. `--check` and `--auth-check` are the
+ * "claude-design" capability's gates (harness/src/skillmgr.ts).
  *
  * Why a background session: `/design` publishes an artifact, and Claude Code
  * turns artifacts off in `claude -p` and the Agent SDK. A background session
  * (`claude --bg`) is a full session, signed in with the computer's claude.ai
- * account (`claude` then `/login`), and runs in DESIGN_DIR, which Claude
- * Code must trust (run `claude` there once and accept the prompt).
+ * account (`claude` then `/login`), working in DESIGN_DIR, which this script
+ * creates and records as trusted.
  */
-import { unlinkSync } from "node:fs";
+import { mkdirSync, unlinkSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -76,7 +78,7 @@ function parts(entry: Record<string, unknown>): Part[] {
 	return Array.isArray(message?.content) ? (message.content as Part[]) : [];
 }
 
-async function chrome(): Promise<string> {
+async function findChrome(): Promise<string | null> {
 	for (const path of ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium"]) {
 		if (await Bun.file(path).exists()) return path;
 	}
@@ -84,7 +86,11 @@ async function chrome(): Promise<string> {
 		const found = Bun.which(name);
 		if (found) return found;
 	}
-	fail("No Chrome on this computer to render the artboards (install Google Chrome).");
+	return null;
+}
+
+async function chrome(): Promise<string> {
+	return (await findChrome()) ?? fail("No Chrome on this computer to render the artboards (install Google Chrome).");
 }
 
 async function upload(bytes: Uint8Array, name: string, space: string): Promise<string> {
@@ -99,15 +105,62 @@ async function upload(bytes: Uint8Array, name: string, space: string): Promise<s
 	return body.id;
 }
 
+/** A background session publishes artifacts from this Claude Code version on. */
+const MIN_CLAUDE = [2, 1, 281];
+
+async function claudeVersion(): Promise<number[] | null> {
+	const found = await run(["claude", "--version"], homedir()).catch(() => null);
+	const m = found?.out.match(/(\d+)\.(\d+)\.(\d+)/);
+	return m ? m.slice(1).map(Number) : null;
+}
+
+const atLeast = (v: number[], min: number[]): boolean => {
+	for (let i = 0; i < min.length; i++) if ((v[i] ?? 0) !== min[i]) return (v[i] ?? 0) > min[i];
+	return true;
+};
+
+async function signedIn(): Promise<boolean> {
+	const status = await run(["claude", "auth", "status"], homedir());
+	return /"loggedIn":\s*true/.test(status.out) && /"authMethod":\s*"claude\.ai"/.test(status.out);
+}
+
+/**
+ * Claude Code asks before working in a folder it hasn't been told to trust,
+ * and a background session can't answer: the design folder is created and
+ * recorded as trusted here, the way accepting that prompt records it.
+ */
+async function trustDesignDir(): Promise<void> {
+	mkdirSync(DESIGN_DIR, { recursive: true });
+	const path = join(homedir(), ".claude.json");
+	const config = JSON.parse(await readFile(path, "utf8").catch(() => "{}")) as { projects?: Record<string, { hasTrustDialogAccepted?: boolean }> };
+	config.projects ??= {};
+	if (config.projects[DESIGN_DIR]?.hasTrustDialogAccepted) return;
+	config.projects[DESIGN_DIR] = { ...config.projects[DESIGN_DIR], hasTrustDialogAccepted: true };
+	await Bun.write(path, JSON.stringify(config, null, 2));
+}
+
+// Roostr's capability gates (harness/src/skillmgr.ts, "claude-design").
+if (process.argv.includes("--check")) {
+	const v = await claudeVersion();
+	if (!v) fail("Claude Code is not installed (https://claude.ai/install.sh).");
+	if (!atLeast(v, MIN_CLAUDE)) fail(`Claude Code ${v.join(".")} is too old: ${MIN_CLAUDE.join(".")} or later publishes designs (claude update).`);
+	if (!(await findChrome())) fail("Google Chrome is not installed: it renders the artboards.");
+	console.log(JSON.stringify({ ok: true, claude: v.join(".") }));
+	process.exit(0);
+}
+if (process.argv.includes("--auth-check")) {
+	if (!(await signedIn())) fail("Claude Code is not signed in to a claude.ai account.");
+	console.log(JSON.stringify({ ok: true }));
+	process.exit(0);
+}
+
 const space = arg("space");
 // The brief on standard input, untouched: in a double-quoted --brief the
 // shell ate "$1" from "$1.3M", and the poster read "$[X].3M".
 const brief = (arg("brief") || (process.stdin.isTTY ? "" : await Bun.stdin.text())).trim();
-if (!space || !brief) fail("Usage: claude-design.ts --space <space id> <<'BRIEF'\n<what to design>\nBRIEF");
-const status = await run(["claude", "auth", "status"]);
-if (!/"loggedIn":\s*true/.test(status.out) || !/"authMethod":\s*"claude\.ai"/.test(status.out)) {
-	fail("Claude Code on this computer is not signed in to a claude.ai account: run `claude`, then /login, then /design consent.");
-}
+if (!space || !brief) fail("Usage: roostr-design --space <space id> <<'BRIEF'\n<what to design>\nBRIEF");
+if (!(await signedIn())) fail("Claude Code on this computer is not signed in to a claude.ai account: run `claude`, then /login, then /design consent.");
+await trustDesignDir();
 
 // One design at a time on a computer: two background sessions started
 // together left the second with its prompt half-typed and blocked.

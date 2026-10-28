@@ -1,0 +1,8 @@
+#!/bin/sh
+# Claude Design for Roostr agents: harness/scripts/claude-design.ts.
+# Usage: roostr-design --space <space id> <<'BRIEF' ... BRIEF
+#        roostr-design --check | --auth-check
+# Shipped with the harness (harness/bin/roostr-design) and linked into
+# ~/.local/bin, so a pull updates it.
+here=$(dirname "$(readlink -f "$0")")
+exec bun "$here/../scripts/claude-design.ts" "$@"

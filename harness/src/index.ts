@@ -19,7 +19,7 @@ import type { ObjectJSON, ValueJSON } from "./api";
 import { publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { migrateLoginInstalls, refreshCredentials, spaceCredential, CREDENTIAL_TYPE } from "./credential-objects";
-import { installGwsAs } from "./google-credentials";
+import { installShippedCommand } from "./shipped-commands";
 import { fillCredential, seedCredentials } from "./credential-seeds";
 import { ANTHROPIC_SERVICE, seedSpaceDefaults } from "./space-defaults";
 import { takeCoverRequest, takePendingCoverRequests } from "./covers";
@@ -307,7 +307,8 @@ async function serve(): Promise<void> {
 	const inboxOwner = `${await machineId()}:${crypto.randomUUID()}`;
 	setCapabilityRequestOwner(inboxOwner);
 	await publishMachine(); // register this machine before serving resolves against the roster
-	installGwsAs();
+	installShippedCommand("gws-as");
+	installShippedCommand("roostr-design");
 	// Spaces the background seeding below covers: a channel event meanwhile must not seed them a second time.
 	for (const s of await queryAll({ type: "channel" })) spacesSeeded.add(s.id);
 	const agents = await servedAgents();

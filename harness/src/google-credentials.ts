@@ -22,7 +22,7 @@
  *    that file (harness/bin/gws-as) - so the credential is the permission,
  *    as for every other login, and the computer needs no local sign-in.
  */
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { API, apiFetch, createObject, queryAll, setField, str, sv, type QueryRow, type ValueJSON } from "./api";
@@ -205,30 +205,4 @@ export async function syncGoogleCredentials(): Promise<void> {
 	const imported = await importLocalGoogleAccounts(creds);
 	if (imported.length > 0) console.log(`[google] stored sign-ins on Roostr for ${imported.join(", ")}`);
 	await materializeGoogleCredentials(imported.length > 0 ? await queryAll({ type: "credential" }) : creds);
-}
-
-
-const OLD_WRAPPER_MARK = "Run gws against one explicitly selected Google account.";
-
-/**
- * Put the harness's `gws-as` on this computer's PATH (~/.local/bin, where
- * the first one lived), as a link so a pull updates it. A file there that
- * isn't a gws-as we shipped is someone's own and is left alone.
- */
-export function installGwsAs(): void {
-	const shipped = join(import.meta.dir, "..", "bin", "gws-as");
-	const target = join(homedir(), ".local", "bin", "gws-as");
-	try {
-		if (existsSync(target)) {
-			const current = readFileSync(target, "utf8");
-			if (current === readFileSync(shipped, "utf8")) return;
-			if (!current.includes(OLD_WRAPPER_MARK)) return;
-			rmSync(target);
-		}
-		mkdirSync(join(homedir(), ".local", "bin"), { recursive: true });
-		symlinkSync(shipped, target);
-		console.log(`[google] gws-as → ${shipped}`);
-	} catch (error) {
-		console.error("[google] could not install gws-as:", error instanceof Error ? error.message : error);
-	}
 }

@@ -188,9 +188,9 @@ These are enforced by the harness for every agent; follow them in any prompt you
 
 ### Designs with Claude Design
 
-1. On the computer that will make them: Claude Code signed in to a claude.ai plan (`claude`, then `/login`, then `/design consent`), Google Chrome, and a trusted design folder (`~/projekt/3/roostr-design`, or `DESIGN_DIR`; run `claude` there once and accept the prompt).
-2. An agent served by that computer, with `shell_exec` in its Tools and a "Claude Design" Skill that runs `bun harness/scripts/claude-design.ts --space <space id>` with the brief on standard input in a quoted heredoc (`<<'BRIEF'`), so the shell leaves `$` and quotes alone (Roostr repo).
-3. The script drafts the design with Claude Code's `/design` in a background session (`claude -p` cannot publish designs), then stores a PNG of each artboard as a File in the space and prints the claude.ai link. The agent links the Files on the object and posts the link.
+1. Every space has the built-in **Claude Design** Skill (like Headless Chrome). Switch it on for the computer in Settings → Skills: it needs Claude Code 2.1.281 or later and Google Chrome there (the switch installs them), and a person signs Claude Code in to a claude.ai plan on that computer (`claude`, then `/login`, then `/design consent`) - until then the capability says it needs sign-in.
+2. Give the Skill and `shell_exec` to an agent served by that computer. The agent runs `roostr-design --space <space id>` (shipped in the Roostr repo's `harness/bin`, put on PATH by the harness) with the brief on standard input in a quoted heredoc (`<<'BRIEF'`), so the shell leaves `$` and quotes alone.
+3. `roostr-design` drafts the design with Claude Code's `/design` in a background session (`claude -p` cannot publish designs), in a design folder it creates and trusts (`~/projekt/3/roostr-design`, or `DESIGN_DIR`), then stores a PNG of each artboard as a File in the space and prints the claude.ai link. The agent links the Files on the object and posts the link.
 4. It uses the claude.ai plan's limits, not an API key.
 
 ### Keep a computer running Roostr
