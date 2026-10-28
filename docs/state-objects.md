@@ -115,6 +115,26 @@ message Record {
   (`gone`), so an older copy arriving later cannot bring it back.
 - **Deleting the object** stamps `deleted`; restoring stamps it again.
 
+### What the history audit requires (phase 1, 2026-10-28)
+
+Nothing user-facing reads edit history: chat order comes from the block
+tree, message ids are fixed at creation, conversation compaction is a view
+over kept blocks, and undo is local. Where today's replay does more than
+"newer wins", the record keeps one entry per thing:
+
+- **`updated_at` / `created_at`** = the newest / oldest stamp in the record.
+- **Conversation participants**: one entry per participant
+  (`participant:<id>`), not one list - concurrent joins both survive.
+- **Directory counters** stay one entry per device (`count:<type>:<device>`),
+  so two devices never overwrite each other's count.
+- **Block and message ids** stay fixed at creation; adding the same id twice
+  is the same entry.
+- **Author of a change** becomes the stamp's device; the signer check
+  (`src/shared_authority.odin`) moves from changes to patches.
+- The engine exists twice - Odin (`core/`) and Rust
+  (`RoostrWebsite/gpui/crates/roostr-engine`, used by the web and iPhone
+  replicas); both get `Record` and the merge, with shared test vectors.
+
 ### Device table
 
 Each space keeps a small list of device ids (in its directory object,
@@ -297,7 +317,9 @@ Per stream, in one direction, with no flag day for single-user spaces:
 | `Object_State` built by replay | `Object_State` = a view of the record (unchanged API for queries) |
 | Store keeps changes per object | Store keeps one record per object plus the journal |
 
-Queries, the JSON API and the app's object model don't change shape.
+Queries, the JSON API and the app's object model don't change shape. The
+same change lands in the Rust engine (`roostr-engine`: `replay.rs`,
+`codec.rs`), checked against the Odin one with shared test vectors.
 
 ## Estimates
 
