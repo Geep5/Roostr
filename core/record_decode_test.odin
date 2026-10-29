@@ -1,3 +1,4 @@
+#+build !js
 package core
 
 // record_decode / patch_decode invert the canonical encodings: every record

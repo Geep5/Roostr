@@ -198,6 +198,32 @@ record_vectors_conformance :: proc(t: ^testing.T) {
 		}
 		if vectors_writing() do vectors_save(t, "conversion.json", root)
 	}
+
+	// participants.json: conversion splits a discussion's participants into
+	// entries ({conversion: [changes, devices]}, through the ABI); the view
+	// joins them back and hides them ({view: [record]}, lossless state).
+	if root, ok := vectors_parse(t, #load("testdata/record_vectors/participants.json"), "participants.json"); ok {
+		for item in json_array(root, "conversion") {
+			name := json_str(item, "name")
+			payload := jobj()
+			payload["action"] = json.String("from_changes")
+			payload["changes"], _ = json_field(item, "changes")
+			payload["devices"], _ = json_field(item, "devices")
+			result, err := dispatch("record", json.Object(payload))
+			testing.expectf(t, err == "", "%s: %s", name, err)
+			if err != "" do continue
+			vectors_check(t, item, result, name)
+		}
+		for item in json_array(root, "view") {
+			name := json_str(item, "name")
+			rv, _ := json_field(item, "record")
+			r, rok := record_from_json(rv)
+			testing.expect(t, rok, name)
+			state := record_view(r)
+			vectors_check(t, item, record_state_to_json(&state), name)
+		}
+		if vectors_writing() do vectors_save(t, "participants.json", root)
+	}
 }
 
 // ── Merge laws ───────────────────────────────────────────────────────
@@ -504,7 +530,7 @@ record_view_equals_replay :: proc(t: ^testing.T) {
 	testing.expect(t, checked >= 10)
 }
 
-/** The same equality for the hand-written conversion vectors and for replays seeded by a checkpoint. */
+/** The same equality for the hand-written conversion vectors (participants.json's split ones included) and for replays seeded by a checkpoint. */
 @(test)
 record_view_equals_replay_conversion_and_checkpoints :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
@@ -513,11 +539,15 @@ record_view_equals_replay_conversion_and_checkpoints :: proc(t: ^testing.T) {
 	devices["fixture"] = 2
 	devices["alice"] = 3
 	devices["bob"] = 4
-	sources := [][]byte{#load("replay_fixtures.json"), #load("testdata/record_vectors/conversion.json")}
+	participants, _ := json.parse(#load("testdata/record_vectors/participants.json"), parse_integers = true)
+	conversions, _ := json.parse(#load("testdata/record_vectors/conversion.json"), parse_integers = true)
+	fixtures, _ := json.parse(#load("replay_fixtures.json"), parse_integers = true)
+	sources := []json.Array{fixtures.(json.Array), conversions.(json.Array), json_array(participants, "conversion")}
 	seeded := 0
-	for source in sources {
-		root, _ := json.parse(source, parse_integers = true)
-		for fixture in root.(json.Array) {
+	for source, source_index in sources {
+		// participants.json: the discussion bytes too (the API form hides custom data).
+		lossless := source_index == 2
+		for fixture in source {
 			name := json_str(fixture, "name")
 			items := json_array(fixture, "changes")
 			if len(items) == 0 do continue
@@ -527,7 +557,7 @@ record_view_equals_replay_conversion_and_checkpoints :: proc(t: ^testing.T) {
 				changes[i], _ = change_from_json(item)
 				legacy_snapshot ||= changes[i].has_snapshot
 			}
-			check :: proc(t: ^testing.T, name: string, changes: []Change, cp: ^Checkpoint, devices: map[string]u32) {
+			check :: proc(t: ^testing.T, name: string, changes: []Change, cp: ^Checkpoint, devices: map[string]u32, lossless: bool) {
 				replayed, ok := compute_state(changes, checkpoint = cp)
 				testing.expect(t, ok, name)
 				state, writers, _ := record_writers_replay(changes, cp)
@@ -538,8 +568,12 @@ record_view_equals_replay_conversion_and_checkpoints :: proc(t: ^testing.T) {
 				got := string(marshal(object_to_json_value(&view)))
 				want := string(marshal(object_to_json_value(&replayed)))
 				testing.expectf(t, got == want, "%s\n got: %s\nwant: %s", name, got, want)
+				if !lossless do return
+				lossless_got := string(marshal(record_state_to_json(&view)))
+				lossless_want := string(marshal(record_state_to_json(&replayed)))
+				testing.expectf(t, lossless_got == lossless_want, "%s (lossless)\n got: %s\nwant: %s", name, lossless_got, lossless_want)
 			}
-			check(t, name, changes, nil, devices)
+			check(t, name, changes, nil, devices, lossless)
 			// Seeded: a checkpoint of the first change, then the rest.
 			if legacy_snapshot || len(changes) < 2 do continue
 			sorted := topo_sort(changes)
@@ -549,7 +583,7 @@ record_view_equals_replay_conversion_and_checkpoints :: proc(t: ^testing.T) {
 			cp := checkpoint_build(&partial, prefix, 1)
 			tail := make([dynamic]Change)
 			for c in sorted[1:] do append(&tail, c^)
-			check(t, name, tail[:], &cp, devices)
+			check(t, name, tail[:], &cp, devices, lossless)
 			seeded += 1
 		}
 	}

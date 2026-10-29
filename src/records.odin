@@ -31,9 +31,6 @@ import "core:mem/virtual"
 import "../core"
 
 RECORDS_CONVERTED_MARKER :: ".converted"
-/** Conversation participants: one field entry per participant, `participant:<thread block>:<participant>` = Int list index. */
-RECORD_PARTICIPANT_PREFIX :: "participant:"
-DISCUSSION_CONTENT :: "discussion"
 
 /** Record-mode state beside g_store; guarded by g_store.mu. */
 Records_State :: struct {
@@ -138,86 +135,6 @@ hlc_observe_record :: proc(r: core.Record) {
 	for list in ([][dynamic]core.Record_Entry{r.fields, r.blocks, r.messages}) do for e in list do see(e)
 }
 
-// ── Participants: one entry each ────────────────────────────────────
-
-participant_prefix :: proc(block_id: string, allocator := context.temp_allocator) -> string {
-	return strings.concatenate({RECORD_PARTICIPANT_PREFIX, block_id, ":"}, allocator)
-}
-
-/**
- * A discussion root's content without its participants, and the
- * participants in order. ok = false (content unchanged) when it is not a
- * conversation, or one whose bytes a split and join would not reproduce
- * exactly (non-canonical encoding, a participant listed twice).
- */
-participants_split :: proc(content: core.Block_Content) -> (stripped: core.Block_Content, parts: []string, ok: bool) {
-	stripped = content
-	if content.kind != .Custom || content.custom.content_type != DISCUSSION_CONTENT do return
-	conv, dok := core.decode_conversation(content.custom.data, context.temp_allocator)
-	if !dok || string(core.encode_conversation(conv, context.temp_allocator)) != string(content.custom.data) do return
-	seen := make(map[string]bool, allocator = context.temp_allocator)
-	for p in conv.participants {
-		if p in seen do return
-		seen[p] = true
-	}
-	parts = conv.participants[:]
-	conv.participants = make([dynamic]string, context.temp_allocator)
-	stripped.custom.data = core.encode_conversation(conv, context.temp_allocator)
-	ok = true
-	return
-}
-
-/** A converted record in stored form: every splittable discussion's participants as their own entries (the block's stamp). */
-records_split_participants :: proc(r: ^core.Record, allocator := context.allocator) {
-	for &e in r.blocks {
-		if e.gone || e.kind != .Block do continue
-		stripped, parts, ok := participants_split(e.body.content)
-		if !ok || len(parts) == 0 do continue
-		e.body.content = stripped
-		e.body.content.custom.data = slice.clone(stripped.custom.data, allocator)
-		prefix := participant_prefix(e.key)
-		for p, i in parts {
-			key := strings.concatenate({prefix, p}, allocator)
-			append(&r.fields, core.Record_Entry{key = key, stamp = e.stamp, kind = .Value, value = core.Value{kind = .Int, i = i64(i)}})
-		}
-	}
-}
-
-/** The record as today's object: core.record_view, participants folded back into their discussions and hidden as fields. */
-records_view :: proc(r: core.Record, allocator := context.allocator) -> core.Object_State {
-	s := core.record_view(r, allocator)
-	has := false
-	for f in s.fields do if strings.has_prefix(f.key, RECORD_PARTICIPANT_PREFIX) {has = true; break}
-	if !has do return s
-	Part :: struct {
-		id:    string,
-		index: i64,
-	}
-	for &b in s.blocks {
-		if b.content.kind != .Custom || b.content.custom.content_type != DISCUSSION_CONTENT do continue
-		prefix := participant_prefix(b.id)
-		parts := make([dynamic]Part, context.temp_allocator)
-		for f in s.fields {
-			if strings.has_prefix(f.key, prefix) && f.value.kind == .Int do append(&parts, Part{f.key[len(prefix):], f.value.i})
-		}
-		if len(parts) == 0 do continue
-		conv, ok := core.decode_conversation(b.content.custom.data, context.temp_allocator)
-		if !ok do continue
-		slice.sort_by(parts[:], proc(x, y: Part) -> bool {return x.index != y.index ? x.index < y.index : x.id < y.id})
-		conv.participants = make([dynamic]string, context.temp_allocator)
-		for p in parts do append(&conv.participants, p.id)
-		b.content.custom.data = core.encode_conversation(conv, allocator)
-	}
-	kept := 0
-	for f in s.fields {
-		if strings.has_prefix(f.key, RECORD_PARTICIPANT_PREFIX) do continue
-		s.fields[kept] = f
-		kept += 1
-	}
-	resize(&s.fields, kept)
-	return s
-}
-
 // ── Patches from changes ────────────────────────────────────────────
 
 @(private = "file")
@@ -296,7 +213,7 @@ records_patch_for_change :: proc(r: ^core.Record, c: ^core.Change, stamp: core.S
 	seed_ptr: ^core.Snapshot
 	max_ts: i64
 	if r != nil {
-		s0 := records_view(base)
+		s0 := core.record_view(base)
 		seed = core.Snapshot{id = s0.id, type_key = s0.type_key, fields = s0.fields, blocks = s0.blocks, deleted = s0.deleted, created_at = s0.created_at, updated_at = s0.updated_at}
 		seed_ptr = &seed
 		max_ts = s0.updated_at
@@ -329,7 +246,7 @@ records_patch_for_change :: proc(r: ^core.Record, c: ^core.Change, stamp: core.S
 	for k in new_fields do keys[k] = true
 	for k, e in old_fields do if !e.gone do keys[k] = true
 	for key in keys {
-		if strings.has_prefix(key, RECORD_PARTICIPANT_PREFIX) do continue
+		if strings.has_prefix(key, core.RECORD_PARTICIPANT_PREFIX) do continue
 		old, had := old_fields[key]
 		old_live := had && !old.gone
 		touched := wrote(w.fields, key)
@@ -389,7 +306,7 @@ records_patch_for_change :: proc(r: ^core.Record, c: ^core.Change, stamp: core.S
 	plans := make(map[string]Plan)
 	for id in order {
 		b := exists[id]
-		content, parts, split := participants_split(b.content)
+		content, parts, split := core.record_participants_split(b.content)
 		kind: core.Entry_Kind = core.record_block_is_message(b.content) ? .Message : .Block
 		e := core.Record_Entry{key = id, stamp = stamp, kind = kind}
 		e.body = core.Entry_Body{parent = parent[id], content = content, fields = b.fields, align = b.align, background_color = b.background_color}
@@ -447,8 +364,8 @@ records_patch_for_change :: proc(r: ^core.Record, c: ^core.Change, stamp: core.S
 			}
 		}
 		// Participants: desired list against the live entries for this discussion.
-		if pl.entry.body.content.kind != .Custom || pl.entry.body.content.custom.content_type != DISCUSSION_CONTENT do continue
-		prefix := participant_prefix(id)
+		if pl.entry.body.content.kind != .Custom || pl.entry.body.content.custom.content_type != core.RECORD_DISCUSSION_CONTENT do continue
+		prefix := core.record_participant_prefix(id)
 		held := make(map[string]i64)
 		for e in base.fields {
 			if !e.gone && strings.has_prefix(e.key, prefix) && e.value.kind == .Int do held[e.key[len(prefix):]] = e.value.i
@@ -530,7 +447,7 @@ records_load_one :: proc(object_id: string, alloc := context.allocator) {
 	}
 	hlc_observe_record(r)
 	sp := new(core.Object_State, alloc)
-	sp^ = records_view(r, alloc)
+	sp^ = core.record_view(r, alloc)
 	g_store.records[r.object_id] = r
 	g_store.states[r.object_id] = sp
 }
@@ -672,7 +589,6 @@ records_convert_all :: proc() {
 				fmt.eprintfln("[records] %s not converted: %s", id, err)
 				append(&failed, json.String(strings.clone(id, outer_temp)))
 			case:
-				records_split_participants(&r, context.temp_allocator)
 				hlc_observe_record(r)
 				if record_write(r) {
 					converted += 1

@@ -1,11 +1,11 @@
 package core
 
 // Readers for the canonical Record and Patch protobufs (record_encode,
-// patch_encode): a store that keeps records on disk (src/records.odin) reads
-// them back. Strings and bytes point into `data`, so it must outlive the
-// result. Unknown fields (and known numbers with an unexpected wire type)
-// are skipped; a truncated message fails the decode. Odin only for now: the
-// Rust engine has no reader yet (it does not store records).
+// patch_encode): a store that keeps records on disk (src/records.odin) and
+// packs (pack.odin) read them back. Strings and bytes point into `data`, so
+// it must outlive the result. Unknown fields (and known numbers with an
+// unexpected wire type) are skipped; a truncated message fails the decode.
+// The Rust engine's reader is roostr-engine src/record_decode.rs.
 
 @(private = "file")
 decode_value_map :: proc(data: []byte, allocator := context.allocator) -> ([dynamic]Value_Entry, bool) {

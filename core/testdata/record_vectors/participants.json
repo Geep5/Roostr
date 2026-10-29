@@ -1,0 +1,1089 @@
+{
+ "conversion": [
+  {
+   "changes": [
+    {
+     "author": "alice",
+     "id": "0101010101010101010101010101010101010101010101010101010101010101",
+     "objectId": "conv-participants",
+     "ops": [
+      {
+       "objectCreate": {
+        "typeKey": "task"
+       }
+      },
+      {
+       "blockAdd": {
+        "block": {
+         "childrenIds": [
+
+         ],
+         "content": {
+          "custom": {
+           "contentType": "discussion",
+           "data": "",
+           "meta": {
+
+           }
+          }
+         },
+         "id": "__discussion__"
+        }
+       }
+      },
+      {
+       "blockAdd": {
+        "block": {
+         "childrenIds": [
+
+         ],
+         "content": {
+          "custom": {
+           "contentType": "discussion",
+           "data": "CgxfX3RocmVhZF9fbTEQAhoEUGxhbiIMYWdlbnQtd3JpdGVyIgxhZ2VudC1lZGl0b3IiB2FnZW50LWEo6AcyBWFsaWNleAc=",
+           "meta": {
+
+           }
+          }
+         },
+         "id": "__thread__m1"
+        }
+       }
+      }
+     ],
+     "parentIds": [
+
+     ],
+     "timestamp": 1000
+    },
+    {
+     "author": "bob",
+     "id": "0202020202020202020202020202020202020202020202020202020202020202",
+     "objectId": "conv-participants",
+     "ops": [
+      {
+       "blockAdd": {
+        "block": {
+         "childrenIds": [
+
+         ],
+         "content": {
+          "custom": {
+           "contentType": "chat",
+           "meta": {
+            "author": "bob",
+            "text": "hi",
+            "ts": "1100"
+           }
+          }
+         },
+         "id": "m1"
+        },
+        "position": 5,
+        "targetId": "__thread__m1"
+       }
+      }
+     ],
+     "parentIds": [
+      "0101010101010101010101010101010101010101010101010101010101010101"
+     ],
+     "timestamp": 1100
+    },
+    {
+     "author": "bob",
+     "id": "0303030303030303030303030303030303030303030303030303030303030303",
+     "objectId": "conv-participants",
+     "ops": [
+      {
+       "blockUpdate": {
+        "blockId": "__thread__m1",
+        "content": {
+         "custom": {
+          "contentType": "discussion",
+          "data": "CgxfX3RocmVhZF9fbTEQAhoHUGxhbiB2MiIMYWdlbnQtd3JpdGVyIgxhZ2VudC1lZGl0b3IiB2FnZW50LWEo6AcyBWFsaWNleAc=",
+          "meta": {
+
+          }
+         }
+        }
+       }
+      }
+     ],
+     "parentIds": [
+      "0202020202020202020202020202020202020202020202020202020202020202"
+     ],
+     "timestamp": 1200
+    }
+   ],
+   "devices": {
+    "alice": 1,
+    "bob": 2
+   },
+   "expected": {
+    "canonical": "0a11636f6e762d7061727469636970616e747312170a04747970651207088080a01f100122060a047461736b1a160a0764656c657465641207088080a01f100122022000222f0a207061727469636970616e743a5f5f7468726561645f5f6d313a6167656e742d611207088080c02510022202100222340a257061727469636970616e743a5f5f7468726561645f5f6d313a6167656e742d656469746f721207088080c02510022202100122340a257061727469636970616e743a5f5f7468726561645f5f6d313a6167656e742d7772697465721207088080c0251002220210002a2e0a0e5f5f64697363757373696f6e5f5f1207088080a01f10012a131201561a0e120c0a0a64697363757373696f6e2a530a0c5f5f7468726561645f5f6d311207088080c02510022a3a12016c1a3512330a0a64697363757373696f6e12250a0c5f5f7468726561645f5f6d3110021a07506c616e20763228e8073205616c696365780732510a026d311207088080b022100232420a0c5f5f7468726561645f5f6d311201561a2f122d0a04636861741a0d0a06617574686f721203626f621a0a0a0474657874120268691a0a0a02747312043131303038e807",
+    "hash": "108ba00cdfd41ffbda4e337454c5b134439e6c4a94353a329490a979675d1dee",
+    "record": {
+     "blocks": [
+      {
+       "block": {
+        "content": {
+         "custom": {
+          "contentType": "discussion",
+          "data": "",
+          "meta": {
+
+          }
+         }
+        },
+        "parent": "",
+        "position": "V"
+       },
+       "key": "__discussion__",
+       "stamp": {
+        "device": 1,
+        "time": 65536000
+       }
+      },
+      {
+       "block": {
+        "content": {
+         "custom": {
+          "contentType": "discussion",
+          "data": "CgxfX3RocmVhZF9fbTEQAhoHUGxhbiB2MijoBzIFYWxpY2V4Bw==",
+          "meta": {
+
+          }
+         }
+        },
+        "parent": "",
+        "position": "l"
+       },
+       "key": "__thread__m1",
+       "stamp": {
+        "device": 2,
+        "time": 78643200
+       }
+      }
+     ],
+     "createdAt": 1000,
+     "deleted": {
+      "key": "deleted",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "boolValue": false
+      }
+     },
+     "fields": [
+      {
+       "key": "participant:__thread__m1:agent-a",
+       "stamp": {
+        "device": 2,
+        "time": 78643200
+       },
+       "value": {
+        "intValue": 2
+       }
+      },
+      {
+       "key": "participant:__thread__m1:agent-editor",
+       "stamp": {
+        "device": 2,
+        "time": 78643200
+       },
+       "value": {
+        "intValue": 1
+       }
+      },
+      {
+       "key": "participant:__thread__m1:agent-writer",
+       "stamp": {
+        "device": 2,
+        "time": 78643200
+       },
+       "value": {
+        "intValue": 0
+       }
+      }
+     ],
+     "messages": [
+      {
+       "key": "m1",
+       "message": {
+        "content": {
+         "custom": {
+          "contentType": "chat",
+          "data": "",
+          "meta": {
+           "author": "bob",
+           "text": "hi",
+           "ts": "1100"
+          }
+         }
+        },
+        "parent": "__thread__m1",
+        "position": "V"
+       },
+       "stamp": {
+        "device": 2,
+        "time": 72089600
+       }
+      }
+     ],
+     "objectId": "conv-participants",
+     "type": {
+      "key": "type",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "task"
+      }
+     }
+    }
+   },
+   "name": "participants split into entries stamped as their discussion; unknown fields kept"
+  },
+  {
+   "changes": [
+    {
+     "author": "alice",
+     "id": "0101010101010101010101010101010101010101010101010101010101010101",
+     "objectId": "conv-participants",
+     "ops": [
+      {
+       "objectCreate": {
+        "typeKey": "task"
+       }
+      },
+      {
+       "blockAdd": {
+        "block": {
+         "childrenIds": [
+
+         ],
+         "content": {
+          "custom": {
+           "contentType": "discussion",
+           "data": "CgxfX3RocmVhZF9fbTEQAhoDRHVwIgFhIgFiIgFhKOgHMgVhbGljZQ==",
+           "meta": {
+
+           }
+          }
+         },
+         "id": "__thread__m1"
+        }
+       }
+      }
+     ],
+     "parentIds": [
+
+     ],
+     "timestamp": 1000
+    }
+   ],
+   "devices": {
+    "alice": 1,
+    "bob": 2
+   },
+   "expected": {
+    "canonical": "0a11636f6e762d7061727469636970616e747312170a04747970651207088080a01f100122060a047461736b1a160a0764656c657465641207088080a01f1001220220002a560a0c5f5f7468726561645f5f6d311207088080a01f10012a3d1201561a3812360a0a64697363757373696f6e12280a0c5f5f7468726561645f5f6d3110021a0344757022016122016222016128e8073205616c69636538e807",
+    "hash": "850bdc35cd6d3f54f3e672c21c536cb5157fbf7539ac3ea269aed02433f883e8",
+    "record": {
+     "blocks": [
+      {
+       "block": {
+        "content": {
+         "custom": {
+          "contentType": "discussion",
+          "data": "CgxfX3RocmVhZF9fbTEQAhoDRHVwIgFhIgFiIgFhKOgHMgVhbGljZQ==",
+          "meta": {
+
+          }
+         }
+        },
+        "parent": "",
+        "position": "V"
+       },
+       "key": "__thread__m1",
+       "stamp": {
+        "device": 1,
+        "time": 65536000
+       }
+      }
+     ],
+     "createdAt": 1000,
+     "deleted": {
+      "key": "deleted",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "boolValue": false
+      }
+     },
+     "fields": [
+
+     ],
+     "messages": [
+
+     ],
+     "objectId": "conv-participants",
+     "type": {
+      "key": "type",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "task"
+      }
+     }
+    }
+   },
+   "name": "a participant listed twice stays in the discussion"
+  },
+  {
+   "changes": [
+    {
+     "author": "alice",
+     "id": "0101010101010101010101010101010101010101010101010101010101010101",
+     "objectId": "conv-participants",
+     "ops": [
+      {
+       "objectCreate": {
+        "typeKey": "task"
+       }
+      },
+      {
+       "blockAdd": {
+        "block": {
+         "childrenIds": [
+
+         ],
+         "content": {
+          "custom": {
+           "contentType": "discussion",
+           "data": "GgxPdXQgb2Ygb3JkZXIKDF9fdGhyZWFkX19tMSIBYSIBYg==",
+           "meta": {
+
+           }
+          }
+         },
+         "id": "__thread__m1"
+        }
+       }
+      }
+     ],
+     "parentIds": [
+
+     ],
+     "timestamp": 1000
+    }
+   ],
+   "devices": {
+    "alice": 1,
+    "bob": 2
+   },
+   "expected": {
+    "canonical": "0a11636f6e762d7061727469636970616e747312170a04747970651207088080a01f100122060a047461736b1a160a0764656c657465641207088080a01f1001220220002a500a0c5f5f7468726561645f5f6d311207088080a01f10012a371201561a3212300a0a64697363757373696f6e12221a0c4f7574206f66206f726465720a0c5f5f7468726561645f5f6d3122016122016238e807",
+    "hash": "8a45ab736080bb25778ac8ef22cc42bfd8c1878125b67233df5f750fcbc0dc6e",
+    "record": {
+     "blocks": [
+      {
+       "block": {
+        "content": {
+         "custom": {
+          "contentType": "discussion",
+          "data": "GgxPdXQgb2Ygb3JkZXIKDF9fdGhyZWFkX19tMSIBYSIBYg==",
+          "meta": {
+
+          }
+         }
+        },
+        "parent": "",
+        "position": "V"
+       },
+       "key": "__thread__m1",
+       "stamp": {
+        "device": 1,
+        "time": 65536000
+       }
+      }
+     ],
+     "createdAt": 1000,
+     "deleted": {
+      "key": "deleted",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "boolValue": false
+      }
+     },
+     "fields": [
+
+     ],
+     "messages": [
+
+     ],
+     "objectId": "conv-participants",
+     "type": {
+      "key": "type",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "task"
+      }
+     }
+    }
+   },
+   "name": "non-canonical conversation bytes stay whole"
+  },
+  {
+   "changes": [
+    {
+     "author": "alice",
+     "id": "0101010101010101010101010101010101010101010101010101010101010101",
+     "objectId": "conv-participants",
+     "ops": [
+      {
+       "objectCreate": {
+        "typeKey": "task"
+       }
+      },
+      {
+       "blockAdd": {
+        "block": {
+         "childrenIds": [
+
+         ],
+         "content": {
+          "custom": {
+           "contentType": "discussion",
+           "data": "CgxfX3RocmVhZF9fbTF4ASIBYQ==",
+           "meta": {
+
+           }
+          }
+         },
+         "id": "__thread__m1"
+        }
+       }
+      }
+     ],
+     "parentIds": [
+
+     ],
+     "timestamp": 1000
+    }
+   ],
+   "devices": {
+    "alice": 1,
+    "bob": 2
+   },
+   "expected": {
+    "canonical": "0a11636f6e762d7061727469636970616e747312170a04747970651207088080a01f100122060a047461736b1a160a0764656c657465641207088080a01f1001220220002a410a0c5f5f7468726561645f5f6d311207088080a01f10012a281201561a2312210a0a64697363757373696f6e12130a0c5f5f7468726561645f5f6d31780122016138e807",
+    "hash": "01fcc5eb774f131be5ab60fe336e509484faf9d43ff9c991e9a112fbc39d3686",
+    "record": {
+     "blocks": [
+      {
+       "block": {
+        "content": {
+         "custom": {
+          "contentType": "discussion",
+          "data": "CgxfX3RocmVhZF9fbTF4ASIBYQ==",
+          "meta": {
+
+          }
+         }
+        },
+        "parent": "",
+        "position": "V"
+       },
+       "key": "__thread__m1",
+       "stamp": {
+        "device": 1,
+        "time": 65536000
+       }
+      }
+     ],
+     "createdAt": 1000,
+     "deleted": {
+      "key": "deleted",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "boolValue": false
+      }
+     },
+     "fields": [
+
+     ],
+     "messages": [
+
+     ],
+     "objectId": "conv-participants",
+     "type": {
+      "key": "type",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "task"
+      }
+     }
+    }
+   },
+   "name": "an unknown field before known ones is non-canonical and stays whole"
+  },
+  {
+   "changes": [
+    {
+     "author": "alice",
+     "id": "0101010101010101010101010101010101010101010101010101010101010101",
+     "objectId": "conv-participants",
+     "ops": [
+      {
+       "objectCreate": {
+        "typeKey": "task"
+       }
+      },
+      {
+       "blockAdd": {
+        "block": {
+         "childrenIds": [
+
+         ],
+         "content": {
+          "custom": {
+           "contentType": "discussion",
+           "data": "CgxfX3RocmVhZF9fbTEQAhoFRW1wdHko6AcyBWFsaWNl",
+           "meta": {
+
+           }
+          }
+         },
+         "id": "__thread__m1"
+        }
+       }
+      }
+     ],
+     "parentIds": [
+
+     ],
+     "timestamp": 1000
+    }
+   ],
+   "devices": {
+    "alice": 1,
+    "bob": 2
+   },
+   "expected": {
+    "canonical": "0a11636f6e762d7061727469636970616e747312170a04747970651207088080a01f100122060a047461736b1a160a0764656c657465641207088080a01f1001220220002a4f0a0c5f5f7468726561645f5f6d311207088080a01f10012a361201561a31122f0a0a64697363757373696f6e12210a0c5f5f7468726561645f5f6d3110021a05456d70747928e8073205616c69636538e807",
+    "hash": "b69f638b25d3711d32ffd9e814c67b418a03a01be303d917656fee426259e8b9",
+    "record": {
+     "blocks": [
+      {
+       "block": {
+        "content": {
+         "custom": {
+          "contentType": "discussion",
+          "data": "CgxfX3RocmVhZF9fbTEQAhoFRW1wdHko6AcyBWFsaWNl",
+          "meta": {
+
+          }
+         }
+        },
+        "parent": "",
+        "position": "V"
+       },
+       "key": "__thread__m1",
+       "stamp": {
+        "device": 1,
+        "time": 65536000
+       }
+      }
+     ],
+     "createdAt": 1000,
+     "deleted": {
+      "key": "deleted",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "boolValue": false
+      }
+     },
+     "fields": [
+
+     ],
+     "messages": [
+
+     ],
+     "objectId": "conv-participants",
+     "type": {
+      "key": "type",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "task"
+      }
+     }
+    }
+   },
+   "name": "zero participants: content unchanged, no entries"
+  },
+  {
+   "changes": [
+    {
+     "author": "alice",
+     "id": "0101010101010101010101010101010101010101010101010101010101010101",
+     "objectId": "conv-participants",
+     "ops": [
+      {
+       "objectCreate": {
+        "typeKey": "task"
+       }
+      },
+      {
+       "blockAdd": {
+        "block": {
+         "childrenIds": [
+
+         ],
+         "content": {
+          "custom": {
+           "contentType": "discussion",
+           "data": "CgxfX3RocmVhZF9fbTEQAhoER29uZSIBYSjoBzIFYWxpY2U=",
+           "meta": {
+
+           }
+          }
+         },
+         "id": "__thread__m1"
+        }
+       }
+      }
+     ],
+     "parentIds": [
+
+     ],
+     "timestamp": 1000
+    },
+    {
+     "author": "bob",
+     "id": "0202020202020202020202020202020202020202020202020202020202020202",
+     "objectId": "conv-participants",
+     "ops": [
+      {
+       "blockRemove": {
+        "blockId": "__thread__m1"
+       }
+      }
+     ],
+     "parentIds": [
+      "0101010101010101010101010101010101010101010101010101010101010101"
+     ],
+     "timestamp": 1300
+    }
+   ],
+   "devices": {
+    "alice": 1,
+    "bob": 2
+   },
+   "expected": {
+    "canonical": "0a11636f6e762d7061727469636970616e747312170a04747970651207088080a01f100122060a047461736b1a160a0764656c657465641207088080a01f1001220220002a1b0a0c5f5f7468726561645f5f6d311207088080d028100218012a0038e807",
+    "hash": "d7b17d3bf37decb3c94eda274362a7b8ed3f0ad690dbdebf870193eef6b560a0",
+    "record": {
+     "blocks": [
+      {
+       "block": {
+
+       },
+       "gone": true,
+       "key": "__thread__m1",
+       "stamp": {
+        "device": 2,
+        "time": 85196800
+       }
+      }
+     ],
+     "createdAt": 1000,
+     "deleted": {
+      "key": "deleted",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "boolValue": false
+      }
+     },
+     "fields": [
+
+     ],
+     "messages": [
+
+     ],
+     "objectId": "conv-participants",
+     "type": {
+      "key": "type",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "task"
+      }
+     }
+    }
+   },
+   "name": "a removed discussion leaves no participant entries"
+  }
+ ],
+ "view": [
+  {
+   "expected": {
+    "blocks": [
+     {
+      "childrenIds": [
+
+      ],
+      "content": {
+       "custom": {
+        "contentType": "discussion",
+        "data": "CgxfX3RocmVhZF9fbTEQAhoEUGxhbiIMYWdlbnQtd3JpdGVyIgxhZ2VudC1lZGl0b3IiB2FnZW50LXgiB2FnZW50LXko6AcyBWFsaWNl",
+        "meta": {
+
+        }
+       }
+      },
+      "id": "__thread__m1"
+     }
+    ],
+    "createdAt": 1000,
+    "deleted": false,
+    "fields": {
+     "title": {
+      "stringValue": "T"
+     }
+    },
+    "id": "conv-participants",
+    "typeKey": "task",
+    "updatedAt": 5000
+   },
+   "name": "participants joined in (index, id) order, concurrent joins at one index both kept, entries hidden",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "custom": {
+         "contentType": "discussion",
+         "data": "CgxfX3RocmVhZF9fbTEQAhoEUGxhbijoBzIFYWxpY2U=",
+         "meta": {
+
+         }
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "__thread__m1",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "title",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "T"
+      }
+     },
+     {
+      "key": "participant:__thread__m1:agent-writer",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "intValue": 0
+      }
+     },
+     {
+      "key": "participant:__thread__m1:agent-editor",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "intValue": 1
+      }
+     },
+     {
+      "key": "participant:__thread__m1:agent-y",
+      "stamp": {
+       "device": 3,
+       "time": 327680000
+      },
+      "value": {
+       "intValue": 2
+      }
+     },
+     {
+      "key": "participant:__thread__m1:agent-x",
+      "stamp": {
+       "device": 2,
+       "time": 262144000
+      },
+      "value": {
+       "intValue": 2
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "conv-participants",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     },
+     "value": {
+      "stringValue": "task"
+     }
+    }
+   }
+  },
+  {
+   "expected": {
+    "blocks": [
+     {
+      "childrenIds": [
+
+      ],
+      "content": {
+       "custom": {
+        "contentType": "discussion",
+        "data": "CgxfX3RocmVhZF9fbTEQAhoEUGxhbiIBYSIBYijoBzIFYWxpY2U=",
+        "meta": {
+
+        }
+       }
+      },
+      "id": "__thread__m1"
+     },
+     {
+      "childrenIds": [
+
+      ],
+      "content": {
+       "custom": {
+        "contentType": "discussion",
+        "data": "CgxfX3RocmVhZF9fbTIQAxoHUHJpdmF0ZSIBYyjoBzIDYm9i",
+        "meta": {
+
+        }
+       }
+      },
+      "id": "__thread__m2"
+     }
+    ],
+    "createdAt": 1000,
+    "deleted": false,
+    "fields": {
+
+    },
+    "id": "conv-participants",
+    "typeKey": "",
+    "updatedAt": 6000
+   },
+   "name": "a tombstoned participant is dropped; another discussion's entries stay with it",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "custom": {
+         "contentType": "discussion",
+         "data": "CgxfX3RocmVhZF9fbTEQAhoEUGxhbijoBzIFYWxpY2U=",
+         "meta": {
+
+         }
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "__thread__m1",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "custom": {
+         "contentType": "discussion",
+         "data": "CgxfX3RocmVhZF9fbTIQAxoHUHJpdmF0ZSjoBzIDYm9i",
+         "meta": {
+
+         }
+        }
+       },
+       "parent": "",
+       "position": "k"
+      },
+      "key": "__thread__m2",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "participant:__thread__m1:a",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "intValue": 0
+      }
+     },
+     {
+      "key": "participant:__thread__m1:b",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "intValue": 1
+      }
+     },
+     {
+      "gone": true,
+      "key": "participant:__thread__m1:gone",
+      "stamp": {
+       "device": 2,
+       "time": 393216000
+      },
+      "value": {
+
+      }
+     },
+     {
+      "key": "participant:__thread__m2:c",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "intValue": 0
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "conv-participants"
+   }
+  },
+  {
+   "expected": {
+    "blocks": [
+     {
+      "childrenIds": [
+
+      ],
+      "content": {
+       "text": {
+        "checked": false,
+        "color": "",
+        "marks": [
+
+        ],
+        "style": 0,
+        "text": "para"
+       }
+      },
+      "id": "p1"
+     }
+    ],
+    "createdAt": 1000,
+    "deleted": false,
+    "fields": {
+
+    },
+    "id": "conv-participants",
+    "typeKey": "",
+    "updatedAt": 1000
+   },
+   "name": "participant entries of a block that is not a discussion are only hidden",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "text": {
+         "text": "para"
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "p1",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "participant:p1:a",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "intValue": 0
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "conv-participants"
+   }
+  }
+ ]
+}

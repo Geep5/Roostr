@@ -1,7 +1,9 @@
 # State objects: stamped records, packs and a relay cursor
 
-Status: **design; the record library exists (rollout step 3) and the daemon
-can run on records behind `GLON_RECORDS=1`, offline-only ("Record mode").**
+Status: **design; the record library exists (rollout step 3), the daemon
+can run on records behind `GLON_RECORDS=1`, offline-only ("Record mode"),
+and the pack format is implemented (rollout step 4: build, read, encrypt;
+not yet built, announced or loaded by any host).**
 Proposed successor to the base / delta / compaction model of
 `docs/state-sync.md` (which stays the contract until this ships).
 
@@ -134,6 +136,18 @@ shared vectors in `core/testdata/record_vectors/`. Details both engines fix:
   a base converts from it (`record_writers_replay_base`) as the store loads
   it. The `record` core method exposes this to hosts without a replay
   (`writers`, `from_changes`; changes and a legacy checkpoint, not bases).
+- **Participants** (both engines, `record_participants_split` in
+  `core/record.odin`, `participants_split` in `roostr-engine`): conversion
+  stores a live discussion root's (custom `"discussion"`, data a
+  Conversation) participants as one field entry each,
+  `participant:<thread block id>:<participant>` = Int list index, stamped
+  as the block, and the root keeps the rest of the Conversation with an
+  empty participant list. The view joins them back - live Int entries
+  under the root's prefix, ordered by `(index, id)`, re-encoded into the
+  root - and hides every `participant:` field (their stamps still count for
+  `updated_at`). A root whose bytes would not survive the split exactly
+  (not decodable, not re-encoding to the same bytes, a participant listed
+  twice or not UTF-8) stays whole. Vectors: `participants.json`.
 - **Dry run** (`glon-odin records-check [objectId]`, offline, reads
   `GLON_DATA`): converts every object, views it back and compares with
   today's state. Grant's Mac, 2026-10-28: 7,334 objects, 7,325 exact; the 9
@@ -265,13 +279,15 @@ tombstones included, in a fixed order.
 
 - **Format**: a small header (`stream`, `cursor`, record count, bucket
   index) then 256 **buckets** by the first byte of `sha256(object_id)`,
-  each bucket a run of length-prefixed `Record` protobufs sorted by id. The
-  whole thing is compressed per bucket with zstd and encrypted with the
-  existing Blossom frame format (`harness/src/blossom.ts`: AES-256-GCM,
-  4 MiB frames). Per-bucket compression plus the index let a **Lite** device
-  fetch one bucket with an HTTP Range request instead of the whole pack.
-- **Key**: `HMAC-SHA256(space key, "roostr-pack-v1" || cursor)` (personal
-  stream: the personal conversation key) - only members can read it.
+  each bucket a run of length-prefixed `Record` protobufs sorted by id,
+  compressed per bucket (raw DEFLATE, below) and the whole pack encrypted
+  with the existing Blossom frame format (`harness/src/blossom.ts`:
+  AES-256-GCM, 4 MiB frames). Per-bucket compression plus the index let a
+  **Lite** device fetch the frames holding one bucket with an HTTP Range
+  request instead of the whole pack. Byte layout below.
+- **Key**: `HMAC-SHA256(space key, "roostr-pack-v1" || cursor)`, the cursor
+  as 8 bytes big-endian (personal stream: the personal conversation key) -
+  only members can read it, and every pack has its own key.
 - **Announced** by an addressable event (kind **31081**, `d` = the blinded
   stream tag), signed by the builder, content encrypted like a patch:
   `{cursor, sha256, size, url, root, buckets: [16 hex chars x 256],
@@ -284,6 +300,92 @@ tombstones included, in a fixed order.
   (NIP-09) patches with `seq` <= the previous pack's cursor, and the
   previous pack's blob. So the relay holds one or two packs and at most
   about one pack interval plus a day of patches.
+
+### Pack layout
+
+Implemented in `core/pack.odin` (`pack_build`, `pack_read_header`,
+`pack_bucket_bytes`, `pack_read_bucket`) and `roostr-engine`'s `pack.rs`
+(the same, plus the encryption); `harness/src/pack.ts` encrypts and
+decrypts for the harness. All three are pinned by
+`core/testdata/record_vectors/pack.json`: plaintext, header, bucket hashes,
+root, deflate outputs, pack key, encrypted bytes and frame ranges.
+
+```
+plaintext = varint(len(header)) || Pack_Header || payload
+payload   = bucket 0 || bucket 1 || ... || bucket 255     (compressed)
+bucket b  = DEFLATE( varint(len(r)) || r  for each record r in bucket b,
+                     r = canonical Record bytes, sorted by object id )
+            (an empty bucket is no bytes, not an empty DEFLATE stream)
+blob      = Blossom frames of the plaintext under the pack key
+```
+
+```proto
+message Pack_Header {
+  string stream  = 1;
+  uint64 cursor  = 2;
+  uint64 records = 3;               // total record count
+  repeated Pack_Bucket buckets = 4; // exactly 256, bucket b at index b
+}
+message Pack_Bucket {
+  uint64 offset = 1;  // in the payload: the sum of the earlier lengths
+  uint64 length = 2;  // compressed bytes; 0 exactly when count is 0
+  bytes  hash   = 3;  // 32 bytes, always present: the bucket hash (Fingerprints)
+  uint32 count  = 4;  // records in the bucket
+}
+```
+
+Proto3 rules as the canonical Record encoding (zero fields omitted, fields
+in number order). A reader refuses a header without exactly 256 buckets,
+with a hash that is not 32 bytes, with offsets that are not contiguous, or
+whose counts do not sum to `records`; and a bucket whose length, record
+count, id order, bucket membership or hash (over each record's canonical
+re-encoding) disagrees with its header entry. Two records for one object
+are refused when building. The header is about 40 bytes per bucket (~10 KB),
+so it always lies in frame 0.
+
+**Compression is raw DEFLATE (RFC 1951), not zstd.** Odin has no zstd: no
+pure-Odin codec exists, and binding libzstd would break `engine.wasm` (a
+`js_wasm32` build that links nothing) and add a C library to the static
+library the Rust crate and the iOS xcframework link. DEFLATE is readable
+everywhere without new native code: `core:compress/zlib` (Odin, pure, wasm),
+`miniz_oxide` (Rust, pure, wasm), `node:zlib`, and browsers'
+`DecompressionStream("deflate-raw")`. The compressor is our own
+(`core/deflate.odin`, `roostr-engine` `deflate.rs`): greedy LZ77 over 32 KiB
+with 64-candidate hash chains, dynamic Huffman blocks of 16,384 tokens,
+fully specified tie-breaks - so both engines write the same bytes for the
+same records and a pack's bytes are reproducible. Expect packs somewhat
+larger than the zstd estimates below (not measured with DEFLATE yet); a
+later format can switch codec under a new key
+label (`roostr-pack-v2`).
+
+**Encryption** (`pack.rs` `pack_encrypt` / `frames_encrypt`, `pack.ts`
+`encryptPack`): the plaintext split into 4 MiB frames; frame i is
+AES-256-GCM under the pack key and the 12-byte big-endian nonce i, written
+as ciphertext || 16-byte tag; the blob is the frames concatenated (the last
+frame shorter; an empty plaintext is one empty frame). A per-pack key makes
+the fixed nonces safe.
+
+**Reading one bucket (Lite)**: frame i holds plaintext
+`[i * 4 MiB, (i + 1) * 4 MiB)` and sits at blob bytes
+`[i * (4 MiB + 16), (i + 1) * (4 MiB + 16))`, the last frame shorter.
+
+1. Range-fetch frame 0 (`bytes=0-4194319`, or the whole blob when smaller),
+   decrypt it and read the header and payload start `p` (`pack_read_header`
+   needs only that prefix).
+2. Bucket b covers plaintext `[p + offset, p + offset + length)`; with
+   `first = (p + offset) / 4 MiB` and `last = (p + offset + length - 1) / 4 MiB`,
+   Range-fetch blob bytes `[first * (4 MiB + 16), min((last + 1) * (4 MiB + 16), blob size))`
+   (`frame_range` / `packFrameRange`).
+3. Decrypt those frames with nonces `first ..= last` (`frames_decrypt(bytes,
+   key, first)`), skip `p + offset - first * 4 MiB` bytes, take `length`,
+   and `pack_read_bucket` it (checked against the header hash, so the
+   records match the announced fingerprint).
+
+Every byte is authenticated (whole GCM frames), so a Lite read costs frame
+0 plus the one or two frames holding the bucket - up to ~8-12 MiB, not
+1/256 of the pack. Today's packs (~6-8 MB) are one or two frames, so a Lite
+device effectively downloads the whole pack; smaller frames for packs would
+be a format change (new key label).
 
 ## Fingerprints
 
@@ -322,8 +424,9 @@ removed from the journal when the relay acknowledges it (`OK`); a resend is
 harmless (merge is idempotent).
 
 **Lite device opening one object**: read the bucket index from the pack
-announcement, Range-fetch that bucket, take the record, then apply patches
-for that object (`h` filter, `after` the pack cursor).
+header (frame 0), Range-fetch the frames holding that bucket (Pack layout),
+take the record, then apply patches for that object (`h` filter, `after`
+the pack cursor).
 
 ## Tombstones
 
@@ -391,12 +494,11 @@ The daemon's store can run on records (`src/records.odin`); off by default.
   from the journal on the next start.
 - **Reads** (object fetch, queries, everything through `with_states`) are
   record views.
-- **Participants**: a conversation root's participants are stored as one
-  field entry each, `participant:<thread block id>:<participant>` = Int list
-  index (the view orders by index, then id, and hides these fields); the
-  stored root keeps the rest of the Conversation. Roots whose bytes would
-  not survive the split exactly (non-canonical encoding, a duplicate
-  participant) stay whole.
+- **Participants**: stored as one field entry each, split by core
+  conversion and joined by `core.record_view` ("Object records" above);
+  the daemon's patches use the same `core.record_participants_split` /
+  `core.record_participant_prefix`, writing an entry per joined
+  participant and a tombstone per one that left.
 - **Offline-only**: the change, base, checkpoint and digest routes answer
   409, so nothing is published or imported through the old protocol.
 - **Not expressible as a patch**: a DAG re-create (`restore`, `set_type`)
@@ -409,6 +511,8 @@ The daemon's store can run on records (`src/records.odin`); off by default.
 Measured on Grant's Mac, 2026-10-28: all 6,685 live objects read through the
 engine's API as JSON (an upper bound on the protobuf size - protobuf is
 usually 40-60% of JSON before compression; compressed sizes are close).
+Compressed sizes were measured with zstd; packs use DEFLATE (Pack layout),
+so expect them somewhat larger.
 
 **Size today**
 
@@ -451,8 +555,9 @@ before any of that; the user-visible time is minutes.
 **Online device reconnecting**: one query per stream, returning only what
 changed - typically well under a second.
 
-**Lite device opening one object**: one Range request for its bucket
-(~1/256 of the pack: ~30 KB today, ~300 KB at 10x) plus one patch query.
+**Lite device opening one object**: Range requests for frame 0 (the header)
+and the frames holding its bucket - at most ~12 MiB, the whole pack while
+it is under ~8 MB - plus one patch query (Pack layout).
 
 ## Rollout
 

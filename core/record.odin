@@ -13,6 +13,7 @@ import "core:encoding/hex"
 import "core:encoding/json"
 import "core:slice"
 import "core:strings"
+import "core:unicode/utf8"
 
 // ── Model ────────────────────────────────────────────────────────────
 
@@ -68,6 +69,10 @@ RECORD_TYPE_KEY :: "type"
 RECORD_DELETED_KEY :: "deleted"
 /** Custom content type of a chat message block (conversation.odin). */
 RECORD_MESSAGE_CONTENT :: "chat"
+/** Custom content type of a conversation root block; its data is a Conversation (conversation.odin). */
+RECORD_DISCUSSION_CONTENT :: "discussion"
+/** Conversation participants: one field entry per participant, `participant:<thread block id>:<participant>` = Int list index. */
+RECORD_PARTICIPANT_PREFIX :: "participant:"
 
 stamp_ms :: proc(time: u64) -> i64 {
 	return i64(time >> 16)
@@ -427,7 +432,8 @@ records_fingerprint_hashes :: proc(ids: []string, hashes: [][32]byte) -> Fingerp
  * The record as today's Object_State: live fields; blocks and messages as
  * one tree (children ordered by position then id, preorder from the roots;
  * entries whose parent is gone are not shown); created_at the record's,
- * else the oldest stamp; updated_at the newest stamp.
+ * else the oldest stamp; updated_at the newest stamp. Participant entries
+ * are folded back into their discussions and not shown as fields.
  */
 record_view :: proc(r: Record, allocator := context.allocator) -> Object_State {
 	s: Object_State
@@ -505,7 +511,74 @@ record_view :: proc(r: Record, allocator := context.allocator) -> Object_State {
 		append(&s.blocks, b)
 		for i := len(b.children_ids) - 1; i >= 0; i -= 1 do append(&stack, b.children_ids[i])
 	}
+	record_view_join_participants(&s, allocator)
 	return s
+}
+
+/** Field key prefix of the participant entries of discussion `block_id`. */
+record_participant_prefix :: proc(block_id: string, allocator := context.temp_allocator) -> string {
+	return strings.concatenate({RECORD_PARTICIPANT_PREFIX, block_id, ":"}, allocator)
+}
+
+/**
+ * A discussion root's content without its participants, and the
+ * participants in order (temp-allocated). ok = false (content unchanged)
+ * when it is not a conversation, or one whose bytes a split and join would
+ * not reproduce exactly (non-canonical encoding, a participant listed twice,
+ * a participant that is not UTF-8 and so cannot be an entry key).
+ */
+record_participants_split :: proc(content: Block_Content) -> (stripped: Block_Content, parts: []string, ok: bool) {
+	stripped = content
+	if content.kind != .Custom || content.custom.content_type != RECORD_DISCUSSION_CONTENT do return
+	conv, dok := decode_conversation(content.custom.data, context.temp_allocator)
+	if !dok || string(encode_conversation(conv, context.temp_allocator)) != string(content.custom.data) do return
+	seen := make(map[string]bool, allocator = context.temp_allocator)
+	for p in conv.participants {
+		if p in seen || !utf8.valid_string(p) do return
+		seen[p] = true
+	}
+	parts = conv.participants[:]
+	conv.participants = make([dynamic]string, context.temp_allocator)
+	stripped.custom.data = encode_conversation(conv, context.temp_allocator)
+	ok = true
+	return
+}
+
+/**
+ * Folds participant entries back into their discussions (ordered by
+ * (index, id)) and hides every `participant:` field.
+ */
+@(private = "file")
+record_view_join_participants :: proc(s: ^Object_State, allocator := context.allocator) {
+	has := false
+	for f in s.fields do if strings.has_prefix(f.key, RECORD_PARTICIPANT_PREFIX) {has = true; break}
+	if !has do return
+	Part :: struct {
+		id:    string,
+		index: i64,
+	}
+	for &b in s.blocks {
+		if b.content.kind != .Custom || b.content.custom.content_type != RECORD_DISCUSSION_CONTENT do continue
+		prefix := record_participant_prefix(b.id)
+		parts := make([dynamic]Part, context.temp_allocator)
+		for f in s.fields {
+			if strings.has_prefix(f.key, prefix) && f.value.kind == .Int do append(&parts, Part{f.key[len(prefix):], f.value.i})
+		}
+		if len(parts) == 0 do continue
+		conv, ok := decode_conversation(b.content.custom.data, context.temp_allocator)
+		if !ok do continue
+		slice.sort_by(parts[:], proc(x, y: Part) -> bool {return x.index != y.index ? x.index < y.index : x.id < y.id})
+		conv.participants = make([dynamic]string, context.temp_allocator)
+		for p in parts do append(&conv.participants, p.id)
+		b.content.custom.data = encode_conversation(conv, allocator)
+	}
+	kept := 0
+	for f in s.fields {
+		if strings.has_prefix(f.key, RECORD_PARTICIPANT_PREFIX) do continue
+		s.fields[kept] = f
+		kept += 1
+	}
+	resize(&s.fields, kept)
 }
 
 /**
@@ -680,8 +753,9 @@ record_positions :: proc(n: int, allocator := context.allocator) -> []string {
 /**
  * The record for a replayed state. Every entry is stamped (time of the change
  * that last wrote it, devices[its author]); keys a change removed become
- * tombstones. Error text when a writer's author has no device index or an
- * entry has no writer at all.
+ * tombstones; a live discussion's participants become field entries
+ * (record_participants_split; record_view joins them back). Error text when
+ * a writer's author has no device index or an entry has no writer at all.
  */
 record_from_object_state :: proc(state: ^Object_State, writers: ^Record_Writers, devices: map[string]u32, allocator := context.allocator) -> (Record, string) {
 	r: Record
@@ -773,6 +847,15 @@ record_from_object_state :: proc(state: ^Object_State, writers: ^Record_Writers,
 			append(&r.messages, e)
 		} else {
 			e.kind = .Block
+			// Participants as their own entries, stamped as the block.
+			if stripped, parts, split := record_participants_split(b.content); split && len(parts) > 0 {
+				e.body.content = stripped
+				e.body.content.custom.data = slice.clone(stripped.custom.data, allocator)
+				prefix := record_participant_prefix(b.id)
+				for p, i in parts {
+					append(&r.fields, Record_Entry{key = strings.concatenate({prefix, p}, allocator), stamp = stamp, kind = .Value, value = Value{kind = .Int, i = i64(i)}})
+				}
+			}
 			append(&r.blocks, e)
 		}
 	}

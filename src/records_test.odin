@@ -356,8 +356,8 @@ records_contract :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, thread != "", "the task has a thread")
 	rec_task, _ := record_of(task)
-	writer, has_writer := field_entry(rec_task, strings.concatenate({participant_prefix(thread), "agent-writer"}, context.temp_allocator))
-	editor, has_editor := field_entry(rec_task, strings.concatenate({participant_prefix(thread), "agent-editor"}, context.temp_allocator))
+	writer, has_writer := field_entry(rec_task, strings.concatenate({core.record_participant_prefix(thread), "agent-writer"}, context.temp_allocator))
+	editor, has_editor := field_entry(rec_task, strings.concatenate({core.record_participant_prefix(thread), "agent-editor"}, context.temp_allocator))
 	testing.expect(t, has_writer && has_editor, "each participant is its own entry")
 	testing.expect(t, writer.value.i == 0 && editor.value.i == 1, "entries keep the list order")
 	for e in rec_task.blocks do if e.key == thread {
@@ -367,18 +367,18 @@ records_contract :: proc(t: ^testing.T) {
 	// Two devices join concurrently: both survive the merge.
 	join :: proc(base: core.Record, task, thread, who: string, device: u32, at: i64) -> core.Patch {
 		patch := core.Patch{object_id = task, entries = make([dynamic]core.Record_Entry, context.temp_allocator)}
-		append(&patch.entries, core.Record_Entry{key = strings.concatenate({participant_prefix(thread), who}, context.temp_allocator), stamp = core.stamp_from_ms(at, device), kind = .Value, value = core.Value{kind = .Int, i = 2}})
+		append(&patch.entries, core.Record_Entry{key = strings.concatenate({core.record_participant_prefix(thread), who}, context.temp_allocator), stamp = core.stamp_from_ms(at, device), kind = .Value, value = core.Value{kind = .Int, i = 2}})
 		return patch
 	}
 	far := core.stamp_ms(g_records.hlc.last) + 1000
 	left, _ := core.record_apply_patch(rec_task, join(rec_task, task, thread, "agent-x", 90, far), context.temp_allocator)
 	both, _ := core.record_apply_patch(left, join(rec_task, task, thread, "agent-y", 91, far), context.temp_allocator)
-	merged_view := records_view(both, context.temp_allocator)
+	merged_view := core.record_view(both, context.temp_allocator)
 	for b in merged_view.blocks do if b.id == thread {
 		conv, _ := core.decode_conversation(b.content.custom.data, context.temp_allocator)
 		testing.expectf(t, len(conv.participants) == 4 && conv.participants[2] == "agent-x" && conv.participants[3] == "agent-y", "concurrent joins both kept: %v", conv.participants)
 	}
-	for f in merged_view.fields do testing.expectf(t, !strings.has_prefix(f.key, RECORD_PARTICIPANT_PREFIX), "participant entries are not shown as fields: %s", f.key)
+	for f in merged_view.fields do testing.expectf(t, !strings.has_prefix(f.key, core.RECORD_PARTICIPANT_PREFIX), "participant entries are not shown as fields: %s", f.key)
 
 	// Directory counters: one entry per device, and another device's survives ours.
 	directory := ""
@@ -401,7 +401,7 @@ records_contract :: proc(t: ^testing.T) {
 	other := core.Patch{object_id = directory, entries = make([dynamic]core.Record_Entry, context.temp_allocator)}
 	append(&other.entries, core.Record_Entry{key = "count:note:other-device", stamp = core.stamp_from_ms(1, 77), kind = .Value, value = core.Value{kind = .Int, i = 5}})
 	with_other, _ := core.record_apply_patch(rec_dir, other, context.temp_allocator)
-	other_view := records_view(with_other, context.temp_allocator)
+	other_view := core.record_view(with_other, context.temp_allocator)
 	theirs, _ := core.fields_get(other_view.fields, "count:note:other-device")
 	testing.expect_value(t, theirs.i, 5)
 	for e in rec_dir.fields do if strings.has_prefix(e.key, "count:") && !e.gone {
