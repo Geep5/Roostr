@@ -24,7 +24,7 @@ main :: proc() {
 		home := os.get_env_alloc("HOME", context.allocator)
 		data_root, _ = filepath.join({home, ".glon"})
 	}
-	store_init(data_root, records = records_env())
+	store_init(data_root, records = records_env(data_root))
 
 	args := os.args
 	cmd := len(args) > 1 ? args[1] : "serve"

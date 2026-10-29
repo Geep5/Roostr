@@ -42,8 +42,17 @@ Records_State :: struct {
 
 g_records: Records_State
 
-records_env :: proc() -> bool {
-	return os.get_env("GLON_RECORDS", context.temp_allocator) == "1"
+/** Record mode: GLON_RECORDS=1, or a vault already converted (records/.converted)
+ *  unless GLON_RECORDS=0 - a migrated vault must never fall back to the DAG by
+ *  a restart that forgot the variable. */
+records_env :: proc(data_root := "") -> bool {
+	switch os.get_env("GLON_RECORDS", context.temp_allocator) {
+	case "1": return true
+	case "0": return false
+	}
+	if data_root == "" do return false
+	marker, _ := filepath.join({data_root, "records", ".converted"}, context.temp_allocator)
+	return os.exists(marker)
 }
 
 /** Forget the previous data root's record state (store_init). */
