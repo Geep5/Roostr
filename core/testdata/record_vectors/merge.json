@@ -1,0 +1,1908 @@
+[
+ {
+  "expected": {
+   "canonical": "0a056f626a2d3122140a046e616d651207088080a01f100122030a014122190a067374617475731207088080a41f100222060a046f70656e",
+   "hash": "a15a3cbd2852905d244e8fe5b9d1ff58e01cbed60a8e7a08bfaece92bc1b70e8",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "A"
+      }
+     },
+     {
+      "key": "status",
+      "stamp": {
+       "device": 2,
+       "time": 65601536
+      },
+      "value": {
+       "stringValue": "open"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "disjoint fields both kept",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "A"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "status",
+      "stamp": {
+       "device": 2,
+       "time": 65601536
+      },
+      "value": {
+       "stringValue": "open"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d3122160a046e616d651207088080c03e100122050a036e6577",
+   "hash": "ebff3340bf182c046c9ff344f9570cbae273f0fed7d29302f8f587aacd50d5fd",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 131072000
+      },
+      "value": {
+       "stringValue": "new"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "same field: newer time wins",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "old"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 131072000
+      },
+      "value": {
+       "stringValue": "new"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d3122160a046e616d651207088080a01f100222050a0374776f",
+   "hash": "81fb88384098b4afb1934ad768a9f90c3da3871abf6c0b0b7da62880c4a5ac4e",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 2,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "two"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "same time: larger device wins",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 2,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "two"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "one"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d3122190a046e616d651207088280a01f100122080a067365636f6e64",
+   "hash": "75f65750f2605584ff39d0690e31edaf44950ec255aea18e56a83367090ae145",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536002
+      },
+      "value": {
+       "stringValue": "second"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "hlc counter orders within one millisecond",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536001
+      },
+      "value": {
+       "stringValue": "first"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536002
+      },
+      "value": {
+       "stringValue": "second"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d3122160a046e616d651207088080a01f100122050a03626262",
+   "hash": "319756d9037f8460bf6967b3f2a7c1a6224292cb1877c6f0c47107eb9f2b1c92",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "bbb"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "equal stamps: larger canonical entry bytes wins",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "aaa"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "bbb"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d3122130a046e616d651207088080c03e100218012200",
+   "hash": "4405ea7af323f9016f9375a83224e76c8da11ba5f653c0a54a298fb40c49498d",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "gone": true,
+      "key": "name",
+      "stamp": {
+       "device": 2,
+       "time": 131072000
+      },
+      "value": {
+
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "tombstone beats older edit",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "x"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "gone": true,
+      "key": "name",
+      "stamp": {
+       "device": 2,
+       "time": 131072000
+      },
+      "value": {
+
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d3122170a046e616d651207088080e05d100122060a046261636b",
+   "hash": "269220f9adce4ba3188d114b5f8169c7e123f419df6564302c1a3775b996a7d3",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 196608000
+      },
+      "value": {
+       "stringValue": "back"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "newer edit beats tombstone",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 196608000
+      },
+      "value": {
+       "stringValue": "back"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "gone": true,
+      "key": "name",
+      "stamp": {
+       "device": 2,
+       "time": 131072000
+      },
+      "value": {
+
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d312a240a06622d6c6566741207088080a01f10012a111201561a0c0a0a0a0866726f6d206f6e652a250a07622d72696768741207088080a01f10022a111201561a0c0a0a0a0866726f6d2074776f",
+   "hash": "d6479130c9af0307ac6e7c8d680ad73c8269e9cb9a5e109fd9583c8d8eacb298",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "text": {
+         "checked": false,
+         "color": "",
+         "marks": [
+
+         ],
+         "style": 0,
+         "text": "from one"
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "b-left",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "text": {
+         "checked": false,
+         "color": "",
+         "marks": [
+
+         ],
+         "style": 0,
+         "text": "from two"
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "b-right",
+      "stamp": {
+       "device": 2,
+       "time": 65536000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "concurrent block inserts at the same spot both kept",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "text": {
+         "checked": false,
+         "color": "",
+         "marks": [
+
+         ],
+         "style": 0,
+         "text": "from one"
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "b-left",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "text": {
+         "checked": false,
+         "color": "",
+         "marks": [
+
+         ],
+         "style": 0,
+         "text": "from two"
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "b-right",
+      "stamp": {
+       "device": 2,
+       "time": 65536000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d312a100a01701207088080f02e100218012a00",
+   "hash": "ce504b77432f288c367ec3d2b63b52065b9580a452c46a20118b4c548eac0a86",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "p",
+      "stamp": {
+       "device": 2,
+       "time": 98304000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "block edit vs delete: newer wins",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "text": {
+         "checked": false,
+         "color": "",
+         "marks": [
+
+         ],
+         "style": 0,
+         "text": "edited"
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "p",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "p",
+      "stamp": {
+       "device": 2,
+       "time": 98304000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d3112170a04747970651207088080a01f100122060a04706167651a170a0764656c657465641208088080a09c01100222022001",
+   "hash": "4dadf1313b5a6ab79b3d47872afd3a02af606cd67783f51adfd3529574489652",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 2,
+      "time": 327680000
+     },
+     "value": {
+      "boolValue": true
+     }
+    },
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "type and deleted slots merge like entries",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   },
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 2,
+      "time": 327680000
+     },
+     "value": {
+      "boolValue": true
+     }
+    },
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 2,
+      "time": 58982400
+     },
+     "value": {
+      "stringValue": "task"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d3122100a0161120608808004100122030a013138ac02",
+   "hash": "210cbc4d36f12f1bd660c0b7fa0fbe50b4e9b0a01f35f97d18d9e93eed75751c",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 300,
+    "fields": [
+     {
+      "key": "a",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      },
+      "value": {
+       "stringValue": "1"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "created_at is the smallest non-zero",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 500,
+    "fields": [
+     {
+      "key": "a",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      },
+      "value": {
+       "stringValue": "1"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 300,
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d31223f0a036366671207088080a01f1001222f3a2d0a1f0a05616c70686112163a140a080a016212030a01620a080a017912030a01790a0a0a047a65746112021001224f0a046c6973741207088080a01f1001223e423c0a030a017a0a0b10fbffffffffffffffff010a0919000000000000f83f0a0220000a0832060a01710a01610a084a060a01741201720a052a030001022a460a03636f6c1207088080a01f10012a361201561a041a02080122240a0e0a07616e6f7468657212030a01780a120a057769647468120919000000000000d03f280232037265642a400a03696d671207088080a01f10012a300a03636f6c1201561a2612240a05696d616765120568656c6c6f1a080a03616c741201411a0a0a057469746c651201542a460a066d61726b65641207088080a01f10012a331201741a2e0a2c0a09626f6c64206c696e6b10061a0210041a11080510091805220968747470733a2f2f7820012a04626c75652a170a0374626c1207088080a01f10012a0712016c1a0222002a1d0a0474636f6c1207088080a01f10012a0c0a0374626c1201561a022a002a1f0a0474726f771207088080a01f10012a0e0a0374626c12016c1a0432020801",
+   "hash": "5308ba80baf0a6b41c7c25fa1c97ff6acd02e40efc3fdf1d73d05453870b04ce",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "align": 2,
+       "backgroundColor": "red",
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "fields": {
+        "another": {
+         "stringValue": "x"
+        },
+        "width": {
+         "floatValue": 0.2500000000000000
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "col",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "custom": {
+         "contentType": "image",
+         "data": "aGVsbG8=",
+         "meta": {
+          "alt": "A",
+          "title": "T"
+         }
+        }
+       },
+       "parent": "col",
+       "position": "V"
+      },
+      "key": "img",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "text": {
+         "checked": true,
+         "color": "blue",
+         "marks": [
+          {
+           "from": 0,
+           "to": 4,
+           "type": 0
+          },
+          {
+           "from": 5,
+           "param": "https://x",
+           "to": 9,
+           "type": 5
+          }
+         ],
+         "style": 6,
+         "text": "bold link"
+        }
+       },
+       "parent": "",
+       "position": "t"
+      },
+      "key": "marked",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "",
+       "position": "l"
+      },
+      "key": "tbl",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "tableColumn": {
+
+        }
+       },
+       "parent": "tbl",
+       "position": "V"
+      },
+      "key": "tcol",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "tableRow": {
+         "isHeader": true
+        }
+       },
+       "parent": "tbl",
+       "position": "l"
+      },
+      "key": "trow",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "cfg",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "mapValue": {
+        "entries": {
+         "alpha": {
+          "mapValue": {
+           "entries": {
+            "b": {
+             "stringValue": "b"
+            },
+            "y": {
+             "stringValue": "y"
+            }
+           }
+          }
+         },
+         "zeta": {
+          "intValue": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "key": "list",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "valuesValue": {
+        "items": [
+         {
+          "stringValue": "z"
+         },
+         {
+          "intValue": -5
+         },
+         {
+          "floatValue": 1.5000000000000000
+         },
+         {
+          "boolValue": false
+         },
+         {
+          "listValue": {
+           "values": [
+            "q",
+            "a"
+           ]
+          }
+         },
+         {
+          "linkValue": {
+           "relationKey": "r",
+           "targetId": "t"
+          }
+         },
+         {
+          "bytesValue": "AAEC"
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "canonical maps sorted: value maps, block fields, custom meta",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+     {
+      "block": {
+       "align": 2,
+       "backgroundColor": "red",
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "fields": {
+        "another": {
+         "stringValue": "x"
+        },
+        "width": {
+         "floatValue": 0.2500000000000000
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "col",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "custom": {
+         "contentType": "image",
+         "data": "aGVsbG8=",
+         "meta": {
+          "alt": "A",
+          "title": "T"
+         }
+        }
+       },
+       "parent": "col",
+       "position": "V"
+      },
+      "key": "img",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "",
+       "position": "l"
+      },
+      "key": "tbl",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "tableColumn": {
+
+        }
+       },
+       "parent": "tbl",
+       "position": "V"
+      },
+      "key": "tcol",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "tableRow": {
+         "isHeader": true
+        }
+       },
+       "parent": "tbl",
+       "position": "l"
+      },
+      "key": "trow",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "text": {
+         "checked": true,
+         "color": "blue",
+         "marks": [
+          {
+           "from": 0,
+           "to": 4,
+           "type": 0
+          },
+          {
+           "from": 5,
+           "param": "https://x",
+           "to": 9,
+           "type": 5
+          }
+         ],
+         "style": 6,
+         "text": "bold link"
+        }
+       },
+       "parent": "",
+       "position": "t"
+      },
+      "key": "marked",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "cfg",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "mapValue": {
+        "entries": {
+         "alpha": {
+          "mapValue": {
+           "entries": {
+            "b": {
+             "stringValue": "b"
+            },
+            "y": {
+             "stringValue": "y"
+            }
+           }
+          }
+         },
+         "zeta": {
+          "intValue": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "key": "list",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "valuesValue": {
+        "items": [
+         {
+          "stringValue": "z"
+         },
+         {
+          "intValue": -5
+         },
+         {
+          "floatValue": 1.5000000000000000
+         },
+         {
+          "boolValue": false
+         },
+         {
+          "listValue": {
+           "values": [
+            "q",
+            "a"
+           ]
+          }
+         },
+         {
+          "linkValue": {
+           "relationKey": "r",
+           "targetId": "t"
+          }
+         },
+         {
+          "bytesValue": "AAEC"
+         }
+        ]
+       }
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d312a2e0a0e5f5f64697363757373696f6e5f5f1207088080a01f10012a131201561a0e120c0a0a64697363757373696f6e32110a026d311207088080d02810021801320032540a026d321207088080c025100232450a0e5f5f64697363757373696f6e5f5f1201561a30122e0a04636861741a0d0a06617574686f721203626f621a0b0a047465787412036865791a0a0a027473120431323030",
+   "hash": "e58910dbce6cc4ce7fe44f86b3fdb660dc5f2998a4228a69999b905b25c8e476",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "custom": {
+         "contentType": "discussion",
+         "data": "",
+         "meta": {
+
+         }
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "__discussion__",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+
+    ],
+    "messages": [
+     {
+      "gone": true,
+      "key": "m1",
+      "message": {
+
+      },
+      "stamp": {
+       "device": 2,
+       "time": 85196800
+      }
+     },
+     {
+      "key": "m2",
+      "message": {
+       "content": {
+        "custom": {
+         "contentType": "chat",
+         "data": "",
+         "meta": {
+          "author": "bob",
+          "text": "hey",
+          "ts": "1200"
+         }
+        }
+       },
+       "parent": "__discussion__",
+       "position": "V"
+      },
+      "stamp": {
+       "device": 2,
+       "time": 78643200
+      }
+     }
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "messages and blocks merge separately",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "custom": {
+         "contentType": "discussion",
+         "meta": {
+
+         }
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "__discussion__",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "fields": [
+
+    ],
+    "messages": [
+     {
+      "key": "m1",
+      "message": {
+       "content": {
+        "custom": {
+         "contentType": "chat",
+         "meta": {
+          "author": "alice",
+          "text": "hi",
+          "ts": "1100"
+         }
+        }
+       },
+       "parent": "__discussion__",
+       "position": "V"
+      },
+      "stamp": {
+       "device": 1,
+       "time": 72089600
+      }
+     }
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+
+    ],
+    "messages": [
+     {
+      "key": "m2",
+      "message": {
+       "content": {
+        "custom": {
+         "contentType": "chat",
+         "meta": {
+          "author": "bob",
+          "text": "hey",
+          "ts": "1200"
+         }
+        }
+       },
+       "parent": "__discussion__",
+       "position": "V"
+      },
+      "stamp": {
+       "device": 2,
+       "time": 78643200
+      }
+     },
+     {
+      "gone": true,
+      "key": "m1",
+      "message": {
+
+      },
+      "stamp": {
+       "device": 2,
+       "time": 85196800
+      }
+     }
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d3112170a04747970651207088080a01f100122060a046e6f74651a160a0764656c657465641207088080a01f10012202200022140a046e616d651207088080c03e100122030a01422a110a0270311207088080904e100218012a00324a0a026d311207088080c03e1001323b0a0270311201561a3212300a04636861741a0f0a06617574686f721205616c6963651a0b0a047465787412036d73671a0a0a027473120432303030",
+   "hash": "6d2355e9cd1aefb4b9c0accb632839b27362fcb70551aada8d34252cc53d5d2b",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "p1",
+      "stamp": {
+       "device": 2,
+       "time": 163840000
+      }
+     }
+    ],
+    "createdAt": 0,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 131072000
+      },
+      "value": {
+       "stringValue": "B"
+      }
+     }
+    ],
+    "messages": [
+     {
+      "key": "m1",
+      "message": {
+       "content": {
+        "custom": {
+         "contentType": "chat",
+         "data": "",
+         "meta": {
+          "author": "alice",
+          "text": "msg",
+          "ts": "2000"
+         }
+        }
+       },
+       "parent": "p1",
+       "position": "V"
+      },
+      "stamp": {
+       "device": 1,
+       "time": 131072000
+      }
+     }
+    ],
+    "objectId": "obj-1",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     },
+     "value": {
+      "stringValue": "note"
+     }
+    }
+   }
+  },
+  "name": "patches route by key and body kind",
+  "patches": [
+   {
+    "entries": [
+     {
+      "key": "type",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "note"
+      }
+     },
+     {
+      "key": "deleted",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "boolValue": false
+      }
+     },
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 131072000
+      },
+      "value": {
+       "stringValue": "B"
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "text": {
+         "checked": false,
+         "color": "",
+         "marks": [
+
+         ],
+         "style": 0,
+         "text": "para"
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "p1",
+      "stamp": {
+       "device": 1,
+       "time": 131072000
+      }
+     },
+     {
+      "key": "m1",
+      "message": {
+       "content": {
+        "custom": {
+         "contentType": "chat",
+         "meta": {
+          "author": "alice",
+          "text": "msg",
+          "ts": "2000"
+         }
+        }
+       },
+       "parent": "p1",
+       "position": "V"
+      },
+      "stamp": {
+       "device": 1,
+       "time": 131072000
+      }
+     }
+    ],
+    "objectId": "obj-1"
+   },
+   {
+    "entries": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 2,
+       "time": 98304000
+      },
+      "value": {
+       "stringValue": "stale"
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "p1",
+      "stamp": {
+       "device": 2,
+       "time": 163840000
+      }
+     }
+    ],
+    "objectId": "obj-1"
+   }
+  ],
+  "records": [
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "A"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d3122150a016b1207088080c03e100122070a056e65776572",
+   "hash": "0899f60d2ea14d3c55f65cf407d89fa35b01d57848e1020c19fad7cf84d81e8a",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "key": "k",
+      "stamp": {
+       "device": 1,
+       "time": 131072000
+      },
+      "value": {
+       "stringValue": "newer"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "duplicate keys inside one patch: larger stamp wins",
+  "patches": [
+   {
+    "entries": [
+     {
+      "key": "k",
+      "stamp": {
+       "device": 1,
+       "time": 131072000
+      },
+      "value": {
+       "stringValue": "newer"
+      }
+     },
+     {
+      "key": "k",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "older"
+      }
+     }
+    ],
+    "objectId": "obj-1"
+   }
+  ],
+  "records": [
+
+  ]
+ },
+ {
+  "expected": {
+   "canonical": "0a056f626a2d31221d0a0e676f6e652d776974682d626f64791207088080a01f100118012200",
+   "hash": "1bda08a26d19bd3a73db8d1a8e670209767b1d504f14772a7946b6535bcd71a9",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "gone": true,
+      "key": "gone-with-body",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  },
+  "name": "tombstone payload is ignored by the canonical encoding",
+  "patches": [
+
+  ],
+  "records": [
+   {
+    "blocks": [
+
+    ],
+    "createdAt": 0,
+    "fields": [
+     {
+      "gone": true,
+      "key": "gone-with-body",
+      "stamp": {
+       "device": 1,
+       "time": 65536000
+      },
+      "value": {
+       "stringValue": "ignored"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "obj-1"
+   }
+  ]
+ }
+]

@@ -1,0 +1,543 @@
+[
+ {
+  "expected": {
+   "blocks": [
+
+   ],
+   "createdAt": 500,
+   "deleted": true,
+   "fields": {
+    "a": {
+     "stringValue": "A"
+    },
+    "b": {
+     "stringValue": "B"
+    }
+   },
+   "id": "obj-1",
+   "typeKey": "page",
+   "updatedAt": 4000
+  },
+  "name": "fields minus tombstones, type, deleted, timestamps",
+  "record": {
+   "blocks": [
+
+   ],
+   "createdAt": 0,
+   "deleted": {
+    "key": "deleted",
+    "stamp": {
+     "device": 1,
+     "time": 32768000
+    },
+    "value": {
+     "boolValue": true
+    }
+   },
+   "fields": [
+    {
+     "key": "b",
+     "stamp": {
+      "device": 1,
+      "time": 131072000
+     },
+     "value": {
+      "stringValue": "B"
+     }
+    },
+    {
+     "key": "a",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     },
+     "value": {
+      "stringValue": "A"
+     }
+    },
+    {
+     "gone": true,
+     "key": "gone",
+     "stamp": {
+      "device": 1,
+      "time": 262144000
+     },
+     "value": {
+
+     }
+    }
+   ],
+   "messages": [
+
+   ],
+   "objectId": "obj-1",
+   "type": {
+    "key": "type",
+    "stamp": {
+     "device": 1,
+     "time": 32768000
+    },
+    "value": {
+     "stringValue": "page"
+    }
+   }
+  }
+ },
+ {
+  "expected": {
+   "blocks": [
+
+   ],
+   "createdAt": 42,
+   "deleted": false,
+   "fields": {
+    "a": {
+     "stringValue": "A"
+    }
+   },
+   "id": "obj-1",
+   "typeKey": "",
+   "updatedAt": 1000
+  },
+  "name": "created_at from record when set",
+  "record": {
+   "blocks": [
+
+   ],
+   "createdAt": 42,
+   "fields": [
+    {
+     "key": "a",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     },
+     "value": {
+      "stringValue": "A"
+     }
+    }
+   ],
+   "messages": [
+
+   ],
+   "objectId": "obj-1"
+  }
+ },
+ {
+  "expected": {
+   "blocks": [
+    {
+     "childrenIds": [
+      "tie-a",
+      "tie-b"
+     ],
+     "content": {
+      "text": {
+       "checked": false,
+       "color": "",
+       "marks": [
+
+       ],
+       "style": 0,
+       "text": "first"
+      }
+     },
+     "id": "root-1"
+    },
+    {
+     "childrenIds": [
+
+     ],
+     "content": {
+      "text": {
+       "checked": false,
+       "color": "",
+       "marks": [
+
+       ],
+       "style": 0,
+       "text": "tie a"
+      }
+     },
+     "id": "tie-a"
+    },
+    {
+     "childrenIds": [
+
+     ],
+     "content": {
+      "text": {
+       "checked": false,
+       "color": "",
+       "marks": [
+
+       ],
+       "style": 0,
+       "text": "tie b"
+      }
+     },
+     "id": "tie-b"
+    },
+    {
+     "childrenIds": [
+
+     ],
+     "content": {
+      "text": {
+       "checked": false,
+       "color": "",
+       "marks": [
+
+       ],
+       "style": 0,
+       "text": "second"
+      }
+     },
+     "id": "root-2"
+    },
+    {
+     "childrenIds": [
+      "m1",
+      "m2"
+     ],
+     "content": {
+      "custom": {
+       "contentType": "discussion",
+       "data": "",
+       "meta": {
+
+       }
+      }
+     },
+     "id": "__discussion__"
+    },
+    {
+     "childrenIds": [
+      "receipt"
+     ],
+     "content": {
+      "custom": {
+       "contentType": "chat",
+       "data": "",
+       "meta": {
+        "author": "alice",
+        "text": "first",
+        "ts": "1100"
+       }
+      }
+     },
+     "id": "m1"
+    },
+    {
+     "childrenIds": [
+
+     ],
+     "content": {
+      "text": {
+       "checked": false,
+       "color": "",
+       "marks": [
+
+       ],
+       "style": 0,
+       "text": "seen"
+      }
+     },
+     "id": "receipt"
+    },
+    {
+     "childrenIds": [
+
+     ],
+     "content": {
+      "custom": {
+       "contentType": "chat",
+       "data": "",
+       "meta": {
+        "author": "bob",
+        "text": "second",
+        "ts": "1200"
+       }
+      }
+     },
+     "id": "m2"
+    }
+   ],
+   "createdAt": 1000,
+   "deleted": false,
+   "fields": {
+
+   },
+   "id": "obj-1",
+   "typeKey": "",
+   "updatedAt": 1300
+  },
+  "name": "tree ordered by position then id, messages interleaved, orphans hidden",
+  "record": {
+   "blocks": [
+    {
+     "block": {
+      "content": {
+       "text": {
+        "checked": false,
+        "color": "",
+        "marks": [
+
+        ],
+        "style": 0,
+        "text": "second"
+       }
+      },
+      "parent": "",
+      "position": "l"
+     },
+     "key": "root-2",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     }
+    },
+    {
+     "block": {
+      "content": {
+       "text": {
+        "checked": false,
+        "color": "",
+        "marks": [
+
+        ],
+        "style": 0,
+        "text": "first"
+       }
+      },
+      "parent": "",
+      "position": "V"
+     },
+     "key": "root-1",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     }
+    },
+    {
+     "block": {
+      "content": {
+       "text": {
+        "checked": false,
+        "color": "",
+        "marks": [
+
+        ],
+        "style": 0,
+        "text": "tie b"
+       }
+      },
+      "parent": "root-1",
+      "position": "V"
+     },
+     "key": "tie-b",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     }
+    },
+    {
+     "block": {
+      "content": {
+       "text": {
+        "checked": false,
+        "color": "",
+        "marks": [
+
+        ],
+        "style": 0,
+        "text": "tie a"
+       }
+      },
+      "parent": "root-1",
+      "position": "V"
+     },
+     "key": "tie-a",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     }
+    },
+    {
+     "block": {
+      "content": {
+       "text": {
+        "checked": false,
+        "color": "",
+        "marks": [
+
+        ],
+        "style": 0,
+        "text": "hidden"
+       }
+      },
+      "parent": "missing-parent",
+      "position": "V"
+     },
+     "key": "orphan",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     }
+    },
+    {
+     "block": {
+
+     },
+     "gone": true,
+     "key": "deleted-root",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     }
+    },
+    {
+     "block": {
+      "content": {
+       "text": {
+        "checked": false,
+        "color": "",
+        "marks": [
+
+        ],
+        "style": 0,
+        "text": "hidden too"
+       }
+      },
+      "parent": "deleted-root",
+      "position": "V"
+     },
+     "key": "child-of-deleted",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     }
+    },
+    {
+     "block": {
+      "content": {
+       "custom": {
+        "contentType": "discussion",
+        "meta": {
+
+        }
+       }
+      },
+      "parent": "",
+      "position": "t"
+     },
+     "key": "__discussion__",
+     "stamp": {
+      "device": 1,
+      "time": 65536000
+     }
+    }
+   ],
+   "createdAt": 0,
+   "fields": [
+
+   ],
+   "messages": [
+    {
+     "key": "m2",
+     "message": {
+      "content": {
+       "custom": {
+        "contentType": "chat",
+        "meta": {
+         "author": "bob",
+         "text": "second",
+         "ts": "1200"
+        }
+       }
+      },
+      "parent": "__discussion__",
+      "position": "l"
+     },
+     "stamp": {
+      "device": 2,
+      "time": 78643200
+     }
+    },
+    {
+     "key": "m1",
+     "message": {
+      "content": {
+       "custom": {
+        "contentType": "chat",
+        "meta": {
+         "author": "alice",
+         "text": "first",
+         "ts": "1100"
+        }
+       }
+      },
+      "parent": "__discussion__",
+      "position": "V"
+     },
+     "stamp": {
+      "device": 1,
+      "time": 72089600
+     }
+    },
+    {
+     "key": "receipt",
+     "message": {
+      "content": {
+       "text": {
+        "checked": false,
+        "color": "",
+        "marks": [
+
+        ],
+        "style": 0,
+        "text": "seen"
+       }
+      },
+      "parent": "m1",
+      "position": "V"
+     },
+     "stamp": {
+      "device": 1,
+      "time": 85196800
+     }
+    }
+   ],
+   "objectId": "obj-1"
+  }
+ },
+ {
+  "expected": {
+   "blocks": [
+
+   ],
+   "createdAt": 0,
+   "deleted": false,
+   "fields": {
+
+   },
+   "id": "obj-1",
+   "typeKey": "",
+   "updatedAt": 0
+  },
+  "name": "empty record",
+  "record": {
+   "blocks": [
+
+   ],
+   "createdAt": 0,
+   "fields": [
+
+   ],
+   "messages": [
+
+   ],
+   "objectId": "obj-1"
+  }
+ }
+]

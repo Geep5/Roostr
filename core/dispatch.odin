@@ -10,6 +10,8 @@ dispatch :: proc(method: string, payload: json.Value) -> (json.Value, string) {
 	// Changes, conversations and agent messages: one codec, reached by every host.
 	case "codec": return codec_dispatch(payload)
 	case "replay": return replay_dispatch(payload)
+	// State records (docs/state-objects.md): DAG → record conversion.
+	case "record": return record_dispatch(payload)
 	case "query": return query_dispatch(payload)
 	case "mutation": return mutation_dispatch(payload)
 	case "wire": return wire_dispatch(payload)

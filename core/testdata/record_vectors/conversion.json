@@ -1,0 +1,2741 @@
+[
+ {
+  "changes": [
+   {
+    "author": "fixture-author",
+    "id": "0101010101010101010101010101010101010101010101010101010101010101",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "winner",
+       "value": {
+        "stringValue": "child"
+       }
+      }
+     }
+    ],
+    "parentIds": [
+     "2020202020202020202020202020202020202020202020202020202020202020"
+    ],
+    "timestamp": 9
+   },
+   {
+    "author": "fixture-author",
+    "id": "3030303030303030303030303030303030303030303030303030303030303030",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "winner",
+       "value": {
+        "stringValue": "root"
+       }
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 4
+   },
+   {
+    "author": "fixture-author",
+    "id": "2020202020202020202020202020202020202020202020202020202020202020",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "page"
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 1
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0e666978747572652d6f626a65637412160a0474797065120608808004100122060a04706167651a150a0764656c6574656412060880800410012202200022190a0677696e6e6572120608808024100122070a056368696c643801",
+   "hash": "3fe2dbbf1d440c13b8c1d1a90212e6717b6999dbbd6146adae1bc5a64b42e1b0",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 1,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 1,
+      "time": 65536
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+     {
+      "key": "winner",
+      "stamp": {
+       "device": 1,
+       "time": 589824
+      },
+      "value": {
+       "stringValue": "child"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "fixture-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 1,
+      "time": 65536
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "replay fixture: FIFO Kahn ordering retains queued roots before newly freed smaller ids"
+ },
+ {
+  "changes": [
+   {
+    "author": "fixture-author",
+    "id": "1010101010101010101010101010101010101010101010101010101010101010",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "objectDelete": {
+
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "snapshot": {
+     "blocks": [
+      {
+       "childrenIds": [
+
+       ],
+       "content": {
+        "table": {
+
+        }
+       },
+       "id": "a"
+      }
+     ],
+     "content": "aGVsbG8=",
+     "createdAt": 3,
+     "fields": {
+      "kept": {
+       "intValue": 7
+      }
+     },
+     "id": "fixture-object",
+     "typeKey": "page",
+     "updatedAt": 49
+    },
+    "timestamp": 50
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0e666978747572652d6f626a65637412100a0474797065120022060a0470616765220c0a046b6570741200220210072a290a0b5f5f636f6e74656e745f5f12002a1812016c1a1312110a08676c6f6e2f726177120568656c6c6f2a0e0a016112002a071201561a0222003803",
+   "hash": "614ef9e6d6bfb9937bdf73d4dbb422b2154a27b48b3797afb483acf18eecf76e",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "custom": {
+         "contentType": "glon/raw",
+         "data": "aGVsbG8=",
+         "meta": {
+
+         }
+        }
+       },
+       "parent": "",
+       "position": "l"
+      },
+      "key": "__content__",
+      "stamp": {
+       "device": 0,
+       "time": 0
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "a",
+      "stamp": {
+       "device": 0,
+       "time": 0
+      }
+     }
+    ],
+    "createdAt": 3,
+    "fields": [
+     {
+      "key": "kept",
+      "stamp": {
+       "device": 0,
+       "time": 0
+      },
+      "value": {
+       "intValue": 7
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "fixture-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 0,
+      "time": 0
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "replay fixture: snapshot-only keeps legacy zero updatedAt and hides primary content"
+ },
+ {
+  "changes": [
+   {
+    "author": "fixture-author",
+    "id": "1010101010101010101010101010101010101010101010101010101010101010",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "discarded"
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 1
+   },
+   {
+    "author": "fixture-author",
+    "id": "2020202020202020202020202020202020202020202020202020202020202020",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "objectDelete": {
+
+      }
+     }
+    ],
+    "parentIds": [
+     "1010101010101010101010101010101010101010101010101010101010101010"
+    ],
+    "snapshot": {
+     "createdAt": 2,
+     "fields": {
+      "base": {
+       "boolValue": true
+      }
+     },
+     "typeKey": "page"
+    },
+    "timestamp": 200
+   },
+   {
+    "author": "fixture-author",
+    "id": "3030303030303030303030303030303030303030303030303030303030303030",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "fieldSet": {
+       "key": "suffix",
+       "value": {
+        "intValue": 1
+       }
+      }
+     }
+    ],
+    "parentIds": [
+     "2020202020202020202020202020202020202020202020202020202020202020"
+    ],
+    "snapshot": {
+     "deleted": true,
+     "typeKey": "ignored"
+    },
+    "timestamp": 100
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0e666978747572652d6f626a65637412100a0474797065120022060a0470616765220c0a046261736512002202200122150a06737566666978120708808090031001220210013802",
+   "hash": "d684c8a787060f8df73c850cf018afd48196017115f3bc621a32ab31f534f2ea",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 2,
+    "fields": [
+     {
+      "key": "base",
+      "stamp": {
+       "device": 0,
+       "time": 0
+      },
+      "value": {
+       "boolValue": true
+      }
+     },
+     {
+      "key": "suffix",
+      "stamp": {
+       "device": 1,
+       "time": 6553600
+      },
+      "value": {
+       "intValue": 1
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "fixture-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 0,
+      "time": 0
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "replay fixture: highest timestamp snapshot skips prefix and ignores later older snapshot state"
+ },
+ {
+  "changes": [
+   {
+    "author": "fixture-author",
+    "id": "1010101010101010101010101010101010101010101010101010101010101010",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "old"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "kept",
+       "value": {
+        "stringValue": "yes"
+       }
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "table": {
+
+         }
+        },
+        "id": "a"
+       }
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 1
+   },
+   {
+    "author": "fixture-author",
+    "id": "2020202020202020202020202020202020202020202020202020202020202020",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "objectDelete": {
+
+      }
+     }
+    ],
+    "parentIds": [
+     "1010101010101010101010101010101010101010101010101010101010101010"
+    ],
+    "timestamp": 2
+   },
+   {
+    "author": "fixture-author",
+    "id": "3030303030303030303030303030303030303030303030303030303030303030",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "page"
+      }
+     }
+    ],
+    "parentIds": [
+     "2020202020202020202020202020202020202020202020202020202020202020"
+    ],
+    "timestamp": 3
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0e666978747572652d6f626a65637412160a047479706512060880800c100122060a04706167651a150a0764656c6574656412060880800c10012202200022150a046b657074120608808004100122050a037965732a140a016112060880800410012a071201561a0222003803",
+   "hash": "4760ac9978dc997d5854e026ec313544bcdfa80ade52f8c0534207379e4e3a60",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "a",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     }
+    ],
+    "createdAt": 3,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 1,
+      "time": 196608
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+     {
+      "key": "kept",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      },
+      "value": {
+       "stringValue": "yes"
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "fixture-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 1,
+      "time": 196608
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "replay fixture: delete and recreate revives without erasing fields or blocks"
+ },
+ {
+  "changes": [
+   {
+    "author": "fixture-author",
+    "id": "1010101010101010101010101010101010101010101010101010101010101010",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "page"
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "table": {
+
+         }
+        },
+        "id": "a"
+       }
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "table": {
+
+         }
+        },
+        "id": "kid"
+       },
+       "parentId": "a"
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "align": 2,
+        "backgroundColor": "red",
+        "childrenIds": [
+
+        ],
+        "content": {
+         "table": {
+
+         }
+        },
+        "id": "z"
+       },
+       "position": 6,
+       "targetId": "a"
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 1
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0e666978747572652d6f626a65637412160a0474797065120608808004100122060a04706167651a150a0764656c657465641206088080041001220220002a0f0a0161120608808004100118012a002a190a036b696412060880800410012a0a0a017a1201561a0222002a1b0a017a12060880800410012a0e1201561a022200280232037265643801",
+   "hash": "c82106e8dfb107149d728aa584e910344dd4602836358ffac2d7411c4be1bba1",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "a",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "z",
+       "position": "V"
+      },
+      "key": "kid",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     },
+     {
+      "block": {
+       "align": 2,
+       "backgroundColor": "red",
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "z",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     }
+    ],
+    "createdAt": 1,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 1,
+      "time": 65536
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "fixture-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 1,
+      "time": 65536
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "replay fixture: replace inherits target children and attrs remain on replacement"
+ },
+ {
+  "changes": [
+   {
+    "author": "fixture-author",
+    "id": "1010101010101010101010101010101010101010101010101010101010101010",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "page"
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "table": {
+
+         }
+        },
+        "id": "a"
+       }
+      }
+     },
+     {
+      "blockAdd": {
+       "afterId": "missing",
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "table": {
+
+         }
+        },
+        "id": "b"
+       }
+      }
+     },
+     {
+      "blockAdd": {
+       "afterId": "a",
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "table": {
+
+         }
+        },
+        "id": "c"
+       }
+      }
+     },
+     {
+      "blockMove": {
+       "afterId": "a",
+       "blockId": "c"
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 1
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0e666978747572652d6f626a65637412160a0474797065120608808004100122060a04706167651a150a0764656c657465641206088080041001220220002a140a016112060880800410012a071201471a0222002a140a016212060880800410012a0712016c1a0222002a140a016312060880800410012a071201561a0222003801",
+   "hash": "3d20722de1378e9ce9c427e178de7c66185fd48f9a226e5c550dfa193c7eff5f",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "",
+       "position": "G"
+      },
+      "key": "a",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "",
+       "position": "l"
+      },
+      "key": "b",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "c",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     }
+    ],
+    "createdAt": 1,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 1,
+      "time": 65536
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "fixture-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 1,
+      "time": 65536
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "replay fixture: legacy add ignores after while legacy move honors after"
+ },
+ {
+  "changes": [
+   {
+    "author": "fixture-author",
+    "id": "1010101010101010101010101010101010101010101010101010101010101010",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "page"
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "table": {
+
+         }
+        },
+        "id": "a"
+       }
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "table": {
+
+         }
+        },
+        "id": "b"
+       },
+       "position": 4,
+       "targetId": "a"
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 1
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0e666978747572652d6f626a65637412160a0474797065120608808004100122060a04706167651a150a0764656c657465641206088080041001220220002a2b0a016112060880800410012a1e0a1563742d313031303130313031303130313031302d321201561a0222002a2b0a016212060880800410012a1e0a1563642d313031303130313031303130313031302d321201561a0222002a400a1563642d313031303130313031303130313031302d3212060880800410012a1f0a14722d313031303130313031303130313031302d3212016c1a041a0208012a400a1563742d313031303130313031303130313031302d3212060880800410012a1f0a14722d313031303130313031303130313031302d321201561a041a0208012a270a14722d313031303130313031303130313031302d3212060880800410012a071201561a021a003801",
+   "hash": "b133f4b6219392ebea68af393e8039638e219b8b22be80f0bf4e0c16473ba028",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "ct-1010101010101010-2",
+       "position": "V"
+      },
+      "key": "a",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "cd-1010101010101010-2",
+       "position": "V"
+      },
+      "key": "b",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "parent": "r-1010101010101010-2",
+       "position": "l"
+      },
+      "key": "cd-1010101010101010-2",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "parent": "r-1010101010101010-2",
+       "position": "V"
+      },
+      "key": "ct-1010101010101010-2",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "layout": {
+         "style": 0
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "r-1010101010101010-2",
+      "stamp": {
+       "device": 1,
+       "time": 65536
+      }
+     }
+    ],
+    "createdAt": 1,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 1,
+      "time": 65536
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "fixture-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 1,
+      "time": 65536
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "replay fixture: side insertion makes deterministic row and columns"
+ },
+ {
+  "changes": [
+   {
+    "author": "fixture-author",
+    "id": "1010101010101010101010101010101010101010101010101010101010101010",
+    "objectId": "fixture-object",
+    "ops": [
+
+    ],
+    "parentIds": [
+
+    ],
+    "snapshot": {
+     "blocks": [
+      {
+       "childrenIds": [
+        "ca",
+        "cb"
+       ],
+       "content": {
+        "layout": {
+         "style": 0
+        }
+       },
+       "id": "row"
+      },
+      {
+       "childrenIds": [
+        "a"
+       ],
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "fields": {
+        "entries": {
+         "kept": {
+          "boolValue": true
+         },
+         "width": {
+          "floatValue": 0.4000000000000000
+         }
+        }
+       },
+       "id": "ca"
+      },
+      {
+       "childrenIds": [
+
+       ],
+       "content": {
+        "table": {
+
+        }
+       },
+       "id": "a"
+      },
+      {
+       "childrenIds": [
+        "b"
+       ],
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "fields": {
+        "entries": {
+         "width": {
+          "floatValue": 0.6000000000000000
+         }
+        }
+       },
+       "id": "cb"
+      },
+      {
+       "childrenIds": [
+
+       ],
+       "content": {
+        "table": {
+
+        }
+       },
+       "id": "b"
+      }
+     ],
+     "createdAt": 1,
+     "typeKey": "page"
+    },
+    "timestamp": 1
+   },
+   {
+    "author": "fixture-author",
+    "id": "2020202020202020202020202020202020202020202020202020202020202020",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "table": {
+
+         }
+        },
+        "id": "c"
+       },
+       "position": 4,
+       "targetId": "b"
+      }
+     }
+    ],
+    "parentIds": [
+     "1010101010101010101010101010101010101010101010101010101010101010"
+    ],
+    "timestamp": 2
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0e666978747572652d6f626a65637412100a0474797065120022060a04706167652a120a016112002a0b0a0263611201561a0222002a180a016212060880800810012a0b0a0263621201561a0222002a2b0a016312060880800810012a1e0a1563642d323032303230323032303230323032302d301201561a0222002a240a02636112002a1c0a03726f771201471a041a020801220c0a0a0a046b657074120220012a160a02636212002a0e0a03726f771201561a041a0208012a2f0a1563642d323032303230323032303230323032302d3012060880800810012a0e0a03726f7712016c1a041a0208012a100a03726f7712002a071201561a021a003801",
+   "hash": "22f35e9dc51d26599c52d4575ef921800ac516fce68968ba1e54a1870bd060ea",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "ca",
+       "position": "V"
+      },
+      "key": "a",
+      "stamp": {
+       "device": 0,
+       "time": 0
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "cb",
+       "position": "V"
+      },
+      "key": "b",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "cd-2020202020202020-0",
+       "position": "V"
+      },
+      "key": "c",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "fields": {
+        "kept": {
+         "boolValue": true
+        }
+       },
+       "parent": "row",
+       "position": "G"
+      },
+      "key": "ca",
+      "stamp": {
+       "device": 0,
+       "time": 0
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "parent": "row",
+       "position": "V"
+      },
+      "key": "cb",
+      "stamp": {
+       "device": 0,
+       "time": 0
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "parent": "row",
+       "position": "l"
+      },
+      "key": "cd-2020202020202020-0",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "layout": {
+         "style": 0
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "row",
+      "stamp": {
+       "device": 0,
+       "time": 0
+      }
+     }
+    ],
+    "createdAt": 1,
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "fixture-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 0,
+      "time": 0
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "replay fixture: row count change resets column widths preserving other fields"
+ },
+ {
+  "changes": [
+   {
+    "author": "fixture-author",
+    "id": "1010101010101010101010101010101010101010101010101010101010101010",
+    "objectId": "fixture-object",
+    "ops": [
+
+    ],
+    "parentIds": [
+
+    ],
+    "snapshot": {
+     "blocks": [
+      {
+       "childrenIds": [
+        "ca",
+        "cb"
+       ],
+       "content": {
+        "layout": {
+         "style": 0
+        }
+       },
+       "id": "row"
+      },
+      {
+       "childrenIds": [
+        "a"
+       ],
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "fields": {
+        "entries": {
+         "kept": {
+          "boolValue": true
+         },
+         "width": {
+          "floatValue": 0.4000000000000000
+         }
+        }
+       },
+       "id": "ca"
+      },
+      {
+       "childrenIds": [
+
+       ],
+       "content": {
+        "table": {
+
+        }
+       },
+       "id": "a"
+      },
+      {
+       "childrenIds": [
+        "b"
+       ],
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "fields": {
+        "entries": {
+         "width": {
+          "floatValue": 0.6000000000000000
+         }
+        }
+       },
+       "id": "cb"
+      },
+      {
+       "childrenIds": [
+
+       ],
+       "content": {
+        "table": {
+
+        }
+       },
+       "id": "b"
+      }
+     ],
+     "createdAt": 1,
+     "typeKey": "page"
+    },
+    "timestamp": 1
+   },
+   {
+    "author": "fixture-author",
+    "id": "2020202020202020202020202020202020202020202020202020202020202020",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "blockRemove": {
+       "blockId": "b"
+      }
+     }
+    ],
+    "parentIds": [
+     "1010101010101010101010101010101010101010101010101010101010101010"
+    ],
+    "timestamp": 2
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0e666978747572652d6f626a65637412100a0474797065120022060a04706167652a0e0a016112002a071201561a0222002a0f0a0162120608808008100118012a002a100a026361120608808008100118012a002a100a026362120608808008100118012a002a110a03726f77120608808008100118012a003801",
+   "hash": "4baa662ffffbeb0013e2906a62f22f8828aac5d25dd716d00ca8e6a905725222",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "a",
+      "stamp": {
+       "device": 0,
+       "time": 0
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "b",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "ca",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "cb",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "row",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     }
+    ],
+    "createdAt": 1,
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "fixture-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 0,
+      "time": 0
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "replay fixture: empty column deletion unwraps single-column row"
+ },
+ {
+  "changes": [
+   {
+    "author": "fixture-author",
+    "id": "1010101010101010101010101010101010101010101010101010101010101010",
+    "objectId": "fixture-object",
+    "ops": [
+
+    ],
+    "parentIds": [
+
+    ],
+    "snapshot": {
+     "blocks": [
+      {
+       "childrenIds": [
+        "oc"
+       ],
+       "content": {
+        "layout": {
+         "style": 0
+        }
+       },
+       "id": "outer"
+      },
+      {
+       "childrenIds": [
+        "inner"
+       ],
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "id": "oc"
+      },
+      {
+       "childrenIds": [
+        "ic"
+       ],
+       "content": {
+        "layout": {
+         "style": 0
+        }
+       },
+       "id": "inner"
+      },
+      {
+       "childrenIds": [
+        "leaf"
+       ],
+       "content": {
+        "layout": {
+         "style": 1
+        }
+       },
+       "id": "ic"
+      },
+      {
+       "childrenIds": [
+
+       ],
+       "content": {
+        "table": {
+
+        }
+       },
+       "id": "leaf"
+      }
+     ],
+     "createdAt": 1,
+     "typeKey": "page"
+    },
+    "timestamp": 1
+   },
+   {
+    "author": "fixture-author",
+    "id": "2020202020202020202020202020202020202020202020202020202020202020",
+    "objectId": "fixture-object",
+    "ops": [
+     {
+      "blockRemove": {
+       "blockId": "missing"
+      }
+     }
+    ],
+    "parentIds": [
+     "1010101010101010101010101010101010101010101010101010101010101010"
+    ],
+    "timestamp": 2
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0e666978747572652d6f626a65637412100a0474797065120022060a04706167652a100a026963120608808008100118012a002a130a05696e6e6572120608808008100118012a002a110a046c65616612002a071201561a0222002a150a076d697373696e67120608808008100118012a002a100a026f63120608808008100118012a002a130a056f75746572120608808008100118012a003801",
+   "hash": "d9ba40c4daea6bb509de081e5c30588da204c0c7b67582d407fea5ab462d80ae",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "ic",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "inner",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "leaf",
+      "stamp": {
+       "device": 0,
+       "time": 0
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "missing",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "oc",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "outer",
+      "stamp": {
+       "device": 1,
+       "time": 131072
+      }
+     }
+    ],
+    "createdAt": 1,
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "fixture-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 0,
+      "time": 0
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "replay fixture: nested single-column rows normalize in insertion order"
+ },
+ {
+  "changes": [
+   {
+    "author": "fixture",
+    "id": "1111111111111111111111111111111111111111111111111111111111111111",
+    "objectId": "legacy-graph",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "page"
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "custom": {
+          "contentType": "opaque",
+          "data": "AAE=",
+          "meta": {
+
+          }
+         }
+        },
+        "id": "leaf"
+       }
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 1
+   },
+   {
+    "author": "fixture",
+    "id": "2222222222222222222222222222222222222222222222222222222222222222",
+    "objectId": "legacy-graph",
+    "ops": [
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+         "leaf"
+        ],
+        "content": {
+         "table": {
+
+         }
+        },
+        "id": "parent"
+       }
+      }
+     }
+    ],
+    "parentIds": [
+     "1111111111111111111111111111111111111111111111111111111111111111"
+    ],
+    "timestamp": 2
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0c6c65676163792d677261706812160a0474797065120608808004100222060a04706167651a150a0764656c657465641206088080041002220220002a230a046c65616612060880800410022a131201561a0e120c0a066f7061717565120200012a190a06706172656e7412060880800810022a0712016c1a0222003801",
+   "hash": "8f8c912194945a5ace8faed2040cf3482cdae20f0ef46877f458d944aff5b301",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "custom": {
+         "contentType": "opaque",
+         "data": "AAE=",
+         "meta": {
+
+         }
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "leaf",
+      "stamp": {
+       "device": 2,
+       "time": 65536
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "table": {
+
+        }
+       },
+       "parent": "",
+       "position": "l"
+      },
+      "key": "parent",
+      "stamp": {
+       "device": 2,
+       "time": 131072
+      }
+     }
+    ],
+    "createdAt": 1,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 2,
+      "time": 65536
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "legacy-graph",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 2,
+      "time": 65536
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "replay fixture: legacy child root serialized once even when repeated under later parent; UI hides custom binary data"
+ },
+ {
+  "changes": [
+   {
+    "author": "alice",
+    "id": "0101010101010101010101010101010101010101010101010101010101010101",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "page"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Doc"
+       }
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "tmp",
+       "value": {
+        "stringValue": "x"
+       }
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "text": {
+          "checked": false,
+          "color": "",
+          "marks": [
+
+          ],
+          "style": 0,
+          "text": "one"
+         }
+        },
+        "id": "p1"
+       }
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "text": {
+          "checked": false,
+          "color": "",
+          "marks": [
+
+          ],
+          "style": 0,
+          "text": "two"
+         }
+        },
+        "id": "p2"
+       },
+       "position": 2,
+       "targetId": "p1"
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "text": {
+          "checked": false,
+          "color": "",
+          "marks": [
+
+          ],
+          "style": 0,
+          "text": "child"
+         }
+        },
+        "id": "p3"
+       },
+       "position": 5,
+       "targetId": "p2"
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 1000
+   },
+   {
+    "author": "bob",
+    "id": "0202020202020202020202020202020202020202020202020202020202020202",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "fieldDelete": {
+       "key": "tmp"
+      }
+     },
+     {
+      "blockUpdate": {
+       "blockId": "p1",
+       "content": {
+        "text": {
+         "checked": false,
+         "color": "",
+         "marks": [
+
+         ],
+         "style": 0,
+         "text": "one, edited"
+        }
+       }
+      }
+     }
+    ],
+    "parentIds": [
+     "0101010101010101010101010101010101010101010101010101010101010101"
+    ],
+    "timestamp": 2000
+   },
+   {
+    "author": "alice",
+    "id": "0303030303030303030303030303030303030303030303030303030303030303",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "blockRemove": {
+       "blockId": "p2"
+      }
+     },
+     {
+      "fieldSet": {
+       "key": "name",
+       "value": {
+        "stringValue": "Doc 2"
+       }
+      }
+     }
+    ],
+    "parentIds": [
+     "0101010101010101010101010101010101010101010101010101010101010101"
+    ],
+    "timestamp": 1500
+   },
+   {
+    "author": "bob",
+    "id": "0404040404040404040404040404040404040404040404040404040404040404",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "text": {
+          "checked": false,
+          "color": "",
+          "marks": [
+
+          ],
+          "style": 0,
+          "text": "four"
+         }
+        },
+        "id": "p4"
+       },
+       "position": 1,
+       "targetId": "p1"
+      }
+     },
+     {
+      "blockSetAlign": {
+       "align": 1,
+       "blockId": "p4"
+      }
+     }
+    ],
+    "parentIds": [
+     "0202020202020202020202020202020202020202020202020202020202020202",
+     "0303030303030303030303030303030303030303030303030303030303030303"
+    ],
+    "timestamp": 3000
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0b636f6e762d6f626a65637412170a04747970651207088080a01f100322060a04706167651a160a0764656c657465641207088080a01f10032202200022180a046e616d651207088080f02e100322070a05446f63203222120a03746d701207088080c03e1004180122002a230a0270311207088080c03e10042a1412016c1a0f0a0d0a0b6f6e652c206564697465642a110a0270321207088080f02e100318012a002a110a0270331207088080f02e100318012a002a1e0a0270341207088080e05d10042a0f1201561a080a060a04666f7572280138e807",
+   "hash": "34e2817f8c23e95b87f0f7c714a358dc5d72c6ebf3fbdd9b8372a6d92be6c281",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "text": {
+         "checked": false,
+         "color": "",
+         "marks": [
+
+         ],
+         "style": 0,
+         "text": "one, edited"
+        }
+       },
+       "parent": "",
+       "position": "l"
+      },
+      "key": "p1",
+      "stamp": {
+       "device": 4,
+       "time": 131072000
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "p2",
+      "stamp": {
+       "device": 3,
+       "time": 98304000
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "p3",
+      "stamp": {
+       "device": 3,
+       "time": 98304000
+      }
+     },
+     {
+      "block": {
+       "align": 1,
+       "content": {
+        "text": {
+         "checked": false,
+         "color": "",
+         "marks": [
+
+         ],
+         "style": 0,
+         "text": "four"
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "p4",
+      "stamp": {
+       "device": 4,
+       "time": 196608000
+      }
+     }
+    ],
+    "createdAt": 1000,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 3,
+      "time": 65536000
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+     {
+      "key": "name",
+      "stamp": {
+       "device": 3,
+       "time": 98304000
+      },
+      "value": {
+       "stringValue": "Doc 2"
+      }
+     },
+     {
+      "gone": true,
+      "key": "tmp",
+      "stamp": {
+       "device": 4,
+       "time": 131072000
+      },
+      "value": {
+
+      }
+     }
+    ],
+    "messages": [
+
+    ],
+    "objectId": "conv-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 3,
+      "time": 65536000
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "two authors, field delete and block remove become tombstones"
+ },
+ {
+  "changes": [
+   {
+    "author": "alice",
+    "id": "0101010101010101010101010101010101010101010101010101010101010101",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "task"
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "custom": {
+          "contentType": "discussion",
+          "meta": {
+
+          }
+         }
+        },
+        "id": "__discussion__"
+       }
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 1000
+   },
+   {
+    "author": "alice",
+    "id": "0202020202020202020202020202020202020202020202020202020202020202",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "custom": {
+          "contentType": "chat",
+          "meta": {
+           "author": "alice",
+           "text": "hello",
+           "ts": "1100"
+          }
+         }
+        },
+        "id": "m1"
+       },
+       "position": 5,
+       "targetId": "__discussion__"
+      }
+     }
+    ],
+    "parentIds": [
+     "0101010101010101010101010101010101010101010101010101010101010101"
+    ],
+    "timestamp": 1100
+   },
+   {
+    "author": "bob",
+    "id": "0303030303030303030303030303030303030303030303030303030303030303",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "custom": {
+          "contentType": "chat",
+          "meta": {
+           "author": "bob",
+           "text": "hi",
+           "ts": "1200"
+          }
+         }
+        },
+        "id": "m2"
+       },
+       "position": 5,
+       "targetId": "__discussion__"
+      }
+     }
+    ],
+    "parentIds": [
+     "0101010101010101010101010101010101010101010101010101010101010101"
+    ],
+    "timestamp": 1200
+   },
+   {
+    "author": "bob",
+    "id": "0404040404040404040404040404040404040404040404040404040404040404",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "custom": {
+          "contentType": "chat",
+          "meta": {
+           "author": "bob",
+           "text": "oops",
+           "ts": "1300"
+          }
+         }
+        },
+        "id": "m3"
+       },
+       "position": 5,
+       "targetId": "__discussion__"
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "custom": {
+          "contentType": "receipt",
+          "meta": {
+           "state": "seen"
+          }
+         }
+        },
+        "id": "r1"
+       },
+       "position": 5,
+       "targetId": "m1"
+      }
+     }
+    ],
+    "parentIds": [
+     "0202020202020202020202020202020202020202020202020202020202020202",
+     "0303030303030303030303030303030303030303030303030303030303030303"
+    ],
+    "timestamp": 1300
+   },
+   {
+    "author": "bob",
+    "id": "0505050505050505050505050505050505050505050505050505050505050505",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "blockRemove": {
+       "blockId": "m3"
+      }
+     }
+    ],
+    "parentIds": [
+     "0404040404040404040404040404040404040404040404040404040404040404"
+    ],
+    "timestamp": 1400
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0b636f6e762d6f626a65637412170a04747970651207088080a01f100322060a047461736b1a160a0764656c657465641207088080a01f1003220220002a2e0a0e5f5f64697363757373696f6e5f5f1207088080a01f10032a131201561a0e120c0a0a64697363757373696f6e2a320a0272311207088080d02810042a230a026d311201561a1a12180a07726563656970741a0d0a05737461746512047365656e32580a026d311207088080b022100332490a0e5f5f64697363757373696f6e5f5f1201561a3412320a04636861741a0f0a06617574686f721205616c6963651a0d0a0474657874120568656c6c6f1a0a0a02747312043131303032530a026d321207088080c025100432440a0e5f5f64697363757373696f6e5f5f12016c1a2f122d0a04636861741a0d0a06617574686f721203626f621a0a0a0474657874120268691a0a0a02747312043132303032110a026d331207088080e02b10041801320038e807",
+   "hash": "3ef1981b17fed9375d670c5358c7dd194575014d8edce2b4bdd6765650ef2c07",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "custom": {
+         "contentType": "discussion",
+         "data": "",
+         "meta": {
+
+         }
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "__discussion__",
+      "stamp": {
+       "device": 3,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+       "content": {
+        "custom": {
+         "contentType": "receipt",
+         "data": "",
+         "meta": {
+          "state": "seen"
+         }
+        }
+       },
+       "parent": "m1",
+       "position": "V"
+      },
+      "key": "r1",
+      "stamp": {
+       "device": 4,
+       "time": 85196800
+      }
+     }
+    ],
+    "createdAt": 1000,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 3,
+      "time": 65536000
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+
+    ],
+    "messages": [
+     {
+      "key": "m1",
+      "message": {
+       "content": {
+        "custom": {
+         "contentType": "chat",
+         "data": "",
+         "meta": {
+          "author": "alice",
+          "text": "hello",
+          "ts": "1100"
+         }
+        }
+       },
+       "parent": "__discussion__",
+       "position": "V"
+      },
+      "stamp": {
+       "device": 3,
+       "time": 72089600
+      }
+     },
+     {
+      "key": "m2",
+      "message": {
+       "content": {
+        "custom": {
+         "contentType": "chat",
+         "data": "",
+         "meta": {
+          "author": "bob",
+          "text": "hi",
+          "ts": "1200"
+         }
+        }
+       },
+       "parent": "__discussion__",
+       "position": "l"
+      },
+      "stamp": {
+       "device": 4,
+       "time": 78643200
+      }
+     },
+     {
+      "gone": true,
+      "key": "m3",
+      "message": {
+
+      },
+      "stamp": {
+       "device": 4,
+       "time": 91750400
+      }
+     }
+    ],
+    "objectId": "conv-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 3,
+      "time": 65536000
+     },
+     "value": {
+      "stringValue": "task"
+     }
+    }
+   }
+  },
+  "name": "chat messages under a discussion root, one removed"
+ },
+ {
+  "changes": [
+   {
+    "author": "alice",
+    "id": "0101010101010101010101010101010101010101010101010101010101010101",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "page"
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "text": {
+          "checked": false,
+          "color": "",
+          "marks": [
+
+          ],
+          "style": 0,
+          "text": "a"
+         }
+        },
+        "id": "a"
+       }
+      }
+     },
+     {
+      "blockAdd": {
+       "block": {
+        "childrenIds": [
+
+        ],
+        "content": {
+         "text": {
+          "checked": false,
+          "color": "",
+          "marks": [
+
+          ],
+          "style": 0,
+          "text": "b"
+         }
+        },
+        "id": "b"
+       },
+       "position": 4,
+       "targetId": "a"
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 1000
+   },
+   {
+    "author": "bob",
+    "id": "0202020202020202020202020202020202020202020202020202020202020202",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "blockRemove": {
+       "blockId": "b"
+      }
+     }
+    ],
+    "parentIds": [
+     "0101010101010101010101010101010101010101010101010101010101010101"
+    ],
+    "timestamp": 2000
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0b636f6e762d6f626a65637412170a04747970651207088080a01f100322060a04706167651a160a0764656c657465641207088080a01f1003220220002a180a01611207088080a01f10032a0a1201561a050a030a01612a100a01621207088080c03e100418012a002a240a1563642d303130313031303130313031303130312d321207088080c03e100418012a002a240a1563742d303130313031303130313031303130312d321207088080c03e100418012a002a230a14722d303130313031303130313031303130312d321207088080c03e100418012a0038e807",
+   "hash": "6810e3851e2ba2f68d396e53a9088104a9c88c3dd83428fc4422bf916eac80b1",
+   "record": {
+    "blocks": [
+     {
+      "block": {
+       "content": {
+        "text": {
+         "checked": false,
+         "color": "",
+         "marks": [
+
+         ],
+         "style": 0,
+         "text": "a"
+        }
+       },
+       "parent": "",
+       "position": "V"
+      },
+      "key": "a",
+      "stamp": {
+       "device": 3,
+       "time": 65536000
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "b",
+      "stamp": {
+       "device": 4,
+       "time": 131072000
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "cd-0101010101010101-2",
+      "stamp": {
+       "device": 4,
+       "time": 131072000
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "ct-0101010101010101-2",
+      "stamp": {
+       "device": 4,
+       "time": 131072000
+      }
+     },
+     {
+      "block": {
+
+      },
+      "gone": true,
+      "key": "r-0101010101010101-2",
+      "stamp": {
+       "device": 4,
+       "time": 131072000
+      }
+     }
+    ],
+    "createdAt": 1000,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 3,
+      "time": 65536000
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "conv-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 3,
+      "time": 65536000
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "side insertion layout blocks stamped by the change that made them, then unwrapped"
+ },
+ {
+  "changes": [
+   {
+    "author": "alice",
+    "id": "0101010101010101010101010101010101010101010101010101010101010101",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "page"
+      }
+     }
+    ],
+    "parentIds": [
+
+    ],
+    "timestamp": 1000
+   },
+   {
+    "author": "bob",
+    "id": "0202020202020202020202020202020202020202020202020202020202020202",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "objectDelete": {
+
+      }
+     }
+    ],
+    "parentIds": [
+     "0101010101010101010101010101010101010101010101010101010101010101"
+    ],
+    "timestamp": 2000
+   },
+   {
+    "author": "alice",
+    "id": "0303030303030303030303030303030303030303030303030303030303030303",
+    "objectId": "conv-object",
+    "ops": [
+     {
+      "objectCreate": {
+       "typeKey": "page"
+      }
+     }
+    ],
+    "parentIds": [
+     "0202020202020202020202020202020202020202020202020202020202020202"
+    ],
+    "timestamp": 3000
+   }
+  ],
+  "devices": {
+   "alice": 3,
+   "bob": 4,
+   "fixture": 2,
+   "fixture-author": 1
+  },
+  "expected": {
+   "canonical": "0a0b636f6e762d6f626a65637412170a04747970651207088080e05d100322060a04706167651a160a0764656c657465641207088080e05d10032202200038b817",
+   "hash": "1820144eaf5371079b32bcfb227bbe98aaece5eb678ca9bda1cfff181bbd7f66",
+   "record": {
+    "blocks": [
+
+    ],
+    "createdAt": 3000,
+    "deleted": {
+     "key": "deleted",
+     "stamp": {
+      "device": 3,
+      "time": 196608000
+     },
+     "value": {
+      "boolValue": false
+     }
+    },
+    "fields": [
+
+    ],
+    "messages": [
+
+    ],
+    "objectId": "conv-object",
+    "type": {
+     "key": "type",
+     "stamp": {
+      "device": 3,
+      "time": 196608000
+     },
+     "value": {
+      "stringValue": "page"
+     }
+    }
+   }
+  },
+  "name": "delete then restore"
+ }
+]

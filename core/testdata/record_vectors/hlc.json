@@ -1,0 +1,151 @@
+[
+ {
+  "expected": [
+   {
+    "time": 65536000
+   },
+   {
+    "time": 131072000
+   }
+  ],
+  "name": "wall clock moves forward",
+  "steps": [
+   {
+    "op": "now",
+    "wall": 1000
+   },
+   {
+    "op": "now",
+    "wall": 2000
+   }
+  ]
+ },
+ {
+  "expected": [
+   {
+    "time": 65536000
+   },
+   {
+    "time": 65536001
+   },
+   {
+    "time": 65536002
+   }
+  ],
+  "name": "same millisecond counts up",
+  "steps": [
+   {
+    "op": "now",
+    "wall": 1000
+   },
+   {
+    "op": "now",
+    "wall": 1000
+   },
+   {
+    "op": "now",
+    "wall": 1000
+   }
+  ]
+ },
+ {
+  "expected": [
+   {
+    "time": 327680000
+   },
+   {
+    "time": 327680001
+   },
+   {
+    "time": 327680002
+   },
+   {
+    "time": 393216000
+   }
+  ],
+  "name": "backwards wall clock stays monotonic",
+  "steps": [
+   {
+    "op": "now",
+    "wall": 5000
+   },
+   {
+    "op": "now",
+    "wall": 1000
+   },
+   {
+    "op": "now",
+    "wall": 4999
+   },
+   {
+    "op": "now",
+    "wall": 6000
+   }
+  ]
+ },
+ {
+  "expected": [
+   {
+    "time": 65536000
+   },
+   {
+    "last": 196608007,
+    "ok": true
+   },
+   {
+    "time": 196608008
+   }
+  ],
+  "name": "observe a newer stamp then advance past it",
+  "steps": [
+   {
+    "op": "now",
+    "wall": 1000
+   },
+   {
+    "device": 2,
+    "op": "observe",
+    "time": 196608007,
+    "wall": 1000
+   },
+   {
+    "op": "now",
+    "wall": 1000
+   }
+  ]
+ },
+ {
+  "expected": [
+   {
+    "last": 0,
+    "ok": false
+   },
+   {
+    "last": 5662375936000,
+    "ok": true
+   },
+   {
+    "time": 5662375936001
+   }
+  ],
+  "name": "refuse stamps more than 24h ahead",
+  "steps": [
+   {
+    "device": 2,
+    "op": "observe",
+    "time": 5662376001536,
+    "wall": 1000
+   },
+   {
+    "device": 2,
+    "op": "observe",
+    "time": 5662375936000,
+    "wall": 1000
+   },
+   {
+    "op": "now",
+    "wall": 1000
+   }
+  ]
+ }
+]

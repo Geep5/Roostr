@@ -1,8 +1,8 @@
 # State objects: stamped records, packs and a relay cursor
 
-Status: **design, not implemented.** Proposed successor to the base / delta /
-compaction model of `docs/state-sync.md` (which stays the contract until this
-ships).
+Status: **design; the record library exists (rollout step 3), nothing uses
+it yet.** Proposed successor to the base / delta / compaction model of
+`docs/state-sync.md` (which stays the contract until this ships).
 
 ## Why
 
@@ -75,9 +75,9 @@ message Stamp {
 
 message Entry {
   string key    = 1;   // property key, block id, message id
-  Stamp  stamp  = 2;
+  Stamp  stamp  = 2;   // always written, even when zero
   bool   gone   = 3;   // tombstone: the entry was removed at `stamp`
-  oneof body {
+  oneof body {         // a tombstone keeps an empty body of its kind
     Value       value   = 4;   // a property (existing Value message)
     BlockBody   block   = 5;
     MessageBody message = 6;
@@ -85,23 +85,53 @@ message Entry {
 }
 
 message BlockBody {
-  string parent   = 1;   // "" = top level
-  string position = 2;   // fractional key, sorts siblings (as pin_order)
-  Content content = 3;   // existing block content (text, style, marks, ...)
+  string   parent           = 1;   // "" = top level
+  string   position         = 2;   // fractional key, sorts siblings (as pin_order)
+  BlockContent content      = 3;   // existing block content (text, style, marks, ...)
+  ValueMap fields           = 4;   // existing Block.fields (column width, ...)
+  BlockAlign align          = 5;   // existing Block.align
+  string   background_color = 6;   // existing Block.background_color
 }
 
-message MessageBody { /* existing chat block content: author, ts, text, meta */ }
+// Same fields as BlockBody; `content` is the existing chat block content
+// (custom "chat", meta {author, ts, text, ...}).
+message MessageBody { /* fields 1-6 as BlockBody */ }
 
 message Record {
   string object_id   = 1;
-  Entry  type        = 2;   // key "type": typeKey, stamped like any entry
-  Entry  deleted     = 3;   // key "deleted": object-level tombstone
+  Entry  type        = 2;   // key "type": value {string_value: typeKey}
+  Entry  deleted     = 3;   // key "deleted": value {bool_value}, object-level
   repeated Entry fields   = 4;
   repeated Entry blocks   = 5;
   repeated Entry messages = 6;
-  int64 created_at   = 7;   // first stamp's time; informational
+  int64 created_at   = 7;   // informational; merge keeps the smallest non-zero
 }
 ```
+
+BlockBody carries `fields`, `align` and `background_color` (not in the first
+draft) because blocks have them today and a record must show the same page.
+
+Implemented in `core/record.odin` (and `roostr-engine`), checked against the
+shared vectors in `core/testdata/record_vectors/`. Details both engines fix:
+
+- **Canonical encoding** (hashing, packs): proto3 rules (defaults omitted,
+  fields in number order); entries sorted by key; every map (Value maps at
+  any depth, block `fields`, custom `meta`) sorted by key, a repeated key
+  keeps its last value; a tombstone's body encoded empty.
+- **Merge tie**: equal stamps (never written on purpose) - the larger
+  canonical Entry bytes win, so merge stays commutative.
+- **View** (record → today's object JSON): live fields; blocks and messages
+  form one tree, children ordered by `(position, id)`, entries whose parent
+  is gone are hidden; `created_at` = the record's, else the oldest stamp;
+  `updated_at` = the newest stamp, tombstones included.
+- **Conversion** (`record_from_object_state`): one replay of the DAG with a
+  `Replay_Hook` records, per key, the last change that wrote it; a block
+  counts as a message when its content is custom `"chat"`; positions come
+  from `pin_key_between` by bisection over each sibling list (short keys
+  for long chats); keys removed by a change become tombstones; entries
+  from a checkpoint seed get its `updated_at` and device 0. The `record`
+  core method exposes this to hosts without a replay (`writers`,
+  `from_changes`).
 
 - **Properties**: one entry per key. `name`, `channel`, `iconEmoji`, ... are
   properties as today.

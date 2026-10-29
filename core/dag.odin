@@ -778,7 +778,7 @@ normalize :: proc(t: ^Block_Tree, before_counts: map[string]int) {
 // it (checkpoint_for_replay); a peer missing covered originals applies the
 // tail only when checkpoint_tail_continues proves the order, so the state
 // never depends on download order.
-compute_state :: proc(changes: []Change, allocator := context.allocator, checkpoint: ^Checkpoint = nil) -> (Object_State, bool) {
+compute_state :: proc(changes: []Change, allocator := context.allocator, checkpoint: ^Checkpoint = nil, hook: ^Replay_Hook = nil) -> (Object_State, bool) {
 	state: Object_State
 	checkpoint := checkpoint_for_replay(changes, checkpoint)
 	if len(changes) == 0 && checkpoint == nil do return state, false
@@ -823,8 +823,20 @@ compute_state :: proc(changes: []Change, allocator := context.allocator, checkpo
 			start_idx = snapshot_idx + 1
 		}
 	}
-	if !replay_apply(&state, seed, sorted[start_idx:], max_ts, allocator) do return state, false
+	if !replay_apply(&state, seed, sorted[start_idx:], max_ts, allocator, hook) do return state, false
 	return state, true
+}
+
+/**
+ * Observer of a replay, for callers that need to know who wrote what
+ * (record conversion, docs/state-objects.md "Migration"). `on_change` runs
+ * once before the first change with `change` nil (the tree holds the seed),
+ * then after each change has been applied and normalized. `seed_ms` is the
+ * replay's starting updated_at (a checkpoint's; 0 for a legacy snapshot).
+ */
+Replay_Hook :: struct {
+	data:      rawptr,
+	on_change: proc(data: rawptr, change: ^Change, seed: ^Snapshot, seed_ms: i64, t: ^Block_Tree),
 }
 
 /**
@@ -832,7 +844,7 @@ compute_state :: proc(changes: []Change, allocator := context.allocator, checkpo
  * object). `state` arrives with id and heads set; fields, blocks, type and
  * timestamps are filled here. False when a block op makes the tree cyclic.
  */
-replay_apply :: proc(state: ^Object_State, seed: ^Snapshot, sorted: []^Change, max_ts_in: i64, allocator := context.allocator) -> bool {
+replay_apply :: proc(state: ^Object_State, seed: ^Snapshot, sorted: []^Change, max_ts_in: i64, allocator := context.allocator, hook: ^Replay_Hook = nil) -> bool {
 	max_ts := max_ts_in
 	if state.fields == nil do state.fields = make([dynamic]Value_Entry, allocator)
 	initial_blocks: []Block
@@ -859,6 +871,7 @@ replay_apply :: proc(state: ^Object_State, seed: ^Snapshot, sorted: []^Change, m
 		append(&t.storage, b)
 		append(&t.root_ids, b.id)
 	}
+	if hook != nil do hook.on_change(hook.data, nil, seed, max_ts_in, &t)
 
 	for change in sorted {
 		if change.timestamp > max_ts do max_ts = change.timestamp
@@ -909,6 +922,7 @@ replay_apply :: proc(state: ^Object_State, seed: ^Snapshot, sorted: []^Change, m
 		}
 
 		if touched do normalize(&t, row_counts)
+		if hook != nil do hook.on_change(hook.data, change, seed, max_ts_in, &t)
 	}
 
 	state.blocks = tree_serialize(&t, allocator)
