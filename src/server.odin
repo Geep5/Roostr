@@ -70,6 +70,8 @@ sse_ping_loop :: proc() {
 Request :: struct {
 	method: string,
 	path:   string,
+	/** After `?`, undecoded ("" when none). */
+	query:  string,
 	body:   []byte,
 	host, origin, authorization: string,
 }
@@ -217,7 +219,10 @@ parse_request_head :: proc(head: string) -> (req: Request, content_length: int, 
 	if parts[0] != "GET" && parts[0] != "POST" && parts[0] != "OPTIONS" do return {}, 0, false
 	req.method = parts[0]
 	req.path = parts[1]
-	if qi := strings.index_byte(req.path, '?'); qi >= 0 do req.path = req.path[:qi]
+	if qi := strings.index_byte(req.path, '?'); qi >= 0 {
+		req.query = req.path[qi + 1:]
+		req.path = req.path[:qi]
+	}
 	seen := make(map[string]bool, context.temp_allocator)
 	for line in lines[1:] {
 		colon := strings.index_byte(line, ':')
@@ -282,6 +287,7 @@ route :: proc(sock: net.TCP_Socket, req: Request) {
 		respond_error(sock, "record mode (GLON_RECORDS=1) is offline-only: sync is off", "409 Conflict")
 		return
 	}
+	if records_route(sock, req) do return
 	switch {
 	case req.method == "GET" && req.path == "/api/objects":
 		handle_list_objects(sock)

@@ -289,7 +289,7 @@ export async function loadIdentity(): Promise<Identity | null> {
 }
 
 /** Blinded object tag: stable per (key, object), unlinkable without the key. */
-function blindObjectId(id: Identity, objectId: string): string {
+export function blindObjectId(id: Identity, objectId: string): string {
 	const h = new Bun.CryptoHasher("sha256");
 	h.update(id.sk);
 	h.update(objectId);
@@ -310,7 +310,7 @@ function blindObjectId(id: Identity, objectId: string): string {
 const ALLOWLIST_KIND = 30100;
 const ALLOWLIST_D = "roostr-allowlist";
 
-interface SharedSpace {
+export interface SharedSpace {
 	spaceId: string;
 	keyHex: string;
 	keyId: number;
@@ -346,7 +346,7 @@ async function readKeyring(): Promise<Keyring | null> {
 	}
 }
 
-function blindShared(keyHex: string, id: string): string {
+export function blindShared(keyHex: string, id: string): string {
 	const h = new Bun.CryptoHasher("sha256");
 	h.update(keyHex);
 	h.update(id);
@@ -370,7 +370,7 @@ function npubToHex(npub: string): string | null {
  * invites - while their keyring entries stay: a vanished space's key still
  * names its stream for the relay deletion (contract §5).
  */
-async function loadSharedSpaces(identity: Identity, gone: ReadonlyMap<string, VanishedEntry>): Promise<Map<string, SharedSpace>> {
+export async function loadSharedSpaces(identity: Identity, gone: ReadonlyMap<string, VanishedEntry>): Promise<Map<string, SharedSpace>> {
 	const myPk = identity.pk;
 	const out = new Map<string, SharedSpace>();
 	const keyring = await readKeyring();
@@ -661,7 +661,7 @@ function baseTagOf(event: Event): string | undefined {
 }
 
 /** The local ledger by id (src/vanish.odin): vanished and left ids, and every object of such a space. */
-async function localVanished(): Promise<Map<string, VanishedEntry>> {
+export async function localVanished(): Promise<Map<string, VanishedEntry>> {
 	try {
 		return new Map((await vanishedEntries()).map((entry) => [entry.objectId, entry]));
 	} catch {

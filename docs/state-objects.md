@@ -1,9 +1,10 @@
 # State objects: stamped records, packs and a relay cursor
 
 Status: **design; the record library exists (rollout step 3), the daemon
-can run on records behind `GLON_RECORDS=1`, offline-only ("Record mode"),
-and the pack format is implemented (rollout step 4: build, read, encrypt;
-not yet built, announced or loaded by any host).**
+can run on records behind `GLON_RECORDS=1` and syncs them through the
+harness (`harness/src/recordsync.ts`: patches, relay cursor, packs built,
+announced, loaded and retired; "Record mode"), and the pack format is
+implemented (rollout step 4).**
 Proposed successor to the base / delta / compaction model of
 `docs/state-sync.md` (which stays the contract until this ships).
 
@@ -468,7 +469,7 @@ Queries, the JSON API and the app's object model don't change shape. The
 same change lands in the Rust engine (`roostr-engine`: `replay.rs`,
 `codec.rs`), checked against the Odin one with shared test vectors.
 
-### Record mode (daemon, `GLON_RECORDS=1`, offline-only)
+### Record mode (daemon, `GLON_RECORDS=1`)
 
 The daemon's store can run on records (`src/records.odin`); off by default.
 
@@ -499,12 +500,114 @@ The daemon's store can run on records (`src/records.odin`); off by default.
   the daemon's patches use the same `core.record_participants_split` /
   `core.record_participant_prefix`, writing an entry per joined
   participant and a tombstone per one that left.
-- **Offline-only**: the change, base, checkpoint and digest routes answer
-  409, so nothing is published or imported through the old protocol.
+- **Old protocol off**: the change, base, checkpoint and digest routes
+  answer 409; records sync through `/api/records/*` ("Record sync" below).
 - **Not expressible as a patch**: a DAG re-create (`restore`, `set_type`)
   moves `createdAt` to the re-create's time; a record keeps the oldest stamp.
   `vanish` is not a patch either: it deletes the record and the object's
-  journal entries (the ledger's own patch records it).
+  journal entries (the ledger's own patch records it) and journals a
+  `<stamp>-<objectId>.vanish` item (holding the object's space) for kind 1082.
+
+### Record sync (daemon routes + harness, `harness/src/recordsync.ts`)
+
+`bun run sync` asks `GET /api/records/status`: 200 = record mode, run
+`recordsync.ts`; 409 = DAG mode, run `nostrsync.ts`. Daemon routes
+(`src/records_sync.odin`, record mode only, writes service-only):
+
+| Route | |
+|---|---|
+| `GET /api/records/journal` | `{items: [{id, objectId, space, patch (b64) \| vanish: true}]}` in write order |
+| `POST /api/records/journal/ack` | `{ids}`: sent, removed from the journal |
+| `POST /api/records/apply` | `{patches: [b64], vanish: [id]}` merged (`record_merge`, clock observed); `refused: [{objectId, reason}]` for a stamp > 24 h ahead or a vanished object (ledger, or a 1082 kept 30 days in `record-vanished.json`) |
+| `GET /api/records/export?<select>&stream=&cursor=` | the stream's pack plaintext (b64), `root`, 256 bucket hashes, `records` |
+| `POST /api/records/import-pack` | body = pack plaintext; every record merged (same refusals) |
+| `GET`/`POST /api/records/cursors` | `record-cursors.json`: `{<stream>: {relay, cursor}}` |
+| `GET /api/records/fingerprint?<select>` | `{root, buckets, records}` |
+
+`<select>` = `space=<id>` (a shared space's objects) or `exclude=<ids>`
+(the personal stream: objects in none of the shared spaces). An object's
+space: a channel is its own, else its `channel` field.
+
+Wire (shared with the Rust replica):
+
+- **1081**: content NIP-44(stream key, base64(canonical Patch)), parts of
+  40,000 chars with `["c", sha256(b64)[:16], i, n]`; tags `["h", blinded
+  object id]`, space streams also `["s", space tag]`, `["h", space tag]`,
+  `["owner", owner]` (so the owner's space deletion covers them), `["v",
+  "1"]`. Stream keys and blinding as legacy deltas (`nostrsync.ts`).
+- **1082**: NIP-44 `{"object_id"}`, same tags.
+- **31081**: `d` = the space tag, personal `blindObjectId("stream:personal")`;
+  NIP-44 JSON `{v: 1, stream, cursor, sha256, size, url, root, buckets
+  (256 x 16 hex), records, built_at, builder, deleted_through}`.
+  `deleted_through` = the previous pack's cursor: retained kind-5 requests
+  keep the relay's `oldest` low in the personal stream, so a device also
+  loads the pack when its cursor is below `deleted_through`.
+
+Loop per stream: load the newest pack when the cursor is 0, below
+`oldest - 1` or below `deleted_through`; page `REQ after` to the head
+(cursor held below a half-received chunk group); one live `after`
+subscription (a seq gap or a reconnect pages again); the journal goes out
+on every commit and acknowledged on `OK`. The builder (space: the host
+computer, `servesHere`; personal: any full copy; `GLON_RECORD_PACK_BUILDER`
+= `1`/`0` forces it) flushes its journal, catches up, and once at the head
+with 2,000 events or 6 h since the last pack (`GLON_RECORD_PACK_PATCHES`,
+`GLON_RECORD_PACK_INTERVAL_MS`, checked every `GLON_RECORD_PACK_CHECK_MS`)
+exports, encrypts (`pack.ts`), uploads to Blossom, announces, then NIP-09
+deletes its own 1081/1082 with seq <= the previous pack's cursor and the
+previous pack blob.
+
+Test: `harness/src/recordsync.test.ts` (local RoostrRelay + Blossom, three
+daemons, `GLON_ODIN_BIN` / `ROOSTR_RELAY_BIN` or built from source).
+
+Open: cursors and packs use the first relay only; stamps carry the
+daemon's local `devices.json` index (no shared device table yet; merge
+still converges on ties by canonical bytes) and the signer is not checked
+against it; the relay honours retention deletes only for the builder's own
+events (other members' patches stay); tombstones are not dropped after 30
+days; keyrings are not synced by record mode (the legacy keyring event).
+
+### Record mode (Rust replica, `roostr-records`, off by default)
+
+The replica (`RoostrWebsite/gpui/crates/roostr-replica`, `src/records.rs`)
+runs on records when its device-local `roostr-records` key is `"1"`
+(browser `localStorage`, desktop/iOS `local.json`; natively also
+`ROOSTR_RECORDS=1`), through `ReplicaBackend::records_if_flagged` in
+`open_native`, `open_browser` and the iOS `open_replica`.
+
+- **Store**: `records` (canonical Record bytes by id), `journal` and
+  `record_meta` (stream cursors, the clock, the vanish ledger) beside the
+  change tables - SQLite tables, IndexedDB stores (`DB_VERSION` 2).
+- **Reads**: every state is `record_view` of the record (plus `heads` =
+  the record hash); nothing is replayed or memoized.
+- **Commits**: the planned `Change` goes through the engine's `record`
+  action `patch` (`core/record_patch.odin` `record_patch_for_change`, the
+  same code as the daemon's commit), stamped with the replica's HLC and its
+  device index (first 4 bytes of sha256(signer pubkey) | 1); record,
+  journal item and clock are one transaction; the journal is sent as kind
+  1081 and an item leaves it on the first relay `OK`.
+- **Sync**: per stream (personal = the author's events, each shared space
+  its `s` tag), the newest 31081 pack when there is no cursor or the
+  cursor is below the pack's `deleted_through` (as the harness: the relay's
+  `oldest` alone misses a retention cut, any older kept event of the stream
+  holds it down) or below the relay's `oldest - 1`, merged into what is
+  held, then `REQ after` pages to the head, then one live subscription with
+  seq (a gap or a reconnect catches up the same way, then the journal is
+  sent).
+  Cursors are of the first relay; patches go to all. A `vanish` also
+  publishes kind 1082 and drops the records here; received 1082s drop the
+  record and refuse its patches for 30 days.
+- **Lite**: `RecordSync::fetch_object` reads one object from frame 0 and
+  the frames holding its bucket (HTTP Range, `frame_range`), then its
+  patches after the pack (`#h`); record mode itself always holds whole.
+- The old protocol never starts in record mode (`RelaySync` is built but
+  not started). Tests: `cargo test -p roostr-replica --test records`
+  (builds `../RoostrRelay` with odin, or `ROOSTR_RELAY_BIN`). Against the
+  daemon: `bun harness/scripts/records-daemon.ts` (relay + Blossom, a
+  record-mode daemon packing and patching its personal stream and a shared
+  space; prints `export RECORDS_DAEMON_*` and stays up), then with those
+  exported `cargo test -p roostr-replica --test records -- --ignored
+  a_replica_reaches_the_daemons_root`: each stream's root, and full and
+  Lite views of a sample, equal the daemon's.
 
 ## Estimates
 

@@ -170,9 +170,22 @@ vanish_objects :: proc(object_ids: []string) -> int {
 		append(&accepted, object_id)
 	}
 	if len(accepted) == 0 do return 0
+	// Record mode: the harness announces each vanish in the object's stream
+	// (kind 1082); the space is read before the ledger commit purges the state.
+	spaces := make(map[string]string, allocator = context.temp_allocator)
+	if g_store.record_mode {
+		sync.lock(&g_store.mu)
+		ensure_loaded()
+		for object_id in accepted do if object_id in g_store.states do spaces[object_id] = strings.clone(record_space_of(g_store.states[object_id]), context.temp_allocator)
+		sync.unlock(&g_store.mu)
+	}
 	ops := core.mutation_vanish_ops(accepted[:], now, exists)
 	if !commit_ops(VANISH_LOG_ID, ops[:]) do return 0
-
+	if len(spaces) > 0 {
+		sync.lock(&g_store.mu)
+		for object_id, space in spaces do records_journal_vanish_locked(object_id, space)
+		sync.unlock(&g_store.mu)
+	}
 	for object_id in accepted do purge_object_files(object_id)
 	// The purged objects must leave `states` and the new ledger fields must be
 	// visible to import suppression: cheapest correct answer is a rebuild.

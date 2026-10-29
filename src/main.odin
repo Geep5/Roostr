@@ -8,7 +8,8 @@ package glon
 //   glon-odin records-check [objectId]  offline dry run of the record conversion
 //   glon-odin journal          record mode: the unsent patches
 //
-// GLON_RECORDS=1 runs the record store (src/records.odin): offline-only.
+// GLON_RECORDS=1 runs the record store (src/records.odin), synced by the
+// harness through /api/records/* (src/records_sync.odin).
 
 import "core:os"
 import "core:fmt"
@@ -66,7 +67,7 @@ main :: proc() {
 		// retention applies to bases held under an older policy. Record mode
 		// leaves the DAG files as they are.
 		if g_store.record_mode {
-			fmt.eprintln("[glon-odin] record mode (GLON_RECORDS=1): offline-only, sync routes refuse")
+			fmt.eprintln("[glon-odin] record mode (GLON_RECORDS=1): legacy sync routes refuse; records sync via /api/records/*")
 		} else {
 			migrate_archive()
 			retain_all_bases()

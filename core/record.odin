@@ -1082,9 +1082,13 @@ record_state_to_json :: proc(s: ^Object_State, allocator := context.temp_allocat
  *   {action: "writers", changes, checkpoint?} → {state, writers, seed?}
  *   {action: "from_changes", changes, checkpoint?, devices: {author: u32}}
  *     → {record, canonical: hex, hash: hex}
+ *   {action: "patch", record?: hex canonical Record, change, stamp: {time, device}}
+ *     → {patch: hex canonical Patch, record: hex merged Record}; an empty
+ *     patch (nothing written) leaves the record as given.
  */
 record_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 	action := json_str(payload, "action")
+	if action == "patch" do return record_patch_dispatch(payload)
 	if action != "writers" && action != "from_changes" do return nil, "unknown record action"
 	items_value, present := json_field(payload, "changes")
 	if !present do return nil, "record requires changes"
