@@ -104,6 +104,7 @@ store_durability_contract :: proc(t: ^testing.T) {
 	bases_contract(t)
 	folded_contract(t)
 	device_record_contract(t)
+	records_contract(t)
 }
 
 @(private = "file")

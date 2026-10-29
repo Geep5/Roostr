@@ -39,6 +39,9 @@ bun run pair                       # a fresh one-use pairing code, shown in the 
 ./glon-odin serve            # API on http://127.0.0.1:7333 (GLON_DATA=~/.glon)
 ./glon-odin list             # object summaries
 ./glon-odin dump <objectId>  # computed state as JSON (parity testing)
+./glon-odin records-check [objectId]  # offline record conversion dry run (docs/state-objects.md)
+GLON_RECORDS=1 ./glon-odin list   # record store mode: offline-only (docs/state-objects.md "Record mode")
+GLON_RECORDS=1 ./glon-odin journal  # record mode: the unsent patches
 cd harness && bun run sync
 cd harness && bun run serve        # optional: agents and machine integrations
 

@@ -75,10 +75,11 @@ note_space_vanished_locked :: proc(object_id: string, entry: core.Vanish_Entry) 
 	g_store.vanish_pending[strings.clone(object_id)] = entry
 }
 
-/** Delete an object's change directory, checkpoint, bases and folded index. Returns files removed. */
+/** Delete an object's change directory, checkpoint, bases and folded index (record mode: its record; the DAG stays). Returns files removed. */
 purge_object_files :: proc(object_id: string) -> int {
 	if object_id == "" || object_id == VANISH_LOG_ID do return 0
 	if strings.contains(object_id, "/") || strings.contains(object_id, "..") do return 0
+	if g_store.record_mode do return records_purge(object_id)
 	removed := purge_checkpoint(object_id) ? 1 : 0
 	bases := data_dir("bases", object_id)
 	if os.exists(bases) && os.remove_all(bases) == nil do removed += 1
@@ -109,6 +110,7 @@ enforce_vanished_locked :: proc() -> int {
 		if purge_object_files(object_id) > 0 do reclaimed += 1
 		delete_key(&g_store.states, object_id)
 		delete_key(&g_store.bases, object_id)
+		delete_key(&g_store.records, object_id)
 	}
 	doomed := make([dynamic]string, context.temp_allocator)
 	for object_id, state in g_store.states {
@@ -121,6 +123,7 @@ enforce_vanished_locked :: proc() -> int {
 		purge_object_files(object_id)
 		delete_key(&g_store.states, object_id)
 		delete_key(&g_store.bases, object_id)
+		delete_key(&g_store.records, object_id)
 		reclaimed += 1
 	}
 	if len(doomed) > 0 do fmt.eprintfln("[vanish] %d object(s) in vanished spaces purged", len(doomed))
@@ -141,6 +144,7 @@ enforce_vanished_touched_locked :: proc(touched: []string) {
 		purge_object_files(object_id)
 		delete_key(&g_store.states, object_id)
 		delete_key(&g_store.bases, object_id)
+		delete_key(&g_store.records, object_id)
 	}
 }
 

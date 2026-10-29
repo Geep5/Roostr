@@ -473,35 +473,6 @@ fixture_devices :: proc() -> map[string]u32 {
 	return devices
 }
 
-/**
- * A record gives every block one place, so a legacy graph that lists a
- * block under a parent AND emits it elsewhere (tree_serialize prints it
- * once, the parent keeps the dangling reference) loses that extra
- * reference. Drop it from the replayed side the way conversion does:
- * a child reference to a block already placed earlier in preorder.
- */
-@(private = "file")
-drop_repeated_refs :: proc(s: ^Object_State) -> bool {
-	exists := make(map[string]bool)
-	for b in s.blocks do exists[b.id] = true
-	placed := make(map[string]bool)
-	changed := false
-	for &b in s.blocks {
-		placed[b.id] = true
-		kept := make([dynamic]string)
-		for c in b.children_ids {
-			if c in exists && c in placed {
-				changed = true
-				continue
-			}
-			placed[c] = true
-			append(&kept, c)
-		}
-		b.children_ids = kept
-	}
-	return changed
-}
-
 @(test)
 record_view_equals_replay :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
@@ -524,7 +495,7 @@ record_view_equals_replay :: proc(t: ^testing.T) {
 		testing.expectf(t, err == "", "%s: %s", name, err)
 		view := record_view(record)
 		got := string(marshal(object_to_json_value(&view)))
-		repeated := drop_repeated_refs(&replayed)
+		repeated := state_drop_repeated_refs(&replayed)
 		testing.expectf(t, !repeated || name == "legacy child root serialized once even when repeated under later parent; UI hides custom binary data", "%s: only the legacy graph fixture repeats a block", name)
 		want := string(marshal(object_to_json_value(&replayed)))
 		testing.expectf(t, got == want, "%s\n got: %s\nwant: %s", name, got, want)
@@ -563,7 +534,7 @@ record_view_equals_replay_conversion_and_checkpoints :: proc(t: ^testing.T) {
 				record, err := record_from_object_state(&state, &writers, devices)
 				testing.expectf(t, err == "", "%s: %s", name, err)
 				view := record_view(record)
-				drop_repeated_refs(&replayed)
+				state_drop_repeated_refs(&replayed)
 				got := string(marshal(object_to_json_value(&view)))
 				want := string(marshal(object_to_json_value(&replayed)))
 				testing.expectf(t, got == want, "%s\n got: %s\nwant: %s", name, got, want)

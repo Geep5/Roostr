@@ -1,7 +1,8 @@
 # State objects: stamped records, packs and a relay cursor
 
-Status: **design; the record library exists (rollout step 3), nothing uses
-it yet.** Proposed successor to the base / delta / compaction model of
+Status: **design; the record library exists (rollout step 3) and the daemon
+can run on records behind `GLON_RECORDS=1`, offline-only ("Record mode").**
+Proposed successor to the base / delta / compaction model of
 `docs/state-sync.md` (which stays the contract until this ships).
 
 ## Why
@@ -129,9 +130,22 @@ shared vectors in `core/testdata/record_vectors/`. Details both engines fix:
   counts as a message when its content is custom `"chat"`; positions come
   from `pin_key_between` by bisection over each sibling list (short keys
   for long chats); keys removed by a change become tombstones; entries
-  from a checkpoint seed get its `updated_at` and device 0. The `record`
-  core method exposes this to hosts without a replay (`writers`,
-  `from_changes`).
+  from a checkpoint seed get its `updated_at` and device 0. A device holding
+  a base converts from it (`record_writers_replay_base`) as the store loads
+  it. The `record` core method exposes this to hosts without a replay
+  (`writers`, `from_changes`; changes and a legacy checkpoint, not bases).
+- **Dry run** (`glon-odin records-check [objectId]`, offline, reads
+  `GLON_DATA`): converts every object, views it back and compares with
+  today's state. Grant's Mac, 2026-10-28: 7,334 objects, 7,325 exact; the 9
+  others are design consequences - 6 type-less fragments with no create
+  (`created_at` 0 today, the oldest stamp in the view), 1 empty base-only
+  fragment (`updated_at` lost: no entry carries a stamp), 1 dangling child
+  id (a record cannot point at a block it lacks), 1 empty-but-present block
+  `fields` map (wire form only; API JSON equal). 112,872 entries, 95% stamped
+  by a base seed (time = the base's `updated_at`, device 0): stamps, hence
+  record hashes, depend on which base a device holds, so devices adopt the
+  host's first pack instead of comparing self-converted roots. 47 MB of
+  canonical records vs 130 MB of changes, bases and checkpoints; ~14 s.
 
 - **Properties**: one entry per key. `name`, `channel`, `iconEmoji`, ... are
   properties as today.
@@ -350,6 +364,45 @@ Per stream, in one direction, with no flag day for single-user spaces:
 Queries, the JSON API and the app's object model don't change shape. The
 same change lands in the Rust engine (`roostr-engine`: `replay.rs`,
 `codec.rs`), checked against the Odin one with shared test vectors.
+
+### Record mode (daemon, `GLON_RECORDS=1`, offline-only)
+
+The daemon's store can run on records (`src/records.odin`); off by default.
+
+- **Disk**: `records/<bucket hex>/<objectId>.pb` (canonical Record bytes),
+  `journal/<stamp hex>-<objectId>.pb` (one Patch per local write; removal on
+  relay `OK` comes with sync), `hlc` (the clock's last stamp time),
+  `devices.json` (author / device key → stamp index; this install's key is
+  `device-id`), `records/.converted` (conversion done, with any failures).
+- **First start** converts every object from what the DAG load would replay
+  (`src/record_convert.odin`, shared with `records-check`) and marks it done.
+  The DAG files (`changes/`, `bases/`, `checkpoints/`, `folded/`) are never
+  touched, and serve skips the archive migration and base retention.
+- **Mutations** plan a `Change` as before; `commit_change` replays it on the
+  record's view with the writer hook and writes the entries it wrote (even
+  with an unchanged value, as a DAG change moves `updated_at`) plus what the
+  replay changed on the side (layout unwraps, width resets), all at one HLC
+  stamp of this device. A block written with the shape it already had (the
+  idempotent root add of `chat_post`) is left out unless nothing else
+  changed, so it cannot overwrite another device's newer edit. Unchanged
+  siblings keep their positions (longest increasing run); new or moved
+  blocks get keys between their kept neighbours. Journal, clock and record
+  are each written atomically, in that order; a crash in between is repaired
+  from the journal on the next start.
+- **Reads** (object fetch, queries, everything through `with_states`) are
+  record views.
+- **Participants**: a conversation root's participants are stored as one
+  field entry each, `participant:<thread block id>:<participant>` = Int list
+  index (the view orders by index, then id, and hides these fields); the
+  stored root keeps the rest of the Conversation. Roots whose bytes would
+  not survive the split exactly (non-canonical encoding, a duplicate
+  participant) stay whole.
+- **Offline-only**: the change, base, checkpoint and digest routes answer
+  409, so nothing is published or imported through the old protocol.
+- **Not expressible as a patch**: a DAG re-create (`restore`, `set_type`)
+  moves `createdAt` to the re-create's time; a record keeps the oldest stamp.
+  `vanish` is not a patch either: it deletes the record and the object's
+  journal entries (the ledger's own patch records it).
 
 ## Estimates
 

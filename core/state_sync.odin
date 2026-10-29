@@ -267,14 +267,14 @@ deltas_of :: proc(deltas: []Delta, cls: Classification, class: Delta_Class, allo
  * root; roots and freed batches sort by hex id exactly like topo_sort.
  * Heads: live heads plus base heads no live delta built on.
  */
-state_from_base :: proc(base: ^Checkpoint, live: []Change, allocator := context.allocator) -> (Object_State, bool) {
+state_from_base :: proc(base: ^Checkpoint, live: []Change, allocator := context.allocator, hook: ^Replay_Hook = nil) -> (Object_State, bool) {
 	state: Object_State
 	state.id = base.object_id
 	state.fields = make([dynamic]Value_Entry, allocator)
 	state.heads = checkpoint_heads(live, base, allocator)
 	sorted := topo_sort(live, context.temp_allocator)
 	if len(sorted) != len(live) do return state, false
-	ok := replay_apply(&state, &base.state, sorted[:], base.state.updated_at, allocator)
+	ok := replay_apply(&state, &base.state, sorted[:], base.state.updated_at, allocator, hook)
 	return state, ok
 }
 

@@ -46,6 +46,10 @@ Store :: struct {
 	quarantined: int,
 	/** Ids the space rule purged that the ledger does not name yet (heap keys). */
 	vanish_pending: map[string]core.Vanish_Entry,
+	/** GLON_RECORDS=1 (src/records.odin): records instead of DAG replay. */
+	record_mode: bool,
+	/** Record mode: the record behind each state (arena, like states). */
+	records:   map[string]core.Record,
 }
 
 g_store: Store
@@ -54,9 +58,11 @@ unix_ms :: proc() -> i64 {
 	return time.now()._nsec / 1_000_000
 }
 
-store_init :: proc(data_root: string) {
+store_init :: proc(data_root: string, records := false) {
 	g_store.data_root = data_root
 	g_store.root, _ = filepath.join({data_root, "changes"})
+	g_store.record_mode = records
+	records_reset()
 	folded_reset()
 }
 
@@ -89,7 +95,8 @@ ensure_loaded :: proc() {
 		for object_id in g_store.dirty {
 			delete_key(&g_store.states, object_id)
 			delete_key(&g_store.bases, object_id)
-			load_object_dir(object_id, alloc)
+			delete_key(&g_store.records, object_id)
+			load_object(object_id, alloc)
 			append(&touched, strings.clone(object_id, context.temp_allocator))
 		}
 		for k in g_store.dirty do delete(k)
@@ -112,6 +119,8 @@ ensure_loaded :: proc() {
 		delete(g_store.states)
 		virtual.arena_destroy(&g_store.arena)
 	}
+	if g_store.records != nil do delete(g_store.records)
+	g_store.records = make(map[string]core.Record)
 	_ = virtual.arena_init_growing(&g_store.arena)
 	alloc := virtual.arena_allocator(&g_store.arena)
 	g_store.states = make(map[string]^core.Object_State)
@@ -123,30 +132,35 @@ ensure_loaded :: proc() {
 	}
 
 	g_store.quarantined = 0
-	dir, derr := os.open(g_store.root)
-	if derr == nil {
-		defer os.close(dir)
-		entries, eerr := os.read_dir(dir, -1, context.temp_allocator)
-		if eerr == nil {
-			for entry in entries {
-				if entry.type != .Directory || strings.has_prefix(entry.name, ".") do continue
-				load_object_dir(entry.name, alloc)
+	if g_store.record_mode {
+		records_open()
+		records_load_all(alloc)
+	} else {
+		dir, derr := os.open(g_store.root)
+		if derr == nil {
+			defer os.close(dir)
+			entries, eerr := os.read_dir(dir, -1, context.temp_allocator)
+			if eerr == nil {
+				for entry in entries {
+					if entry.type != .Directory || strings.has_prefix(entry.name, ".") do continue
+					load_object_dir(entry.name, alloc)
+				}
 			}
 		}
+		// Objects known only by checkpoint or base (no change directory yet): a
+		// machine that bootstrapped from the relay and has no tail for them.
+		for object_id in checkpointed_object_ids() {
+			if object_id in g_store.states do continue
+			load_object_dir(object_id, alloc)
+		}
+		for object_id in based_object_ids() {
+			if object_id in g_store.states do continue
+			load_object_dir(object_id, alloc)
+		}
+		// Damage is a standing fact, not a boot event: report everything parked,
+		// so a restart cannot make missing changes look healed.
+		g_store.quarantined += count_quarantined()
 	}
-	// Objects known only by checkpoint or base (no change directory yet): a
-	// machine that bootstrapped from the relay and has no tail for them.
-	for object_id in checkpointed_object_ids() {
-		if object_id in g_store.states do continue
-		load_object_dir(object_id, alloc)
-	}
-	for object_id in based_object_ids() {
-		if object_id in g_store.states do continue
-		load_object_dir(object_id, alloc)
-	}
-	// Damage is a standing fact, not a boot event: report everything parked,
-	// so a restart cannot make missing changes look healed.
-	g_store.quarantined += count_quarantined()
 	enforce_vanished_locked()
 	g_store.live_used = g_store.arena.total_used
 	g_store.loaded_at = now
@@ -175,6 +189,13 @@ count_quarantined :: proc() -> int {
 	}
 	return total
 }
+
+/** One object from whatever this mode stores. Caller holds the lock. */
+load_object :: proc(object_id: string, alloc := context.allocator) {
+	if g_store.record_mode do records_load_one(object_id, alloc)
+	else do load_object_dir(object_id, alloc)
+}
+
 /** Load one object into g_store.states / g_store.bases. Caller holds the lock. */
 load_object_dir :: proc(object_id: string, alloc := context.allocator) {
 	h := read_holdings(object_id, alloc, quarantine = true)
@@ -300,6 +321,7 @@ with_states :: proc(fn: proc(states: map[string]^core.Object_State, user: rawptr
  * caller was told the commit succeeded.
  */
 commit_change :: proc(c: ^core.Change) -> (string, bool) {
+	if g_store.record_mode do return records_commit_change(c)
 	hashed := core.encode_change(c^, for_hashing = true, allocator = context.temp_allocator)
 	digest := core.sha256(hashed)
 	c.id = make([]byte, 32, context.temp_allocator)

@@ -386,20 +386,30 @@ Fingerprint :: struct {
 
 /** Bucket hash = sha256 of its record hashes in object id order; root = sha256 of the 256 bucket hashes. */
 records_fingerprint :: proc(records: []Record) -> Fingerprint {
+	ids := make([]string, len(records), context.temp_allocator)
+	hashes := make([][32]byte, len(records), context.temp_allocator)
+	for r, i in records {
+		ids[i] = r.object_id
+		hashes[i] = record_hash(r)
+	}
+	return records_fingerprint_hashes(ids, hashes)
+}
+
+/** records_fingerprint from record hashes already taken (`ids[i]` names `hashes[i]`; any order). */
+records_fingerprint_hashes :: proc(ids: []string, hashes: [][32]byte) -> Fingerprint {
 	Keyed :: struct {
 		id:    string,
 		index: int,
 	}
-	keyed := make([]Keyed, len(records), context.temp_allocator)
-	for r, i in records do keyed[i] = {r.object_id, i}
+	keyed := make([]Keyed, len(ids), context.temp_allocator)
+	for id, i in ids do keyed[i] = {id, i}
 	slice.sort_by(keyed, proc(a, b: Keyed) -> bool {return a.id < b.id})
 
 	per_bucket: [256][dynamic]byte
 	for k in keyed {
-		h := record_hash(records[k.index])
 		bucket := record_bucket(k.id)
 		if per_bucket[bucket] == nil do per_bucket[bucket] = make([dynamic]byte, context.temp_allocator)
-		append(&per_bucket[bucket], ..h[:])
+		append(&per_bucket[bucket], ..hashes[k.index][:])
 	}
 	fp: Fingerprint
 	all := make([dynamic]byte, 0, 256 * 32, context.temp_allocator)
@@ -496,6 +506,35 @@ record_view :: proc(r: Record, allocator := context.allocator) -> Object_State {
 		for i := len(b.children_ids) - 1; i >= 0; i -= 1 do append(&stack, b.children_ids[i])
 	}
 	return s
+}
+
+/**
+ * A record gives every block one place, so a legacy graph that lists a
+ * block under a parent AND emits it elsewhere (tree_serialize prints it
+ * once, the parent keeps the dangling reference) loses that extra
+ * reference. Drops it from a replayed state the way conversion does - a
+ * child reference to a block already placed earlier in preorder - so the
+ * state compares equal to record_view. True when something was dropped.
+ */
+state_drop_repeated_refs :: proc(s: ^Object_State, allocator := context.allocator) -> bool {
+	exists := make(map[string]bool, allocator = context.temp_allocator)
+	for b in s.blocks do exists[b.id] = true
+	placed := make(map[string]bool, allocator = context.temp_allocator)
+	changed := false
+	for &b in s.blocks {
+		placed[b.id] = true
+		kept := make([dynamic]string, allocator)
+		for c in b.children_ids {
+			if c in exists && c in placed {
+				changed = true
+				continue
+			}
+			placed[c] = true
+			append(&kept, c)
+		}
+		b.children_ids = kept
+	}
+	return changed
 }
 
 // ── Conversion: replayed DAG state → record ──────────────────────────
@@ -595,14 +634,28 @@ record_writers_on_change :: proc(data: rawptr, change: ^Change, seed: ^Snapshot,
 	w.live_count = len(t.by_id)
 }
 
-/** Replay once, as compute_state does, recording who last wrote each entry. */
-record_writers_replay :: proc(changes: []Change, checkpoint: ^Checkpoint = nil, allocator := context.allocator) -> (Object_State, Record_Writers, bool) {
+@(private = "file")
+record_writers_make :: proc(allocator: runtime.Allocator) -> Record_Writers {
 	w: Record_Writers
 	w.slots = make(map[string]Record_Writer, allocator = allocator)
 	w.fields = make(map[string]Record_Writer, allocator = allocator)
 	w.blocks = make(map[string]Record_Writer, allocator = allocator)
+	return w
+}
+
+/** Replay once, as compute_state does, recording who last wrote each entry. */
+record_writers_replay :: proc(changes: []Change, checkpoint: ^Checkpoint = nil, allocator := context.allocator) -> (Object_State, Record_Writers, bool) {
+	w := record_writers_make(allocator)
 	hook := Replay_Hook{data = &w, on_change = record_writers_on_change}
 	state, ok := compute_state(changes, allocator, checkpoint, &hook)
+	return state, w, ok
+}
+
+/** The same for a device holding a base: state_from_base over its live deltas, the base as seed. */
+record_writers_replay_base :: proc(base: ^Checkpoint, live: []Change, allocator := context.allocator) -> (Object_State, Record_Writers, bool) {
+	w := record_writers_make(allocator)
+	hook := Replay_Hook{data = &w, on_change = record_writers_on_change}
+	state, ok := state_from_base(base, live, allocator, &hook)
 	return state, w, ok
 }
 

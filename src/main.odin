@@ -5,6 +5,10 @@ package glon
 //   glon-odin serve [port]     HTTP API + SSE (default 7333)
 //   glon-odin list             object summaries from the DAG
 //   glon-odin dump <objectId>  computed state as JSON (parity testing)
+//   glon-odin records-check [objectId]  offline dry run of the record conversion
+//   glon-odin journal          record mode: the unsent patches
+//
+// GLON_RECORDS=1 runs the record store (src/records.odin): offline-only.
 
 import "core:os"
 import "core:fmt"
@@ -19,7 +23,7 @@ main :: proc() {
 		home := os.get_env_alloc("HOME", context.allocator)
 		data_root, _ = filepath.join({home, ".glon"})
 	}
-	store_init(data_root)
+	store_init(data_root, records = records_env())
 
 	args := os.args
 	cmd := len(args) > 1 ? args[1] : "serve"
@@ -33,6 +37,10 @@ main :: proc() {
 			os.exit(1)
 		}
 		cli_dump(args[2])
+	case "records-check":
+		cli_records_check(len(args) > 2 ? args[2] : "")
+	case "journal":
+		cli_journal()
 	case "key-export":
 		// Explicit local terminal operation; never available to paired browser sessions.
 		s := nostr_ensure()
@@ -55,13 +63,18 @@ main :: proc() {
 			if p, ok := strconv.parse_int(args[2]); ok do port = p
 		}
 		// Before the first load: the archive becomes the folded index, and
-		// retention applies to bases held under an older policy.
-		migrate_archive()
-		retain_all_bases()
+		// retention applies to bases held under an older policy. Record mode
+		// leaves the DAG files as they are.
+		if g_store.record_mode {
+			fmt.eprintln("[glon-odin] record mode (GLON_RECORDS=1): offline-only, sync routes refuse")
+		} else {
+			migrate_archive()
+			retain_all_bases()
+		}
 		bootstrap_space_defaults()
 		serve(port)
 	case:
-		fmt.eprintln("usage: glon-odin [serve [port] | list | dump <objectId> | key-export]")
+		fmt.eprintln("usage: glon-odin [serve [port] | list | dump <objectId> | records-check [objectId] | journal | key-export]")
 		os.exit(1)
 	}
 }

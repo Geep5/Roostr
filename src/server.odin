@@ -276,6 +276,12 @@ read_request :: proc(sock: net.TCP_Socket) -> (Request, bool) {
 // ── Routing ──────────────────────────────────────────────────────────
 
 route :: proc(sock: net.TCP_Socket, req: Request) {
+	// Record mode is offline-only: nothing is published or imported through
+	// the change/base/checkpoint protocol (docs/state-objects.md "Record mode").
+	if records_sync_refused(req.path) {
+		respond_error(sock, "record mode (GLON_RECORDS=1) is offline-only: sync is off", "409 Conflict")
+		return
+	}
 	switch {
 	case req.method == "GET" && req.path == "/api/objects":
 		handle_list_objects(sock)
