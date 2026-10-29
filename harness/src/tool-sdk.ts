@@ -137,7 +137,7 @@ export interface SentMessage {
 export interface HarnessApi {
 	shell(command: string): Promise<ShellRun>;
 	webPage(url: string): Promise<WebPage>;
-	credential(service: string): Promise<CredentialInfo>;
+	credential(service: string, pick: string): Promise<CredentialInfo>;
 	credentialPage(service: string, url: string, script: string): Promise<CredentialPage>;
 	credentialApi(service: string, path: string, request: CredentialRequest): Promise<CredentialAnswer>;
 	credentialAct(service: string, action: string, input: Record<string, unknown>): Promise<CredentialActResult>;
@@ -165,8 +165,8 @@ export function harnessCalls(send: HarnessSend): HarnessCall {
 
 /** The running agent's credentials (its Credentials property), used by the harness: a tool sees what they show and what they fetch, never their secrets. */
 export interface RoostrCredentials {
-	/** The agent's credential for `service`: its name, account, actions, and whether it signs in with a browser. */
-	get(service: string): Promise<CredentialInfo>;
+	/** The agent's credential for `service` (the one `pick` names - its name, id or account - when it has several): its name, account, actions, and whether it signs in with a browser. */
+	get(service: string, pick?: string): Promise<CredentialInfo>;
 	/** Open `url` in a throwaway headless Chrome signed in with that credential, run `script` there (an async function body; what it returns is `result`), and read the page. */
 	page(service: string, url: string, script: string): Promise<CredentialPage>;
 	/** A request to the service's own API (a path on it), signed in with that credential; only for services whose sign-in the harness knows how to send (an extension's `credentialApis`). */
@@ -375,7 +375,7 @@ export function createRoostr(context: ToolRunContext, touched: Set<string>, harn
 		shell: (command) => sdkCall(() => harness("shell", [command])),
 		webPage: (url) => sdkCall(() => harness("webPage", [url])),
 		credentials: {
-			get: (service) => sdkCall(() => harness("credential", [service])),
+			get: (service, pick = "") => sdkCall(() => harness("credential", [service, pick])),
 			page: (service, url, script) => sdkCall(() => harness("credentialPage", [service, url, script])),
 			api: (service, path, request = {}) => sdkCall(() => harness("credentialApi", [service, path, request])),
 			act: (service, action, input = {}) => sdkCall(() => harness("credentialAct", [service, action, input])),

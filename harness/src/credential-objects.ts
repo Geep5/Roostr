@@ -748,7 +748,8 @@ export interface AgentCredential {
 /**
  * The credential an agent may act with: one it lists in its Credentials
  * property, of the service asked for, that is active - the one `pick`
- * names (its name or id) when given, else the first active one. Any
+ * names (its name, id or account: "grant@…" of several Google logins)
+ * when given, else the first active one. Any
  * computer can use it - the secret rides on the object.
  */
 export async function agentCredential(agent: ObjectJSON, service: string, pick = ""): Promise<AgentCredential> {
@@ -757,7 +758,8 @@ export async function agentCredential(agent: ObjectJSON, service: string, pick =
 	const rows = await Promise.all(linked.map((id) => credentialObject(id).catch(() => null)));
 	const ofService = rows.filter((r): r is CredentialRow => !!r && r.service === service);
 	if (ofService.length === 0) throw new CredentialMissing(`None of this agent's credentials is for "${service}".`);
-	const picked = pick ? ofService.find((r) => r.id === pick || r.name === pick) ?? ofService.find((r) => r.name.toLowerCase() === pick.toLowerCase()) : undefined;
+	const lower = pick.toLowerCase();
+	const picked = pick ? ofService.find((r) => r.id === pick || r.name === pick) ?? ofService.find((r) => r.name.toLowerCase() === lower || r.account.toLowerCase() === lower) : undefined;
 	if (pick && !picked) throw new Error(`None of this agent's "${service}" credentials is "${pick}"; they are: ${ofService.map((r) => `"${r.name}"`).join(", ")}.`);
 	const row = picked ?? ofService.find((r) => r.status === "active") ?? ofService[0];
 	if (row.status !== "active") throw new CredentialNotConnected(row.name, `Credential "${row.name}" is not connected (${row.status || "missing"}${row.error ? `: ${row.error}` : ""}).`);

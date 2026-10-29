@@ -229,8 +229,8 @@ export function harnessFor(ctx: ToolContext): HarnessServe {
 			}
 			return { ok: true, html: run.stdout.slice(0, WEB_PAGE_CAP) };
 		},
-		credential: async ([service]) => {
-			const found = await credentialFor(ctx, textArg(service, "service"));
+		credential: async ([service, pick]) => {
+			const found = await credentialFor(ctx, textArg(service, "service"), pick === undefined ? "" : textArg(pick, "pick").trim());
 			if (!found.ok) return found;
 			const { row, cookies } = found.cred;
 			return { ok: true, name: row.name, service: row.service, account: row.account, actions: actionsOf(row.fields), browserSignIn: cookies.length > 0 };
