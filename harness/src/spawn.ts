@@ -80,9 +80,8 @@ export async function spawnSubagent(task: string, templateName: string, parentCt
 			spawn_template: sv(template.name),
 			model: sv(model),
 			...(parent.fields["prompt"] ? { prompt: parent.fields["prompt"] } : {}),
-			// The folder its parent works in this turn (where the chat is, or
-			// the parent's own): a helper works in the same project.
-			...(parentCtx.workspacePath ? { repo_path: sv(parentCtx.workspacePath) } : {}),
+			// Its parent's Project folder: a helper works in the same project.
+			...(str(parent.fields, "repo_path") ? { repo_path: parent.fields["repo_path"] } : {}),
 			// Its parent's logins: the model key first of all. Without them a
 			// helper fell back to the computer's own Claude login - an expired
 			// one failed every spawn while its parent's key worked.

@@ -46,14 +46,8 @@ An agent is an object whose properties are its configuration - nothing is hidden
 - **Tools**: extra tools beyond the always-on core - gated built-ins (`shell_exec`, `web_fetch`) and custom Tool objects.
 - **Skills**: instructions it may read (like this guide). With none listed it sees every Skill; with a list, only those.
 - **Served by**: the one computer it runs on. No Served by, no runs - its Error property says so.
-- **Project folder**: optional, and only a fallback - a folder belongs to the work, not the agent (see "Project folders" below). The agent's own folder is used on its own page and on objects with no folder of their own or of their Project.
+- **Project folder**: optional - a folder on its computer that is its project (Choose… picks it with the macOS folder window when you're at that computer). When set, every turn the agent is told it's its project - and its git repo, remote, branch and uncommitted changes, when it is one - reads the folder's AGENTS.md (or CLAUDE.md), and its shell and helpers start there. All of that comes from this property, never the System prompt. A folder that isn't on its computer is on the agent's Error until fixed or cleared.
 - **Fresh each run**: optional checkbox. Every scheduled or push run starts on an empty transcript and the last run's is deleted, so the agent carries no history of its runs. Use it for work whose state lives on the object it runs: an inbox already fetches only mail newer than its last check, so its old runs are only weight (tokens to read, and an agent too big to sync).
-
-### Project folders
-
-A **Project folder** is a folder on a computer that is the project for work done on an object. Add the Project folder property to any object - a task, a meeting, a client's Project - and pick the folder (Choose… opens the macOS folder window when you're at that computer). Anyone who can edit the object can set it, like any other property.
-
-When an agent works on an object, its folder is the first of: the object's own Project folder; the folder of the first Project it is linked to (Linked projects); the agent's own Project folder. So one Mockup agent works in each client's folder: give each client's Project (or each task) its folder - no agent per client. Every turn the agent is told which folder it is and where it is set, and its git repo, remote, branch and uncommitted changes when it is one; it reads the folder's AGENTS.md (or CLAUDE.md); its shell and helpers start there. The folder must be on the computer the agent runs on (its Served by): one that isn't is said in the chat - the agent tells you instead of working elsewhere - and, for the agent's own folder, on its Error.
 
 The always-on core tools let every agent read and edit objects (`object_get`, `object_set_field`, `object_add_text`, `object_create`, `object_delete`, `find`, `query_run`, `space_map`, `neighborhood`...), read Skills, keep memory, schedule (`object_set_repeat`, `occurrence_complete`), ask other agents (`agent_ask`) and delegate (`spawn`).
 

@@ -40,7 +40,7 @@ export interface ToolContext {
 	touched: Set<string>;
 	/** What the agent runs from Tool objects and what its Tools property unlocks (tool-objects.ts); unset = every built-in running its shipped code, no custom tools (tests, internal callers). */
 	toolset?: Toolset;
-	/** This turn's Project folder on this machine (where the chat is, its Project's, else the agent's own - workspace.ts turnFolder): shell_exec's cwd when set. */
+	/** The agent's Project folder (`repo_path`) on this machine - shell_exec's cwd when set. */
 	workspacePath?: string;
 }
 

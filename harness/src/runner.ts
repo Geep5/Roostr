@@ -21,7 +21,7 @@ import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
 import { agentModelKey, credentialsPromptLine } from "./credential-objects";
 import { dispatchTool, missingToolsNote, toolDefs, type ToolContext } from "./tools";
 import { agentToolset } from "./tool-objects";
-import { missingFolderSection, turnFolder, workspacePromptSection, workspaceSummary } from "./workspace";
+import { checkProjectFolder, workspaceAt, workspacePromptSection, workspaceSummary } from "./workspace";
 import { genesisCalls, genesisFingerprint, lastGenesis } from "./genesis";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
@@ -208,10 +208,9 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	]);
 	const kbRows = await knowledgeBaseRows(agent);
 	const credsLine = await credentialsPromptLine(agent);
-	// The folder where this chat is (or its Project's, else the agent's own),
-	// checked every turn on the computer running it.
-	const on = objectId ? await fetchObject(objectId).catch(() => null) : null;
-	const { source, ws } = await turnFolder(agent, on);
+	const repo = str(agent.fields, "repo_path");
+	// Checked every turn on the computer running it: missing here is on the agent's Error.
+	const ws = await checkProjectFolder(agent).catch(() => null);
 	const fingerprint = [
 		agent.updatedAt ?? 0,
 		promptObj?.updatedAt ?? 0,
@@ -224,7 +223,7 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 		kbRows.length,
 		maxUpdated(kbRows),
 		channelId,
-		source ? `${source.from.id}=${source.path}` : "",
+		repo,
 		ws ? `${workspaceSummary(ws)}#${ws.agentsMd.length}` : "",
 		objectId,
 	].join("|");
@@ -249,11 +248,10 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	parts.push({ label: "Chat conduct", text: CHAT_CONDUCT });
 	const instructions = await channelInstructions(channelId);
 	if (instructions) parts.push({ label: "Space instructions", text: instructions });
-	// Machine-local by design: a Project folder exists only on the machine
-	// holding the checkout - the one running this turn, for the agent's own
-	// (the serving gate); a folder set where the chat is may be missing here.
-	if (source && ws) parts.push({ label: "Workspace", text: workspacePromptSection(ws, source, agentId) });
-	else if (source && source.from.id !== agentId) parts.push({ label: "Workspace", text: await missingFolderSection(source, agentId) });
+	// Machine-local by design: the agent's Project folder (`repo_path`) exists
+	// only on the machine holding the checkout - which the serving gate
+	// guarantees is the one running this turn.
+	if (ws) parts.push({ label: "Workspace", text: workspacePromptSection(ws) });
 
 	slowCache.set(agentId, { fingerprint, parts });
 	slowStats.builds++;
@@ -341,11 +339,10 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		// The object this turn is about is where its transcript lives: the
 		// object naming this agent, or its space - never the agent's own page.
 		ctx.boundObject = ref.objectId === agentId ? undefined : ref.objectId;
-		// Same folder the Workspace prompt section describes (where this chat
-		// is, its Project's, else the agent's own); missing means home, never
-		// a spawn failure - the prompt tells the agent it is missing.
-		const on = conv.id === agentId || conv.typeKey === "channel" ? null : conv;
-		ctx.workspacePath = (await turnFolder(agent, on)).ws?.path;
+		// Same checkout the Workspace prompt section describes; a missing
+		// directory means home, never a spawn failure.
+		const repo = str(agent.fields, "repo_path");
+		ctx.workspacePath = repo ? (await workspaceAt(repo).catch(() => null))?.path : undefined;
 		const ratio = tokenRatio(agent);
 		const cfg = compactionConfig(agent);
 		// The model is the agent's own Model property (a select stores a one-item list) - nothing else.
