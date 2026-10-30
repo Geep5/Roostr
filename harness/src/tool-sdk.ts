@@ -248,7 +248,7 @@ export interface Roostr {
 	/** Notes for the harness log (stderr); never part of the result. */
 	log(...args: unknown[]): void;
 	// ── Asked of the harness (HarnessApi) ──
-	/** `sh -lc command` on this computer (5 minutes at most), in the agent's Project folder, else home. Refused unless the agent's Tools list shell_exec. */
+	/** `sh -lc command` on this computer (5 minutes at most), in this turn's Project folder (where the chat is, else the agent's own), else home. Refused unless the agent's Tools list shell_exec. */
 	shell(command: string): Promise<ShellRun>;
 	/** A live http(s) page through this computer's headless Chrome (browserless). Refused unless the agent's Tools list web_fetch. */
 	webPage(url: string): Promise<WebPage>;

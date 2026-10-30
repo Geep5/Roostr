@@ -1,15 +1,17 @@
 /**
- * The agent's Project folder: its `repo_path` property, an absolute path on
- * the computer that serves it (machine-local by nature - the serving gate
- * guarantees the computer running the turn is the one the agent is pinned
- * to). Optional: no folder is a normal agent. A folder that is set is
- * either fully in use - checked, described in the prompt, shell_exec's
- * starting directory, its AGENTS.md read - or its absence is on the agent's
- * Error. A folder need not be a git repo; when it is, the prompt says so.
+ * Project folders: the `repo_path` property, an absolute path on the
+ * computer that runs the turn. A folder belongs to the work - set on the
+ * object a chat is on (a task, a meeting...), or on the Project it is linked
+ * to - so one agent works in each task's own folder; the agent's own folder
+ * is only the fallback (its own page, objects without one). Optional: no
+ * folder anywhere is normal. A folder in use is checked, described in the
+ * prompt (where it is set), shell_exec's starting directory, its AGENTS.md
+ * read; one missing here is said in the prompt, and on the agent's Error
+ * when it is the agent's own. A folder need not be a git repo.
  */
 
 import { homedir } from "node:os";
-import { deleteField, setField, str, sv, type ObjectJSON } from "./api";
+import { deleteField, fetchObject, setField, str, sv, type ObjectJSON } from "./api";
 
 const AGENTS_MD_CAP = 8000;
 const GIT_TIMEOUT_MS = 10_000;
@@ -90,9 +92,54 @@ export function workspaceSummary(ws: Workspace): string {
 	return `${ws.path} - git repo${where ? ` ${where}` : ""} (${state})`;
 }
 
+/**
+ * Where a turn's Project folder is set: on the object the chat is on, else
+ * on the first Project it is linked to (Linked projects), else on the agent
+ * itself - a fallback for its own page and objects without one.
+ */
+export interface FolderSource {
+	/** As set (`~` not yet expanded). */
+	path: string;
+	from: ObjectJSON;
+}
+
+const folderOf = (o: ObjectJSON): string => str(o.fields, "repo_path").trim();
+
+export async function projectFolderSource(agent: ObjectJSON, on: ObjectJSON | null): Promise<FolderSource | null> {
+	if (on && on.id !== agent.id) {
+		if (folderOf(on)) return { path: folderOf(on), from: on };
+		const v = on.fields["linked_projects"];
+		const first = (v?.valuesValue?.items ?? (v ? [v] : [])).map((i) => i.linkValue?.targetId ?? "").find(Boolean);
+		const project = first ? await fetchObject(first).catch(() => null) : null;
+		if (project && folderOf(project)) return { path: folderOf(project), from: project };
+	}
+	return folderOf(agent) ? { path: folderOf(agent), from: agent } : null;
+}
+
+/** Whose Project folder it is, in the prompt's words. */
+function whose(source: FolderSource, agentId: string): string {
+	if (source.from.id === agentId) return "your own Project folder (no folder is set where this chat is)";
+	const name = str(source.from.fields, "name") || source.from.id.slice(0, 8);
+	return `the Project folder of ${source.from.typeKey} "${name}" (${source.from.id})`;
+}
+
+/**
+ * A turn's Project folder: where it is set and, when this computer has it,
+ * the folder. The agent's own folder keeps its Error true as before; a
+ * folder set elsewhere that is missing here is said in the prompt instead
+ * (missingFolderSection) - never silently swapped for another folder.
+ */
+export async function turnFolder(agent: ObjectJSON, on: ObjectJSON | null): Promise<{ source: FolderSource | null; ws: Workspace | null }> {
+	const own = await checkProjectFolder(agent).catch(() => null);
+	const source = await projectFolderSource(agent, on);
+	if (!source) return { source: null, ws: null };
+	if (source.from.id === agent.id) return { source, ws: own };
+	return { source, ws: await workspaceAt(source.path).catch(() => null) };
+}
+
 /** The Workspace system-prompt section: everything from the folder itself, never from the System prompt. */
-export function workspacePromptSection(ws: Workspace): string {
-	const lines = [`This is your project: ${ws.path} - set as your Project folder. Read and change the project here; shell_exec starts in this folder.`];
+export function workspacePromptSection(ws: Workspace, source: FolderSource, agentId: string): string {
+	const lines = [`This is your project: ${ws.path} - ${whose(source, agentId)}. Read and change the project here; shell_exec starts in this folder.`];
 	if (ws.git) {
 		lines.push(
 			`It is a git repo${ws.remote ? ` (remote ${ws.remote})` : ""}${ws.branch ? `, on branch ${ws.branch}` : ""}: ${ws.dirty ? `${ws.dirty} uncommitted change${ws.dirty === 1 ? "" : "s"}` : "no uncommitted changes"}. Use git for its history and changes.`,
@@ -106,9 +153,17 @@ export function workspacePromptSection(ws: Workspace): string {
 }
 
 /**
- * Keep the agent's Error true about its Project folder, on the computer that
- * serves it: a set folder missing here is an Error; fine or unset clears one
- * this wrote. Returns the folder when it is in use.
+ * The Workspace section for a folder set where this chat is (or on its
+ * Project) that this computer doesn't have: work nowhere else.
+ */
+export async function missingFolderSection(source: FolderSource, agentId: string): Promise<string> {
+	return `${whose(source, agentId)[0].toUpperCase()}${whose(source, agentId).slice(1)} is ${source.path}, but that folder isn't on ${await thisComputerName()}, the computer you run on. Don't work on the project anywhere else: tell the person, so they set it to a folder on this computer or clear it.`;
+}
+
+/**
+ * Keep the agent's Error true about its own Project folder, on the computer
+ * that serves it: a set folder missing here is an Error; fine or unset
+ * clears one this wrote. Returns the folder when it is in use.
  */
 export async function checkProjectFolder(agent: ObjectJSON): Promise<Workspace | null> {
 	const repo = str(agent.fields, "repo_path").trim();

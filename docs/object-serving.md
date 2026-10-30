@@ -31,7 +31,7 @@ identically. No heartbeats, no leases, no coordinator.
 | machine  | `machine_id`   | string      | that machine               | stable id from `~/.glon/harness.json`                  |
 | machine  | `name`         | string      | that machine / human       | hostname by default                                    |
 | agent    | `served_by`    | string      | human, harness migration   | the agent's computer: it runs there on every object    |
-| agent    | `repo_path`    | string      | human                      | "Project folder": the agent's checkout on that machine |
+| any      | `repo_path`    | string      | human, agent tool          | "Project folder": the checkout work on this object uses, on the machine running it (an agent's own: its fallback) |
 | agent    | `credentials`  | link list   | human, agent tool          | Credential objects: service logins AND its model login |
 | any      | `served_by`    | string      | human, agent tool          | pin: where the object's repeats fire and inbox recovers |
 | any      | `agent`        | link list   | human, agent tool          | guest list; the first pinned guest lends its pin       |
