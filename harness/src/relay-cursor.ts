@@ -3,6 +3,12 @@
  * README "Relay cursor"): `EVENT` frames may carry a fourth element
  * `{seq}` and `EOSE` a third `{head, oldest}`, which nostr-tools' pool
  * drops. One WebSocket, reconnected on loss; publishes wait for `OK`.
+ *
+ * A socket can die without closing (the Mac slept, the network changed):
+ * sends vanish and nothing ever answers. So an unanswered publish or query
+ * abandons the socket and the next call opens a new one, and while live
+ * subscriptions are open a heartbeat query every minute catches a dead
+ * socket nothing else would touch.
  */
 
 import type { Event, Filter } from "nostr-tools";
@@ -27,8 +33,18 @@ interface Sub {
 	onClosed?: (reason: string) => void;
 }
 
-const OK_TIMEOUT_MS = 15_000;
-const QUERY_TIMEOUT_MS = 30_000;
+export interface RelayTimings {
+	/** How long a publish waits for its `OK`. */
+	okMs: number;
+	/** How long a query waits for its `EOSE`. */
+	queryMs: number;
+	/** How often an otherwise idle connection with live subscriptions is checked. */
+	heartbeatMs: number;
+}
+
+const TIMINGS: RelayTimings = { okMs: 15_000, queryMs: 30_000, heartbeatMs: 60_000 };
+/** An id no event has: the heartbeat's query matches nothing, so the relay answers with EOSE alone. */
+const NO_EVENT = "0".repeat(64);
 
 export class CursorRelay {
 	readonly url: string;
@@ -41,9 +57,12 @@ export class CursorRelay {
 	/** Runs after every reconnection (not the first connect); live subscriptions are already re-sent. */
 	onReconnect: (() => void) | null = null;
 	private everOpened = false;
+	private readonly timings: RelayTimings;
+	private heartbeat: Timer | null = null;
 
-	constructor(url: string) {
+	constructor(url: string, timings: Partial<RelayTimings> = {}) {
 		this.url = url;
+		this.timings = { ...TIMINGS, ...timings };
 	}
 
 	private connect(): Promise<void> {
@@ -61,6 +80,7 @@ export class CursorRelay {
 			this.everOpened = true;
 			for (const [id, sub] of this.subs) ws.send(JSON.stringify(["REQ", id, ...sub.filters]));
 			resolve();
+			this.heartbeat ??= setInterval(() => this.checkAlive(), this.timings.heartbeatMs);
 			if (reconnected) this.onReconnect?.();
 		};
 		ws.onmessage = (message) => this.receive(String(message.data));
@@ -71,17 +91,43 @@ export class CursorRelay {
 			reject(new Error(`relay ${this.url} unreachable`));
 		};
 		ws.onclose = () => {
-			if (this.ws === ws) this.ws = null;
 			if (!settled) {
 				settled = true;
 				this.opening = null;
 				reject(new Error(`relay ${this.url} closed`));
 			}
-			for (const [, settle] of this.oks) settle(false, "connection closed");
-			this.oks.clear();
+			// An abandoned socket closing late: its replacement is already in use.
+			if (this.ws !== ws) return;
+			this.ws = null;
+			this.failPublishes("connection closed");
 			if (!this.closed && this.subs.size > 0) setTimeout(() => void this.connect().catch(() => this.retryLater()), 1000);
 		};
 		return promise;
+	}
+
+	private failPublishes(why: string): void {
+		for (const [, settle] of this.oks) settle(false, why);
+		this.oks.clear();
+	}
+
+	/**
+	 * Nothing answered on `ws`: treat it as dead. Waiting publishes fail (the
+	 * journal keeps them for the next flush), and the next call - or, with
+	 * live subscriptions, a reconnect now - opens a new socket that re-sends
+	 * every open subscription and query.
+	 */
+	private abandon(ws: WebSocket | null): void {
+		if (!ws || this.ws !== ws) return;
+		this.ws = null;
+		this.failPublishes("connection lost");
+		ws.close();
+		if (!this.closed && this.subs.size > 0) void this.connect().catch(() => this.retryLater());
+	}
+
+	/** The heartbeat: a query that matches nothing must still get its EOSE (query() abandons the socket otherwise). */
+	private checkAlive(): void {
+		if (this.closed || !this.ws || this.subs.size === 0) return;
+		void this.query([{ ids: [NO_EVENT], limit: 1 }]).catch(() => {});
 	}
 
 	private retryLater(): void {
@@ -121,11 +167,13 @@ export class CursorRelay {
 	async publish(event: Event): Promise<{ ok: boolean; message: string }> {
 		for (let attempt = 0; ; attempt++) {
 			await this.connect();
+			const ws = this.ws;
 			const { promise, resolve } = Promise.withResolvers<{ ok: boolean; message: string }>();
 			const timer = setTimeout(() => {
 				this.oks.delete(event.id);
 				resolve({ ok: false, message: "timeout" });
-			}, OK_TIMEOUT_MS);
+				this.abandon(ws);
+			}, this.timings.okMs);
 			this.oks.set(event.id, (ok, message) => {
 				clearTimeout(timer);
 				resolve({ ok, message });
@@ -143,13 +191,15 @@ export class CursorRelay {
 	/** One-shot REQ: every stored match, then the EOSE cursor (null when the relay sent none). */
 	async query(filters: CursorFilter[]): Promise<{ events: SeqEvent[]; cursor: StreamCursor | null }> {
 		await this.connect();
+		const ws = this.ws;
 		const id = `q${this.nextId++}`;
 		const { promise, resolve, reject } = Promise.withResolvers<{ events: SeqEvent[]; cursor: StreamCursor | null }>();
 		const events: SeqEvent[] = [];
 		const timer = setTimeout(() => {
 			this.close(id);
 			reject(new Error("relay query timed out"));
-		}, QUERY_TIMEOUT_MS);
+			this.abandon(ws);
+		}, this.timings.queryMs);
 		this.subs.set(id, {
 			filters,
 			onEvent: (item) => events.push(item),
@@ -189,6 +239,8 @@ export class CursorRelay {
 
 	shutdown(): void {
 		this.closed = true;
+		if (this.heartbeat) clearInterval(this.heartbeat);
+		this.heartbeat = null;
 		this.subs.clear();
 		this.ws?.close();
 		this.ws = null;

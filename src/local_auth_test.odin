@@ -126,6 +126,11 @@ local_http_header_contract :: proc(t: ^testing.T) {
 	request, length, ok := parse_request_head("POST /api/mutate?token=ignored HTTP/1.1\r\nHoSt: localhost:7333\r\nContent-Length: 2\r\nOrigin: https://roostr.example\r\nAuthorization: Bearer abc")
 	testing.expect(t, ok && length == 2 && request.path == "/api/mutate")
 	testing.expect(t, request.host == "localhost:7333" && request.origin == "https://roostr.example" && request.authorization == "Bearer abc")
+	// A pack import may exceed the 16 MiB body cap (a whole stream); nothing else may.
+	_, pack_length, pack_ok := parse_request_head("POST /api/records/import-pack HTTP/1.1\r\nHost: localhost:7333\r\nContent-Length: 20000000")
+	testing.expect(t, pack_ok && pack_length == 20000000)
+	_, _, big_ok := parse_request_head("POST /api/mutate HTTP/1.1\r\nHost: localhost:7333\r\nContent-Length: 20000000")
+	testing.expect(t, !big_ok)
 	for invalid in ([]string{
 		"GET /api/events HTTP/1.1",
 		"GET /api/events HTTP/1.1\r\nHost: localhost:7333\r\nhost: evil.example",

@@ -211,6 +211,12 @@ handle_connection :: proc(sock: net.TCP_Socket) {
 	}
 }
 
+/* A request body's cap. A pack import carries the whole personal stream (it
+ * passed 16 MiB in Oct 2026 and was dropped, unanswered: sync could never catch
+ * up past it), so it alone gets room to grow. */
+MAX_BODY :: 16 << 20
+MAX_PACK_BODY :: 256 << 20
+
 parse_request_head :: proc(head: string) -> (req: Request, content_length: int, ok: bool) {
 	lines := strings.split(head, "\r\n", context.temp_allocator)
 	if len(lines) == 0 do return {}, 0, false
@@ -243,7 +249,8 @@ parse_request_head :: proc(head: string) -> (req: Request, content_length: int, 
 			for c in value do if c < '0' || c > '9' do return {}, 0, false
 			length_ok: bool
 			content_length, length_ok = strconv.parse_int(value)
-			if !length_ok || content_length < 0 || content_length > 16 << 20 do return {}, 0, false
+			cap := MAX_PACK_BODY if req.method == "POST" && req.path == "/api/records/import-pack" else MAX_BODY
+			if !length_ok || content_length < 0 || content_length > cap do return {}, 0, false
 		}
 	}
 	// A POST with neither Content-Length nor Transfer-Encoding has an empty
