@@ -21,8 +21,6 @@ import { ANTHROPIC_SERVICE } from "./space-defaults";
 const CREDENTIAL_TYPE = "credential";
 /** Renew this long before the token expires: the credential check runs every 5 minutes. */
 const RENEW_BEFORE_MS = 15 * 60_000;
-/** How long a sign-in window waits for the person. */
-const SIGN_IN_MS = 10 * 60_000;
 
 interface Tokens {
 	access: string;
@@ -107,9 +105,9 @@ export async function startPlanSignIn(servedBy: string): Promise<void> {
 		return;
 	}
 	void (async () => {
-		const deadline = Date.now() + SIGN_IN_MS;
+		// Watched until it lands, or the person cancels or starts another (Settings).
 		let landed = null as { code: string; state: string } | null;
-		while (!landed && Date.now() < deadline && pending === job) {
+		while (!landed && pending === job) {
 			// Only this sign-in's callback: an older one in the history carries another state.
 			for (const url of visitedUrlsLike(CALLBACK_PREFIXES)) {
 				const hit = codeFromCallback(url);
@@ -117,12 +115,8 @@ export async function startPlanSignIn(servedBy: string): Promise<void> {
 			}
 			if (!landed) await Bun.sleep(1500);
 		}
-		if (pending !== job) return;
+		if (pending !== job || !landed) return;
 		job.watching = false;
-		if (!landed) {
-			job.error = "The sign-in took too long, or your browser's history could not be read. Paste the code claude.ai showed, or sign in again.";
-			return;
-		}
 		try {
 			await applyPlan(await exchange(landed.code, landed.state, job.verifier), job.servedBy);
 			pending = null;
