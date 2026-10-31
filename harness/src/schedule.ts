@@ -48,6 +48,7 @@ import { linkIds, runToolObject } from "./tool-objects";
 import { localClock } from "./repeat";
 import { SCORE_WITH_KEY, scoreWithSkill } from "./jev";
 import { runViewActions } from "./view-actions";
+import { relationDefs, savedViewBody } from "./spacemap";
 
 /** The object ids a check's result names: a list of `{id}` (or JSON text of one). */
 export function foundIds(value: unknown): string[] {
@@ -88,6 +89,25 @@ const TURN_SUFFIX =
 
 /** How much of a check's finding goes into the frame. */
 const FINDING_CAP = 8000;
+
+/** How many of a query's or collection's objects its run lists. */
+const SET_LIST_CAP = 200;
+
+/**
+ * What a query or collection holds now, as its run hands it to the agent:
+ * a line per object (name, type, id), at most SET_LIST_CAP, with the total.
+ * Run as the app runs the view (its filters, its space).
+ */
+export async function setListing(view: ObjectJSON): Promise<string> {
+	const space = str(view.fields, "channel");
+	const run = await savedViewBody(view, space, await relationDefs(space));
+	const rows = run ? await queryAll(run) : [];
+	const name = str(view.fields, "name") || "this view";
+	if (rows.length === 0) return `"${name}" holds no objects right now.`;
+	const lines = rows.slice(0, SET_LIST_CAP).map((r) => `- ${str(r.fields, "name") || "(untitled)"} (${r.typeKey}, id ${r.id})`);
+	const more = rows.length > SET_LIST_CAP ? `\n… and ${rows.length - SET_LIST_CAP} more (query_run on ${view.id} lists them all)` : "";
+	return `"${name}" holds ${rows.length} object${rows.length === 1 ? "" : "s"} right now:\n${lines.join("\n")}${more}`;
+}
 
 /** A check's result that means "nothing new": nothing, "", [] or {} - also as JSON text. */
 export function isEmptyResult(value: unknown): boolean {
@@ -788,6 +808,9 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = "
 			return;
 		}
 		const body = objectText(obj).slice(0, 4000);
+		// A query or collection: what it holds now, so the agent works on its
+		// objects without having to run the view first.
+		if (!finding && (obj.typeKey === "query" || obj.typeKey === "collection")) finding = await setListing(obj).catch(() => "");
 		const ending = kind === "extra" || kind === "push"
 			? `this is an extra run ${kind === "push" ? "started because new data arrived" : "started by a person with Run now"}, not a scheduled occurrence - don't call occurrence_complete.`
 			: subDaily(obj)
@@ -802,7 +825,7 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = "
 						? `Retry of "${name}" (${obj.typeKey || "object"}): the occurrence due ${when} never finished, and a person pressed Retry - do it again now, from the start`
 						: `Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}`;
 		const frame = [
-			`${header}. ${finding ? "What its check found, then its page" : "Its page"} follows; ${ending}`,
+			`${header}. ${finding ? (checkId ? "What its check found, then its page" : "What it holds now, then its page") : "Its page"} follows; ${ending}`,
 			...(finding ? [finding, "Instructions:"] : []),
 			body || "(this object has no body text)",
 		].join("\n");

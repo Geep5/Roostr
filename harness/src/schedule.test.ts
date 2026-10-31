@@ -742,3 +742,75 @@ test("an object whose write doesn't read back is not written again on every look
 	}
 	expect(writes).toEqual([{ action: "set_field", id: "broken", text: `${UNSERVED_BADGE}no computer runs Ann - set Served by on it` }]);
 });
+
+test("a repeating query's run hands its agent what it holds now, ahead of its page", async () => {
+	const now = Date.now();
+	const viewId = "5a1f0c2e-0000-4000-8000-0000000000aa";
+	const channelId = "34e8f017-dfd1-4062-abaf-f7574f2b5176";
+	const agentId = "856fcc37-9ad6-43e8-a1d8-5ee236699183";
+	const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		calls.push({ path: url.pathname, body });
+		if (url.pathname === "/api/channels") return respond([{ id: channelId, name: "Matcherino" }]);
+		if (url.pathname === "/api/query") {
+			const filter = Array.isArray(body.filters) ? (body.filters[0] as Record<string, unknown>) : undefined;
+			if (body.type === "machine" || body.type === "relation") return respond({ records: [], total: 0 });
+			if (filter?.key === "repeat") {
+				return respond({ records: [{ id: viewId, typeKey: "query", fields: { repeat: { mapValue: { entries: { next: { intValue: now - 1000 } } } } } }], total: 1 });
+			}
+			// The view's own run: its setId.
+			if (body.setId === viewId) {
+				return respond({
+					records: [
+						{ id: "email-1", typeKey: "email", fields: { name: { stringValue: "Refund please" } } },
+						{ id: "email-2", typeKey: "email", fields: { name: { stringValue: "Where is my payout" } } },
+					],
+					total: 2,
+				});
+			}
+			return respond({ records: [], total: 0 });
+		}
+		if (url.pathname === "/api/serving") {
+			const ids = (body.objectIds as string[]) ?? [];
+			return respond(Object.fromEntries(ids.map((id) => [id, { machineId: "test-machine", reason: "agent", skills: [], candidates: ["test-machine"] }])));
+		}
+		if (url.pathname === `/api/objects/${viewId}`) {
+			return respond({
+				id: viewId,
+				typeKey: "query",
+				fields: {
+					channel: { stringValue: channelId },
+					name: { stringValue: "Needs Attention" },
+					agent: { valuesValue: { items: [{ stringValue: agentId }] } },
+					repeat: { mapValue: { entries: {} } },
+				},
+				blocks: [{ id: "b1", childrenIds: [], content: { text: { text: "Triage each one.", style: 0 } } }],
+				deleted: false,
+				createdAt: now,
+				updatedAt: now,
+			});
+		}
+		if (url.pathname === `/api/objects/${agentId}`) return respond({ id: agentId, typeKey: "agent", fields: {}, blocks: [], deleted: false, createdAt: now, updatedAt: now });
+		if (url.pathname === "/api/mutate") return respond({ ok: true, id: "message" });
+		return respond({ records: [], total: 0 });
+	}) as typeof fetch;
+	const turnDone = waitForTurnEnd();
+	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
+	await startScheduler({
+		fresh: unusedFresh,
+		async served(id) {
+			return id === agentId ? { agentId: id, conv: { objectId: "t-obj", threadId: "t-thread" } } : undefined;
+		},
+		async turn() {
+			return { error: "", reply: "" };
+		},
+	});
+	await turnDone;
+	const frame = calls.find((c) => c.body.action === "block_add")?.body.block as FrameBlock;
+	const text = frame.content.custom.meta.text;
+	expect(text).toContain('"Needs Attention" holds 2 objects right now:');
+	expect(text).toContain("- Refund please (email, id email-1)");
+	expect(text.indexOf("Where is my payout")).toBeLessThan(text.indexOf("Triage each one."));
+});
