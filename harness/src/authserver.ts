@@ -8,7 +8,7 @@
 import { SimplePool, finalizeEvent, getPublicKey, nip19 } from "nostr-tools";
 
 import { authStatus, setApiKey } from "./auth";
-import { finishPlanSignIn, planStatus, servePlanOn, signOutPlan, startPlanSignIn } from "./claude-plan";
+import { cancelPlanSignIn, finishPlanSignIn, planStatus, servePlanOn, signOutPlan, startPlanSignIn } from "./claude-plan";
 import { agentTurnStatus } from "./index";
 import { readRoster } from "./roster";
 import { approveCapabilityRequest, listCapabilityRequests, rejectCapabilityRequest } from "./capability-messages";
@@ -247,6 +247,10 @@ export function startAuthServer(served: Set<string>): void {
 						}
 						if (req.method === "POST" && url.pathname === "/claude-plan/serve") {
 							await servePlanOn(typeof body.machine === "string" ? body.machine : "");
+							return json(await planStatus());
+						}
+						if (req.method === "POST" && url.pathname === "/claude-plan/cancel") {
+							cancelPlanSignIn();
 							return json(await planStatus());
 						}
 						if (req.method === "POST" && url.pathname === "/claude-plan/signout") {

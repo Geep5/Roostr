@@ -92,7 +92,8 @@ const CALLBACK_PREFIXES = [...CALLBACK_HOSTS].map((host) => `https://${host}${ne
  * space-wide. Returns at once - Settings follows it through status().
  */
 export async function startPlanSignIn(servedBy: string): Promise<void> {
-	if (pending?.watching) throw new Error("A Claude sign-in is already open on this computer - finish it or paste its code.");
+	// A new sign-in replaces one still open (its window closed, or opened in
+	// the wrong browser): the old one stops watching.
 	const pkce = await generatePkce();
 	const params = new URLSearchParams({ code: "true", client_id: ANTHROPIC_CLIENT_ID, response_type: "code", redirect_uri: ANTHROPIC_REDIRECT_URI, scope: ANTHROPIC_SCOPES, code_challenge: pkce.challenge, code_challenge_method: "S256", state: pkce.verifier });
 	const me = await machineId();
@@ -133,6 +134,11 @@ export async function startPlanSignIn(servedBy: string): Promise<void> {
 		job.watching = false;
 		job.error = `Could not watch for the sign-in (${err instanceof Error ? err.message : String(err)}). Paste the code claude.ai showed.`;
 	});
+}
+
+/** Stop a sign-in in progress (its window was closed): Settings offers Sign in again. */
+export function cancelPlanSignIn(): void {
+	pending = null;
 }
 
 /** Finish a sign-in with the code claude.ai shows (CODE#STATE), when the window could not be read. */
