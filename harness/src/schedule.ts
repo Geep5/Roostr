@@ -43,7 +43,6 @@ import { CREDENTIAL_BADGE, CREDENTIAL_MISSING_BADGE, issuesBadge, parseIssuesBad
 import { agentCredentialIds } from "./credential-objects";
 import { machines, primeServing, servesHere } from "./machine";
 import { machineId } from "./roster";
-import { objectText } from "./skills";
 import { linkIds, runToolObject } from "./tool-objects";
 import { localClock } from "./repeat";
 import { SCORE_WITH_KEY, scoreWithSkill } from "./jev";
@@ -79,13 +78,13 @@ export interface ScheduleHost {
 export const FRESH_RUNS_KEY = "fresh_runs";
 
 /**
- * The scheduler's own words for a run. The object's body is the instructions
- * and wins: it once said "report briefly in this chat" here, and agents did
+ * The scheduler's own words for a run. The object's Repeat instructions
+ * win: it once said "report briefly in this chat" here, and agents did
  * that on top of a body that said to stop - announcing what they had just
  * done in every run.
  */
 const TURN_SUFFIX =
-	"This turn was started by the scheduler, not a person. When the object's page gives instructions, follow them exactly - they decide what to post and when the run is done; when it holds no instructions (notes, a record), your own instructions say what to do with it. If they say to stop, end with no reply. Call occurrence_complete only when they say the run is done; if something blocks the run, say what, once, and do not call it.";
+	"This turn was started by the scheduler, not a person. Follow the object's Repeat instructions exactly - they decide what to post and when the run is done. If they say to stop, end with no reply. Call occurrence_complete only when they say the run is done; if something blocks the run, say what, once, and do not call it.";
 
 /** How much of a check's finding goes into the frame. */
 const FINDING_CAP = 8000;
@@ -137,10 +136,20 @@ async function completeOccurrence(d: Due): Promise<void> {
 	await mutate("occurrence_complete", { object_id: d.id, ...localClock() });
 }
 
+/**
+ * What a run asks of its agent: the object's Repeat instructions - never its
+ * page (a person's notes, an email, a task's write-up are the object, not
+ * what each run should do). A run with none does not happen: NO_INSTRUCTIONS_BADGE.
+ */
+export const INSTRUCTIONS_KEY = "repeat_instructions";
+/** How much of the instructions goes into the frame. */
+const INSTRUCTIONS_CAP = 8000;
+export const NO_INSTRUCTIONS_BADGE = "no Repeat instructions:";
+
 /** Error badges a clean run clears: what a failed run, check, login or scoring wrote, or a run that never finished - never a human's or another writer's message. */
 async function clearRunBadge(obj: ObjectJSON, alsoNoAgent: boolean): Promise<void> {
 	const badge = str(obj.fields, "error");
-	const automatic = ["run failed:", "check failed:", "scoring failed:", STUCK_BADGE, UNSERVED_BADGE, CREDENTIAL_BADGE, CREDENTIAL_MISSING_BADGE];
+	const automatic = ["run failed:", "check failed:", "scoring failed:", NO_INSTRUCTIONS_BADGE, STUCK_BADGE, UNSERVED_BADGE, CREDENTIAL_BADGE, CREDENTIAL_MISSING_BADGE];
 	if (automatic.some((p) => badge.startsWith(p)) || (alsoNoAgent && badge.startsWith("recurring object has no agent"))) await deleteField(obj.id, "error");
 }
 
@@ -807,7 +816,18 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = "
 			console.log(`[schedule] reminded "${name}" (${obj.id.slice(0, 8)}) - no served agent owns it`);
 			return;
 		}
-		const body = objectText(obj).slice(0, 4000);
+		const instructions = str(obj.fields, INSTRUCTIONS_KEY).trim();
+		if (!instructions) {
+			// Nothing says what the run is for: no turn (the page is not
+			// instructions). Completed, as a failed check is: the next
+			// occurrence is the retry, once someone writes them.
+			const text = `${NO_INSTRUCTIONS_BADGE} write what each run should do in its Repeat instructions property`;
+			if (obj.fields.repeat) await mutate("run_record", { object_id: obj.id, run: { at: Date.now(), machine: me, error: text } });
+			await setField(obj.id, "error", sv(text));
+			await completeOccurrence(d);
+			console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) has no Repeat instructions; no turn`);
+			return;
+		}
 		// A query or collection: what it holds now, so the agent works on its
 		// objects without having to run the view first.
 		if (!finding && (obj.typeKey === "query" || obj.typeKey === "collection")) finding = await setListing(obj).catch(() => "");
@@ -824,10 +844,13 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = "
 					: kind === "retry"
 						? `Retry of "${name}" (${obj.typeKey || "object"}): the occurrence due ${when} never finished, and a person pressed Retry - do it again now, from the start`
 						: `Scheduled occurrence of "${name}" (${obj.typeKey || "object"}), due ${when}`;
+		const shown = instructions.length > INSTRUCTIONS_CAP ? `${instructions.slice(0, INSTRUCTIONS_CAP)}\n… (cut at ${INSTRUCTIONS_CAP} characters)` : instructions;
 		const frame = [
-			`${header}. ${finding ? (checkId ? "What its check found, then its page" : "What it holds now, then its page") : "Its page"} follows; ${ending}`,
-			...(finding ? [finding, "Instructions:"] : []),
-			body || "(this object has no body text)",
+			`${header}. ${finding ? (checkId ? "What its check found, then its Repeat instructions" : "What it holds now, then its Repeat instructions") : "Its Repeat instructions"} follow; ${ending}`,
+			`The object is "${name}" (${obj.typeKey || "object"}, id ${obj.id}); its page is not part of this message - open it with your tools only when the instructions need it.`,
+			...(finding ? [finding] : []),
+			"Repeat instructions:",
+			shown,
 		].join("\n");
 		// Fresh each run: the run starts on an empty transcript, the last run's removed.
 		const conv = (await fetchObject(owner.agentId).catch(() => null))?.fields[FRESH_RUNS_KEY]?.boolValue ? await host.fresh(owner.agentId) : owner.conv;
@@ -867,7 +890,7 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = "
 
 /** A Run now turn's own words: the object's instructions as usual, but the schedule is not this run's to move. */
 const RUN_NOW_SUFFIX =
-	"This turn was started by a person pressing Run now on the object - an extra run, not a scheduled occurrence. When the object's page gives instructions, follow them exactly - they decide what to post; when it holds no instructions (notes, a record), your own instructions say what to do with it. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
+	"This turn was started by a person pressing Run now on the object - an extra run, not a scheduled occurrence. Follow the object's Repeat instructions exactly - they decide what to post. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
 
 /** On a repeating object: a person asked for Run now ({at}), or another writer a push ({at, push: true, why}: an importer saying a message from this person arrived); the computer that serves it starts the run and deletes this. */
 export const RUN_REQUEST_KEY = "run_now";
@@ -904,7 +927,7 @@ async function runExclusive(d: Due, me: string, kind: RunKind, why = ""): Promis
 
 /** A push's own words: the object's instructions as usual, outside the schedule. */
 const PUSH_SUFFIX =
-	"This turn was started because new data arrived for this object (a push), not by its schedule or a person. When the object's page gives instructions, follow them exactly - they decide what to post; when it holds no instructions (notes, a record), your own instructions say what to do with it. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
+	"This turn was started because new data arrived for this object (a push), not by its schedule or a person. Follow the object's Repeat instructions exactly - they decide what to post. If they say to stop, end with no reply. Never call occurrence_complete in this run; if something blocks it, say what, once.";
 
 /** Objects pushed while a run of them was in progress, with what arrived: each gets one more run when it ends. */
 const pushWaiting = new Map<string, string>();
@@ -965,7 +988,7 @@ export function runNow(objectId: string, why: string): void {
  * A Run now request on `obj` (its `run_now` field, written by any device):
  * the computer that serves the object claims it - deletes the request - and
  * starts a run exactly as an occurrence runs (Check first, the agent's turn
- * with the page as instructions, the run record). While an occurrence is
+ * with its Repeat instructions, the run record). While an occurrence is
  * open (fired, never finished) that run is a Retry of it - finishing it
  * moves the schedule on, which is how a stuck object is fixed; otherwise
  * it is an extra run outside the schedule. A request while a run is in

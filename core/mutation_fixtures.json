@@ -4638,6 +4638,110 @@
       {
         "author": "alice",
         "id": "",
+        "objectId": "bundled-rel-repeat_instructions-new-id",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "repeat_instructions"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "longtext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Repeat instructions"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "📋"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
         "objectId": "bundled-rel-repo_path-new-id",
         "ops": [
           {
@@ -8224,6 +8328,53 @@
           },
           {
             "fieldSet": {
+              "key": "rel:bundled-rel-repeat_instructions-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "repeat_instructions"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Repeat instructions"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📋"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "rel:bundled-rel-repo_path-new-id",
               "value": {
                 "mapValue": {
@@ -9419,7 +9570,7 @@
             "fieldSet": {
               "key": "count:relation:alice",
               "value": {
-                "intValue": 32
+                "intValue": 33
               }
             }
           },
@@ -11884,6 +12035,110 @@
                       "stringValue": "bundled-type-tool-s"
                     }
                   ]
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-repeat_instructions-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "repeat_instructions"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "longtext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Repeat instructions"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "📋"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
                 }
               }
             }
@@ -15995,6 +16250,110 @@
       {
         "author": "alice",
         "id": "",
+        "objectId": "bundled-rel-repeat_instructions-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "repeat_instructions"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "longtext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Repeat instructions"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "📋"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
         "objectId": "bundled-rel-repo_path-s",
         "ops": [
           {
@@ -19098,6 +19457,53 @@
           },
           {
             "fieldSet": {
+              "key": "rel:bundled-rel-repeat_instructions-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "repeat_instructions"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Repeat instructions"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📋"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "rel:bundled-rel-repo_path-s",
               "value": {
                 "mapValue": {
@@ -20293,7 +20699,7 @@
             "fieldSet": {
               "key": "count:relation:alice",
               "value": {
-                "intValue": 32
+                "intValue": 33
               }
             }
           },

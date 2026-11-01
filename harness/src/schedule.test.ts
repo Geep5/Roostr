@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { credentialBadge, issuesBadge, missingBadge, parseIssuesBadge } from "./credential-issues";
 import { invalidateServing } from "./machine";
-import { checkUnserved, clearFinishedStuck, settleObject, flagStuckRuns, flagUnservedRepeats, handleStuckChange, isEmptyResult, resetScheduler, retryUnblockedRuns, runNow, STUCK_BADGE, startScheduler, UNSERVED_BADGE, unservedBadge, waitForTurnEnd } from "./schedule";
+import { checkUnserved, clearFinishedStuck, settleObject, flagStuckRuns, flagUnservedRepeats, handleStuckChange, isEmptyResult, NO_INSTRUCTIONS_BADGE, resetScheduler, retryUnblockedRuns, runNow, STUCK_BADGE, startScheduler, UNSERVED_BADGE, unservedBadge, waitForTurnEnd } from "./schedule";
 
 let root = "";
 let previousRoot: string | undefined;
@@ -72,6 +72,7 @@ test("a scheduled object fires to the served agent on its guest list", async () 
 					name: { stringValue: "Retweet recent tagged in posts" },
 					agent: { valuesValue: { items: [{ stringValue: guestAgentId }] } },
 					repeat: { mapValue: { entries: {} } },
+					repeat_instructions: { stringValue: "Remove tournaments that already started." },
 				},
 				blocks: [],
 				deleted: false,
@@ -229,8 +230,8 @@ async function checkFirstRun(code: string, withAgent = true): Promise<{ calls: A
 			return respond({
 				id: objectId,
 				typeKey: "task",
-				fields: { name: { stringValue: "Check support inbox" }, ...(withAgent ? { agent: { valuesValue: { items: [{ stringValue: agentId }] } } } : {}), check_first: { valuesValue: { items: [{ linkValue: { targetId: toolId } }] } }, repeat },
-				blocks: [{ id: "b", childrenIds: [], content: { text: { text: "Triage each new email.", style: 0 } } }],
+				fields: { name: { stringValue: "Check support inbox" }, ...(withAgent ? { agent: { valuesValue: { items: [{ stringValue: agentId }] } } } : {}), check_first: { valuesValue: { items: [{ linkValue: { targetId: toolId } }] } }, repeat, repeat_instructions: { stringValue: "Triage each new email." } },
+				blocks: [{ id: "b", childrenIds: [], content: { text: { text: "Notes: the support inbox moved in May.", style: 0 } } }],
 				deleted: false,
 				createdAt: now,
 				updatedAt: now,
@@ -292,6 +293,8 @@ test("a check that finds something puts it in the turn's frame ahead of the inst
 	const text = frame.content.custom.meta.text;
 	expect(text).toContain("Check first (check_inbox) found:");
 	expect(text.indexOf("Refund please")).toBeLessThan(text.indexOf("Triage each new email."));
+	// The page is the object, not the run's instructions: it is not sent.
+	expect(text).not.toContain("the support inbox moved in May");
 	// A minute repeat: the scheduler completes the run itself once the turn ends.
 	expect(calls.some((c) => c.body.action === "occurrence_complete")).toBe(true);
 });
@@ -556,7 +559,7 @@ test("an agent with Fresh each run gets a new transcript for every run: the run'
 		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
 		if (url.pathname === "/api/query") return respond({ records: [], total: 0 });
 		if (url.pathname === `/api/objects/${objectId}`) {
-			return respond({ id: objectId, typeKey: "task", fields: { name: { stringValue: "Check grant@ inbox" }, agent: { valuesValue: { items: [{ stringValue: agentId }] } } }, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
+			return respond({ id: objectId, typeKey: "task", fields: { name: { stringValue: "Check grant@ inbox" }, agent: { valuesValue: { items: [{ stringValue: agentId }] } }, repeat_instructions: { stringValue: "Triage the new mail." } }, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
 		}
 		if (url.pathname === `/api/objects/${agentId}`) {
 			return respond({ id: agentId, typeKey: "agent", fields: freshRuns ? { fresh_runs: { boolValue: true } } : {}, blocks: [], deleted: false, createdAt: 1, updatedAt: 1 });
@@ -743,7 +746,7 @@ test("an object whose write doesn't read back is not written again on every look
 	expect(writes).toEqual([{ action: "set_field", id: "broken", text: `${UNSERVED_BADGE}no computer runs Ann - set Served by on it` }]);
 });
 
-test("a repeating query's run hands its agent what it holds now, ahead of its page", async () => {
+test("a repeating query's run hands its agent what it holds now, ahead of its Repeat instructions", async () => {
 	const now = Date.now();
 	const viewId = "5a1f0c2e-0000-4000-8000-0000000000aa";
 	const channelId = "34e8f017-dfd1-4062-abaf-f7574f2b5176";
@@ -785,8 +788,9 @@ test("a repeating query's run hands its agent what it holds now, ahead of its pa
 					name: { stringValue: "Needs Attention" },
 					agent: { valuesValue: { items: [{ stringValue: agentId }] } },
 					repeat: { mapValue: { entries: {} } },
+					repeat_instructions: { stringValue: "Triage each one." },
 				},
-				blocks: [{ id: "b1", childrenIds: [], content: { text: { text: "Triage each one.", style: 0 } } }],
+				blocks: [],
 				deleted: false,
 				createdAt: now,
 				updatedAt: now,
@@ -813,4 +817,65 @@ test("a repeating query's run hands its agent what it holds now, ahead of its pa
 	expect(text).toContain('"Needs Attention" holds 2 objects right now:');
 	expect(text).toContain("- Refund please (email, id email-1)");
 	expect(text.indexOf("Where is my payout")).toBeLessThan(text.indexOf("Triage each one."));
+});
+
+test("a run with no Repeat instructions does not happen: no turn, its Error says why, the occurrence moves on", async () => {
+	const now = Date.now();
+	const objectId = "9c1d0e2f-0000-4000-8000-0000000000bb";
+	const agentId = "856fcc37-9ad6-43e8-a1d8-5ee236699183";
+	const next = now - 1000;
+	const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+	globalThis.fetch = (async (input, init) => {
+		const url = new URL(input instanceof Request ? input.url : String(input));
+		const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+		calls.push({ path: url.pathname, body });
+		const filter = Array.isArray(body.filters) ? (body.filters[0] as Record<string, unknown>) : undefined;
+		if (url.pathname === "/api/query") {
+			if (filter?.key === "repeat") return respond({ records: [{ id: objectId, typeKey: "person", fields: { repeat: { mapValue: { entries: { next: { intValue: next } } } } } }], total: 1 });
+			return respond({ records: [], total: 0 });
+		}
+		if (url.pathname === "/api/serving") {
+			const ids = (body.objectIds as string[]) ?? [];
+			return respond(Object.fromEntries(ids.map((id) => [id, { machineId: "test-machine", reason: "agent", skills: [], candidates: ["test-machine"] }])));
+		}
+		if (url.pathname === `/api/objects/${objectId}`) {
+			return respond({
+				id: objectId,
+				typeKey: "person",
+				fields: {
+					name: { stringValue: "Lou Fasulo" },
+					agent: { valuesValue: { items: [{ stringValue: agentId }] } },
+					repeat: { mapValue: { entries: { next: { intValue: next }, fired_for: { intValue: next } } } },
+				},
+				// A person's notes: not what a run should do.
+				blocks: [{ id: "b1", childrenIds: [], content: { text: { text: "Met at GDC; prefers email.", style: 0 } } }],
+				deleted: false,
+				createdAt: now,
+				updatedAt: now,
+			});
+		}
+		if (url.pathname === "/api/mutate") return respond({ ok: true });
+		return respond({ records: [], total: 0 });
+	}) as typeof fetch;
+	const turns: string[] = [];
+	const turnDone = waitForTurnEnd();
+	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
+	await startScheduler({
+		fresh: unusedFresh,
+		async served(id) {
+			return id === agentId ? { agentId: id, conv: { objectId: "t-obj", threadId: "t-thread" } } : undefined;
+		},
+		async turn(id) {
+			turns.push(id);
+			return { error: "", reply: "" };
+		},
+	});
+	await turnDone;
+	const mutations = calls.filter((c) => c.path === "/api/mutate").map((c) => c.body);
+	expect(turns).toEqual([]);
+	expect(mutations.some((m) => m.action === "block_add")).toBe(false);
+	const badge = mutations.find((m) => m.action === "set_field" && m.key === "error")?.value as { stringValue: string } | undefined;
+	expect(badge?.stringValue.startsWith(NO_INSTRUCTIONS_BADGE)).toBe(true);
+	expect((mutations.find((m) => m.action === "run_record")?.run as Record<string, unknown>)?.error).toBe(badge?.stringValue);
+	expect(mutations.some((m) => m.action === "occurrence_complete")).toBe(true);
 });

@@ -1452,6 +1452,10 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// A repeating object's pre-check: a Tool run (no AI) before each turn;
 	// an empty result ends the run there.
 	{"check_first", "object", "Check first", "🔎", false, false, 1, {}},
+	// What a repeating (or pushed) object's run asks of its agent, in words:
+	// the scheduler sends this, not the page - a person's notes, an email or a
+	// task's write-up are the object, not its run's instructions.
+	{"repeat_instructions", "longtext", "Repeat instructions", "📋", false, false, 1, {}},
 	// An agent's checkout on the machine that serves it: the harness works
 	// in this folder.
 	{"repo_path", "shorttext", "Project folder", "📁", false, false, 1, {}},

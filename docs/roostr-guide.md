@@ -71,8 +71,9 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 ## 6. Repeat and Check first
 
 - **Repeat** (on any object): every N minutes, hours, days, weeks, months or years, with times and days. Each occurrence fires once, on the computer serving the object (its own Served by, else the first agent on it that has one).
-- **A repeating Query or Collection** hands its agent what it holds at that moment - each object's name, type and id (the first 200, with the total), then its page as the instructions: "every morning, triage everything in Needs Attention".
-- **What fires**: the object's first served agent gets a message with the object's page as instructions and one turn, in the agent's own chat. Its final reply is also posted in the object's chat, as that agent, so the object shows what its run did. With no agent, the object's chat gets a reminder and its Error property says it has no agent.
+- **Repeat instructions**: a repeating object's text property saying what each run should do, written for the agent. The run sends these, not the object's page: a person's notes, an email or a task's write-up are what the run is about, and the agent opens the page with its tools when the instructions need it. With no Repeat instructions the run does not happen - its Error says so. Run now and push runs use them too.
+- **A repeating Query or Collection** hands its agent what it holds at that moment - each object's name, type and id (the first 200, with the total), then its Repeat instructions: "every morning, triage everything in Needs Attention".
+- **What fires**: the object's first served agent gets a message naming the object (name, type, id) with its Repeat instructions, and one turn, in the agent's own chat. Its final reply is also posted in the object's chat, as that agent, so the object shows what its run did. With no agent, the object's chat gets a reminder and its Error property says it has no agent.
 - **Not served**: when none of a repeating object's agents can run - each has a blank Served by, or names a computer that doesn't exist - its Error says "not served: no computer runs <agent> - set Served by on it"; it clears on its own (within seconds of the agent's Served by change, at most 10 minutes) once any of them runs on a computer.
 - **Finishing**: a day-or-longer repeat waits until its run is marked done (`occurrence_complete`, or a person ticking Done). Minute and hour repeats complete themselves after each run. Call `occurrence_complete` only when the object's instructions say the run is done - and say plainly what blocks it otherwise.
 - **Check first**: links a Tool that runs before each occurrence, without a model. An empty result (nothing, `[]`, `{}`) ends the run there - no turn, no cost. A non-empty result is put in front of the agent's instructions. Use it for "only wake the agent when there is something new".
@@ -126,7 +127,7 @@ These are enforced by the harness for every agent; follow them in any prompt you
 ### Designing a setup
 
 - **One job per agent.** A triage agent, a support agent, a writer - not one agent that does everything. Small prompts are more reliable and cheaper.
-- **Instructions live on the work.** Put a recurring job's steps on the repeating object's page, not in the agent's system prompt. The prompt says who the agent is; the object says what to do this time.
+- **Instructions live on the work.** Put a recurring job's steps in the repeating object's Repeat instructions, not in the agent's system prompt. The prompt says who the agent is; the object says what to do this time.
 - **Make the work visible as objects.** Imported email, tickets, leads: one object each, with properties (status, owner, scores). People can then see, sort, query and fix them.
 - **Use properties for anything you will filter on.** Status, Done, scores, owner. Text in the body is for reading, properties are for deciding.
 - **Use templates for anything made more than twice.** A template keeps every new one consistent (properties, agents, body).
@@ -152,7 +153,7 @@ These are enforced by the harness for every agent; follow them in any prompt you
 
 ### A recurring task run by an agent
 
-1. Create a Task; write the steps on its page (what to do, what to post, when it is done).
+1. Create a Task; write the steps in its Repeat instructions (what to do, what to post, when it is done).
 2. Add the agent to its Agent property.
 3. Set its Repeat (e.g. every weekday at 9:00).
 4. Optional: Check first with a Tool that returns `[]` when there is nothing to do.
@@ -162,7 +163,7 @@ These are enforced by the harness for every agent; follow them in any prompt you
 
 1. A Google account credential for the mailbox, connected on the computer that will run it.
 2. A Task "Check support inbox" with Repeat every 5-15 minutes and Check first = an import Tool (one that reads the mailbox, creates one Email object per thread and returns the new ones, `[]` when none). Its settings (mailbox, agents to add to each email) are properties on the task.
-3. Agent: a triage agent on the task, with Jev Skills such as Spam meter in its Skills and a TypeSafe credential. The task's page says how to triage: first score the new emails, then close spam and tag the support agent on real questions.
+3. Agent: a triage agent on the task, with Jev Skills such as Spam meter in its Skills and a TypeSafe credential. Its Repeat instructions say how to triage: first score the new emails, then close spam and tag the support agent on real questions.
 4. A Query "Support Emails not done" for people.
 
 ### Score objects with a Jev Skill
