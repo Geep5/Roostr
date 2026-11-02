@@ -1,6 +1,6 @@
 import type { Roostr } from "../tool-sdk";
 
-export const description = "Run one of the human's saved views (a query or collection) exactly as their UI runs it - the views are the human's own semantic map of the space. Free.";
+export const description = "Run one of the human's saved views (a query or collection) exactly as their UI runs it - the views are the human's own semantic map of the space. Each row comes with its properties by name (the view's columns, else all it has; links as names). Free.";
 export const inputs = "query_id: string";
 
 export default async function (input: Record<string, unknown>, roostr: Roostr) {
@@ -9,5 +9,6 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 	const body = await roostr.viewQuery(view);
 	if (!body) return "[] (empty view)";
 	const rows = await roostr.query({ ...body, limit: 100 });
-	return JSON.stringify(rows.map((r) => ({ id: r.id, type: r.typeKey, name: r.name ?? r.fields.name?.stringValue ?? "" })));
+	const props = await roostr.viewRowProps(view, rows);
+	return JSON.stringify(rows.map((r, i) => ({ id: r.id, type: r.typeKey, name: r.name ?? r.fields.name?.stringValue ?? "", properties: props[i] })));
 }

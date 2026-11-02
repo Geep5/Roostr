@@ -74,3 +74,23 @@ capability_serving_never_leaves_its_owning_machine :: proc(t: ^testing.T) {
 	testing.expect_value(t, unowned.machine_id, "")
 	testing.expect_value(t, unowned.reason, "unserved")
 }
+
+@(test)
+repeat_assignee_picks_the_serving_machine :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	// Two agents on a query, each on its own computer; its Repeat picked the
+	// second (`assignee`): that agent's computer runs it, not the first's.
+	object := Object_State{id = "q", type_key = "query", fields = make([dynamic]Value_Entry)}
+	append(&object.fields, Value_Entry{key = "agent", value = list_value([]Value{Value{kind = .Link, link_target = "a1", link_relation = "agent"}, Value{kind = .Link, link_target = "a2", link_relation = "agent"}})})
+	first := Object_State{id = "a1", type_key = "agent", fields = make([dynamic]Value_Entry)}
+	append(&first.fields, Value_Entry{key = "served_by", value = string_value("m1")})
+	second := Object_State{id = "a2", type_key = "agent", fields = make([dynamic]Value_Entry)}
+	append(&second.fields, Value_Entry{key = "served_by", value = string_value("m2")})
+	states := make(map[string]^Object_State, context.temp_allocator)
+	states["q"] = &object
+	states["a1"] = &first
+	states["a2"] = &second
+	testing.expect_value(t, resolve_server(&object, states).machine_id, "m1")
+	append(&object.fields, Value_Entry{key = "assignee", value = string_value("a2")})
+	testing.expect_value(t, resolve_server(&object, states).machine_id, "m2")
+}

@@ -30,7 +30,7 @@ import * as memory from "./memory";
 import { describeRepeat, localClock } from "./repeat";
 import { objectText, type SkillListing } from "./skills";
 import type { ScoreRow } from "./jev";
-import { assertInSpace, buildNeighborhood, buildSpaceMap, defaultSpaceId, relationDefs, savedViewBody, spaceFilterFor, typeDefs, type RelDef, type TypeDef } from "./spacemap";
+import { assertInSpace, buildNeighborhood, buildSpaceMap, defaultSpaceId, relationDefs, savedViewBody, spaceFilterFor, typeDefs, viewRowProps, type RelDef, type TypeDef } from "./spacemap";
 import { bodyBlocks, isAgentAuthor, type BodyLine } from "./surfaces";
 
 export type { AgentEndpoint, BlockJSON, ObjectJSON, QueryRow, ValueJSON } from "./api";
@@ -216,6 +216,8 @@ export interface Roostr {
 	neighborhood(id: string): Promise<string>;
 	/** The query that runs a saved view (a query or collection) exactly as the app does; null for an empty collection. */
 	viewQuery(view: ObjectJSON): Promise<Record<string, unknown> | null>;
+	/** Each of a view's rows' properties by name - the view's columns, else all it has - links as names, dates as YYYY-MM-DD. */
+	viewRowProps(view: ObjectJSON, rows: QueryRow[]): Promise<Array<Record<string, string>>>;
 	/**
 	 * A new object; it lands in this tool's space unless `fields.channel` says otherwise.
 	 * `opts.id` fixes its id (letters, digits, - _ . :): derived from a source - a Gmail
@@ -321,6 +323,7 @@ export function createRoostr(context: ToolRunContext, touched: Set<string>, harn
 		spaceMap: () => sdkCall(() => buildSpaceMap(context.channelId)),
 		neighborhood: (id) => sdkCall(() => buildNeighborhood(id, context.channelId)),
 		viewQuery: (view) => sdkCall(async () => savedViewBody(view, context.channelId, await relationDefs(context.channelId))),
+		viewRowProps: (view, rows) => sdkCall(async () => viewRowProps(view, rows, await relationDefs(context.channelId))),
 		create: (name, typeKey, fields = {}, opts = {}) =>
 			sdkCall(async () => {
 				if (typeKey === TOOL_TYPE) throw new Error(TOOL_EDIT_REFUSAL);

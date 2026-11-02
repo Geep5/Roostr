@@ -746,11 +746,13 @@ test("an object whose write doesn't read back is not written again on every look
 	expect(writes).toEqual([{ action: "set_field", id: "broken", text: `${UNSERVED_BADGE}no computer runs Ann - set Served by on it` }]);
 });
 
-test("a repeating query's run hands its agent what it holds now, ahead of its Repeat instructions", async () => {
+test("a repeating query's run hands the agent its Repeat picked what it holds now, with each object's properties, ahead of its Repeat instructions", async () => {
 	const now = Date.now();
 	const viewId = "5a1f0c2e-0000-4000-8000-0000000000aa";
 	const channelId = "34e8f017-dfd1-4062-abaf-f7574f2b5176";
 	const agentId = "856fcc37-9ad6-43e8-a1d8-5ee236699183";
+	// First on the guest list, but not the one the Repeat picked.
+	const spaceAgent = "79d8beb8-2ec6-463c-aae7-c5d7c7103295";
 	const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
 	globalThis.fetch = (async (input, init) => {
 		const url = new URL(input instanceof Request ? input.url : String(input));
@@ -760,6 +762,8 @@ test("a repeating query's run hands its agent what it holds now, ahead of its Re
 		if (url.pathname === "/api/query") {
 			const filter = Array.isArray(body.filters) ? (body.filters[0] as Record<string, unknown>) : undefined;
 			if (body.type === "machine" || body.type === "relation") return respond({ records: [], total: 0 });
+			// Link targets, named for the listing.
+			if (filter?.key === "id") return respond({ records: [{ id: spaceAgent, typeKey: "agent", name: "Matcherino Space", fields: {} }], total: 1 });
 			if (filter?.key === "repeat") {
 				return respond({ records: [{ id: viewId, typeKey: "query", fields: { repeat: { mapValue: { entries: { next: { intValue: now - 1000 } } } } } }], total: 1 });
 			}
@@ -767,7 +771,7 @@ test("a repeating query's run hands its agent what it holds now, ahead of its Re
 			if (body.setId === viewId) {
 				return respond({
 					records: [
-						{ id: "email-1", typeKey: "email", fields: { name: { stringValue: "Refund please" } } },
+						{ id: "email-1", typeKey: "email", fields: { name: { stringValue: "Refund please" }, stage: { stringValue: "New" }, owner: { linkValue: { relationKey: "owner", targetId: spaceAgent } } } },
 						{ id: "email-2", typeKey: "email", fields: { name: { stringValue: "Where is my payout" } } },
 					],
 					total: 2,
@@ -786,7 +790,9 @@ test("a repeating query's run hands its agent what it holds now, ahead of its Re
 				fields: {
 					channel: { stringValue: channelId },
 					name: { stringValue: "Needs Attention" },
-					agent: { valuesValue: { items: [{ stringValue: agentId }] } },
+					agent: { valuesValue: { items: [{ stringValue: spaceAgent }, { stringValue: agentId }] } },
+					assignee: { stringValue: agentId },
+					viewRelations: { valuesValue: { items: [{ mapValue: { entries: { key: { stringValue: "name" } } } }, { mapValue: { entries: { key: { stringValue: "stage" } } } }, { mapValue: { entries: { key: { stringValue: "owner" } } } }] } },
 					repeat: { mapValue: { entries: {} } },
 					repeat_instructions: { stringValue: "Triage each one." },
 				},
@@ -800,22 +806,25 @@ test("a repeating query's run hands its agent what it holds now, ahead of its Re
 		if (url.pathname === "/api/mutate") return respond({ ok: true, id: "message" });
 		return respond({ records: [], total: 0 });
 	}) as typeof fetch;
+	const turns: string[] = [];
 	const turnDone = waitForTurnEnd();
 	await writeFile(join(root, "harness.json"), JSON.stringify({ version: 1, agents: [], machineId: "test-machine" }));
 	await startScheduler({
 		fresh: unusedFresh,
 		async served(id) {
-			return id === agentId ? { agentId: id, conv: { objectId: "t-obj", threadId: "t-thread" } } : undefined;
+			return { agentId: id, conv: { objectId: `t-${id}`, threadId: "t-thread" } };
 		},
-		async turn() {
+		async turn(id) {
+			turns.push(id);
 			return { error: "", reply: "" };
 		},
 	});
 	await turnDone;
 	const frame = calls.find((c) => c.body.action === "block_add")?.body.block as FrameBlock;
 	const text = frame.content.custom.meta.text;
-	expect(text).toContain('"Needs Attention" holds 2 objects right now:');
-	expect(text).toContain("- Refund please (email, id email-1)");
+	expect(text).toContain('"Needs Attention" holds 2 objects right now, each with its properties:');
+	expect(turns).toEqual([agentId]);
+	expect(text).toContain("- Refund please (email, id email-1) - stage: New; owner: Matcherino Space");
 	expect(text.indexOf("Where is my payout")).toBeLessThan(text.indexOf("Triage each one."));
 });
 

@@ -12,8 +12,8 @@
  * disagree, or a fire racing a re-arm, converge on exactly one dispatch
  * per occurrence.
  *
- * Dispatch: an object with an agent served here - the agent it names
- * (`agent`), else one named by `assignee` - gets a framed message in that
+ * Dispatch: an object with an agent served here - the one its Repeat picked
+ * (`assignee`), else the first it names (`agent`) - gets a framed message in that
  * agent's chat plus one turn, recorded back onto the object with
  * `run_record`; anything else gets a one-line reminder on its own
  * discussion. Scheduler messages carry
@@ -47,7 +47,7 @@ import { linkIds, runToolObject } from "./tool-objects";
 import { localClock } from "./repeat";
 import { SCORE_WITH_KEY, scoreWithSkill } from "./jev";
 import { runViewActions } from "./view-actions";
-import { relationDefs, savedViewBody } from "./spacemap";
+import { relationDefs, savedViewBody, viewRowProps } from "./spacemap";
 
 /** The object ids a check's result names: a list of `{id}` (or JSON text of one). */
 export function foundIds(value: unknown): string[] {
@@ -89,8 +89,9 @@ const TURN_SUFFIX =
 /** How much of a check's finding goes into the frame. */
 const FINDING_CAP = 8000;
 
-/** How many of a query's or collection's objects its run lists. */
+/** How many of a query's or collection's objects its run lists, and in how many characters. */
 const SET_LIST_CAP = 200;
+const SET_LIST_CHARS = 16_000;
 
 /**
  * What a query or collection holds now, as its run hands it to the agent:
@@ -103,9 +104,19 @@ export async function setListing(view: ObjectJSON): Promise<string> {
 	const rows = run ? await queryAll(run) : [];
 	const name = str(view.fields, "name") || "this view";
 	if (rows.length === 0) return `"${name}" holds no objects right now.`;
-	const lines = rows.slice(0, SET_LIST_CAP).map((r) => `- ${str(r.fields, "name") || "(untitled)"} (${r.typeKey}, id ${r.id})`);
-	const more = rows.length > SET_LIST_CAP ? `\n… and ${rows.length - SET_LIST_CAP} more (query_run on ${view.id} lists them all)` : "";
-	return `"${name}" holds ${rows.length} object${rows.length === 1 ? "" : "s"} right now:\n${lines.join("\n")}${more}`;
+	const shown = rows.slice(0, SET_LIST_CAP);
+	const props = await viewRowProps(view, shown, await relationDefs(space));
+	const lines: string[] = [];
+	let chars = 0;
+	for (const [i, r] of shown.entries()) {
+		const ps = Object.entries(props[i] ?? {}).map(([k, v]) => `${k}: ${v}`);
+		const line = `- ${str(r.fields, "name") || "(untitled)"} (${r.typeKey}, id ${r.id})${ps.length > 0 ? ` - ${ps.join("; ")}` : ""}`;
+		if (chars + line.length > SET_LIST_CHARS) break;
+		lines.push(line);
+		chars += line.length + 1;
+	}
+	const more = rows.length > lines.length ? `\n… and ${rows.length - lines.length} more (query_run on ${view.id} lists them all)` : "";
+	return `"${name}" holds ${rows.length} object${rows.length === 1 ? "" : "s"} right now, each with its properties:\n${lines.join("\n")}${more}`;
 }
 
 /** A check's result that means "nothing new": nothing, "", [] or {} - also as JSON text. */
@@ -679,12 +690,13 @@ function agentIdsOf(v: ValueJSON | undefined): string[] {
 }
 
 /**
- * The served agent responsible for the object, if any: the agent it names
- * first (that's the mind with its transcript), then `assignee`.
+ * The served agent responsible for the object, if any: the one its Repeat
+ * editor picked (`assignee`), then its guest list in order.
  */
 async function ownerOf(obj: ObjectJSON): Promise<{ agentId: string; conv: ConvRef } | undefined> {
 	if (!host) return undefined;
-	const candidates = [...agentIdsOf(obj.fields["agent"]), ...agentIdsOf(obj.fields["assignee"])];
+	// The agent the Repeat editor picked (`assignee`) runs it; else the first on the guest list.
+	const candidates = [...new Set([...agentIdsOf(obj.fields["assignee"]), ...agentIdsOf(obj.fields["agent"])])];
 	for (const id of candidates) {
 		const s = await host.served(id);
 		if (s) return s;

@@ -152,6 +152,65 @@ export async function savedViewBody(view: ObjectJSON, spaceId: string, rels: Map
 	return { setId: view.id, filters: [...convertViewFilters(view, rels), sf] };
 }
 
+/** Fields that are bookkeeping, never a row's property for an agent. */
+const ROW_SKIP = new Set(["name", "channel", "iconEmoji", "iconImage", "cover", "cover_y", "repeat", "run_now", "run_active", "featuredRelations", "pin_order", "pin_collapsed", "system", "bundled"]);
+
+/** The view's columns as the person set them up (its table's `viewRelations`), Name aside; none when it has never been set. */
+function viewColumns(view: ObjectJSON): string[] {
+	return (view.fields["viewRelations"]?.valuesValue?.items ?? [])
+		.map((i) => i.stringValue ?? i.mapValue?.entries?.["key"]?.stringValue ?? "")
+		.filter((k) => k && k !== "name");
+}
+
+/**
+ * Each row's properties as an agent reads them, by property name: the
+ * view's own columns (what the person looks at), or - a view with none set -
+ * every property the object has. Links read as the names of what they point
+ * at, dates as YYYY-MM-DD; empty values are left out.
+ */
+export async function viewRowProps(view: ObjectJSON, rows: QueryRow[], rels: Map<string, RelDef>): Promise<Array<Record<string, string>>> {
+	const columns = viewColumns(view);
+	const keysOf = (r: QueryRow): string[] =>
+		columns.length > 0 ? columns : Object.keys(r.fields).filter((k) => !ROW_SKIP.has(k) && !SYSTEM_FIELDS.has(k) && rels.has(k) && !rels.get(k)?.readOnly);
+	// Link targets, named in one query.
+	const ids = new Set<string>();
+	const collect = (v: ValueJSON | undefined, format: string) => {
+		if (!v) return;
+		if (v.linkValue?.targetId) ids.add(v.linkValue.targetId);
+		else if (v.stringValue && format === "object") ids.add(v.stringValue);
+		for (const item of v.valuesValue?.items ?? []) collect(item, format);
+	};
+	for (const r of rows) for (const k of keysOf(r)) collect(r.fields[k], rels.get(k)?.format ?? "");
+	const names = new Map<string, string>();
+	if (ids.size > 0) for (const t of await queryAll({ filters: [{ key: "id", condition: "in", value: [...ids] }] })) names.set(t.id, t.name ?? str(t.fields, "name") ?? t.id);
+	// Dates are stored as local midnights: read them on this computer's clock.
+	const day = (ms: number) => {
+		const d = new Date(ms);
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+	};
+	const show = (v: ValueJSON | undefined, format: string): string => {
+		if (!v) return "";
+		if (v.linkValue?.targetId) return names.get(v.linkValue.targetId) ?? v.linkValue.targetId;
+		if (v.valuesValue) return v.valuesValue.items.map((i) => show(i, format)).filter(Boolean).join(", ");
+		if (v.stringValue !== undefined) return format === "object" ? (names.get(v.stringValue) ?? v.stringValue) : v.stringValue;
+		if (v.intValue !== undefined) return format === "date" ? day(v.intValue) : String(v.intValue);
+		if (v.floatValue !== undefined) return String(v.floatValue);
+		if (v.boolValue !== undefined) return v.boolValue ? "yes" : "no";
+		if (v.mapValue) return JSON.stringify(Object.fromEntries(Object.entries(v.mapValue.entries ?? {}).map(([k, x]) => [k, show(x, "")])));
+		return "";
+	};
+	return rows.map((r) => {
+		const out: Record<string, string> = {};
+		for (const k of keysOf(r)) {
+			const rel = rels.get(k);
+			const text =
+				k === "type" ? r.typeKey : k === "updatedAt" || k === "modifiedDate" ? day(r.updatedAt) : k === "createdAt" || k === "createdDate" ? day(r.createdAt) : show(r.fields[k], rel?.format ?? "");
+			if (text) out[rel?.name ?? k] = text.length > 300 ? `${text.slice(0, 300)}…` : text;
+		}
+		return out;
+	});
+}
+
 function viewSummary(v: QueryRow | ObjectJSON): string {
 	const sources = strItems(v.fields["setOf"]);
 	const filters = (v.fields["viewFilters"]?.valuesValue?.items ?? [])

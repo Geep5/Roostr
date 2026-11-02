@@ -126,11 +126,15 @@ served_by :: proc(s: ^Object_State) -> string {
 	return pin
 }
 
-// The first agent on the object's guest list, in list order, that has a
-// served_by. Agents missing from `states`, binned, or unpinned are skipped.
+// The agent that runs the object's repeats - the one its Repeat picked
+// (`assignee`), then its guest list in order - that has a served_by.
+// Agents missing from `states`, binned, or unpinned are skipped.
 @(private = "file")
 agent_pin :: proc(object: ^Object_State, states: map[string]^Object_State) -> string {
-	for id in object_agents(object.fields) {
+	order := make([dynamic]string, context.temp_allocator)
+	if assignee := field_string(object.fields, "assignee"); assignee != "" do append(&order, assignee)
+	append(&order, ..object_agents(object.fields)[:])
+	for id in order {
 		agent := states[id]
 		if agent == nil || agent.deleted || agent.type_key != "agent" do continue
 		if pin := served_by(agent); pin != "" do return pin
