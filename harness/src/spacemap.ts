@@ -141,9 +141,13 @@ export function convertViewFilters(obj: ObjectJSON, rels: Map<string, RelDef>): 
 	return out;
 }
 
-/** The body that runs a saved view exactly as the UI would. */
+/** The body that runs a saved view exactly as the UI would; a type runs as everything of that type (its page's set). */
 export async function savedViewBody(view: ObjectJSON, spaceId: string, rels: Map<string, RelDef>): Promise<Record<string, unknown> | null> {
 	const sf = await spaceFilterFor(spaceId);
+	if (view.typeKey === "type") {
+		const key = str(view.fields, "key");
+		return key ? { type: key, filters: [...convertViewFilters(view, rels), sf] } : null;
+	}
 	if (view.typeKey === "collection") {
 		const members = strItems(view.fields["collectionIds"]);
 		if (members.length === 0) return null;

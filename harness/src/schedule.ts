@@ -840,9 +840,9 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = "
 			console.log(`[schedule] "${name}" (${obj.id.slice(0, 8)}) has no Repeat instructions; no turn`);
 			return;
 		}
-		// A query or collection: what it holds now, so the agent works on its
-		// objects without having to run the view first.
-		if (!finding && (obj.typeKey === "query" || obj.typeKey === "collection")) finding = await setListing(obj).catch(() => "");
+		// A query, collection or type: what it holds now, so the agent works
+		// on its objects without having to run the view first.
+		if (!finding && (obj.typeKey === "query" || obj.typeKey === "collection" || obj.typeKey === "type")) finding = await setListing(obj).catch(() => "");
 		const ending = kind === "extra" || kind === "push"
 			? `this is an extra run ${kind === "push" ? "started because new data arrived" : "started by a person with Run now"}, not a scheduled occurrence - don't call occurrence_complete.`
 			: subDaily(obj)

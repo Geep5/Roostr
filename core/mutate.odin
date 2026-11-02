@@ -303,6 +303,31 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 			ch := oldest_channel_id(input.states)
 			if ch != "" do append(&ops, Operation{kind = .Field_Set, key = "channel", value = string_value(ch)})
 		}
+		// Its type's agents are on it from the start (after any it was given).
+		if object_has_own_agent(type_key) {
+			channel := ""
+			agent_op := -1
+			for op, i in ops {
+				if op.kind != .Field_Set do continue
+				if op.key == "channel" && op.value.kind == .String do channel = op.value.str
+				if op.key == "agent" do agent_op = i
+			}
+			if def := type_def_in(input.states, type_key, channel); def != nil {
+				from_type := object_agents(def.fields)
+				if len(from_type) > 0 {
+					given := agent_op >= 0 ? agents_in_value(ops[agent_op].value) : make([dynamic]string, context.temp_allocator)
+					merged := make([dynamic]string, context.temp_allocator)
+					append(&merged, ..given[:])
+					for a in from_type {
+						seen := false
+						for m in merged do if m == a do seen = true
+						if !seen do append(&merged, a)
+					}
+					if agent_op >= 0 do ops[agent_op].value = agent_list_value(merged[:])
+					else do append(&ops, Operation{kind = .Field_Set, key = "agent", value = agent_list_value(merged[:])})
+				}
+			}
+		}
 		if type_key == "agent" {
 			created := make([dynamic]Value_Entry, context.temp_allocator)
 			for op in ops do if op.kind == .Field_Set do append(&created, Value_Entry{key = op.key, value = op.value})
@@ -848,6 +873,9 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 			if op, needed := agent_error_op(agent_fields_after(s.fields, key, value, false)); needed do append(&ops, op)
 		}
 		mutation_add(&plan, input, object_id, ops[:])
+		if s, ok := input.states[object_id]; ok && !s.deleted && s.type_key == "type" && key == "agent" {
+			type_agent_spread(&plan, input, object_id, object_agents(s.fields)[:], agents_in_value(value)[:])
+		}
 		return plan, ""
 
 	// ── Recurring objects (repeat.odin) ──
@@ -953,6 +981,9 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 			if op, needed := agent_error_op(agent_fields_after(s.fields, key, {}, true)); needed do append(&ops, op)
 		}
 		mutation_add(&plan, input, object_id, ops[:])
+		if s, ok := input.states[object_id]; ok && !s.deleted && s.type_key == "type" && key == "agent" {
+			type_agent_spread(&plan, input, object_id, object_agents(s.fields)[:], {})
+		}
 		return plan, ""
 
 	case "restore":
@@ -1304,6 +1335,61 @@ type_instance_cascade :: proc(states: map[string]^Object_State, object_id: strin
 	return out
 }
 
+// ── Type agents ──────────────────────────────────────────────────────
+//
+// Agents on a type are on every object of it: adding one to the type adds
+// it to each of the type's objects in its space (after their own agents),
+// removing one takes it off them, and a new object of the type starts with
+// them (`create`).
+
+/** The guest list a value for `agent` holds (links or strings). */
+agents_in_value :: proc(value: Value) -> [dynamic]string {
+	fields := make([dynamic]Value_Entry, context.temp_allocator)
+	append(&fields, Value_Entry{key = "agent", value = value})
+	return object_agents(fields)
+}
+
+agent_list_value :: proc(ids: []string) -> Value {
+	items := make([dynamic]Value, context.temp_allocator)
+	for id in ids do append(&items, Value{kind = .Link, link_target = id, link_relation = "agent"})
+	return list_value(items[:])
+}
+
+/** The type definition (`type` object) of `type_key` in space `channel`, if any. */
+type_def_in :: proc(states: map[string]^Object_State, type_key, channel: string) -> ^Object_State {
+	for _, s in states {
+		if s.deleted || s.type_key != "type" do continue
+		if field_string(s.fields, "key") == type_key && field_string(s.fields, "channel") == channel do return s
+	}
+	return nil
+}
+
+/** A type's guest list went `before` → `after`: the same change on each of its objects. */
+type_agent_spread :: proc(plan: ^Mutation_Plan, input: Mutation_Input, type_id: string, before, after: []string) {
+	has :: proc(xs: []string, x: string) -> bool {
+		for y in xs do if y == x do return true
+		return false
+	}
+	added := make([dynamic]string, context.temp_allocator)
+	removed := make([dynamic]string, context.temp_allocator)
+	for a in after do if !has(before, a) do append(&added, a)
+	for b in before do if !has(after, b) do append(&removed, b)
+	if len(added) == 0 && len(removed) == 0 do return
+	for id in type_instance_cascade(input.states, type_id) {
+		obj := input.states[id]
+		if obj == nil || !object_has_own_agent(obj.type_key) do continue
+		current := object_agents(obj.fields)
+		next := make([dynamic]string, context.temp_allocator)
+		for a in current do if !has(removed[:], a) && !has(next[:], a) do append(&next, a)
+		for a in added do if !has(next[:], a) do append(&next, a)
+		same := len(next) == len(current)
+		if same do for a, i in next do if current[i] != a { same = false; break }
+		if same do continue
+		if len(next) == 0 do mutation_add(plan, input, id, {Operation{kind = .Field_Delete, key = "agent"}})
+		else do mutation_add(plan, input, id, {Operation{kind = .Field_Set, key = "agent", value = agent_list_value(next[:])}})
+	}
+}
+
 // ── Relation-value cascade ───────────────────────────────────────────
 //
 // Deleting a property definition wipes that field from every live
@@ -1354,7 +1440,7 @@ relation_value_cascade :: proc(states: map[string]^Object_State, object_id: stri
 // Types that never have an agent of their own; an `agent` field on them
 // means something else (a chat's owner).
 // Mirrors the harness's UNMINTABLE set (harness/src/index.ts).
-AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "type", "skill", "tool", "credential", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
+AGENTLESS_TYPES :: []string{"agent", "channel", "relation", "skill", "tool", "credential", "program", "typescript", "json", "proto", "pinned_fact", "milestone", "chat", "machine"}
 
 /** Agents on an object's guest list. `agent` was a single string before it became a link list; both shapes read. */
 object_agents :: proc(fields: [dynamic]Value_Entry, allocator := context.temp_allocator) -> [dynamic]string {
