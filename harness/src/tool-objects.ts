@@ -39,6 +39,8 @@ import { CODE_STYLE, INPUTS_KEY, NOT_LOADED, SHIPPED_TOOLS, automatedError, comp
 import { dispatchTool, runObjectToolFor, type ToolContext, type Toolset } from "./tools";
 
 export const TOOLS_KEY = "tools";
+/** The built-ins every new agent lists in its Tools: it can run commands and fetch the web. */
+export const DEFAULT_AGENT_TOOLS = ["shell_exec", "web_fetch"];
 const BUILTIN_KEY = "tool_builtin";
 const SOURCE_AT_KEY = "tool_source_at";
 /** "object": a built-in whose object's code is what runs (every built-in a current harness writes). */
@@ -266,6 +268,18 @@ export async function ensureBuiltinToolsEverywhere(): Promise<void> {
 	for (const space of await queryAll({ type: "channel" })) {
 		await ensureBuiltinTools(space.id).catch((err) => console.error(`[tools] built-in Tool objects for ${space.id.slice(0, 8)} failed:`, err instanceof Error ? err.message : err));
 	}
+}
+
+/**
+ * The ids of `space`'s Tool objects a new agent lists ([`DEFAULT_AGENT_TOOLS`]):
+ * the built-ins already there, else written first (a fresh space's).
+ */
+export async function defaultAgentTools(space: string): Promise<string[]> {
+	const tools = await queryAll({ type: TOOL_TYPE, filters: [{ key: "channel", condition: "equal", value: space }] });
+	const found = DEFAULT_AGENT_TOOLS.flatMap((name) => tools.find((t) => isBuiltin(t.fields) && str(t.fields, "name") === name)?.id ?? []);
+	if (found.length === DEFAULT_AGENT_TOOLS.length) return found;
+	const builtins = await ensureBuiltinTools(space);
+	return DEFAULT_AGENT_TOOLS.flatMap((name) => builtins.get(name) ?? []);
 }
 
 // ── Loading Tool objects ────────────────────────────────────────

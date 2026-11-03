@@ -83,9 +83,11 @@ function daemon(): void {
 		}
 		if (url.pathname === "/api/channels") return Response.json([...objects.values()].filter((o) => o.typeKey === "channel").map((o) => ({ id: o.id, name: o.fields.name?.stringValue ?? "", owner: "" })));
 		if (url.pathname === "/api/query") {
-			const filters = (body.filters as Array<{ key: string; condition: string }> | undefined) ?? [];
+			const filters = (body.filters as Array<{ key: string; condition: string; value?: string }> | undefined) ?? [];
+			const holds = (o: ObjectJSON, f: { key: string; condition: string; value?: string }) =>
+				f.condition === "exists" ? o.fields[f.key] !== undefined : f.condition === "equal" && o.fields[f.key]?.stringValue === f.value;
 			const records: QueryRow[] = [...objects.values()]
-				.filter((o) => !o.deleted && (!body.type || o.typeKey === body.type) && filters.every((f) => f.condition === "exists" && o.fields[f.key] !== undefined))
+				.filter((o) => !o.deleted && (!body.type || o.typeKey === body.type) && filters.every((f) => holds(o, f)))
 				.map((o) => ({ id: o.id, typeKey: o.typeKey, createdAt: o.createdAt, updatedAt: o.updatedAt, fields: o.fields }));
 			return Response.json({ records, total: records.length });
 		}
@@ -376,10 +378,12 @@ test("Check asks OpenAI whether the key works: a refused key breaks the credenti
 	expect(objects.get(CRED)!.fields.error).toBeUndefined();
 });
 
-test("every space you own gets a blank OpenAI credential served here and the Cover properties, once", async () => {
+test("every space you own gets a blank OpenAI credential served here, the Cover properties and its own agent with the default tools, once", async () => {
 	world("");
 	objects.delete(CRED);
 	objects.delete("rel-cover");
+	// The space's built-in Tools, as every space has them.
+	for (const name of ["shell_exec", "web_fetch", "object_get"]) objects.set(`tool-${name}`, object(`tool-${name}`, "tool", { name: sv(name), tool_builtin: { boolValue: true } }));
 	await seedSpaceDefaults();
 	const cred = objects.get(CRED)!;
 	expect(cred.typeKey).toBe("credential");
@@ -392,6 +396,9 @@ test("every space you own gets a blank OpenAI credential served here and the Cov
 	expect(cover.fields).toMatchObject({ key: sv("cover"), name: sv("Cover"), format: sv("object"), hidden: { boolValue: false }, maxCount: { intValue: 1 }, bundled: { boolValue: false }, system: { boolValue: true } });
 	expect(cover.fields.object_types?.valuesValue?.items).toEqual([sv(`bundled-type-file-${SPACE.slice(0, 8)}`)]);
 	expect(objects.get(`rel-cover_y-${SPACE}`)!.fields).toMatchObject({ key: sv("cover_y"), name: sv("Cover position"), format: sv("number") });
+	// Its "<Space> Space" agent can run commands and fetch the web, like every new agent.
+	const tools = objects.get(`space-agent-${SPACE}`)!.fields.tools?.valuesValue?.items.map((i) => i.linkValue?.targetId);
+	expect(tools).toEqual(["tool-shell_exec", "tool-web_fetch"]);
 
 	const count = objects.size;
 	await seedSpaceDefaults();

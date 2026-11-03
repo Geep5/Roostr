@@ -39,7 +39,7 @@ import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishMachine, seedComputerProperties, serverOf, servesHere } from "./machine";
 import { CAPABILITY_TYPE } from "./capabilities";
 import { SKILLS_KEY, machineSkillKeys } from "./skills";
-import { TOOLS_KEY, ensureBuiltinTools, ensureBuiltinToolsEverywhere, linkList } from "./tool-objects";
+import { TOOLS_KEY, defaultAgentTools, ensureBuiltinTools, ensureBuiltinToolsEverywhere, linkList } from "./tool-objects";
 import { migrateCapabilities } from "./migrate-capabilities";
 import { runBootSteps } from "./boot";
 import { startDiscordManager } from "./discord";
@@ -123,8 +123,7 @@ async function setup(): Promise<void> {
 	if (modelCred && !fields.credentials) fields.credentials = linkList("credentials", [modelCred.id]);
 	// A normal agent can run commands and fetch the web: list both built-ins
 	// in its Tools (its space's Tool objects).
-	const builtins = await ensureBuiltinTools(space);
-	fields[TOOLS_KEY] = linkList(TOOLS_KEY, ["shell_exec", "web_fetch"].flatMap((tool) => builtins.get(tool) ?? []));
+	fields[TOOLS_KEY] = linkList(TOOLS_KEY, await defaultAgentTools(space));
 	// Flags override the template: --model, a kind's settings, any field.
 	const args = process.argv.slice(process.argv.indexOf("setup") + 1);
 	for (let i = 0; i < args.length - 1; i++) {

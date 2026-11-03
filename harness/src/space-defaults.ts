@@ -27,7 +27,7 @@ import { COVER_PROPERTIES } from "./covers";
 import { OPENAI_SERVICE } from "./openai";
 import { SYSTEM_PROMPT_TYPE, DEFAULT_MODEL, writePageText } from "./prompts";
 import { machineId } from "./roster";
-import { linkIds, linkList } from "./tool-objects";
+import { defaultAgentTools, linkIds, linkList, TOOLS_KEY } from "./tool-objects";
 
 export const ANTHROPIC_SERVICE = "anthropic";
 /** A space's Default type (what it makes when nobody picks one) until someone chooses another. */
@@ -181,12 +181,15 @@ async function seedSpace(space: { id: string; name: string }, me: string, out: {
 		const p = await fetchObject(promptId);
 		if (p.blocks.length === 0) await writePageText(promptId, spaceAgentPrompt(space.name));
 	}
+	// Like every new agent (`setup`, "+ New agent"): it can run commands and fetch the web.
+	const tools = await defaultAgentTools(space.id);
 	const made = await createDefault(name, "agent", {
 		channel: sv(space.id),
 		prompt: { linkValue: { relationKey: "prompt", targetId: promptId } },
 		served_by: sv(me),
 		model: lv([DEFAULT_MODEL]),
 		...(cred ? { credentials: linkList("credentials", [cred.id]) } : {}),
+		...(tools.length ? { [TOOLS_KEY]: linkList(TOOLS_KEY, tools) } : {}),
 	}, agentId);
 	if (!made) return;
 	// On the space's guest list: it answers in the space's own chat.
