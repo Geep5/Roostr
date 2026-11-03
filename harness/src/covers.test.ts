@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BlockJSON, ObjectJSON, QueryRow, ValueJSON } from "./api";
 import { fetchObject } from "./api";
-import { COVER_GENERATION_KEY, COVER_REQUEST_KEY, coverGeneration, NEEDS_KEY, takeCoverRequest, type CoverGeneration } from "./covers";
+import { COVER_GENERATION_KEY, COVER_REQUEST_KEY, coverGeneration, NEEDS_KEY, reaskInterruptedCovers, takeCoverRequest, takePendingCoverRequests, type CoverGeneration } from "./covers";
 import { checkCredential } from "./credential-objects";
 import { seedSpaceDefaults } from "./space-defaults";
 import { hasBlob } from "./files";
@@ -295,6 +295,65 @@ test("a session closed while it painted keeps nothing", async () => {
 	await ask({ at: { intValue: 1 } });
 	expect(objects.get(PAGE)!.fields[COVER_GENERATION_KEY]).toBeUndefined();
 	expect([...objects.values()].filter((o) => o.typeKey === "file")).toEqual([]);
+});
+
+test("a run its computer stopped mid-paint (a restart) is asked again when its harness starts, as it was", async () => {
+	world("sk-test-123");
+	// The page as it is left when the harness stops mid-paint: its run still
+	// says painting, and nothing works on it any more.
+	const stopMidPaint = async (entries: Record<string, ValueJSON>): Promise<void> => {
+		let midPaint: ValueJSON | undefined;
+		onImage = async () => {
+			midPaint = structuredClone(objects.get(PAGE)!.fields[COVER_GENERATION_KEY]);
+			return Response.json({ error: { message: "connection lost" } }, { status: 500 });
+		};
+		await ask(entries);
+		objects.get(PAGE)!.fields[COVER_GENERATION_KEY] = midPaint!;
+		onImage = null;
+		seen = [];
+	};
+
+	// Choose for me, stopped while it painted the art director's idea: asked
+	// again as Choose for me - a fresh idea in the house style, never the old
+	// idea painted as if the person had written it.
+	await stopMidPaint({ at: { intValue: 7 } });
+	expect(coverGeneration(objects.get(PAGE)!.fields)).toMatchObject({ status: "painting", prompt: "Idea 1", asked: "" });
+	expect(await reaskInterruptedCovers()).toBe(1);
+	await takePendingCoverRequests();
+	expect(seen.map((s) => s.path)).toEqual(["/v1/responses", "/v1/images/generations"]);
+	expect(seen[1]!.body.prompt).toBe(`Idea 2\n\n${COVER_STYLE}`);
+	expect(objects.get(PAGE)!.fields[COVER_GENERATION_KEY]).toBeUndefined();
+	const first = objects.get(PAGE)!.fields.cover?.linkValue?.targetId;
+	expect(first).toBeDefined();
+
+	// The person's own words: painted as written again, and the page gets its cover.
+	await stopMidPaint({ at: { intValue: 8 }, prompt: sv("A train crossing with the barriers down") });
+	expect(await reaskInterruptedCovers()).toBe(1);
+	await takePendingCoverRequests();
+	expect(seen.map((s) => s.body.prompt)).toEqual(["A train crossing with the barriers down"]);
+	expect(objects.get(PAGE)!.fields[COVER_GENERATION_KEY]).toBeUndefined();
+	expect(objects.get(PAGE)!.fields.cover?.linkValue?.targetId).not.toBe(first);
+});
+
+test("at start only this computer's own unfinished runs are asked again: another computer's, a failed one and a newer ask are left", async () => {
+	world("sk-test-123");
+	const run = (machine: string, status: string): ValueJSON => ({
+		mapValue: { entries: { at: { intValue: 3 }, status: sv(status), machine: sv(machine), credential: sv(CRED), prompt: sv("A red barn"), asked: sv("A red barn") } },
+	});
+	const page = objects.get(PAGE)!.fields;
+	// Another computer may be painting it right now.
+	page[COVER_GENERATION_KEY] = run("other-machine", "painting");
+	expect(await reaskInterruptedCovers()).toBe(0);
+	// A failure stays on the page until the person asks again.
+	page[COVER_GENERATION_KEY] = run(ME, "failed");
+	expect(await reaskInterruptedCovers()).toBe(0);
+	// The person already asked again: that ask wins.
+	page[COVER_GENERATION_KEY] = run(ME, "painting");
+	const newer: ValueJSON = { mapValue: { entries: { at: { intValue: 4 }, prompt: sv("A blue boat") } } };
+	page[COVER_REQUEST_KEY] = newer;
+	expect(await reaskInterruptedCovers()).toBe(0);
+	expect(page[COVER_REQUEST_KEY]).toEqual(newer);
+	expect(seen).toEqual([]);
 });
 
 test("only the computer serving the space's OpenAI credential takes the request", async () => {

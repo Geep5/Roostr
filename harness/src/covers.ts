@@ -12,11 +12,15 @@
  * - `cover_request` {at, prompt}: the app's ask - the person's prompt is
  *   painted as written; an empty one ("Choose for me") has the art director
  *   write an idea from the page first, painted in the house style.
- * - `cover_generation` {at, status, machine, credential, prompt, error,
- *   needs_key}: the run in progress, which the app shows as a spinner -
- *   (`writing` →) `painting`. When the image is stored it becomes the page's
- *   `cover` and this field goes; when it fails it stays as `failed`, with
- *   OpenAI's own message, until the next ask or the person dismisses it.
+ * - `cover_generation` {at, status, machine, credential, prompt, asked,
+ *   error, needs_key}: the run in progress, which the app shows as a
+ *   spinner - (`writing` →) `painting`. `prompt` is what is painted,
+ *   `asked` the person's own words ("" for Choose for me). When the image
+ *   is stored it becomes the page's `cover` and this field goes; when it
+ *   fails it stays as `failed`, with OpenAI's own message, until the next
+ *   ask or the person dismisses it. A run its computer stopped mid-way (a
+ *   restart, a crash, a shutdown) is asked again, as it was, when that
+ *   computer's harness starts.
  *
  * The work runs on the computer serving the space's OpenAI credential (its
  * Served by): the harness holding the key. A key that is blank or refused
@@ -56,6 +60,8 @@ export interface CoverGeneration {
 	machine: string;
 	credential: string;
 	prompt: string;
+	/** The person's own words, "" for Choose for me; absent on runs an older harness wrote. */
+	asked?: string;
 	error: string;
 	needsKey: boolean;
 }
@@ -73,6 +79,7 @@ export function coverGeneration(fields: Record<string, ValueJSON>): CoverGenerat
 		machine: e["machine"]?.stringValue ?? "",
 		credential: e["credential"]?.stringValue ?? "",
 		prompt: e["prompt"]?.stringValue ?? "",
+		asked: e["asked"]?.stringValue,
 		error: e["error"]?.stringValue ?? "",
 		needsKey: e["needs_key"]?.boolValue === true,
 	};
@@ -85,6 +92,7 @@ function generationValue(g: CoverGeneration): ValueJSON {
 		machine: { stringValue: g.machine },
 		credential: { stringValue: g.credential },
 		prompt: { stringValue: g.prompt },
+		asked: { stringValue: g.asked ?? "" },
 	};
 	if (g.error) entries["error"] = { stringValue: g.error };
 	if (g.needsKey) entries["needs_key"] = { boolValue: true };
@@ -182,7 +190,7 @@ async function runCoverRequest(page: ObjectJSON, ask: Record<string, ValueJSON>)
 	const asked = (ask["prompt"]?.stringValue ?? "").trim();
 	await deleteField(page.id, COVER_REQUEST_KEY);
 
-	const session: CoverGeneration = { at, status: asked ? "painting" : "writing", machine: me, credential: cred.id, prompt: asked, error: "", needsKey: false };
+	const session: CoverGeneration = { at, status: asked ? "painting" : "writing", machine: me, credential: cred.id, prompt: asked, asked, error: "", needsKey: false };
 	const publish = (next: Partial<CoverGeneration>) => {
 		Object.assign(session, next);
 		return setField(page.id, COVER_GENERATION_KEY, generationValue(session));
@@ -238,4 +246,26 @@ export async function takePendingCoverRequests(): Promise<number> {
 		taken += 1;
 	}
 	return taken;
+}
+
+/**
+ * Runs this computer started and never finished: its harness stopped (a
+ * restart, a crash, a shutdown) while one wrote or painted, so nothing works
+ * on it now, yet the page shows the spinner for good. At start, before the
+ * pending requests are taken, each is asked again as it was - the person's
+ * own words, or Choose for me - for whichever computer now serves the
+ * space's OpenAI credential. A newer ask already waiting is left to win.
+ */
+export async function reaskInterruptedCovers(): Promise<number> {
+	const me = await machineId();
+	const rows = await queryAll({ filters: [{ key: COVER_GENERATION_KEY, condition: "exists" }] });
+	let asked = 0;
+	for (const row of rows) {
+		const g = coverGeneration(row.fields);
+		if (!g || g.machine !== me || g.status === "failed" || working.has(row.id) || row.fields[COVER_REQUEST_KEY]) continue;
+		const prompt = g.asked ?? g.prompt;
+		await setField(row.id, COVER_REQUEST_KEY, { mapValue: { entries: { at: { intValue: g.at }, prompt: { stringValue: prompt } } } });
+		asked += 1;
+	}
+	return asked;
 }

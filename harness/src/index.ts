@@ -22,7 +22,7 @@ import { migrateLoginInstalls, refreshCredentials, spaceCredential, CREDENTIAL_T
 import { installShippedCommand } from "./shipped-commands";
 import { fillCredential, seedCredentials } from "./credential-seeds";
 import { ANTHROPIC_SERVICE, seedSpaceDefaults } from "./space-defaults";
-import { takeCoverRequest, takePendingCoverRequests } from "./covers";
+import { reaskInterruptedCovers, takeCoverRequest, takePendingCoverRequests } from "./covers";
 import { checkProjectFolder } from "./workspace";
 import { seedJev } from "./jev";
 import { nudgeViewActions, startViewActions } from "./view-actions";
@@ -332,8 +332,9 @@ async function serve(): Promise<void> {
 		{ name: "credential check", run: () => refreshCredentials() },
 		// Every space of yours starts with Anthropic and OpenAI credentials (keys empty), the Cover properties and its "<Space> Space" agent.
 		{ name: "space defaults", run: () => seedSpaceDefaults() },
-		// Cover requests written while this computer was off - after the credentials above say who serves which.
-		{ name: "cover requests", run: async () => ({ taken: await takePendingCoverRequests() }) },
+		// Cover runs this computer was in the middle of when it stopped, asked again; then the requests written
+		// while it was off - after the credentials above say who serves which.
+		{ name: "cover requests", run: async () => ({ reasked: await reaskInterruptedCovers(), taken: await takePendingCoverRequests() }) },
 		// The Computer page's "Keep every file" and "Starts automatically" checkboxes.
 		{ name: "computer properties", run: async () => ({ seeded: await seedComputerProperties() }) },
 		// Jev Skills' Answer / Writes to properties in every space.
