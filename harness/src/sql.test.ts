@@ -249,7 +249,9 @@ test("object_get on a credential never shows its secrets", async () => {
 
 // ── A real database ─────────────────────────────────────────────
 
-const docker = Bun.which("docker") !== null && Bun.spawnSync(["docker", "image", "inspect", "postgres:16.3"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0;
+// A Docker installed but not answering (its daemon stuck or starting) would
+// block this probe forever, before any test ran: it gets 5 s, then these skip.
+const docker = Bun.which("docker") !== null && Bun.spawnSync(["docker", "image", "inspect", "postgres:16.3"], { stdout: "ignore", stderr: "ignore", timeout: 5_000 }).exitCode === 0;
 
 describe.skipIf(!docker)("against postgres:16.3 in docker", () => {
 	const name = `roostr-sql-test-${process.pid}`;
