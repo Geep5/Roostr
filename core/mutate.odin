@@ -1256,6 +1256,25 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
  case "device_rename":
   err := device_rename_plan(&plan, input, parsed)
   return plan, err
+ // Pin an object to its space's sidebar, last (as the app's Pin to space),
+ // or take it off. Pinning a pinned object keeps its place.
+ case "pin", "unpin":
+  object_id := json_str(parsed, "object_id")
+  if object_id == "" do return plan, "object_id required"
+  obj, ok := input.states[object_id]
+  if !ok || obj.deleted do return plan, "unknown object"
+  pinned := field_string(obj.fields, PIN_KEY) != ""
+  if action == "unpin" {
+   if pinned do mutation_add(&plan, input, object_id, {Operation{kind = .Field_Delete, key = PIN_KEY}})
+   return plan, ""
+  }
+  if pinned do return plan, ""
+  default_space := pins_default_space(input.states)
+  space := field_string(obj.fields, "channel")
+  if space == "" do space = default_space
+  key := pin_key_between(pins_last_key(input.states, space, default_space), "", false)
+  mutation_add(&plan, input, object_id, {Operation{kind = .Field_Set, key = PIN_KEY, value = string_value(key)}})
+  return plan, ""
  // Take every space's bundled All Objects query off the sidebar, once
  // (pins_unpin_all_once). `object_ids` limits it to those queries.
  case "unpin_all_objects_once":

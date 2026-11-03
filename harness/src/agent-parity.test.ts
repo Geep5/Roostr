@@ -38,6 +38,9 @@ const COVERAGE: Record<string, Coverage> = {
 	table_col_remove: { reason: TABLES },
 	// ── Recurrence ──
 	repeat_set: { tools: ["object_set_repeat"] },
+	// ── Sidebar ──
+	pin: { tools: ["object_pin"] },
+	unpin: { tools: ["object_pin"] },
 	repeat_clear: { tools: ["object_clear_repeat"] },
 	occurrence_complete: { tools: ["occurrence_complete"] },
 	occurrence_move: { tools: ["object_move_next_run"] },

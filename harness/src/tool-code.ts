@@ -31,6 +31,7 @@ import * as object_add_text from "./tool-code/object_add_text";
 import * as object_check from "./tool-code/object_check";
 import * as object_clear_field from "./tool-code/object_clear_field";
 import * as object_clear_repeat from "./tool-code/object_clear_repeat";
+import * as object_pin from "./tool-code/object_pin";
 import * as object_create from "./tool-code/object_create";
 import * as object_delete from "./tool-code/object_delete";
 import * as object_edit_block from "./tool-code/object_edit_block";
@@ -100,6 +101,7 @@ const FILES: ReadonlyArray<[string, { description: string; inputs: string }]> = 
 	["object_set_field", object_set_field],
 	["object_set_repeat", object_set_repeat],
 	["object_clear_repeat", object_clear_repeat],
+	["object_pin", object_pin],
 	["object_add_property", object_add_property],
 	["property_edit", property_edit],
 	["object_clear_field", object_clear_field],
