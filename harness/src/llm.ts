@@ -248,16 +248,27 @@ async function callKimi(req: LLMRequest): Promise<LLMResult> {
 /**
  * Deterministic offline model for smoke tests:
  *  - "search: X"  → calls object_search with query X, then echoes results
+ *  - "answer alongside a tool: X" → writes X with a tool call (object_search),
+ *    then says nothing once it answers - as a model does when it answers and
+ *    closes a scheduled run in one step
  *  - anything else → echoes. Summaries return a canned structure.
  */
 function callMock(req: LLMRequest): LLMResult {
-	const last = req.turns[req.turns.length - 1];
-	const lastText =
-		typeof last?.content === "string"
-			? last.content
-			: (last?.content ?? [])
+	const textOf = (turn: LLMRequest["turns"][number] | undefined): string =>
+		typeof turn?.content === "string"
+			? turn.content
+			: (turn?.content ?? [])
 					.map((c) => (c.type === "text" ? c.text : c.type === "tool_result" ? `RESULT:${c.content.slice(0, 120)}` : ""))
 					.join(" ");
+	const lastText = textOf(req.turns[req.turns.length - 1]);
+	const ALONGSIDE = "answer alongside a tool:";
+	const asked = req.turns.map(textOf).find((t) => t.includes(ALONGSIDE));
+	if (asked) {
+		const answer = asked.slice(asked.indexOf(ALONGSIDE) + ALONGSIDE.length).trim();
+		const answered = req.turns.some((t) => t.role === "assistant" && textOf(t).includes(answer));
+		if (answered) return { text: "", toolUses: [], stopReason: "end_turn", inputTokens: 50, outputTokens: 0 };
+		return { text: answer, toolUses: [{ id: `mock-${Date.now()}`, name: "object_search", input: { query: "x" } }], stopReason: "tool_use", inputTokens: 50, outputTokens: 10 };
+	}
 	if (req.system.includes("You are summarising")) {
 		return { text: "## Goal\nMock summary.\n\n## Next Steps\n1. continue", toolUses: [], stopReason: "end_turn", inputTokens: 100, outputTokens: 20 };
 	}

@@ -330,6 +330,8 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		allowAsk: !opts.a2aTurn && (opts.depth ?? 0) === 0,
 	};
 
+	/** The text the model last wrote alongside tool calls: the reply if the turn then ends silent. */
+	let unsaid = "";
 	for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
 		// Fresh fetch each iteration: picks up steered user messages and the
 		// blocks we just appended.
@@ -418,9 +420,15 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 
 		const text = res.text.trim();
 		if (res.toolUses.length === 0) {
-			if (text) await postTo(ref, text, agentId);
-			return text;
+			// A turn that ends saying nothing after writing its answer alongside
+			// its last tool calls (the answer, then occurrence_complete in one
+			// step) posts that answer: kept only as a note on the call, it was
+			// lost - a scheduled run looked like it never answered.
+			const reply = text || unsaid;
+			if (reply) await postTo(ref, reply, agentId);
+			return reply;
 		}
+		if (text) unsaid = text;
 
 		for (const [i, use] of res.toolUses.entries()) {
 			// Persist into the CONVERSATION thread - the same one the next
