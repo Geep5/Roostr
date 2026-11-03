@@ -60,7 +60,7 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 5. **Turn**: the harness builds its prompt (system prompt, the workspace rules, Skills listing, memory, the object), the model calls tools, the harness runs them, until it has an answer.
 6. **Posts**: only its final text is posted to the chat. Text written alongside tool calls is kept as working notes on those calls, not posted.
 7. **Remembers**: each agent keeps one transcript (compacted over time), plus pinned facts and milestones it writes with its memory tools.
-8. **Ends**: deleting the agent, or clearing Served by, stops it everywhere. Its past messages stay.
+8. **Ends**: deleting the agent, or clearing Served by, stops it everywhere. Its past messages stay. Deleting an object for good also deletes an agent that object alone lists (an agent made just for it), with its chats - but never a space's own agent or one on a space's guest list: those stay when a page they were added to goes.
 
 ### Talking between agents
 

@@ -1486,8 +1486,15 @@ cascade_agent :: proc(c: ^Cascade_Ctx, states: map[string]^Object_State, aid: st
 	// its binned agent along, not orphan the tombstone.
 	agent := states[aid]
 	if agent == nil || agent.type_key != "agent" do return
+	// A space's own agent ("<Space> Space") belongs to its space, and an
+	// agent on a live space's guest list works across that space: neither
+	// goes with another object they were invited to (a page they tested
+	// on). Vanishing the space itself still takes them.
+	if strings.has_prefix(aid, "space-agent-") && aid != strings.concatenate({"space-agent-", c.object_id}, context.temp_allocator) do return
 	for _, s in states {
-		if s.deleted || s.id == c.object_id || !object_has_own_agent(s.type_key) do continue
+		if s.deleted || s.id == c.object_id do continue
+		if s.type_key == "channel" && object_names_agent(s.fields, aid) do return // on a space's guest list
+		if !object_has_own_agent(s.type_key) do continue
 		if object_names_agent(s.fields, aid) do return // still someone's mind
 	}
 	append(c.out, strings.clone(aid, context.temp_allocator))

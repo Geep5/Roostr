@@ -274,3 +274,55 @@ mutation_bootstrap_ticks_system_on_builtins :: proc(t: ^testing.T) {
 	testing.expect(t, !ticked["type-mine"] && !ticked["tool-mine"], "the user's own objects do not")
 	testing.expect(t, !ticked["tool-done"], "one already ticked is left alone")
 }
+
+// Vanishing an object takes an agent only it names (its own one-off agent),
+// never a space's: the space's own "<Space> Space" agent, or one on a live
+// space's guest list, stays when a page it was invited to goes. Deleting a
+// throwaway test page took a space's agent with it. The space itself still
+// takes them.
+@(test)
+mutation_vanish_keeps_space_agents :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	obj :: proc(id, type_key: string, agent := "") -> ^Object_State {
+		s := new(Object_State)
+		s^ = Object_State{id = id, type_key = type_key, fields = make([dynamic]Value_Entry)}
+		append(&s.fields, Value_Entry{key = "channel", value = string_value("space-aa")})
+		if agent != "" do append(&s.fields, Value_Entry{key = "agent", value = string_value(agent)})
+		return s
+	}
+	states := make(map[string]^Object_State)
+	all := []^Object_State{
+		obj("space-aa", "channel", "agent-shared"),
+		obj("agent-shared", "agent"),
+		obj("space-agent-space-aa", "agent"),
+		obj("agent-own", "agent"),
+		obj("page-shared", "page", "agent-shared"),
+		obj("page-space", "page", "space-agent-space-aa"),
+		obj("page-own", "page", "agent-own"),
+		obj("space-bb", "channel", "agent-solo"),
+		obj("agent-solo", "agent"),
+	}
+	for s in all do states[s.id] = s
+	vanish :: proc(states: map[string]^Object_State, id: string) -> []string {
+		request := jobj()
+		request["action"] = json.String("vanish")
+		request["object_id"] = json.String(id)
+		plan, err := mutation_plan(json.Object(request), Mutation_Input{states = states, timestamp = 1000, author = "alice", id_seed = "seed"})
+		assert(err == "")
+		return plan.vanish_ids[:]
+	}
+	gone := vanish(states, "page-shared")
+	testing.expectf(t, len(gone) == 1 && gone[0] == "page-shared", "an agent on the space's guest list stays: %v", gone)
+	gone = vanish(states, "page-space")
+	testing.expectf(t, len(gone) == 1 && gone[0] == "page-space", "the space's own agent stays: %v", gone)
+	gone = vanish(states, "page-own")
+	testing.expectf(t, len(gone) == 2 && gone[1] == "agent-own", "an agent only that page names goes with it: %v", gone)
+	gone = vanish(states, "space-bb")
+	testing.expectf(t, slice_contains(gone, "agent-solo"), "a space takes the agent only its guest list names: %v", gone)
+}
+
+@(private = "file")
+slice_contains :: proc(list: []string, want: string) -> bool {
+	for s in list do if s == want do return true
+	return false
+}
