@@ -1,6 +1,7 @@
 package query_tests
 
 import "core:encoding/json"
+import "core:fmt"
 import "core:testing"
 import "core:mem"
 import "../core"
@@ -95,4 +96,23 @@ query_cache_lifetime_and_atomic_errors :: proc(t: ^testing.T) {
 	core.query_cache_reset()
 	testing.expect(t, core.query_cache_bytes == 0, "reset must release every cached object allocation")
 	testing.expect(t, len(core.query_pending_objects) == 0 && len(core.query_cached_objects) == 0, "reset must release pending and committed owners")
+}
+
+@(test)
+query_links_lists_backlinks :: proc(t: ^testing.T) {
+	// Linked three ways: a link field, a list of links, a collection's
+	// members. The channel is not a link; an object never lists itself.
+	objects := `[
+		{"id":"target","typeKey":"page","fields":{"name":{"stringValue":"Target"},"channel":{"stringValue":"sp"}},"blocks":[]},
+		{"id":"by-field","typeKey":"task","fields":{"owner":{"linkValue":{"relationKey":"owner","targetId":"target"}}},"blocks":[]},
+		{"id":"by-list","typeKey":"task","fields":{"agent":{"valuesValue":{"items":[{"linkValue":{"relationKey":"agent","targetId":"other"}},{"linkValue":{"relationKey":"agent","targetId":"target"}}]}}},"blocks":[]},
+		{"id":"by-collection","typeKey":"collection","fields":{"collectionIds":{"valuesValue":{"items":[{"stringValue":"target"}]}}},"blocks":[]},
+		{"id":"by-channel","typeKey":"page","fields":{"channel":{"stringValue":"target"}},"blocks":[]},
+		{"id":"by-text","typeKey":"page","fields":{"note":{"stringValue":"target"}},"blocks":[]}
+	]`
+	result, err := cache_call(fmt.tprintf(`{{"objects":%s,"body":{{"filters":[{{"key":"$links","condition":"in","value":["target"]}}]}},"nowMs":0}}`, objects))
+	testing.expect(t, err == "", err)
+	ids := make(map[string]bool, context.temp_allocator)
+	for row in core.json_array(result, "records") do ids[core.json_str(row, "id")] = true
+	testing.expectf(t, len(ids) == 3 && ids["by-field"] && ids["by-list"] && ids["by-collection"], "%v", ids)
 }

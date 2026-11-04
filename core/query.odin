@@ -90,8 +90,38 @@ json_to_plain :: proc(v: json.Value, allocator := context.temp_allocator) -> Pla
 	return plain_null()
 }
 
+// A record's virtual "$links" value: every object its fields link to (links,
+// lists of links, and a collection's members), the channel aside. A query
+// for `{"key": "$links", "condition": "in", "value": [id]}` lists an
+// object's backlinks without the caller reading the whole vault.
+RECORD_LINKS_KEY :: "$links"
+
+record_links :: proc(s: ^Object_State, allocator := context.temp_allocator) -> Plain {
+	out := Plain{kind = .List}
+	out.list = make([dynamic]Plain, allocator)
+	for e in s.fields {
+		if e.key == "channel" do continue
+		members := e.key == "collectionIds"
+		switch e.value.kind {
+		case .Link:
+			append(&out.list, Plain{kind = .String, str = e.value.link_target})
+		case .List:
+			for item in e.value.items {
+				if item.kind == .Link do append(&out.list, Plain{kind = .String, str = item.link_target})
+				else if members && item.kind == .String do append(&out.list, Plain{kind = .String, str = item.str})
+			}
+		case .String_List:
+			if members do for m in e.value.strings do append(&out.list, Plain{kind = .String, str = m})
+		case .None, .String, .Int, .Float, .Bool, .Bytes, .Map:
+		}
+	}
+	return out
+}
+
 read_record_value :: proc(s: ^Object_State, key: string, allocator := context.temp_allocator) -> Plain {
 	switch key {
+	case RECORD_LINKS_KEY:
+		return record_links(s, allocator)
 	case "id":
 		return Plain{kind = .String, str = s.id}
 	case "type", "typeKey":
