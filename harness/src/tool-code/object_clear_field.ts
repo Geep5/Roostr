@@ -1,6 +1,6 @@
 import type { Roostr } from "../tool-sdk";
 
-export const description = "Empty one of an object's properties (the Properties pane's Remove). key=agent takes agents OFF the object's guest list: the agent ids in `value` (comma-separated), or every agent when `value` is empty. The repeat rule has its own tool (object_clear_repeat); computed dates can't be cleared.";
+export const description = "Empty one of an object's properties (the Properties pane's Remove). key=agent takes agents OFF the object's default agents: the agent ids in `value` (comma-separated), or every agent when `value` is empty. The repeat rule has its own tool (object_clear_repeat); computed dates can't be cleared.";
 export const inputs = "id?: string - object id; omit for the object of this conversation\nkey: string\nvalue?: string - key=agent only: the agent id(s) to remove";
 
 export default async function (input: Record<string, unknown>, roostr: Roostr) {
@@ -14,9 +14,9 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 		const guests = roostr.guests(obj.fields);
 		const removing = (typeof input.value === "string" ? input.value : "").split(",").map((s) => s.trim()).filter(Boolean);
 		const unknown = removing.filter((aid) => !guests.includes(aid));
-		if (unknown.length) return `error: nothing removed. Not on this object's guest list: ${unknown.join(", ")}. Guests: ${guests.join(", ") || "none"}.`;
+		if (unknown.length) return `error: nothing removed. Not a default agent of this object: ${unknown.join(", ")}. Default agents: ${guests.join(", ") || "none"}.`;
 		const keep = removing.length ? guests.filter((aid) => !removing.includes(aid)) : [];
-		if (keep.length === guests.length) return "Nothing removed: no agent is on this object's guest list.";
+		if (keep.length === guests.length) return "Nothing removed: this object has no default agent.";
 		if (keep.length) await roostr.mutate("set_field", { object_id: obj.id, key, value: { valuesValue: { items: keep.map((s) => ({ stringValue: s })) } } });
 		else await roostr.mutate("delete_field", { object_id: obj.id, key });
 		const names = await Promise.all(keep.map(async (aid) => (await roostr.get(aid).catch(() => null))?.fields["name"]?.stringValue || aid));

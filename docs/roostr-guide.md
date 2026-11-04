@@ -53,19 +53,19 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 
 ### Lifecycle
 
-1. **Made**: from the space's Agent template ("+ New agent" in a picker - named right there - or New object -> Agent). The template supplies the prompt, model, tools and credentials; with none, it gets the space's Assistant prompt, `shell_exec` and `web_fetch`, and the space's Anthropic credential. Made from an object's Agent row, it also starts with that object's tags (an agent made on a Team task is Customer: Team); made from a cell or the new-row line of a query's table, it starts with the query's filter values.
+1. **Made**: from the space's Agent template ("+ New agent" in a picker - named right there - or New object -> Agent). The template supplies the prompt, model, tools and credentials; with none, it gets the space's Assistant prompt, `shell_exec` and `web_fetch`, and the space's Anthropic credential. Made from an object's Default agent row, it also starts with that object's tags (an agent made on a Team task is Customer: Team); made from a cell or the new-row line of a query's table, it starts with the query's filter values.
 2. **Placed**: its Served by names a computer. That computer's harness adopts it within seconds - no restart. Change Served by and it moves; the old computer lets go.
-3. **Invited**: an object's **Agent** property is its guest list. An agent only ever works on objects that list it (and on its own page). Nothing answers an object uninvited. Agents on a **type** are on every object of it: adding one there adds it to all of them (and to each new one), removing it takes it off them.
-4. **Woken**: a person (or another agent) @-mentions it in the object's chat - its own page included - or a Repeat on an object it is on fires. A chat post with no @ wakes nobody, anywhere.
+3. **Everywhere in its space**: every agent works on every object in its space - @-mention it in any object's chat. An object's **Default agent** property names who its chat starts tagged (several default agents start as several tags; a template sets them for every object made from it) and which agent runs its Repeat. Agents on a **type** are default agents of every object of it: adding one there adds it to all of them (and to each new one), removing it takes it off them. An agent never reaches another space's objects.
+4. **Woken**: a person (or another agent) @-mentions it in an object's chat - its own page included - or a Repeat on an object it is a default agent of fires. A chat post with no @ wakes nobody, anywhere; the composer starts with the tags of the last message a person sent there, else the default agents, and they can be removed before sending.
 5. **Turn**: the harness builds its prompt (system prompt, the workspace rules, Skills listing, memory, the object), the model calls tools, the harness runs them, until it has an answer.
-6. **Posts**: only its final text is posted to the chat. Text written alongside tool calls is kept as working notes on those calls, not posted.
+6. **Posts**: its final text is posted to the chat. Text written alongside tool calls is kept as working notes on those calls - except when the turn then ends with no final text: the last such text is posted as the answer.
 7. **Remembers**: each agent keeps one transcript (compacted over time), plus pinned facts and milestones it writes with its memory tools.
-8. **Ends**: deleting the agent, or clearing Served by, stops it everywhere. Its past messages stay. Deleting an object for good also deletes an agent that object alone lists (an agent made just for it), with its chats - but never a space's own agent or one on a space's guest list: those stay when a page they were added to goes.
+8. **Ends**: deleting the agent, or clearing Served by, stops it everywhere. Its past messages stay. Deleting an object for good also deletes an agent that object alone lists as a default agent (an agent made just for it), with its chats - but never a space's own agent or a default agent of a space: those stay when a page they were added to goes.
 
 ### Talking between agents
 
-- On an object where two agents are both guests, an agent asks the other by starting its reply with "@Their Name" and the question.
-- To ask an agent on a different object, use `agent_ask` (the target object must list that agent). Agent-to-agent back-and-forth is capped at a few hops.
+- On any object of the space, an agent asks another by starting its reply with "@Their Name" and the question.
+- To ask about a different object, use `agent_ask`: it reaches that object's default agent, or an agent at its own page. Agent-to-agent back-and-forth is capped at a few hops.
 - `spawn` hands a self-contained task to a short-lived helper that returns one result.
 
 ## 6. Repeat and Check first
@@ -96,7 +96,7 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 
 - A Query with **Move to bin**, **Mark done**, **Tag agents** (agents added to the object and @-mentioned in its chat, which wakes them) or **Set property** + **Set value** does that to everything it matches - including what already matched when you switched it on. Open the query to see exactly what it acts on.
 - Each object is acted on once per query: it keeps which queries acted on it, so restoring it from the bin (or unticking Done) overrules that query for it for good. Every action leaves one line in the object's chat ("binned by \"Spam to bin\"").
-- It runs on the query's computer: its Served by, else its Agent's. A query nobody runs, or an action that fails, shows on the query's Error. It acts within seconds of a change, and inbox imports run it before the agent's turn, so what it bins is never shown to the agent.
+- It runs on the query's computer: its Served by, else its Default agent's. A query nobody runs, or an action that fails, shows on the query's Error. It acts within seconds of a change, and inbox imports run it before the agent's turn, so what it bins is never shown to the agent.
 
 ## 8. Credentials
 
@@ -154,7 +154,7 @@ These are enforced by the harness for every agent; follow them in any prompt you
 ### A recurring task run by an agent
 
 1. Create a Task; write the steps in its Repeat instructions (what to do, what to post, when it is done).
-2. Add the agent to its Agent property.
+2. Add the agent to its Default agent property.
 3. Set its Repeat (e.g. every weekday at 9:00).
 4. Optional: Check first with a Tool that returns `[]` when there is nothing to do.
 5. Check the run record and Error after the first occurrence.

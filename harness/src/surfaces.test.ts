@@ -15,7 +15,7 @@ import { afterAll, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mentions, pendingMessages, setMark } from "./surfaces";
+import { addressableAgents, mentions, pendingMessages, setMark } from "./surfaces";
 import { humanRef, HUMAN_THREAD } from "./conv";
 import * as api from "./api";
 import type { BlockJSON, ObjectJSON } from "./api";
@@ -216,4 +216,22 @@ test("an agent's answer to a person who asked it since is not the earlier guest'
 	await setMark(chat, "p1");
 	expect(await pendingMessages(obj, chat, AGENT, "Matcherino Space")).toEqual([]);
 	fetchSpy.mockRestore();
+});
+
+test("an @-mention on an object can wake any agent of its space, default agents first", () => {
+	const SPACE = "space-a";
+	const link = (id: string) => ({ linkValue: { targetId: id, relationKey: "agent" } });
+	const agent = (id: string, channel: string, extra: Record<string, api.ValueJSON> = {}) => ({ id, typeKey: "agent", fields: { channel: { stringValue: channel }, ...extra } });
+	const task = { id: "task-1", typeKey: "task", fields: { channel: { stringValue: SPACE }, agent: { valuesValue: { items: [link("default-1")] } } } };
+	const roster = [
+		agent("unlisted", SPACE),
+		agent("default-1", SPACE),
+		agent("other-space", "space-b"),
+		agent("helper", SPACE, { spawn_parent: { stringValue: "unlisted" } }),
+	];
+	expect(addressableAgents(task, roster, "space-dflt")).toEqual(["default-1", "unlisted"]);
+	// The space page itself: its own id is its space.
+	expect(addressableAgents({ id: SPACE, typeKey: "channel", fields: {} }, roster, "space-dflt")).toEqual(["unlisted", "default-1"]);
+	// An unstamped object belongs to the default space.
+	expect(addressableAgents({ id: "n", typeKey: "note", fields: {} }, [agent("d", ""), ...roster], "space-dflt")).toEqual(["d"]);
 });

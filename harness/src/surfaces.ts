@@ -21,7 +21,7 @@
  * newest message is picked up (their SEED_BACKLOG idea, conservative).
  */
 
-import { fetchObject, str, type BlockJSON, type ObjectJSON } from "./api";
+import { fetchObject, guestAgents, str, type BlockJSON, type ObjectJSON } from "./api";
 import { addConvBlock, convBlocks, convKey, HUMAN_THREAD, isHuman, parseConvKey, type ConvRef } from "./conv";
 
 // ── Marks ─────────────────────────────────────────────────────────
@@ -94,6 +94,28 @@ export function isAgentAuthor(author: string): boolean {
 /** Whether `text` @-mentions `name` (whole name, any case): "@Marco Dev Bot" yes, "tag marco" no. */
 export function mentions(text: string, name: string): boolean {
 	return !!name && new RegExp(`@${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w])`, "i").test(text);
+}
+
+type Placed = Pick<ObjectJSON, "id" | "typeKey" | "fields">;
+
+/** The space an object lives in: a space is its own; an unstamped object is in the default space. */
+export function spaceOfObject(obj: Placed, defaultSpace: string): string {
+	return obj.typeKey === "channel" ? obj.id : str(obj.fields, "channel") || defaultSpace;
+}
+
+/**
+ * Who an @-mention on `obj` can wake: its default agents (`agent`) first,
+ * then every other agent of its space - any of them works on any object
+ * there. Agents of other spaces and spawned helpers are never addressable.
+ */
+export function addressableAgents(obj: Placed, roster: Placed[], defaultSpace: string): string[] {
+	const space = spaceOfObject(obj, defaultSpace);
+	const out = [...guestAgents(obj.fields)];
+	for (const agent of roster) {
+		if (agent.typeKey !== "agent" || str(agent.fields, "spawn_parent") || out.includes(agent.id)) continue;
+		if (spaceOfObject(agent, defaultSpace) === space) out.push(agent.id);
+	}
+	return out;
 }
 
 type ChatRow = { id: string; block: BlockJSON };

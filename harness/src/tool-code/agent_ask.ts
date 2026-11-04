@@ -1,7 +1,7 @@
 import type { ObjectJSON, Roostr } from "../tool-sdk";
 
 export const description =
-	"Send a durable question to agents on ANOTHER object's guest list (its Agent property), as a separate exchange thread. For an agent that is in this chat with you (a guest on the object you're working on), don't use this - make your reply the question, starting with \"@Their Name \", and they answer in the same chat. Every recipient receives its own DAG copy and answers asynchronously on its serving machine, including after being offline. Read replies with discussion_read using the returned threadId. To ask an agent that is not yet on the object, add it first with object_set_field(key=agent). Agents never create minds. Specify the complete group audience for each message; a reply preserves its exchange_id and reply_to.";
+	"Send a durable question to the default agent of ANOTHER object (its Agent property), or to an agent at its own page, as a separate exchange thread. Any agent of this space can instead be asked in the chat you are in: make your reply the question, starting with \"@Their Name \", and they answer in the same chat - prefer that when the question is about this object. Every recipient receives its own DAG copy and answers asynchronously on its serving machine, including after being offline. Read replies with discussion_read using the returned threadId. Agents never create minds. Specify the complete group audience for each message; a reply preserves its exchange_id and reply_to.";
 export const inputs =
 	"object_ids: string[] - objects whose existing agents should receive this message\ntext: string\nexchange_id?: string - existing exchange id, or omit for a new exchange\nreply_to?: string - message id being answered in that exchange\ntitle?: string";
 
@@ -9,8 +9,8 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 	// The request is kept on the object this turn is about, so that object
 	// sees the reply; on the agent's own page, on the agent (its home). The
 	// harness sends it from there, and only from a top-level turn.
-	// Guest list rule: a recipient object must name the asked agent in its
-	// `agent` property - adding someone there IS how they are brought in.
+	// An object is answered by its first default agent (`agent`) that is
+	// not the asker; an agent's own page reaches that agent.
 	const text = typeof input.text === "string" ? input.text.trim() : "";
 	const ids = [...new Set(Array.isArray(input.object_ids) ? input.object_ids.filter((x): x is string => typeof x === "string") : [])];
 	if (!ids.length || !text) throw new Error("recipient objects and nonempty text are required");
@@ -28,7 +28,7 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 		let holder: ObjectJSON | null = target;
 		if (target.typeKey !== "agent") {
 			const guests = roostr.guests(target.fields).filter((aid) => aid !== me.id);
-			if (guests.length === 0) throw new Error(`"${nameOf(target, id)}" has no other agent on its guest list; add one with object_set_field(id, "agent", "<agent id>") first`);
+			if (guests.length === 0) throw new Error(`"${nameOf(target, id)}" has no default agent other than you. Ask an agent at its own page (pass the agent's id), or @-tag it in this chat.`);
 			// One recipient per object: the first guest that is not the asker.
 			holder = await roostr.get(guests[0]).catch(() => null);
 		}

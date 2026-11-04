@@ -1574,12 +1574,14 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// The color an agent's chat bubbles take (a #RRGGBB hex; blank = the
 	// default grey). The chat picks readable text for it.
 	{"chat_color", "shorttext", "Chat color", "🎨", false, false, 1, {}},
-	// The object's guest list: agents a human (or one of those agents) may
-	// address here with @. Rendered as a link badge; its picker is limited to
-	// the space's agent type. Nothing answers an object without being on it.
-	// Agent-related properties are hidden from query/collection views by
-	// default (FeaturedProps shows them on the object page regardless).
-	{"agent", "object", "Agent", "🤖", false, false, 0, {}},
+	// The object's default agents: pre-tagged in its chat composer (a
+	// template sets them for every object made from it), and the ones its
+	// Repeat runs through. Every agent of the space can be @-asked on any
+	// object; this only names who is asked when nobody else is tagged.
+	// Rendered as a link badge; its picker is limited to the space's agent
+	// type. Agent-related properties are hidden from query/collection views
+	// by default (FeaturedProps shows them on the object page regardless).
+	{"agent", "object", "Default agent", "🤖", false, false, 0, {}},
 	// Which logins an agent's work uses: Credential objects, each kept by the
 	// computer its own Served by names (secrets stay on that computer).
 	{"credentials", "object", "Credentials", "🔑", false, false, 0, {}},

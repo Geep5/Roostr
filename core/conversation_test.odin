@@ -657,12 +657,18 @@ mailbox_human_self_groups_and_agent_binding_boundaries :: proc(t: ^testing.T) {
 	guest_message.sender.agent_id = guest
 	_, guest_error := mail_send(&v, guest_message)
 	testing.expect(t, guest_error == "", guest_error)
-	// A guest answering from the shared object addresses another guest, never itself.
+	// Every agent in the space speaks for any object in it, listed or not.
 	stranger := mail_object(t, &v, "agent", space)
-	stray_message := mail_envelope("stray-agent", target, Agent_Endpoint{object_id = target})
-	stray_message.sender.agent_id = stranger
-	_, stray_error := mail_send(&v, stray_message)
-	testing.expect(t, stray_error != "", "an agent not on the guest list does not speak for the object")
+	stranger_message := mail_envelope("space-stranger", target, Agent_Endpoint{object_id = source})
+	stranger_message.sender.agent_id = stranger
+	_, stranger_error := mail_send(&v, stranger_message)
+	testing.expect(t, stranger_error == "", stranger_error)
+	// An agent of another space does not.
+	outsider := mail_object(t, &v, "agent", other_space)
+	outsider_message := mail_envelope("outsider", target, Agent_Endpoint{object_id = source})
+	outsider_message.sender.agent_id = outsider
+	_, outsider_error := mail_send(&v, outsider_message)
+	testing.expect_value(t, outsider_error, "endpoint agent must belong to the same space")
 }
 
 @(test)

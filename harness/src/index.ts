@@ -12,7 +12,7 @@
 
 // First: private extensions (harness/private/) register their seeds before anything reads them.
 import "./extensions";
-import { API, VANISH_LOG_ID, apiFetch, chatPost, deleteField, fetchObject, guestAgents, mutate, query, setField, str, subscribe, sv, createObject, lv, queryAll, vanishedEntries, wasDeleted } from "./api";
+import { API, VANISH_LOG_ID, apiFetch, chatPost, deleteField, fetchObject, guestAgents, mutate, query, setField, str, subscribe, sv, createObject, lv, queryAll, vanishedEntries, wasDeleted, type QueryRow } from "./api";
 import { TEMPLATE_OWN, kindTemplates, seedCatalog } from "./catalog-seeds";
 import { DEFAULT_MODEL, PROMPT_SEEDS } from "./prompts";
 import type { ObjectJSON, ValueJSON } from "./api";
@@ -43,7 +43,8 @@ import { TOOLS_KEY, defaultAgentTools, ensureBuiltinTools, ensureBuiltinToolsEve
 import { migrateCapabilities } from "./migrate-capabilities";
 import { runBootSteps } from "./boot";
 import { startDiscordManager } from "./discord";
-import { answersGuestQuestion, chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, mentions, pendingMessages, setMark } from "./surfaces";
+import { addressableAgents, answersGuestQuestion, chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, mentions, pendingMessages, setMark, spaceOfObject } from "./surfaces";
+import { defaultSpaceId } from "./spacemap";
 import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
 import { processInboxMessage } from "./message-turn";
@@ -207,12 +208,12 @@ async function buildServedOne(agentId: string, defaultChannel: string, forObject
 }
 
 /**
- * The transcript a turn on `surface` runs in: on the object itself when it
- * names this agent (`object.agent`), so one object carries its work and every
- * conversation about it; else the agent's home.
+ * The transcript a turn on `surface` runs in: the agent's own thread on that
+ * object, so one object carries its work and every conversation about it -
+ * on its own page, its home transcript.
  */
 async function transcriptFor(s: Served, surface: ObjectJSON): Promise<ConvRef> {
-	if (!guestAgents(surface.fields).includes(s.agentId)) return s.conv;
+	if (surface.id === s.conv.objectId) return s.conv;
 	return agentThreadOn(await fetchObject(s.agentId), surface.id);
 }
 
@@ -407,6 +408,8 @@ async function serve(): Promise<void> {
 	 * scheduler keeps the not-served error of the repeats it runs.
 	 */
 	function notePin(agent: ObjectJSON): void {
+		// Any agent event may add, rename, move or remove an addressable agent.
+		roster = null;
 		const pin = str(agent.fields, "served_by");
 		if (agentPins.get(agent.id) === pin) return;
 		agentPins.set(agent.id, pin);
@@ -415,20 +418,33 @@ async function serve(): Promise<void> {
 		void flagUnservedRepeats().catch((err) => console.error("[schedule] unserved check:", err instanceof Error ? err.message : err));
 	}
 
+	/** Every agent, for who an @-mention can wake (`addressableAgents`); dropped on any agent event (`notePin`). */
+	let roster: Promise<QueryRow[]> | null = null;
+	async function addressable(obj: ObjectJSON): Promise<string[]> {
+		roster ??= queryAll({ type: "agent" });
+		const all = await roster.catch((err: unknown) => {
+			roster = null;
+			throw err;
+		});
+		return addressableAgents(obj, all, await defaultSpaceId());
+	}
+
 	/**
-	 * One agent on an object's guest list (`object.agent`), served here
-	 * because this machine runs it on the object - adopted into the local
-	 * roster on first contact, so it needs no per-agent toggling. Null when
-	 * the pointer is dangling or another bot answers for the agent.
+	 * An agent of the object's space, served here because this machine runs
+	 * it on the object - adopted into the local roster on first contact, so
+	 * it needs no per-agent toggling. Null when the pointer is dangling, the
+	 * agent is another space's, or another bot answers for it.
 	 */
 	async function adoptForObject(obj: ObjectJSON, aid: string): Promise<Served | null> {
-		if (!aid || !guestAgents(obj.fields).includes(aid) || externalAgents.has(aid)) return null;
+		if (!aid || externalAgents.has(aid)) return null;
 		// Only the computer that runs the agent here takes it in.
 		if (!(await runsAgentHere(obj.id, aid))) return null;
 		const known = served.get(aid);
 		if (known) return known;
 		const agent = await fetchObject(aid).catch(() => null);
 		if (agent?.typeKey !== "agent") return null;
+		const dflt = await defaultSpaceId();
+		if (spaceOfObject(agent, dflt) !== spaceOfObject(obj, dflt)) return null;
 		if (!agents.has(aid)) {
 			agents.add(aid);
 			await setEnabled(aid, true);
@@ -444,9 +460,9 @@ async function serve(): Promise<void> {
 		}
 	}
 
-	/** The agent behind a mailbox endpoint: the agent's home, or an object that names it. */
+	/** The agent behind a mailbox endpoint: the agent's home, or any object of its space. */
 	async function mailboxAgent(object: ObjectJSON, endpoint: { objectId: string; agentId: string }): Promise<Served | null> {
-		if (guestAgents(object.fields).includes(endpoint.agentId)) return adoptForObject(object, endpoint.agentId);
+		if (endpoint.objectId !== endpoint.agentId) return adoptForObject(object, endpoint.agentId);
 		const agent = await fetchObject(endpoint.agentId);
 		if (agent.typeKey !== "agent" || str(agent.fields, "spawn_parent") || str(agent.fields, "external_responder")) return null;
 		if (agentSubject(agent) !== endpoint.objectId || !(await agentServedHere(agent))) return null;
@@ -887,37 +903,35 @@ async function serve(): Promise<void> {
 		}
 		if (obj.typeKey === "agent") return; // other agents' brains
 		// ── One conversation per object (`__discussion__`). Humans and agents
-		// post there; an @-mention of a guest is the wake signal for that
-		// guest. A post with no tag wakes nobody; the reply lands in the same
-		// thread. Exchanges are only for explicit group/agent-to-agent asks. ──
-		if (guestAgents(obj.fields).length === 0 || externallyAnswered(obj)) return;
-		// Per guest, not per object: a guest pinned to another machine is that
-		// machine's to run even here; a guest pinned HERE runs even when the
-		// object follows another guest's pin.
-		const mine: string[] = [];
-		for (const aid of guestAgents(obj.fields)) if (await runsAgentHere(objectId, aid)) mine.push(aid);
+		// post there; an @-mention of any agent of the space is the wake
+		// signal for that agent. A post with no tag wakes nobody; the reply
+		// lands in the same thread. Exchanges are only for explicit
+		// group/agent-to-agent asks. ──
+		if (externallyAnswered(obj)) return;
 		void pumpMailbox(objectId, obj);
-		if (mine.length === 0) return;
-		for (const aid of mine) void adoptForObject(obj, aid);
+		// Per agent, not per object: an agent pinned to another machine is
+		// that machine's to run even here; one pinned HERE runs even when the
+		// object follows another agent's pin.
+		for (const aid of guestAgents(obj.fields)) if (await runsAgentHere(objectId, aid)) void adoptForObject(obj, aid);
 
-		// ── @-mentions in the human thread: wake each tagged guest. ──
-		await wakeMentionedGuests(obj);
+		// ── @-mentions in the human thread: wake each tagged agent. ──
+		await wakeMentioned(obj);
 	}
 
-	/** Wake every guest the newest discussion message @-mentions, or answers (an agent replying to that guest's question). */
-	async function wakeMentionedGuests(obj: ObjectJSON): Promise<void> {
+	/** Wake every agent of the space the newest discussion message @-mentions, or answers (an agent replying to that agent's question). */
+	async function wakeMentioned(obj: ObjectJSON): Promise<void> {
 		const msgs = chatBlocks(obj, humanRef(obj.id))
 			.map((row, index) => ({ ...row, index, ts: Number(row.block.content.custom?.meta?.["ts"] ?? 0) }))
 			.sort((a, b) => a.ts - b.ts || a.index - b.index);
 		if (msgs.length === 0) return;
 		const newest = msgs[msgs.length - 1].block.content.custom?.meta?.["text"] ?? "";
-		for (const aid of guestAgents(obj.fields)) {
-			if (!(await runsAgentHere(obj.id, aid))) continue;
+		for (const aid of await addressable(obj)) {
 			const agent = await fetchObject(aid).catch(() => null);
 			if (!agent) continue;
 			const name = str(agent.fields, "name");
 			if (!name) continue;
 			if (!mentions(newest, name) && !(await answersGuestQuestion(msgs, msgs.length - 1, aid))) continue;
+			if (!(await runsAgentHere(obj.id, aid))) continue;
 			const s2 = await adoptForObject(obj, aid);
 			if (s2) void drive(s2, humanRef(obj.id));
 		}
