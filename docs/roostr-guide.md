@@ -202,6 +202,12 @@ These are enforced by the harness for every agent; follow them in any prompt you
 3. `roostr-clip` (in the Roostr repo's `harness/bin`, put on PATH by the harness) downloads one MP4 (H.264/AAC up to 1080p, or a part with `--start`/`--end`), checks it with ffprobe and stores it as a File in the space; `--store <path>` stores a Palmier export or any video file the same way. Files over 1 GB are refused - take a part instead. `roostr-palmier` calls Palmier's editing tools (`tools`, `tools <name>`, `call <name>` with the inputs as JSON), starting Palmier hidden when it isn't running.
 4. A YouTube video that answers "sign in to confirm you're not a bot" is YouTube limiting that computer for a while; the agent puts it on the object's Error. Palmier's AI generation spends the person's Palmier credits, so agents use it only when asked.
 
+### Rive graphics, intros and games
+
+1. Every space has the built-in **Rive** Skill. Switch it on for the computer in Settings → Skills: it installs the Rive CLI (and ffmpeg) when missing, but never updates a CLI that is already there - a new CLI can break existing projects, so a person runs `rive update` deliberately and re-checks their projects.
+2. Give an agent the Rive Skill and `shell_exec`, set its Served by to that computer, and set its Project folder to the Rive work (a folder with `rive.yaml`, or one holding several such projects). The project's own AGENTS.md carries its rules - brand, palette, timing - so each space's agents work on their own project with the same Skill.
+3. Ask for anything in Rive: "make the TOP 5 card for this tournament", "build a small game", "an intro with this player's name". The agent edits with the Rive CLI (`rive docs`, `rive schema`, `--verify`, `inspect`) and shows its work with `roostr-rive`: `shot` stores one frame as a PNG File, `render` a video File (MP4, or ProRes 4444 with transparency with `--alpha` when the scene's background is bound to a `bg` color), with `--data` filling in view model values per render.
+
 ### Keep a computer running Roostr
 
 1. In the Roostr repo: build the engine (`odin build src -out:glon-odin -o:speed`), then `cd harness && bun install`.

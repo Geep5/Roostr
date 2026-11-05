@@ -311,6 +311,7 @@ async function serve(): Promise<void> {
 	installShippedCommand("roostr-design");
 	installShippedCommand("roostr-clip");
 	installShippedCommand("roostr-palmier");
+	installShippedCommand("roostr-rive");
 	// Spaces the background seeding below covers: a channel event meanwhile must not seed them a second time.
 	for (const s of await queryAll({ type: "channel" })) spacesSeeded.add(s.id);
 	const agents = await servedAgents();

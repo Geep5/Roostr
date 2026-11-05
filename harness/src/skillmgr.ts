@@ -240,6 +240,29 @@ export const CATALOG: CatalogEntry[] = [
 			"Generation (generate_video, generate_image, generate_audio, upscale_media) spends the person's Palmier credits: use it only when asked, and say what it cost (get_usage).\n" +
 			"When something fails, say so plainly and put it on the object's Error (object_flag_error). Never retry in a loop.",
 	},
+	{
+		key: "rive",
+		name: "Rive",
+		description: "Make Rive graphics, animations and interactive scenes (title cards, intros, games, UI) with the Rive CLI in a project folder, and render them to images and video Files.",
+		// The harness links `roostr-rive` (harness/bin) into ~/.local/bin at
+		// start; the install only brings the Rive CLI and ffmpeg.
+		installPrompt:
+			"Make the Rive CLI and ffmpeg ready on this Mac. If the Rive CLI is missing (neither `command -v rive` nor ~/.rive/bin/rive), install it with `curl -fsSL https://releases.rive.app/cli/install.sh | sh`. " +
+			"If it is already installed, do NOT run `rive update` or `rive switch`: a newer CLI can break existing projects, so a person updates it deliberately. " +
+			"If `command -v ffmpeg` fails, run `brew install ffmpeg` (if Homebrew is missing, stop and say a person must install it from https://brew.sh). NEVER use sudo or anything that can prompt for a password. " +
+			"Finish only when `roostr-rive --check` exits 0; if `roostr-rive` is not found, say the harness needs a restart to put it on PATH.",
+		uninstallPrompt: "Rive needs nothing removed: the Rive CLI and ffmpeg are the person's own tools. Remove only the `roostr-rive` link from ~/.local/bin if it is there, and finish.",
+		checkCmd: "roostr-rive --check",
+		skillBody:
+			"Use this for anything made with Rive: title cards, intros and outros, animated graphics, interactive scenes, games, UI. The work lives in a Rive CLI project (a folder with rive.yaml, RML scenes, Luau scripts) - usually your Project folder or a folder inside it.\n" +
+			"Making and editing: the Rive CLI teaches itself. Read the project's AGENTS.md first and follow it - it holds that project's own rules. Look things up with `rive docs` and `rive schema <Type>`; after every edit run `rive <dir> --verify` and `rive inspect <dir> --json`, and read what got built. Start new work with `rive create <name>` (or `rive samples`). The CLI may be at ~/.rive/bin/rive if `rive` is not on PATH. Never run `rive update` or `rive switch`: a person updates the CLI, because a new one can break existing projects.\n" +
+			"Show the person what you made - images and video as Files on the object, with shell_exec:\n" +
+			"roostr-rive shot <dir> --space <this space's id> [--at 2s] [--size 1920x1080] [--data path=value]   one frame as a PNG\n" +
+			"roostr-rive render <dir> --space <id> --seconds 3.6 [--fps 30|60] [--size 1920x1080] [--data path=value]... [--alpha] [--out <path>]   a video: H.264 MP4, or with --alpha a ProRes 4444 MOV with transparency (the scene's background must be bound to a view model color `bg`)\n" +
+			"--data sets view model properties for that render (names, scores, players - the same scene, new content); --out also keeps a copy, e.g. in the project's build/. It prints the stored File (`id`, `name`...) or `error`. Look at a shot before rendering a whole video; renders take about a second per frame.\n" +
+			"Then put the File on the object with object_add_link and reply with what you made. If the project has its own render scripts (render_video.py and the like) and the person asks for those, use them instead and store the result with `roostr-clip --store` (Video Clips Skill).\n" +
+			"When something fails, say so plainly and put it on the object's Error (object_flag_error). Never retry in a loop.",
+	},
 ];
 
 // -- Object-backed state ------------------------------------------

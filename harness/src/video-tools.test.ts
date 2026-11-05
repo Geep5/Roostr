@@ -6,6 +6,7 @@
 import { expect, test } from "bun:test";
 import { explainFailure, readProbe, seconds, ytdlpAtLeast } from "../scripts/clip";
 import { resultText, rpcReply } from "../scripts/palmier";
+import { MATTE, frameTicks, size, stitchArgs, ticksAt } from "../scripts/rive";
 
 test("yt-dlp from 2026.08.19 on passes the check; anything older or unreadable fails", () => {
 	expect(ytdlpAtLeast("2026.08.19")).toBe(true);
@@ -54,4 +55,33 @@ test("Palmier's reply is found by id in a server-sent event stream or plain JSON
 test("a Palmier tool's error result is an error, with its text", () => {
 	expect(resultText({ content: [{ text: "Unknown tool: nope", type: "text" }], isError: true })).toEqual({ text: "Unknown tool: nope", isError: true });
 	expect(resultText({ content: [{ text: "a", type: "text" }, { type: "image" }] })).toEqual({ text: "a\n[image content]", isError: false });
+});
+
+test("a Rive moment reads as 1/60 s ticks: seconds, milliseconds or a bare tick count, at least one", () => {
+	expect(ticksAt("2s")).toBe(120);
+	expect(ticksAt("500ms")).toBe(30);
+	expect(ticksAt("120")).toBe(120);
+	expect(ticksAt("0")).toBe(1);
+	expect(ticksAt("1.5s")).toBe(90);
+	expect(ticksAt("two seconds")).toBeNull();
+	expect(ticksAt("-1s")).toBeNull();
+});
+
+test("frames land on the right ticks at 30 and 60 fps, the first one advanced once", () => {
+	expect([0, 1, 2, 30].map((i) => frameTicks(i, 30))).toEqual([1, 2, 4, 60]);
+	expect([0, 1, 2, 60].map((i) => frameTicks(i, 60))).toEqual([1, 1, 2, 60]);
+	expect(size("1920x1080")).toEqual({ w: 1920, h: 1080 });
+	expect(size("3840X2160")).toEqual({ w: 3840, h: 2160 });
+	expect(size("1080p")).toBeNull();
+});
+
+test("a render stitches to H.264 MP4, or with alpha to ProRes 4444 from the black and white passes", () => {
+	const mp4 = stitchArgs("/f", 30, false, "/o.mp4");
+	expect(mp4).toContain("libx264");
+	expect(mp4.join(" ")).not.toContain("white_");
+	const mov = stitchArgs("/f", 60, true, "/o.mov");
+	expect(mov.join(" ")).toContain("/f/white_%05d.png");
+	expect(mov).toContain(MATTE);
+	expect(mov.slice(mov.indexOf("-profile:v"), mov.indexOf("-profile:v") + 2)).toEqual(["-profile:v", "4444"]);
+	expect(mov.at(-1)).toBe("/o.mov");
 });
