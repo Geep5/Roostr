@@ -1,6 +1,6 @@
 import type { Roostr } from "../tool-sdk";
 
-export const description = "Make an object repeat, or change how it repeats - exactly what the Repeat cell on the object sets. Every `every` `unit`s. day/week/month/year: it runs at each of `times` (local HH:MM, default 09:00) on every day it runs - several times a day is one rule; weekly rules may name weekdays. minute/hour: it runs every `every` minutes/hours from `from` to `until` (local HH:MM, default the whole day), optionally only on `weekdays`. start is the first day (ISO date, default today). Each occurrence runs through one of the object's default agents (its Agent property). The reply is the rule and next occurrence as the human sees them.";
+export const description = "Make an object repeat, or change how it repeats - exactly what the Repeat cell on the object sets. Every `every` `unit`s. day/week/month/year: it runs at each of `times` (local HH:MM, default 09:00) on every day it runs - several times a day is one rule; weekly rules may name weekdays. minute/hour: it runs every `every` minutes/hours from `from` to `until` (local HH:MM, default the whole day), optionally only on `weekdays`. start is the first day (ISO date, default today). Each occurrence runs through one of the object's agents (its Agent property). The reply is the rule and next occurrence as the human sees them.";
 export const inputs = "id?: string - object id; omit for the object of this conversation\nevery?: number - interval, default 1 (1-999; hours 1-23)\nunit: minute|hour|day|week|month|year\ntimes?: string[] - day/week/month/year: local HH:MM times (24h) it runs on each day it runs; default [\"09:00\"]\nfrom?: string - minute/hour: local HH:MM the day's runs start; default 00:00\nuntil?: string - minute/hour: local HH:MM of the day's last possible run; default 23:59\nweekdays?: string[] - mon..sun. week: which days (default the start day's weekday); minute/hour: only these days (default every day)\nmonthly?: date|weekday - monthly only: same date (default) or same nth weekday\nstart?: string - first day, ISO date; default today";
 
 export default async function (input: Record<string, unknown>, roostr: Roostr) {
@@ -56,6 +56,6 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 	}
 	await roostr.mutate("repeat_set", { object_id: obj.id, rule, ...roostr.clock() });
 	const after = await roostr.get(obj.id);
-	const who = roostr.guests(after.fields).length ? "" : " It has no default agent, so nothing runs each occurrence until one is added (object_set_field key=agent).";
+	const who = roostr.guests(after.fields).length ? "" : " Its Agent property is empty, so nothing runs each occurrence until one is added (object_set_field key=agent).";
 	return `Repeats ${roostr.describeRepeat(after.fields["repeat"])}.${who}`;
 }

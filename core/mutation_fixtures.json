@@ -4985,7 +4985,7 @@
             "fieldSet": {
               "key": "name",
               "value": {
-                "stringValue": "Default agent"
+                "stringValue": "Agent"
               }
             }
           },
@@ -7448,7 +7448,7 @@
                     [
                       "name",
                       {
-                        "stringValue": "Default agent"
+                        "stringValue": "Agent"
                       }
                     ],
                     [
@@ -12393,7 +12393,7 @@
             "fieldSet": {
               "key": "name",
               "value": {
-                "stringValue": "Default agent"
+                "stringValue": "Agent"
               }
             }
           },
@@ -16597,7 +16597,7 @@
             "fieldSet": {
               "key": "name",
               "value": {
-                "stringValue": "Default agent"
+                "stringValue": "Agent"
               }
             }
           },
@@ -18577,7 +18577,7 @@
                     [
                       "name",
                       {
-                        "stringValue": "Default agent"
+                        "stringValue": "Agent"
                       }
                     ],
                     [

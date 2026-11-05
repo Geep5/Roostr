@@ -1,7 +1,7 @@
 import type { ObjectJSON, Roostr } from "../tool-sdk";
 
 export const description =
-	"Send a durable question to the default agent of ANOTHER object (its Agent property), or to an agent at its own page, as a separate exchange thread. Any agent of this space can instead be asked in the chat you are in: make your reply the question, starting with \"@Their Name \", and they answer in the same chat - prefer that when the question is about this object. Every recipient receives its own DAG copy and answers asynchronously on its serving machine, including after being offline. Read replies with discussion_read using the returned threadId. Agents never create minds. Specify the complete group audience for each message; a reply preserves its exchange_id and reply_to.";
+	"Send a durable question to the agent of ANOTHER object (its Agent property), or to an agent at its own page, as a separate exchange thread. Any agent of this space can instead be asked in the chat you are in: make your reply the question, starting with \"@Their Name \", and they answer in the same chat - prefer that when the question is about this object. Every recipient receives its own DAG copy and answers asynchronously on its serving machine, including after being offline. Read replies with discussion_read using the returned threadId. Agents never create minds. Specify the complete group audience for each message; a reply preserves its exchange_id and reply_to.";
 export const inputs =
 	"object_ids: string[] - objects whose existing agents should receive this message\ntext: string\nexchange_id?: string - existing exchange id, or omit for a new exchange\nreply_to?: string - message id being answered in that exchange\ntitle?: string";
 
@@ -28,7 +28,7 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 		let holder: ObjectJSON | null = target;
 		if (target.typeKey !== "agent") {
 			const guests = roostr.guests(target.fields).filter((aid) => aid !== me.id);
-			if (guests.length === 0) throw new Error(`"${nameOf(target, id)}" has no default agent other than you. Ask an agent at its own page (pass the agent's id), or @-tag it in this chat.`);
+			if (guests.length === 0) throw new Error(`"${nameOf(target, id)}" has no agent other than you in its Agent property. Ask an agent at its own page (pass the agent's id), or @-tag it in this chat.`);
 			// One recipient per object: the first guest that is not the asker.
 			holder = await roostr.get(guests[0]).catch(() => null);
 		}

@@ -239,10 +239,10 @@ test("object_set_repeat runs every few minutes inside a daily window, on chosen 
 	expect(mutations.find((m) => m.action === "repeat_set")?.rule).toMatchObject({ freq: "minute", interval: 5, weekdays: [1, 2], window: [540, 1020] });
 });
 
-test("object_set_repeat says when no default agent is there to run it", async () => {
+test("object_set_repeat says when no agent is there to run it", async () => {
 	daemon(task());
 	const result = await call("object_set_repeat", { unit: "day" });
-	expect(result).toContain("It has no default agent");
+	expect(result).toContain("Its Agent property is empty");
 });
 
 test("object_set_repeat rejects a malformed rule without writing", async () => {
