@@ -956,7 +956,9 @@ async function serve(): Promise<void> {
 		void drive(s, humanRef(s.conv.objectId));
 	}
 	subscribe((objectId) => {
-		void route(objectId);
+		// One event's failure (a daemon read reset mid-request) is that
+		// event's: logged, never the end of the harness.
+		void route(objectId).catch((error) => console.error(`[harness] event ${objectId.slice(0, 8)}:`, error instanceof Error ? error.message : error));
 		nudgeViewActions();
 	}, () => {
 		void scanMailboxes().catch((error) => console.error("[harness] mailbox catch-up:", error));
