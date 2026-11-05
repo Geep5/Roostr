@@ -1,11 +1,14 @@
 /**
- * The agent's Project folder: its `repo_path` property, an absolute path on
- * the computer that serves it (machine-local by nature - the serving gate
+ * The Project folder: a `repo_path` property, an absolute path on the
+ * computer that serves the agent (machine-local by nature - the serving gate
  * guarantees the computer running the turn is the one the agent is pinned
- * to). Optional: no folder is a normal agent. A folder that is set is
+ * to). An agent can have one, and so can any object it works on: a turn on
+ * an object whose own folder is set works there, else in the agent's
+ * (`folderHolder`). Optional: no folder is normal. A folder that is set is
  * either fully in use - checked, described in the prompt, shell_exec's
- * starting directory, its AGENTS.md read - or its absence is on the agent's
- * Error. A folder need not be a git repo; when it is, the prompt says so.
+ * starting directory, its AGENTS.md read - or its absence is on the Error of
+ * the object that holds it. A folder need not be a git repo; when it is, the
+ * prompt says so.
  */
 
 import { homedir } from "node:os";
@@ -15,6 +18,11 @@ const AGENTS_MD_CAP = 8000;
 const GIT_TIMEOUT_MS = 10_000;
 /** Error-badge prefix for a Project folder problem (cleared once the folder is fine or unset). */
 export const FOLDER_BADGE = "Project folder ";
+
+/** Whose Project folder a turn on `subject` uses: the object's own when it has one, else the agent's. */
+export function folderHolder(agent: ObjectJSON, subject: ObjectJSON | null | undefined): ObjectJSON {
+	return subject && subject.id !== agent.id && str(subject.fields, "repo_path").trim() ? subject : agent;
+}
 
 async function git(path: string, ...args: string[]): Promise<{ code: number; out: string }> {
 	const proc = Bun.spawn(["git", "-C", path, ...args], { stdout: "pipe", stderr: "pipe" });
@@ -106,17 +114,19 @@ export function workspacePromptSection(ws: Workspace): string {
 }
 
 /**
- * Keep the agent's Error true about its Project folder, on the computer that
- * serves it: a set folder missing here is an Error; fine or unset clears one
- * this wrote. Returns the folder when it is in use.
+ * Keep `holder`'s Error true about its Project folder (an agent's, or an
+ * object's own - `folderHolder`), on the computer running the agent: a set
+ * folder missing here is an Error; fine or unset clears one this wrote.
+ * Returns the folder when it is in use.
  */
-export async function checkProjectFolder(agent: ObjectJSON): Promise<Workspace | null> {
-	const repo = str(agent.fields, "repo_path").trim();
+export async function checkProjectFolder(holder: ObjectJSON): Promise<Workspace | null> {
+	const repo = str(holder.fields, "repo_path").trim();
 	const ws = repo ? await workspaceAt(repo).catch(() => null) : null;
-	const current = str(agent.fields, "error");
-	const want = repo && !ws ? `${FOLDER_BADGE}${repo} isn't on ${await thisComputerName()} - set it to a folder on the computer this agent runs on, or clear it.` : "";
-	if (want && current !== want && (!current || current.startsWith(FOLDER_BADGE))) await setField(agent.id, "error", sv(want));
-	if (!want && current.startsWith(FOLDER_BADGE)) await deleteField(agent.id, "error");
+	const current = str(holder.fields, "error");
+	const whose = holder.typeKey === "agent" ? "this agent runs on" : "this object's agents run on";
+	const want = repo && !ws ? `${FOLDER_BADGE}${repo} isn't on ${await thisComputerName()} - set it to a folder on the computer ${whose}, or clear it.` : "";
+	if (want && current !== want && (!current || current.startsWith(FOLDER_BADGE))) await setField(holder.id, "error", sv(want));
+	if (!want && current.startsWith(FOLDER_BADGE)) await deleteField(holder.id, "error");
 	return ws;
 }
 

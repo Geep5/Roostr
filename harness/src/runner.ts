@@ -21,7 +21,7 @@ import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
 import { agentModelKey, credentialsPromptLine } from "./credential-objects";
 import { dispatchTool, missingToolsNote, toolDefs, type ToolContext } from "./tools";
 import { agentToolset } from "./tool-objects";
-import { checkProjectFolder, workspaceAt, workspacePromptSection, workspaceSummary } from "./workspace";
+import { checkProjectFolder, folderHolder, workspaceAt, workspacePromptSection, workspaceSummary } from "./workspace";
 import { genesisCalls, genesisFingerprint, lastGenesis } from "./genesis";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
@@ -208,9 +208,12 @@ export async function slowSystemParts(agent: ObjectJSON, spec: Awaited<ReturnTyp
 	]);
 	const kbRows = await knowledgeBaseRows(agent);
 	const credsLine = await credentialsPromptLine(agent);
-	const repo = str(agent.fields, "repo_path");
-	// Checked every turn on the computer running it: missing here is on the agent's Error.
-	const ws = await checkProjectFolder(agent).catch(() => null);
+	// The object's own Project folder wins over the agent's for work on it.
+	const subject = objectId && objectId !== agentId ? await fetchObject(objectId).catch(() => null) : null;
+	const holder = folderHolder(agent, subject);
+	const repo = str(holder.fields, "repo_path");
+	// Checked every turn on the computer running it: missing here is on its holder's Error.
+	const ws = await checkProjectFolder(holder).catch(() => null);
 	const fingerprint = [
 		agent.updatedAt ?? 0,
 		promptObj?.updatedAt ?? 0,
@@ -343,7 +346,7 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		ctx.boundObject = ref.objectId === agentId ? undefined : ref.objectId;
 		// Same checkout the Workspace prompt section describes; a missing
 		// directory means home, never a spawn failure.
-		const repo = str(agent.fields, "repo_path");
+		const repo = str(folderHolder(agent, ctx.boundObject ? conv : null).fields, "repo_path");
 		ctx.workspacePath = repo ? (await workspaceAt(repo).catch(() => null))?.path : undefined;
 		const ratio = tokenRatio(agent);
 		const cfg = compactionConfig(agent);
