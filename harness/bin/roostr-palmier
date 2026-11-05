@@ -1,0 +1,6 @@
+#!/bin/sh
+# roostr-palmier for Roostr agents: harness/scripts/palmier.ts (usage there).
+# Shipped with the harness (harness/bin/roostr-palmier) and linked into
+# ~/.local/bin, so a pull updates it.
+here=$(dirname "$(readlink -f "$0")")
+exec bun "$here/../scripts/palmier.ts" "$@"

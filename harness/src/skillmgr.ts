@@ -194,6 +194,52 @@ export const CATALOG: CatalogEntry[] = [
 			"Then: put each File on the object with object_add_link, and reply with the claude.ai link and what you made. To change a design, run it again with a brief that says what to change, and replace the old File link on the object with the new one.\n" +
 			"When it fails, say so plainly and put it on the object's Error (object_flag_error): \"not signed in\" means a person must run `claude` on this computer, then /login and /design consent; a usage limit means the Claude plan's limit is reached until it resets. Never retry in a loop.",
 	},
+	{
+		key: "video-clips",
+		name: "Video Clips",
+		description: "Download YouTube, Twitch and other online video clips (or a part of a long video) as MP4 Files on the object, with yt-dlp and ffmpeg.",
+		// The harness links `roostr-clip` (harness/bin) into ~/.local/bin at
+		// start; the install only brings yt-dlp and ffmpeg.
+		installPrompt:
+			"Make yt-dlp and ffmpeg ready on this Mac. With Homebrew: if `command -v yt-dlp` fails run `brew install yt-dlp`, otherwise `brew upgrade yt-dlp` (it must be 2026.08.19 or newer - older versions get HTTP 403 from YouTube); if `command -v ffmpeg` fails run `brew install ffmpeg`. " +
+			"If Homebrew is missing, stop and say a person must install it (https://brew.sh). NEVER use sudo or anything that can prompt for a password. " +
+			"Finish only when `roostr-clip --check` exits 0; if `roostr-clip` is not found, say the harness needs a restart to put it on PATH.",
+		uninstallPrompt: "Video Clips needs nothing removed: yt-dlp and ffmpeg may be used by other programs. Remove only the `roostr-clip` link from ~/.local/bin if it is there, and finish.",
+		checkCmd: "roostr-clip --check",
+		skillBody:
+			"Use this when someone wants an online video or a part of one: a YouTube video or Short, a Twitch clip or VOD, or any link yt-dlp supports (X, Instagram, TikTok, Vimeo...).\n" +
+			"Download with shell_exec (seconds for a clip; a long video takes longer):\n" +
+			"roostr-clip --space <this space's id> '<link>'\n" +
+			"For part of a long video add --start and --end (75, 1:15 or 1:02:03): roostr-clip --space <id> '<link>' --start 2:10 --end 2:40. Prefer a part over a whole long video - Files over 1 GB are refused.\n" +
+			"It prints one JSON line: the stored File (`id`, `name`, `duration` in seconds, `size`, `width`, `height`, `audio`), or `error` in words. The video is one MP4 (H.264/AAC up to 1080p), already checked with ffprobe and stored in the space.\n" +
+			"Then put the File on the object with object_add_link and reply with what you got (title, length). Several links: one command per link.\n" +
+			"A video you made or edited elsewhere (a Palmier export, a file on this computer) is stored the same way: roostr-clip --space <id> --store '<path>' [--name '<name>'].\n" +
+			"When it fails, say so plainly and put it on the object's Error (object_flag_error); an HTTP 403 means yt-dlp on this computer is out of date (a person runs `brew upgrade yt-dlp`). Never retry in a loop.",
+	},
+	{
+		key: "palmier",
+		name: "Palmier",
+		description: "Edit videos with Palmier Pro, the Mac video editor, headless: import clips, cut, caption, reframe, color, generate and export - then keep the result as a File.",
+		installPrompt:
+			"Palmier Pro is the person's own app (a paid subscription): do NOT download or install it. If /Applications/PalmierPro.app is missing, stop and say a person must install Palmier Pro from https://www.palmier.io/download (macOS 26 or newer) and sign in. " +
+			"Otherwise finish only when `roostr-palmier --check` exits 0 (it starts Palmier hidden when it isn't running); if `roostr-palmier` is not found, say the harness needs a restart to put it on PATH.",
+		uninstallPrompt: "Palmier needs nothing removed: Palmier Pro is the person's own app. Remove only the `roostr-palmier` link from ~/.local/bin if it is there, and finish.",
+		checkCmd: "roostr-palmier --check",
+		authCheckCmd: "roostr-palmier --auth-check",
+		authHint: "Open Palmier Pro on this computer and sign in (Settings → Account); then Re-check in Settings → Skills.",
+		skillBody:
+			"Use this to edit video: cut clips together, trim, remove silences or filler words, add captions or titles, reframe for vertical, color, speed ramps, generate media, and export. Palmier Pro runs headless on this computer: projects open without a window, so a person's own editing isn't disturbed.\n" +
+			"Call its tools with shell_exec through `roostr-palmier`:\n" +
+			"roostr-palmier tools                 every tool, one line each\n" +
+			"roostr-palmier tools <name>          one tool's description and inputs - read it before the first call of a tool\n" +
+			"roostr-palmier call <name> <<'JSON'\n{...the tool's inputs...}\nJSON\n" +
+			"Always pass inputs in that quoted <<'JSON' block. It prints the tool's result (usually JSON), or `error`.\n" +
+			"A typical edit: manage_project (action list, or create a new project - one per piece of work, named after the object), import_media (source.path for a downloaded file, or source.url), get_media for ids, then add_clips / insert_clips onto its timeline, get_timeline to read it back, edits (remove_silence, add_captions, apply_layout, set_clip_properties...), inspect_timeline to look at frames and check the result, then export_project and manage_exports until it is done.\n" +
+			"Check what you did: Palmier's tools report success even when an edit landed somewhere else, so read the timeline back (get_timeline) or render a frame (inspect_timeline) after edits that matter. manage_snapshots saves a point to go back to before big changes.\n" +
+			"Keep the export in Roostr: roostr-clip --space <this space's id> --store '<exported file path>' --name '<name>' (needs the Video Clips Skill), then object_add_link the File and reply with what you made and the Palmier project's name, so a person can open it there (manage_project action show opens its window).\n" +
+			"Generation (generate_video, generate_image, generate_audio, upscale_media) spends the person's Palmier credits: use it only when asked, and say what it cost (get_usage).\n" +
+			"When something fails, say so plainly and put it on the object's Error (object_flag_error). Never retry in a loop.",
+	},
 ];
 
 // -- Object-backed state ------------------------------------------

@@ -195,6 +195,13 @@ These are enforced by the harness for every agent; follow them in any prompt you
 3. `roostr-design` drafts the design with Claude Code's `/design` in a background session (`claude -p` cannot publish designs), in a design folder it creates and trusts (`~/projekt/3/roostr-design`, or `DESIGN_DIR`), then stores a PNG of each artboard as a File in the space and prints the claude.ai link. The agent links the Files on the object and posts the link.
 4. It uses the claude.ai plan's limits, not an API key.
 
+### Download and edit video clips
+
+1. Every space has the built-in **Video Clips** and **Palmier** Skills. Switch them on for the computer in Settings → Skills. Video Clips needs yt-dlp 2026.08.19 or later (older versions get HTTP 403 from YouTube) and ffmpeg: the switch installs or upgrades them with Homebrew. Palmier needs the person's own Palmier Pro app installed and signed in; it runs headless, so agents open projects without a window and a person's own editing isn't disturbed.
+2. Give the Skills and `shell_exec` to an agent served by that computer, then ask it on any object: "@Agent download https://clips.twitch.tv/... and 2:10-2:40 of https://youtu.be/...", "cut these together in Palmier, caption it and export".
+3. `roostr-clip` (in the Roostr repo's `harness/bin`, put on PATH by the harness) downloads one MP4 (H.264/AAC up to 1080p, or a part with `--start`/`--end`), checks it with ffprobe and stores it as a File in the space; `--store <path>` stores a Palmier export or any video file the same way. Files over 1 GB are refused - take a part instead. `roostr-palmier` calls Palmier's editing tools (`tools`, `tools <name>`, `call <name>` with the inputs as JSON), starting Palmier hidden when it isn't running.
+4. A YouTube video that answers "sign in to confirm you're not a bot" is YouTube limiting that computer for a while; the agent puts it on the object's Error. Palmier's AI generation spends the person's Palmier credits, so agents use it only when asked.
+
 ### Keep a computer running Roostr
 
 1. In the Roostr repo: build the engine (`odin build src -out:glon-odin -o:speed`), then `cd harness && bun install`.

@@ -309,6 +309,8 @@ async function serve(): Promise<void> {
 	await publishMachine(); // register this machine before serving resolves against the roster
 	installShippedCommand("gws-as");
 	installShippedCommand("roostr-design");
+	installShippedCommand("roostr-clip");
+	installShippedCommand("roostr-palmier");
 	// Spaces the background seeding below covers: a channel event meanwhile must not seed them a second time.
 	for (const s of await queryAll({ type: "channel" })) spacesSeeded.add(s.id);
 	const agents = await servedAgents();
