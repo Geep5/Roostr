@@ -1,6 +1,6 @@
 import type { Roostr, ValueJSON } from "../tool-sdk";
 
-export const description = "Set one of the object's properties - only a property that exists in this space (the reply lists them if the key is unknown); a value nothing can display is refused, never stored. The value is written in the property's own type: checkbox true/false, number a number, date epoch milliseconds or an ISO date, tag/object comma-separated; anything else is text. The reply is the value as the human now sees it. Setting done=true on a recurring object completes its current occurrence. key=agent ADDS the given agent id(s) to the object's default agents (pre-tagged in its chat; they run its Repeat - any agent of the space can be @-asked on any object anyway); to take an agent off, use object_clear_field(key=agent, value=<agent id>). To make an object repeat, use object_set_repeat.";
+export const description = "Set one of the object's properties - only a property that exists in this space (the reply lists them if the key is unknown); a value nothing can display is refused, never stored. The value is written in the property's own type: checkbox true/false, number a number, date epoch milliseconds or an ISO date, tag comma-separated, object comma-separated object ids or exact names of objects in this space (stored as links); anything else is text. The reply is the value as the human now sees it. Setting done=true on a recurring object completes its current occurrence. key=agent ADDS the given agent id(s) to the object's default agents (pre-tagged in its chat; they run its Repeat - any agent of the space can be @-asked on any object anyway); to take an agent off, use object_clear_field(key=agent, value=<agent id>). To make an object repeat, use object_set_repeat.";
 export const inputs = "id: string\nkey: string\nvalue: string";
 
 export default async function (input: Record<string, unknown>, roostr: Roostr) {
@@ -46,10 +46,9 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 			}
 			case "status":
 				return strings(t ? [t] : []);
-			// Tag and object relations are lists in the store (and in the UI):
-			// a bare string here would render as an empty cell.
+			// Tag relations are lists in the store (and in the UI): a bare
+			// string here would render as an empty cell.
 			case "tag":
-			case "object":
 				return strings(t.split(",").map((s) => s.trim()).filter(Boolean));
 			default:
 				return { stringValue: raw };
@@ -77,6 +76,26 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 			return `error: nothing written. "${raw}" is not a Computer. Computers: ${known || "none"}.`;
 		}
 		value = { stringValue: machineIdOf(hit) };
+	} else if (def.format === "object") {
+		// An object property holds links: each comma-separated part is an
+		// object of this space, by id or by its exact name. Text there is
+		// no link - the Properties pane shows nothing to open, and the
+		// object it named never lists this one.
+		const space = await roostr.space();
+		const targets: string[] = [];
+		for (const part of raw.split(",").map((s) => s.trim()).filter(Boolean)) {
+			const byId = await roostr.get(part).catch(() => null);
+			if (byId && !byId.deleted && (byId.fields["channel"]?.stringValue ?? "") === space) {
+				targets.push(byId.id);
+				continue;
+			}
+			const named = (await roostr.query({ filters: [{ key: "name", condition: "like", value: part }, { key: "channel", condition: "equal", value: space }], limit: 50 }))
+				.filter((r) => (r.fields["name"]?.stringValue ?? "").trim().toLowerCase() === part.toLowerCase());
+			if (named.length === 0) return `error: nothing written. ${def.name} links to objects, and no object of this space is named "${part}" or has that id. Find it with object_search, or create it first.`;
+			if (named.length > 1) return `error: nothing written. ${def.name}: ${named.length} objects are named "${part}": ${named.map((r) => `${r.id} (${r.typeKey})`).join(", ")}. Give the id.`;
+			targets.push(named[0].id);
+		}
+		value = { valuesValue: { items: [...new Set(targets)].map((targetId) => ({ linkValue: { relationKey: key, targetId } })) } };
 	} else {
 		const typed = typedValue(def.format);
 		if ("error" in typed) return `error: nothing written. ${def.name}: ${typed.error}.`;
@@ -88,6 +107,11 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 	const after = await roostr.get(obj.id);
 	if (key === "done" && after.fields["repeat"]) return `This object repeats, so the current occurrence was completed instead: ${roostr.describeRepeat(after.fields["repeat"])}.`;
 	/** A stored value as the Properties pane shows it - what the human now sees. */
+	const names = new Map<string, string>();
+	for (const item of after.fields[key]?.valuesValue?.items ?? []) {
+		const id = item.linkValue?.targetId;
+		if (id) names.set(id, (await roostr.get(id).catch(() => null))?.fields["name"]?.stringValue || id);
+	}
 	const shown = (v: ValueJSON | undefined): string => {
 		if (!v) return "(empty)";
 		if (v.boolValue !== undefined) return v.boolValue ? "checked" : "unchecked";
@@ -95,7 +119,7 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 		if (def.format === "date" && ms !== undefined) return new Date(ms).toLocaleString();
 		if (ms !== undefined) return String(ms);
 		const items = v.valuesValue?.items ?? [];
-		if (v.valuesValue) return items.length ? items.map((i) => i.stringValue ?? i.linkValue?.targetId ?? "").join(", ") : "(empty)";
+		if (v.valuesValue) return items.length ? items.map((i) => i.stringValue ?? names.get(i.linkValue?.targetId ?? "") ?? "").join(", ") : "(empty)";
 		return v.stringValue || "(empty)";
 	};
 	return `${def.name} is now: ${shown(after.fields[key])}`;

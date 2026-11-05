@@ -63,6 +63,12 @@ const RELATIONS = [
 	relation("stage", "Stage", "status", { options: { valuesValue: { items: [{ mapValue: { entries: { id: { stringValue: "o1" }, text: { stringValue: "Lead" }, color: { stringValue: "grey" }, orderId: { stringValue: "000000" } } } }] } } }),
 	relation("bundled_one", "Bundled one", "shorttext", { bundled: { boolValue: true } }),
 ];
+/** Objects an object property can link to: two of this space, one of another. */
+const LINKABLE: ObjectJSON[] = [
+	{ id: "game-stoke", typeKey: "game_publisher", fields: { name: { stringValue: "Stoke Games" }, channel: { stringValue: "space" } }, blocks: [], deleted: false, createdAt: 0, updatedAt: 0, mailbox: [] },
+	{ id: "game-tanks", typeKey: "game", fields: { name: { stringValue: "Tank Game" }, channel: { stringValue: "space" } }, blocks: [], deleted: false, createdAt: 0, updatedAt: 0, mailbox: [] },
+	{ id: "elsewhere", typeKey: "game", fields: { name: { stringValue: "Elsewhere" }, channel: { stringValue: "other" } }, blocks: [], deleted: false, createdAt: 0, updatedAt: 0, mailbox: [] },
+];
 const MACHINES: ObjectJSON[] = [{ id: "computer-obj", typeKey: "machine", fields: { name: { stringValue: "Sharky's Mac Studio" }, machine_id: { stringValue: "820d3a06" } }, blocks: [], deleted: false, createdAt: 0, updatedAt: 0, mailbox: [] }];
 
 const typeRow = (key: string, name: string): ObjectJSON => ({
@@ -94,10 +100,18 @@ function daemon(task: ObjectJSON) {
 		if (url.pathname === `/api/objects/${task.id}`) return Response.json(task);
 		const rel = RELATIONS.find((r) => url.pathname === `/api/objects/${r.id}`);
 		if (rel) return Response.json(rel);
+		const linkable = LINKABLE.find((o) => url.pathname === `/api/objects/${o.id}`);
+		if (linkable) return Response.json(linkable);
 		if (url.pathname === "/api/channels") return Response.json([{ id: "space" }]);
 		if (url.pathname === "/api/query") {
 			const body = JSON.parse(String(init?.body));
-			const records = body.type === "relation" ? RELATIONS : body.type === "type" ? TYPES : body.type === "machine" ? MACHINES : [];
+			const filters = (body.filters ?? []) as Array<{ key: string; value: unknown }>;
+			const like = filters.find((f) => f.key === "name");
+			const channel = filters.find((f) => f.key === "channel");
+			const named = like
+				? LINKABLE.filter((o) => (o.fields.name?.stringValue ?? "").toLowerCase().includes(String(like.value).toLowerCase()) && (!channel || o.fields.channel?.stringValue === channel.value))
+				: [];
+			const records = body.type === "relation" ? RELATIONS : body.type === "type" ? TYPES : body.type === "machine" ? MACHINES : named;
 			return Response.json({ records, total: records.length });
 		}
 		if (url.pathname === "/api/mutate") {
@@ -341,4 +355,25 @@ test("property_edit limits an existing object property to types, renames, adds o
 		expect(reply).toContain(says);
 	}
 	expect(mutations.length).toBe(before);
+});
+
+test("an object property links the objects it names, by exact name or id in this space - never text", async () => {
+	// An agent once set Employer to the text "Stoke Games": the Properties
+	// pane showed nothing to open and Stoke Games never listed the person.
+	const t = task();
+	const mutations = daemon(t);
+	expect(await call("object_set_field", { id: "task", key: "main_games", value: "stoke games, game-tanks" })).toBe("Main games is now: Stoke Games, Tank Game");
+	expect(t.fields.main_games).toEqual({
+		valuesValue: {
+			items: [
+				{ linkValue: { relationKey: "main_games", targetId: "game-stoke" } },
+				{ linkValue: { relationKey: "main_games", targetId: "game-tanks" } },
+			],
+		},
+	});
+	const writes = mutations.length;
+	for (const value of ["Stoke", "Elsewhere", "elsewhere"]) {
+		expect(await call("object_set_field", { id: "task", key: "main_games", value })).toStartWith("error: nothing written");
+	}
+	expect(mutations.length).toBe(writes);
 });
