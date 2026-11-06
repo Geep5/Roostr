@@ -209,6 +209,12 @@ These are enforced by the harness for every agent; follow them in any prompt you
 2. Give an agent the Rive Skill and `shell_exec`, set its Served by to that computer, and set its Project folder to the Rive work (a folder with `rive.yaml`, or one holding several such projects). The project's own AGENTS.md carries its rules - brand, palette, timing - so each space's agents work on their own project with the same Skill.
 3. Ask for anything in Rive: "make the TOP 5 card for this tournament", "build a small game", "an intro with this player's name". The agent edits with the Rive CLI (`rive docs`, `rive schema`, `--verify`, `inspect`) and shows its work with `roostr-rive`: `shot` stores one frame as a PNG File, `render` a video File (MP4, or ProRes 4444 with transparency with `--alpha` when the scene's background is bound to a `bg` color), with `--data` filling in view model values per render.
 
+### Shortcut stories
+
+1. Every space has a **Shortcut** credential template. Paste a Shortcut API token into its "API token" (app.shortcut.com -> Settings -> Your Account -> API Tokens; it acts as the person who made it).
+2. Add the credential to the agent's Credentials. The agent gets the built-in `shortcut` tool: one request to Shortcut's REST API v3 per call (`path` like `/search/stories?query=state:started&page_size=25&detail=slim`, `/stories/<id>`, `/workflows`, `/members`; `PUT /stories/<id>` to move or assign a story, `POST /stories/<id>/comments` to comment). The harness sends the token; the agent never sees it.
+3. Ask on any object: "@Agent which stories are waiting to deploy?", "move story 123 to Done", "make a story for the PayPal cash-out bug and give it to Josh". Say in the agent's instructions when it may write (create, move, comment) - by default it only reads.
+
 ### Keep a computer running Roostr
 
 1. In the Roostr repo: build the engine (`odin build src -out:glon-odin -o:speed`), then `cd harness && bun install`.

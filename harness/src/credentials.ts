@@ -160,6 +160,13 @@ export const CREDENTIAL_SEEDS: CredentialSeed[] = [
 		passwordFields: [{ key: "url", label: "Database URL", secret: true }],
 		options: [{ key: "ssh_host", label: "SSH host" }],
 	},
+	// Shortcut stories, epics and iterations: the shortcut tool, signed in by the harness (shortcut.ts).
+	{
+		key: "shortcut",
+		label: "Shortcut",
+		note: "A Shortcut API token, from app.shortcut.com → Settings → Your Account → API Tokens (it acts as the person who made it). Agents that list this credential read and update Shortcut stories, epics and iterations with the shortcut tool.",
+		passwordFields: [{ key: "api_token", label: "API token", secret: true }],
+	},
 ];
 
 /**

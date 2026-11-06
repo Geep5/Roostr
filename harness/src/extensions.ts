@@ -30,6 +30,7 @@ import type { SessionCookie } from "./browser";
 import { CREDENTIAL_SEEDS, type CredentialSeed } from "./credentials";
 import { PROMPT_SEEDS, type AgentKindEntry } from "./prompts";
 import { CATALOG, type CatalogEntry } from "./skillmgr";
+import { SHORTCUT_SERVICE, shortcutApi } from "./shortcut";
 import type { CredentialAnswer } from "./tool-sdk";
 
 /** A service's own API as the harness signs it in: mint a token from the credential's fields, then send requests with it. */
@@ -61,8 +62,8 @@ export interface Extension {
 
 /** Service -> session renewer. */
 export const sessionRenewers: Record<string, SessionRenewer> = {};
-/** Service -> signed API. */
-export const credentialApis: Record<string, CredentialApi> = {};
+/** Service -> signed API: the built-in ones, then each extension's. */
+export const credentialApis: Record<string, CredentialApi> = { [SHORTCUT_SERVICE]: shortcutApi };
 /** Service -> action key -> harness-side code. */
 export const credentialActions: Record<string, Record<string, CredentialActionRun>> = {};
 
