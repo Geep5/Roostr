@@ -649,6 +649,17 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 			target_id = thread_id,
 			position  = POS_INNER,
 		})
+		// A quiet-timer repeat (repeat.odin `after`): a message in the human
+		// chat restarts its clock, in the same change as the message.
+		if thread_id == DISCUSSION_ID {
+			if current, recurring := repeat_state_value(input, object_id); recurring {
+				offset, has_offset := json_int(parsed, "tz_offset_min")
+				if _, present := json_field(parsed, "tz_offset_min"); !present || !has_offset do offset, _ = repeat_entry_int(current, "tz_offset")
+				if restarted, moved := repeat_after_message(current, input.timestamp, offset); moved {
+					append(&ops, Operation{kind = .Field_Set, key = REPEAT_KEY, value = restarted})
+				}
+			}
+		}
 		mutation_add(&plan, input, object_id, ops[:])
 		extra := jobj()
 		extra["id"] = json.String(mid)
@@ -889,7 +900,15 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 		rule, ok := repeat_rule_from_json(rule_json, tz_offset_min, now_local)
 		if !ok do return plan, "invalid repeat rule"
 		previous, has_previous := repeat_state_value(input, object_id)
-		value := repeat_value(rule, repeat_first(rule, now_local), tz_offset_min, previous, has_previous)
+		first: i64
+		if rule.after {
+			// The clock starts at the newest chat message, or now when that is older.
+			from := max(repeat_last_message(input.states[object_id]), now_ms) + tz_offset_min * REPEAT_MIN_MS
+			first = repeat_after_next(rule, floor_div(from, REPEAT_MIN_MS))
+		} else {
+			first = repeat_first(rule, now_local)
+		}
+		value := repeat_value(rule, first, tz_offset_min, previous, has_previous)
 		ops := make([dynamic]Operation, context.temp_allocator)
 		append(&ops, Operation{kind = .Field_Set, key = REPEAT_KEY, value = value})
 		if done, present := fields_get(input.states[object_id].fields, "done"); present && done.kind == .Bool && done.b {

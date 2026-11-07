@@ -14,7 +14,15 @@ package core
 //       its own times, [] = that period is off; `times` then holds their union.
 //       Absent: only the cycle's first period runs, at `times`.
 //     window: [from, until] minutes after local midnight (minute/hour: the grid
-//       runs from..until each day, restarting at `from`; absent = the whole day),
+//       runs from..until each day, restarting at `from`; after: runs wait for
+//       it; absent = the whole day),
+//     after: true (freq minute/hour/day): a quiet timer, not a calendar - each
+//       run is `interval` units after the newest message in the object's chat
+//       (anyone's, the agent's own included): every message restarts the
+//       clock (chat_post), and a run with no reply since runs again after
+//       the same wait. A run that would land outside `window` waits for it.
+//     tz_offset (after): the UTC offset (minutes) the rule was last set or run
+//       in, for the clock a chat message restarts when its writer sends none,
 //     tz: IANA name (informational),
 //     anchor: ms of the day the cadence counts from (start of local day),
 //     next: ms of the current occurrence,
@@ -50,6 +58,27 @@ Repeat_Rule :: struct {
 	win_until:  i64,
 	tz:         string,
 	anchor:     i64, // local-day index (days since 1970-01-01 in the wall clock)
+	after:      bool, // quiet timer: `interval` x `freq` after the newest chat message
+}
+
+/** The wait of a quiet-timer rule, in minutes. */
+repeat_after_minutes :: proc(rule: Repeat_Rule) -> i64 {
+	unit: i64 = rule.freq == "day" ? REPEAT_DAY_MIN : rule.freq == "hour" ? 60 : 1
+	return max(rule.interval, 1) * unit
+}
+
+/** Local minute `at`, or the next start of the rule's window when `at` falls outside it. */
+repeat_in_window :: proc(rule: Repeat_Rule, at: i64) -> i64 {
+	day := floor_div(at, REPEAT_DAY_MIN)
+	minute := at - day * REPEAT_DAY_MIN
+	if minute < rule.win_from do return day * REPEAT_DAY_MIN + rule.win_from
+	if minute > rule.win_until do return (day + 1) * REPEAT_DAY_MIN + rule.win_from
+	return at
+}
+
+/** A quiet-timer rule's run (local minute): the wait after local minute `from`, inside the window. */
+repeat_after_next :: proc(rule: Repeat_Rule, from: i64) -> i64 {
+	return repeat_in_window(rule, from + repeat_after_minutes(rule))
 }
 
 repeat_sub_daily :: proc(rule: Repeat_Rule) -> bool {
@@ -279,6 +308,7 @@ repeat_rule_from_value :: proc(v: Value) -> (rule: Repeat_Rule, ok: bool) {
 	if w, present := repeat_entry(v, "window"); present && w.kind == .List && len(w.items) == 2 && w.items[0].kind == .Int && w.items[1].kind == .Int {
 		rule.win_from, rule.win_until = w.items[0].i, w.items[1].i
 	}
+	if a, present := repeat_entry(v, "after"); present && a.kind == .Bool do rule.after = a.b
 	return rule, repeat_rule_valid(rule)
 }
 
@@ -309,6 +339,10 @@ repeat_rule_valid :: proc(rule: Repeat_Rule) -> bool {
 	}
 	if rule.interval < 1 || rule.interval > 999 do return false
 	for wd in rule.weekdays do if wd < 0 || wd > 6 do return false
+	if rule.after {
+		if rule.freq != "minute" && rule.freq != "hour" && rule.freq != "day" do return false
+		return rule.win_from >= 0 && rule.win_until < REPEAT_DAY_MIN && rule.win_from <= rule.win_until
+	}
 	if repeat_sub_daily(rule) {
 		if rule.win_from < 0 || rule.win_until >= REPEAT_DAY_MIN || rule.win_from > rule.win_until do return false
 		if rule.freq == "hour" && rule.interval > 23 do return false
@@ -338,10 +372,11 @@ repeat_rule_from_json :: proc(v: json.Value, tz_offset_min: i64, default_anchor_
 		return out
 	}
 	rule.weekdays = json_ints(v, "weekdays")
+	if a, is_bool := json_bool(v, "after"); is_bool do rule.after = a
 	rule.times = json_ints(v, "times")
 	repeat_sorted_times(&rule.times)
 	rule.slots = make([dynamic][dynamic]i64, context.temp_allocator)
-	if !repeat_sub_daily(rule) && rule.interval >= 2 {
+	if !rule.after && !repeat_sub_daily(rule) && rule.interval >= 2 {
 		for slot in json_array(v, "slots") {
 			times := make([dynamic]i64, context.temp_allocator)
 			if items, is_array := slot.(json.Array); is_array {
@@ -383,7 +418,10 @@ repeat_value :: proc(rule: Repeat_Rule, next_local: i64, tz_offset_min: i64, pre
 	put(&v, "interval", int_value(rule.interval))
 	put(&v, "weekdays", ints(rule.weekdays[:]))
 	put(&v, "monthly", string_value(rule.monthly))
-	if repeat_sub_daily(rule) do put(&v, "window", ints([]i64{rule.win_from, rule.win_until}))
+	if rule.after {
+		put(&v, "after", bool_value(true))
+		put(&v, "window", ints([]i64{rule.win_from, rule.win_until}))
+	} else if repeat_sub_daily(rule) do put(&v, "window", ints([]i64{rule.win_from, rule.win_until}))
 	else do put(&v, "times", ints(rule.times[:]))
 	if repeat_slotted(rule) {
 		slots := make([dynamic]Value, context.temp_allocator)
@@ -392,6 +430,7 @@ repeat_value :: proc(rule: Repeat_Rule, next_local: i64, tz_offset_min: i64, pre
 	}
 	put(&v, "tz", string_value(rule.tz))
 	put(&v, "anchor", int_value(rule.anchor))
+	if rule.after do put(&v, "tz_offset", int_value(tz_offset_min))
 	put(&v, "next", int_value(repeat_local_to_ms(next_local, tz_offset_min)))
 	if has_previous {
 		for key in ([]string{"last_done", "count", "last_run"}) {
@@ -445,7 +484,12 @@ repeat_advance_ops :: proc(current: Value, now_ms, tz_offset_min: i64) -> (Value
 	if !has_next do return {}, "repeat has no current occurrence"
 	now_local := now_ms + tz_offset_min * REPEAT_MIN_MS
 	next_after: i64
-	if moved, was_moved := repeat_entry(current, "moved"); was_moved {
+	if rule.after {
+		// A quiet timer runs again the same wait after this run, unless a
+		// message (its own reply, usually) restarted the clock later still.
+		next_after = repeat_local_to_ms(repeat_after_next(rule, floor_div(now_local, REPEAT_MIN_MS)), tz_offset_min)
+		if next_ms > now_ms do next_after = max(next_after, next_ms)
+	} else if moved, was_moved := repeat_entry(current, "moved"); was_moved {
 		// A moved run (occurrence_move) sits off the rule's days: the rule
 		// picks up from the occurrence it displaced - that one itself when
 		// it is still ahead (moved earlier), else the first after now.
@@ -460,8 +504,46 @@ repeat_advance_ops :: proc(current: Value, now_ms, tz_offset_min: i64) -> (Value
 	out = repeat_with(out, "last_done", int_value(now_ms))
 	count, _ := repeat_entry_int(out, "count")
 	out = repeat_with(out, "count", int_value(count + 1))
+	if rule.after do out = repeat_with(out, "tz_offset", int_value(tz_offset_min))
 	for key in ([]string{"fired_for", "fired_at", "fired_by", "moved"}) do out = repeat_without(out, key)
 	return out, ""
+}
+
+/**
+ * A chat message at `at_ms` on an object whose repeat is a quiet timer:
+ * the clock restarts there - the next run is the wait after it, in the
+ * window. `tz_offset_min` is the writer's (the rule's last when it sent
+ * none). An occurrence that fired and is still open stays as it is: its run
+ * is answering, and finishing it restarts the clock (repeat_advance_ops).
+ */
+repeat_after_message :: proc(current: Value, at_ms: i64, tz_offset_min: i64) -> (Value, bool) {
+	rule, ok := repeat_rule_from_value(current)
+	if !ok || !rule.after do return {}, false
+	next_ms, _ := repeat_entry_int(current, "next")
+	if fired_for, fired := repeat_entry_int(current, "fired_for"); fired && fired_for == next_ms do return {}, false
+	at_local := floor_div(at_ms, REPEAT_MIN_MS) + tz_offset_min
+	next := repeat_local_to_ms(repeat_after_next(rule, at_local), tz_offset_min)
+	if next == next_ms do return {}, false
+	out := repeat_with(current, "next", int_value(next))
+	out = repeat_without(out, "moved")
+	return out, true
+}
+
+/** The newest message (ms) in the object's human chat, 0 when it has none. */
+repeat_last_message :: proc(s: ^Object_State) -> i64 {
+	newest: i64 = 0
+	for b in s.blocks {
+		if b.id != DISCUSSION_ID do continue
+		for child in b.children_ids {
+			for m in s.blocks {
+				if m.id != child || m.content.kind != .Custom || m.content.custom.content_type != "chat" do continue
+				for pair in m.content.custom.meta do if pair.key == "ts" {
+					if ts, parsed := strconv.parse_i64(pair.value); parsed do newest = max(newest, ts)
+				}
+			}
+		}
+	}
+	return newest
 }
 
 /**

@@ -15,7 +15,8 @@ function clockTime(minutes: number): string {
 /**
  * An object's repeat rule in the words the Repeat cell uses, with its next
  * occurrence: "every 2 weeks on Wed at 9:00 AM, 1:00 PM · next Wed, Oct 8,
- * 9:00 AM", "every 5 minutes on Mon, Tue from 9:00 AM to 5:00 PM · next ...".
+ * 9:00 AM", "every 5 minutes on Mon, Tue from 9:00 AM to 5:00 PM · next ...",
+ * "2 days after the last message, between 9:00 AM and 6:00 PM · next ...".
  */
 export function describeRepeat(v: ValueJSON | undefined): string {
 	const e = v?.mapValue?.entries;
@@ -26,6 +27,13 @@ export function describeRepeat(v: ValueJSON | undefined): string {
 	const unit = every === 1 ? freq : `${every} ${freq}s`;
 	const days = ints("weekdays").map((i) => WEEKDAY_NAMES[i] ?? "").map((d) => d.charAt(0).toUpperCase() + d.slice(1));
 	const subDaily = freq === "minute" || freq === "hour";
+	const next = e["next"]?.intValue;
+	const when = next ? ` · next ${new Date(next).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : "";
+	if (e["after"]?.boolValue === true) {
+		const [from = 0, until = 1439] = ints("window");
+		const hours = from === 0 && until === 1439 ? "" : `, between ${clockTime(from)} and ${clockTime(until)}`;
+		return `${every} ${freq}${every === 1 ? "" : "s"} after the last message${hours}${when}`;
+	}
 	let at: string;
 	if (subDaily) {
 		const [from = 0, until = 1439] = ints("window");
@@ -35,9 +43,7 @@ export function describeRepeat(v: ValueJSON | undefined): string {
 		const times = e["times"] ? ints("times") : [e["time"]?.intValue ?? 0];
 		at = ` at ${times.map(clockTime).join(", ")}`;
 	}
-	const next = e["next"]?.intValue;
 	const on = (freq === "week" || subDaily) && days.length ? ` on ${days.join(", ")}` : "";
-	const when = next ? ` · next ${new Date(next).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : "";
 	return `every ${unit}${on}${at}${when}`;
 }
 

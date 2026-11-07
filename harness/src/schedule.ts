@@ -134,10 +134,11 @@ export function isEmptyResult(value: unknown): boolean {
 	}
 }
 
-/** A minute/hour repeat: the scheduler completes its occurrences itself. */
+/** A minute/hour repeat, or a quiet timer (`after`, run again the wait after the last message): the scheduler completes its occurrences itself. */
 function subDaily(obj: ObjectJSON): boolean {
-	const freq = obj.fields["repeat"]?.mapValue?.entries?.["freq"]?.stringValue;
-	return freq === "minute" || freq === "hour";
+	const rule = obj.fields["repeat"]?.mapValue?.entries;
+	const freq = rule?.["freq"]?.stringValue;
+	return freq === "minute" || freq === "hour" || rule?.["after"]?.boolValue === true;
 }
 
 /** Complete the occurrence that fired, unless the run already did (an agent's occurrence_complete). */
@@ -390,9 +391,10 @@ const UNIT_MS: Record<string, number> = { day: 86_400_000, week: 7 * 86_400_000,
 /**
  * How long after an occurrence the next one is due, roughly (the rule's
  * unit x interval, divided among its times of day). Null for minute/hour
- * repeats, which the scheduler completes itself.
+ * repeats and quiet timers, which the scheduler completes itself.
  */
 export function occurrenceGap(rule: Record<string, ValueJSON>): number | null {
+	if (rule["after"]?.boolValue === true) return null;
 	const unit = UNIT_MS[rule["freq"]?.stringValue ?? ""];
 	if (!unit) return null;
 	const interval = Math.max(1, rule["interval"]?.intValue ?? 1);
