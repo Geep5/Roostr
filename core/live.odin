@@ -19,7 +19,7 @@ LIVE_TEXT_LIMIT :: 32 * 1024
 LIVE_EVENT_KINDS :: [?]string{"thinking", "step", "text", "done", "error"}
 
 // An exact non-negative integer field: a float must carry no fraction.
-@(private = "file")
+// Shared with the signal payload (core/signal.odin).
 live_count :: proc(event: json.Value, key: string) -> (i64, bool) {
 	value, present := json_field(event, key)
 	if !present do return 0, false
@@ -76,4 +76,15 @@ live_origin :: proc(parsed: json.Value) -> (string, string) {
 	if origin == "" do return "local", ""
 	if origin != "local" && origin != "relay" do return "", "origin must be local or relay"
 	return origin, ""
+}
+
+// `relay`: false when the publisher already reached every viewer directly
+// (the harness's WebRTC lines, core/signal.odin); the event still reaches the
+// change stream, marked so the sync daemon keeps it off the relays.
+live_relay :: proc(parsed: json.Value) -> (bool, string) {
+	value, present := json_field(parsed, "relay")
+	if !present || value == nil do return true, ""
+	b, ok := value.(json.Boolean)
+	if !ok do return true, "relay must be a boolean"
+	return bool(b), ""
 }

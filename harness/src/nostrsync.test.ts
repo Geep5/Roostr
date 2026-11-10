@@ -6,7 +6,8 @@ import { finalizeEvent, getPublicKey, nip44, SimplePool, type Event, type Filter
 import * as api from "./api";
 import { decryptBlob, encryptBlob, sha256Hex } from "./blossom";
 import * as auth from "./local-api-auth";
-import { changeIdOfPart, startNostrSync, vanishOnRelays } from "./nostrsync";
+import { changeIdOfPart, signalScope, signalScopes, signalTemplate, startNostrSync, vanishOnRelays } from "./nostrsync";
+import type { LiveEvent, LiveSignal } from "./types";
 
 const sk = new Uint8Array(32).fill(1);
 const pk = getPublicKey(sk);
@@ -38,6 +39,8 @@ let objectRows: Array<{ id: string; typeKey?: string; channelId?: string }>;
 let spaceObjects: Record<string, unknown>;
 let mutations: Array<Record<string, unknown>>;
 let liveDelete: ((event: Event) => void) | undefined;
+/** The live subscription to our own progress and signals (kinds 25078/25079). */
+let ephemeralEvent: ((event: Event) => void) | undefined;
 /** State-sync daemon fakes: GET /api/bases rows, GET /api/bases/<id> lists, and every POST to /api/bases* or /api/changes/published (path, body). */
 let baseRows: Record<string, Record<string, unknown>>;
 let heldBases: Record<string, Array<{ hash: string; epoch: number; current: boolean; b64: string }>>;
@@ -126,6 +129,7 @@ beforeEach(async () => {
 	spaceObjects = {};
 	mutations = [];
 	liveDelete = undefined;
+	ephemeralEvent = undefined;
 	baseRows = {};
 	heldBases = {};
 	basePosts = [];
@@ -203,6 +207,7 @@ beforeEach(async () => {
 		liveFilters.push(filter);
 		if (filter.kinds?.includes(1078)) liveEvent = (item) => callbacks.onevent?.(item);
 		if (filter.kinds?.includes(5)) liveDelete = (item) => callbacks.onevent?.(item);
+		if (filter.kinds?.includes(25079) && filter.authors) ephemeralEvent = (item) => callbacks.onevent?.(item);
 		return { close() {} };
 	});
 	restore.push(() => live.mockRestore());
@@ -1178,4 +1183,51 @@ test("the pre-migration sweep deletes folded untagged deltas and checkpoints onl
 	await settle();
 	expect(deleted()).toEqual(new Set([checkpoint.id, old.id]));
 	expect((await state()) as unknown as { premigrationSwept: Record<string, true> }).toMatchObject({ premigrationSwept: { obj: true } });
+});
+
+// ── Live-line signals (25079) and direct progress ──
+
+const SIGNAL: LiveSignal = { v: 1, type: "offer", from: "machine-1", to: "phone-1", session: "s1", role: "host", sdp: "v=0", candidate: "", mid: "", ts: 1 };
+const PROGRESS: LiveEvent = { v: 1, run: "r", agent: "a", object: "obj", thread: "__discussion__", seq: 0, kind: "step", text: "x", ts: 1 };
+
+test("a signal speaks for this account when we signed it, for a space when one of its writers did, else for nobody", () => {
+	expect(signalScope(pk, pk, { spaceId: "space-a" })).toBe("");
+	expect(signalScope(pk, pk, null)).toBe("");
+	expect(signalScope("other", pk, { spaceId: "space-a" })).toBe("space-a");
+	expect(signalScope("other", pk, null)).toBeNull();
+	// A hello goes to this account and every shared space; everything else only where its viewer is.
+	expect(signalScopes({ ...SIGNAL, type: "hello", to: "" }, "space-a", ["space-a", "space-b"])).toEqual(["", "space-a", "space-b"]);
+	expect(signalScopes(SIGNAL, "space-b", ["space-a", "space-b"])).toEqual(["space-b"]);
+	const spaceKey = new Uint8Array(32).fill(7);
+	const personal = signalTemplate(SIGNAL, conversationKey, null, 50);
+	expect(personal).toMatchObject({ kind: 25079, created_at: 50, tags: [] });
+	expect(JSON.parse(nip44.decrypt(personal.content, conversationKey))).toEqual(SIGNAL);
+	const shared = signalTemplate(SIGNAL, conversationKey, { convKey: spaceKey, spaceTag: "tag-a" }, 50);
+	expect(shared.tags).toEqual([["h", "tag-a"]]);
+	expect(JSON.parse(nip44.decrypt(shared.content, spaceKey))).toEqual(SIGNAL);
+});
+
+test("local signals go to the relays, relayed ones come back to the store, and progress sent directly stays off the relays", async () => {
+	await startNostrSync();
+	const handlers = (api.subscribe as unknown as Mock<typeof api.subscribe>).mock.calls.at(-1)![2]!;
+	handlers.signal!(SIGNAL, "local", "");
+	handlers.signal!({ ...SIGNAL, session: "s2" }, "relay", "");
+	handlers.live!(PROGRESS, "local", false);
+	await settle();
+	const signals = published.filter((item) => item.kind === 25079);
+	expect(signals.map((item) => JSON.parse(decrypt(item)))).toEqual([SIGNAL]);
+	expect(signals[0].tags).toEqual([]);
+	expect(published.some((item) => item.kind === 25078)).toBe(false);
+	handlers.live!(PROGRESS, "local", true);
+	await until(() => published.some((item) => item.kind === 25078));
+
+	// Our own echo is skipped; another device's signal reaches the store; a stranger's does not open.
+	ephemeralEvent!(signals[0]);
+	const answer: LiveSignal = { ...SIGNAL, type: "answer", from: "phone-1", to: "machine-1", role: "viewer" };
+	ephemeralEvent!(finalizeEvent({ kind: 25079, created_at: 60, tags: [], content: nip44.encrypt(JSON.stringify(answer), conversationKey) }, sk));
+	const stranger = new Uint8Array(32).fill(9);
+	ephemeralEvent!(finalizeEvent({ kind: 25079, created_at: 61, tags: [], content: nip44.encrypt(JSON.stringify(answer), nip44.getConversationKey(stranger, getPublicKey(stranger))) }, stranger));
+	await until(() => mutations.some((m) => m.action === "signal_publish"));
+	await settle();
+	expect(mutations.filter((m) => m.action === "signal_publish")).toEqual([{ action: "signal_publish", event: answer, origin: "relay" }]);
 });

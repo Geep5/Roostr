@@ -57,6 +57,7 @@ const COVERAGE: Record<string, Coverage> = {
 	conversation_update: { reason: "thread plumbing: kept current by the harness, not edited by hand" },
 	chat_react: { reason: "an emoji reaction is a person's gesture on a message; agents answer in words" },
 	live_publish: { reason: "live progress of a turn, published by the harness around the agent's own work; never stored" },
+	signal_publish: { reason: "WebRTC introductions for the direct live-progress line between devices; never stored" },
 	// ── People-only ──
 	vanish: { reason: "irreversible erasure stays with people; agents use the recoverable bin (object_delete)" },
 	purge_deleted: { reason: "emptying the bin is irreversible; it stays with people" },

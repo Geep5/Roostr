@@ -23,14 +23,14 @@
  * pre-migration history folded into epoch-1 bases.
  */
 
-import { SimplePool, finalizeEvent, getPublicKey, nip19, nip44, verifyEvent, type Event, type Filter } from "nostr-tools";
+import { SimplePool, finalizeEvent, getPublicKey, nip19, nip44, verifyEvent, type Event, type EventTemplate as SignableEvent, type Filter } from "nostr-tools";
 import { unwrapEvent, wrapEvent } from "nostr-tools/nip59";
 import { API, VANISH_LOG_ID, apiFetch, mutate, subscribe, vanishedEntries, type VanishedEntry } from "./api";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { machines, serverOf, servesHere } from "./machine";
 import { machineId } from "./roster";
 import { blossomServer, decryptBlob, deleteBlob, download, encryptBlob, sha256Hex, upload } from "./blossom";
-import type { LiveEvent } from "./types";
+import type { LiveEvent, LiveSignal } from "./types";
 
 const CHANGE_KIND = 1078;
 /** One Checkpoint (docs/checkpoint-sync.md) per object: a replay cache, same envelope as 1078. */
@@ -41,6 +41,12 @@ const CHECKPOINT_INTERVAL_MS = 10 * 60_000;
  * never store it), same keys and h tags as the object's 1078s.
  */
 const PROGRESS_KIND = 25078;
+/**
+ * Live-line signalling (core/signal.odin, rtc.ts): ephemeral like progress.
+ * This account's devices: self-encrypted, untagged. A shared space's
+ * members: its key and its stream tag.
+ */
+const SIGNAL_KIND = 25079;
 /** State sync (docs/state-sync.md): a per-object base, addressable, and its parts 2..n. */
 const BASE_KIND = 31078;
 const BASE_PART_KIND = 1080;
@@ -357,6 +363,33 @@ export function blindShared(keyHex: string, id: string): string {
 	h.update(keyHex);
 	h.update(id);
 	return h.digest("hex").slice(0, 16);
+}
+
+// ── Live-line signals (SIGNAL_KIND) ──────────────────────────────
+//
+// Trust is the signer: our own key speaks for this account (scope "",
+// whichever key sealed it - a viewer says hello in every scope it follows),
+// another writer of a shared space for that space only.
+
+/** The scope a relayed signal speaks for: "" this account, a space id, null nobody we listen to. */
+export function signalScope(pubkey: string, ownPk: string, space: Pick<SharedSpace, "spaceId"> | null): string | null {
+	if (pubkey === ownPk) return "";
+	return space ? space.spaceId : null;
+}
+
+/** Where a local signal goes: a hello in this account and every shared space (a viewer cannot know where a host runs), anything else in its viewer's scope. */
+export function signalScopes(signal: LiveSignal, space: string, shared: Iterable<string>): string[] {
+	return signal.type === "hello" ? ["", ...shared] : [space];
+}
+
+/** One signal's relay envelope in a scope: self-encrypted and untagged, or under a shared space's key and stream tag. */
+export function signalTemplate(signal: LiveSignal, conversationKey: Uint8Array, space: Pick<SharedSpace, "convKey" | "spaceTag"> | null, createdAt: number): SignableEvent {
+	return {
+		kind: SIGNAL_KIND,
+		created_at: createdAt,
+		tags: space ? [["h", space.spaceTag]] : [],
+		content: nip44.encrypt(JSON.stringify(signal), space ? space.convKey : conversationKey),
+	};
 }
 
 function npubToHex(npub: string): string | null {
@@ -2628,45 +2661,73 @@ export async function startNostrSync(): Promise<void> {
 			return;
 		}
 		void publishObject(objectId);
-	}, undefined, (live, origin) => {
-		// Only this computer's own progress leaves; a relayed one never goes back out.
-		if (origin === "local") void relayProgress(live);
+	}, undefined, {
+		// Only this computer's own progress and signals leave; relayed ones
+		// never go back out. Progress its harness already handed every
+		// viewer over a direct line (relay:false) stays here too.
+		live: (live, origin, relay) => {
+			if (origin === "local" && relay) void relayProgress(live);
+		},
+		signal: (signal, origin, space) => {
+			if (origin === "local") void relaySignal(signal, space);
+		},
 	});
 
-	// ── Live progress: one event out per local publish, one in per relay event ──
+	// ── Live progress + its signals: one event out per local publish, one in per relay event ──
 	//
-	// Best effort both ways: a lost event is a missing line of progress,
-	// never retried. Relays echo our own events back; their ids are skipped.
-	const sentProgress = new Set<string>();
+	// Best effort both ways: a lost event is a missing line of progress (or
+	// an introduction the next hello repeats), never retried. Relays echo our
+	// own events back; their ids are skipped.
+	const sentEphemeral = new Set<string>();
+
+	async function publishEphemeral(template: SignableEvent): Promise<void> {
+		const event = finalizeEvent(template, id!.sk);
+		if (sentEphemeral.size >= 1024) sentEphemeral.clear();
+		sentEphemeral.add(event.id);
+		await Promise.any(pool.publish(id!.relays, event));
+	}
 
 	async function relayProgress(live: LiveEvent): Promise<void> {
 		try {
 			const space = sharedSpaces.get(spaceMap.get(live.object) ?? "");
-			const event = finalizeEvent(
-				{
-					kind: PROGRESS_KIND,
-					created_at: Math.floor(Date.now() / 1000),
-					tags: space ? [["h", blindShared(space.keyHex, live.object)], ["h", space.spaceTag]] : [["h", blindObjectId(id!, live.object)]],
-					content: nip44.encrypt(JSON.stringify(live), space ? space.convKey : id!.conversationKey),
-				},
-				id!.sk,
-			);
-			if (sentProgress.size >= 1024) sentProgress.clear();
-			sentProgress.add(event.id);
-			await Promise.any(pool.publish(id!.relays, event));
+			await publishEphemeral({
+				kind: PROGRESS_KIND,
+				created_at: Math.floor(Date.now() / 1000),
+				tags: space ? [["h", blindShared(space.keyHex, live.object)], ["h", space.spaceTag]] : [["h", blindObjectId(id!, live.object)]],
+				content: nip44.encrypt(JSON.stringify(live), space ? space.convKey : id!.conversationKey),
+			});
 		} catch {
 			/* no relay took it: this line of progress stays local */
 		}
 	}
 
-	async function onProgressEvent(event: Event): Promise<void> {
-		if (event.kind !== PROGRESS_KIND || sentProgress.has(event.id) || !verifyEvent(event)) return;
+	async function relaySignal(signal: LiveSignal, space: string): Promise<void> {
+		for (const scope of signalScopes(signal, space, sharedSpaces.keys())) {
+			const shared = scope ? sharedSpaces.get(scope) : null;
+			// A space this computer no longer holds a key for has nobody to reach.
+			if (shared === undefined) continue;
+			try {
+				await publishEphemeral(signalTemplate(signal, id!.conversationKey, shared, Math.floor(Date.now() / 1000)));
+			} catch {
+				/* no relay took it: the viewer's next hello starts over */
+			}
+		}
+	}
+
+	async function onEphemeralEvent(event: Event): Promise<void> {
+		if ((event.kind !== PROGRESS_KIND && event.kind !== SIGNAL_KIND) || sentEphemeral.has(event.id) || !verifyEvent(event)) return;
 		const opened = decryptEvent(event);
 		if (!opened) return;
 		try {
-			await mutate("live_publish", { event: JSON.parse(opened.part), origin: "relay" });
+			if (event.kind === PROGRESS_KIND) {
+				await mutate("live_publish", { event: JSON.parse(opened.part), origin: "relay" });
+				return;
+			}
+			const scope = signalScope(event.pubkey, id!.pk, opened.space);
+			if (scope === null) return;
+			await mutate("signal_publish", { event: JSON.parse(opened.part), origin: "relay", ...(scope ? { space: scope } : {}) });
 		} catch {
-			/* not a live event, or the store is restarting */
+			/* not a valid payload, or the store is restarting */
 		}
 	}
 
@@ -2720,17 +2781,17 @@ export async function startNostrSync(): Promise<void> {
 				onevent: (event) => void handleWrap(event),
 			}),
 		);
-		// Live progress is only ever now: no history to ask for.
+		// Live progress and its signals are only ever now: no history to ask for.
 		const now = Math.floor(Date.now() / 1000);
 		liveSubs.push(
-			pool.subscribeMany(id!.relays, { kinds: [PROGRESS_KIND], authors: [id!.pk], since: now }, {
-				onevent: (event) => void onProgressEvent(event),
+			pool.subscribeMany(id!.relays, { kinds: [PROGRESS_KIND, SIGNAL_KIND], authors: [id!.pk], since: now }, {
+				onevent: (event) => void onEphemeralEvent(event),
 			}),
 		);
 		if (tags.length > 0) {
 			liveSubs.push(
-				pool.subscribeMany(id!.relays, { kinds: [PROGRESS_KIND], "#h": tags, since: now }, {
-					onevent: (event) => void onProgressEvent(event),
+				pool.subscribeMany(id!.relays, { kinds: [PROGRESS_KIND, SIGNAL_KIND], "#h": tags, since: now }, {
+					onevent: (event) => void onEphemeralEvent(event),
 				}),
 			);
 		}

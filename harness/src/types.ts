@@ -107,6 +107,25 @@ export interface LiveEvent {
 	ts: number;
 }
 
+/** WebRTC signalling for the direct live line (core/signal.odin): sent by `signal_publish`, never stored. */
+export type LiveSignalType = "hello" | "offer" | "answer" | "ice" | "bye";
+export interface LiveSignal {
+	v: 1;
+	type: LiveSignalType;
+	/** The sender's device id: a computer's machine id, an app install's own random id. */
+	from: string;
+	/** The device it is for; "" for a hello. */
+	to: string;
+	/** Chosen by the offerer; every later signal of that connection repeats it. */
+	session: string;
+	role: "viewer" | "host";
+	sdp: string;
+	/** One ICE candidate, browser form ("candidate:..."). */
+	candidate: string;
+	mid: string;
+	ts: number;
+}
+
 export interface LLMResult {
 	text: string;
 	/** `thinking`: the thinking blocks the model wrote right before this call, which the next request must carry back. */

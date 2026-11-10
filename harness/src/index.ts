@@ -35,6 +35,7 @@ import { FILE_TYPE, startFilePeer } from "./files";
 import { KEEP_ALL_SWEEP_MS, keepAllFiles } from "./keep-files";
 import { holdSingleInstance } from "./single-instance";
 import { machineId, readRoster, setEnabled } from "./roster";
+import { startLiveLines } from "./rtc";
 import { vanishOnRelays } from "./nostrsync";
 import { MACHINE_TYPE, agentRunsOn, agentServedHere, invalidateServing, publishMachine, seedComputerProperties, serverOf, servesHere } from "./machine";
 import { CAPABILITY_TYPE } from "./capabilities";
@@ -954,14 +955,21 @@ async function serve(): Promise<void> {
 		void publishSystemSnapshot(s.agentId, s.conv);
 		void drive(s, humanRef(s.conv.objectId));
 	}
-	subscribe((objectId) => {
-		// One event's failure (a daemon read reset mid-request) is that
-		// event's: logged, never the end of the harness.
-		void route(objectId).catch((error) => console.error(`[harness] event ${objectId.slice(0, 8)}:`, error instanceof Error ? error.message : error));
-		nudgeViewActions();
-	}, () => {
-		void scanMailboxes().catch((error) => console.error("[harness] mailbox catch-up:", error));
-	});
+	// Live progress travels direct lines to open app devices (rtc.ts); the
+	// store's `signal` frames introduce them.
+	const liveLines = await startLiveLines();
+	subscribe(
+		(objectId) => {
+			// One event's failure (a daemon read reset mid-request) is that
+			// event's: logged, never the end of the harness.
+			void route(objectId).catch((error) => console.error(`[harness] event ${objectId.slice(0, 8)}:`, error instanceof Error ? error.message : error));
+			nudgeViewActions();
+		},
+		() => {
+			void scanMailboxes().catch((error) => console.error("[harness] mailbox catch-up:", error));
+		},
+		{ signal: (signal, _origin, space) => liveLines.onSignal(signal, space) },
+	);
 	// Live work, not only what the index already holds: a full rescan on a
 	// slow timer, so an envelope lands a turn even when its SSE event was
 	// missed (a quiet feed, a reconnect gap). scanMailboxes is cheap - it

@@ -190,10 +190,12 @@ Sync_Ingest :: struct {
 	h_tag:           string,
 	// The owner deleted this installed space (a kind-5 on its stream tag).
 	space_vanished:  string,
-	// A LIVE_KIND progress event (core/live.odin), normalized: never an item,
-	// never moves the cursor. Shared-space ones carry their provenance.
-	live:            json.Value,
-	live_provenance: json.Value,
+	// A LIVE_KIND progress event (core/live.odin) or a SIGNAL_KIND signal
+	// (core/signal.odin), normalized: never an item, never moves the cursor.
+	// Shared-space ones carry their provenance.
+	live:                 json.Value,
+	signal:               json.Value,
+	ephemeral_provenance: json.Value,
 }
 
 sync_fault :: proc(r: ^Sync_Ingest, at: i64) {
@@ -240,8 +242,8 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 		r.space_vanished = sync_space_deleted(event)
 		return
 	}
-	if kind == LIVE_KIND {
-		sync_ingest_live(event, &r)
+	if kind == LIVE_KIND || kind == SIGNAL_KIND {
+		sync_ingest_ephemeral(event, kind, &r)
 		return
 	}
 	if kind != SYNC_CHANGE_KIND && kind != SYNC_CHECKPOINT_KIND && kind != SYNC_BASE_KIND && kind != SYNC_BASE_PART_KIND do return
@@ -426,10 +428,10 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 	return
 }
 
-// A live progress event opens with the keys its object's changes use: the
-// self conversation key when we signed it, else the space key its stream tag
-// names. The payload must be one valid live event.
-sync_ingest_live :: proc(event: json.Value, r: ^Sync_Ingest) {
+// A live progress event or a signal opens with the keys an object's changes
+// use: the self conversation key when we signed it, else the space key its
+// stream tag names. The payload must be one valid event of its kind.
+sync_ingest_ephemeral :: proc(event: json.Value, kind: i64, r: ^Sync_Ingest) {
 	tags := json_array(event, "tags")
 	if h, ok := event_tag(tags, "h"); ok do r.h_tag = tag_string(h, 1)
 	pubkey := json_str(event, "pubkey")
@@ -468,16 +470,20 @@ sync_ingest_live :: proc(event: json.Value, r: ^Sync_Ingest) {
 		r.decode_failure = true
 		return
 	}
-	live, why := live_event_normalize(parsed)
+	value: json.Value
+	why: string
+	if kind == LIVE_KIND do value, why = live_event_normalize(parsed)
+	else do value, why = signal_event_normalize(parsed)
 	if why != "" {
 		r.decode_failure = true
 		return
 	}
-	r.live = live
+	if kind == LIVE_KIND do r.live = value
+	else do r.signal = value
 	if space != nil {
 		holder := jobj()
 		sync_provenance(&holder, space, pubkey)
-		r.live_provenance = holder["provenance"]
+		r.ephemeral_provenance = holder["provenance"]
 	}
 }
 

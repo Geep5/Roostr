@@ -6,7 +6,7 @@
  */
 
 import { API, apiFetch } from "./local-api-auth";
-import type { LiveEvent } from "./types";
+import type { LiveEvent, LiveSignal } from "./types";
 export { API, apiFetch } from "./local-api-auth";
 
 export interface ValueJSON {
@@ -325,11 +325,16 @@ export interface ReplyWork {
 export const addBlock = (objectId: string, block: Partial<BlockJSON>, targetId = "", position = 0) =>
 	mutate("block_add", { object_id: objectId, block, target_id: targetId, position });
 
-/**
- * Subscribe to commits; onConnected also runs after every reconnection.
- * `onLive`: live progress frames on the same stream ({"type":"live",...}, core/live.odin).
- */
-export function subscribe(onObject: (objectId: string) => void, onConnected?: () => void, onLive?: (live: LiveEvent, origin: "local" | "relay") => void): void {
+/** The ephemeral frames on the change stream (core/live.odin, core/signal.odin). */
+export interface EphemeralHandlers {
+	/** Live progress; `relay` false: its publisher reached every viewer directly, keep it off the relays. */
+	live?: (live: LiveEvent, origin: "local" | "relay", relay: boolean) => void;
+	/** A live-line signal; `space`: the shared space a relayed one came through ("" = this account). */
+	signal?: (signal: LiveSignal, origin: "local" | "relay", space: string) => void;
+}
+
+/** Subscribe to commits; onConnected also runs after every reconnection. */
+export function subscribe(onObject: (objectId: string) => void, onConnected?: () => void, ephemeral: EphemeralHandlers = {}): void {
 	void (async () => {
 		for (;;) {
 			try {
@@ -351,9 +356,10 @@ export function subscribe(onObject: (objectId: string) => void, onConnected?: ()
 						const m = frame.match(/^data: (.+)$/m);
 						if (!m) continue;
 						try {
-							const parsed = JSON.parse(m[1]) as { objectId?: string; type?: string; origin?: "local" | "relay"; live?: LiveEvent };
+							const parsed = JSON.parse(m[1]) as { objectId?: string; type?: string; origin?: "local" | "relay"; live?: LiveEvent; relay?: boolean; signal?: LiveSignal; space?: string };
 							if (parsed.objectId) onObject(parsed.objectId);
-							else if (parsed.type === "live" && parsed.live) onLive?.(parsed.live, parsed.origin ?? "local");
+							else if (parsed.type === "live" && parsed.live) ephemeral.live?.(parsed.live, parsed.origin ?? "local", parsed.relay !== false);
+							else if (parsed.type === "signal" && parsed.signal) ephemeral.signal?.(parsed.signal, parsed.origin ?? "local", parsed.space ?? "");
 						} catch {
 							/* hello frame etc. */
 						}

@@ -163,6 +163,115 @@ live_publish_validates_and_persists_nothing :: proc(t: ^testing.T) {
 	p["origin"] = json.String("elsewhere")
 	_, origin_err := plan("live_publish", p)
 	testing.expect(t, origin_err != "", "origin is local or relay")
+
+	// Reached every viewer directly: kept off the relays, still a local event.
+	direct := jobj()
+	direct["event"] = json.Object(live_event())
+	direct["relay"] = json.Boolean(false)
+	direct_out, direct_err := plan("live_publish", direct)
+	testing.expect(t, direct_err == "", direct_err)
+	direct_result, _ := json_field(direct_out, "result")
+	relay_flag, has_flag := json_bool(direct_result, "relay")
+	testing.expect(t, has_flag && !relay_flag, "relay:false is kept")
+	_, plain_flag := json_field(result, "relay")
+	testing.expect(t, !plain_flag, "relaying is the default")
+	direct["relay"] = json.String("no")
+	_, flag_err := plan("live_publish", direct)
+	testing.expect(t, flag_err != "", "relay is a boolean")
+}
+
+@(private = "file")
+signal_event :: proc(type := "offer") -> map[string]json.Value {
+	event := jobj()
+	event["v"] = json.Integer(1)
+	event["type"] = json.String(type)
+	event["from"] = json.String("machine-1")
+	event["to"] = json.String("device-1")
+	event["session"] = json.String("session-1")
+	event["role"] = json.String("host")
+	event["sdp"] = json.String("v=0\r\n")
+	event["ts"] = json.Integer(1_700_000_000_000)
+	return event
+}
+
+@(test)
+signal_publish_validates_and_persists_nothing :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	event := signal_event()
+	event["extra"] = json.String("dropped")
+	params := jobj()
+	params["event"] = json.Object(event)
+	out, err := plan("signal_publish", params)
+	testing.expect(t, err == "", err)
+	changes, _ := json_field(out, "changes")
+	testing.expect_value(t, len(changes.(json.Array)), 0)
+	result, _ := json_field(out, "result")
+	testing.expect_value(t, json_str(result, "origin"), "local")
+	signal, _ := json_field(result, "signal")
+	testing.expect_value(t, string(marshal(signal)), `{"candidate":"","from":"machine-1","mid":"","role":"host","sdp":"v=0\r\n","session":"session-1","to":"device-1","ts":1700000000000,"type":"offer","v":1}`)
+	_, has_space := json_field(result, "space")
+	testing.expect(t, !has_space, "no space unless one is named")
+
+	// What the sync daemon brought in, through a shared space.
+	relayed := jobj()
+	relayed["event"] = json.Object(signal_event())
+	relayed["origin"] = json.String("relay")
+	relayed["space"] = json.String("space-1")
+	relay_out, relay_err := plan("signal_publish", relayed)
+	testing.expect(t, relay_err == "", relay_err)
+	relay_result, _ := json_field(relay_out, "result")
+	testing.expect_value(t, json_str(relay_result, "origin"), "relay")
+	testing.expect_value(t, json_str(relay_result, "space"), "space-1")
+
+	// A hello names nobody and no session.
+	hello := signal_event("hello")
+	hello["to"] = json.String("")
+	hello["role"] = json.String("viewer")
+	delete_key(&hello, "session")
+	delete_key(&hello, "sdp")
+	p := jobj()
+	p["event"] = json.Object(hello)
+	_, hello_err := plan("signal_publish", p)
+	testing.expect(t, hello_err == "", hello_err)
+
+	sdp := make([]byte, SIGNAL_SDP_LIMIT + 1, context.temp_allocator)
+	for &b in sdp do b = 'a'
+	Case :: struct {
+		type:  string,
+		key:   string,
+		value: json.Value,
+	}
+	bad := []Case {
+		{"offer", "v", json.Integer(2)},
+		{"offer", "type", json.String("shout")},
+		{"offer", "from", json.String("")},
+		{"offer", "to", json.String("")},
+		{"answer", "session", json.String("")},
+		{"offer", "role", json.String("admin")},
+		{"offer", "sdp", json.String("")},
+		{"offer", "sdp", json.String(string(sdp))},
+		{"offer", "sdp", json.Integer(5)},
+		{"ice", "candidate", json.String("")},
+		{"offer", "ts", json.String("now")},
+		{"offer", "ts", json.Integer(-1)},
+	}
+	for c in bad {
+		e := signal_event(c.type)
+		e[c.key] = c.value
+		p = jobj()
+		p["event"] = json.Object(e)
+		_, bad_err := plan("signal_publish", p)
+		testing.expectf(t, bad_err != "", "%s %s %v is refused", c.type, c.key, c.value)
+	}
+	p = jobj()
+	p["event"] = json.Object(signal_event())
+	p["origin"] = json.String("elsewhere")
+	_, origin_err := plan("signal_publish", p)
+	testing.expect(t, origin_err != "", "origin is local or relay")
+	p["origin"] = json.String("relay")
+	p["space"] = json.Integer(1)
+	_, space_err := plan("signal_publish", p)
+	testing.expect(t, space_err != "", "space is a space id")
 }
 
 @(private = "file")
@@ -177,13 +286,13 @@ ingest :: proc(t: ^testing.T, event: map[string]json.Value) -> json.Value {
 }
 
 @(private = "file")
-sealed_live :: proc(plaintext, key_hex, pubkey: string, tags: json.Array) -> map[string]json.Value {
+sealed_live :: proc(plaintext, key_hex, pubkey: string, tags: json.Array, kind := i64(LIVE_KIND)) -> map[string]json.Value {
 	key, _ := hex_bytes(key_hex)
 	content, _ := nip44_encrypt(plaintext, key, allocator = context.temp_allocator)
 	event := jobj()
 	event["pubkey"] = json.String(pubkey)
 	event["created_at"] = json.Integer(99)
-	event["kind"] = json.Integer(LIVE_KIND)
+	event["kind"] = json.Integer(kind)
 	event["tags"] = tags
 	event["content"] = json.String(content)
 	return event
@@ -244,4 +353,30 @@ sync_session_opens_live_events_without_importing_them :: proc(t: ^testing.T) {
 	testing.expect(t, decode, "an invalid payload is a decode failure")
 	_, garbled_live := json_field(garbled, "live")
 	testing.expect(t, !garbled_live, "and surfaces nothing")
+
+	// A signal opens the same way and answers `signal`, never `live` or an item.
+	signal_payload := string(marshal(json.Object(signal_event())))
+	own := ingest(t, sealed_live(signal_payload, CONV, PK, make(json.Array, 0, context.temp_allocator), SIGNAL_KIND))
+	signal, has_signal := json_field(own, "signal")
+	testing.expect(t, has_signal, "a personal signal opens")
+	testing.expect_value(t, json_str(signal, "session"), "session-1")
+	_, own_live := json_field(own, "live")
+	_, own_item := json_field(own, "item")
+	testing.expect(t, !own_live && !own_item, "a signal is neither progress nor an item")
+	own_cursor, _ := json_int(own, "cursor")
+	testing.expect_value(t, own_cursor, 10)
+	space_tags := make(json.Array, 0, context.temp_allocator)
+	append(&space_tags, json.Array(tag))
+	from_member := ingest(t, sealed_live(signal_payload, SPACE_KEY, member, space_tags, SIGNAL_KIND))
+	_, member_signal := json_field(from_member, "signal")
+	testing.expect(t, member_signal, "a shared-space signal opens")
+	member_provenance, _ := json_field(from_member, "provenance")
+	testing.expect_value(t, json_str(member_provenance, "spaceId"), "space-1")
+	bad_signal := signal_event()
+	bad_signal["sdp"] = json.String("")
+	refused := ingest(t, sealed_live(string(marshal(json.Object(bad_signal))), CONV, PK, make(json.Array, 0, context.temp_allocator), SIGNAL_KIND))
+	refused_decode, _ := json_bool(refused, "decodeFailure")
+	testing.expect(t, refused_decode, "an offer without sdp is a decode failure")
+	_, refused_signal := json_field(refused, "signal")
+	testing.expect(t, !refused_signal, "and surfaces nothing")
 }

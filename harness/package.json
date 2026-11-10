@@ -15,6 +15,7 @@
 		"@types/bun": "^1.1.0"
 	},
 	"dependencies": {
+		"node-datachannel": "^0.33.6",
 		"nostr-tools": "^2.25.0",
 		"werift": "^0.24.4"
 	}

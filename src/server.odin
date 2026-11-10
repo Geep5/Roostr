@@ -33,14 +33,40 @@ sse_broadcast :: proc(object_id: string) {
 	sse_send(fmt.tprintf("data: {{\"objectId\":\"%s\"}}\n\n", object_id))
 }
 
-// A live progress event (core/live.odin) on the same stream, told apart by
-// "type":"live": {"type":"live","origin":"local"|"relay","live":{...}}.
-sse_broadcast_live :: proc(live: json.Value, origin: string) {
+// Live progress (core/live.odin) and its WebRTC signalling (core/signal.odin)
+// on the same stream, told apart by "type":
+//   {"type":"live","origin":"local"|"relay","live":{...},"relay"?:false}
+//   {"type":"signal","origin":"local"|"relay","signal":{...},"space"?:"<id>"}
+// The SSE frame for a `live_publish`/`signal_publish` mutate, or why not.
+// Local frames are what the sync daemon carries to the relays (a live frame
+// marked "relay":false stays here); relay frames are what it brought in.
+ephemeral_frame :: proc(action: string, parsed: json.Value) -> (string, string) {
+	origin, err := core.live_origin(parsed)
+	if err != "" do return "", err
 	frame := core.jobj()
-	frame["type"] = json.String("live")
+	event, _ := core.json_field(parsed, "event")
+	switch action {
+	case "live_publish":
+		live, live_err := core.live_event_normalize(event)
+		if live_err != "" do return "", live_err
+		relay, relay_err := core.live_relay(parsed)
+		if relay_err != "" do return "", relay_err
+		frame["type"] = json.String("live")
+		frame["live"] = live
+		if !relay do frame["relay"] = json.Boolean(false)
+	case "signal_publish":
+		signal, signal_err := core.signal_event_normalize(event)
+		if signal_err != "" do return "", signal_err
+		space, space_err := core.signal_space(parsed)
+		if space_err != "" do return "", space_err
+		frame["type"] = json.String("signal")
+		frame["signal"] = signal
+		if space != "" do frame["space"] = json.String(space)
+	case:
+		return "", "not an ephemeral action"
+	}
 	frame["origin"] = json.String(origin)
-	frame["live"] = live
-	sse_send(fmt.tprintf("data: %s\n\n", string(core.marshal(json.Object(frame)))))
+	return fmt.tprintf("data: %s\n\n", string(core.marshal(json.Object(frame)))), ""
 }
 
 sse_send :: proc(msg: string) {

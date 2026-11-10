@@ -6,8 +6,10 @@
  * wait) and hands them to the transport: the store's `live_publish`, which
  * puts them on its change stream and lets the sync daemon carry them to the
  * account's other devices as encrypted ephemeral relay events (kind 25078,
- * core/live.odin). Nothing is stored; a publish that fails costs the viewer
- * a line of progress, never the turn.
+ * core/live.odin). The harness swaps in rtc.ts, which sends them down direct
+ * WebRTC lines first and keeps the relay copy for viewers without one.
+ * Nothing is stored; a publish that fails costs the viewer a line of
+ * progress, never the turn.
  *
  * What lasts is the record on the reply itself: `LiveRun.record()` (the
  * thinking and steps, merged and capped) and `thoughtMs()`, which the
@@ -24,7 +26,7 @@ const LIVE_DELTA_CHARS = 16 * 1024;
 export const RECORD_CAP_BYTES = 64 * 1024;
 export const TRIMMED_MARKER = "(earlier thinking trimmed)";
 
-/** How a live event leaves this computer. A WebRTC transport plugs in here. */
+/** How a live event leaves this computer (rtc.ts's direct lines in the harness). */
 export type LiveTransport = (event: LiveEvent) => Promise<void>;
 
 const storeTransport: LiveTransport = async (event) => {

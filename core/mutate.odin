@@ -705,8 +705,26 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 		if err != "" do return plan, err
 		origin, origin_error := live_origin(parsed)
 		if origin_error != "" do return plan, origin_error
+		relay, relay_error := live_relay(parsed)
+		if relay_error != "" do return plan, relay_error
 		plan.result["live"] = live
 		plan.result["origin"] = json.String(origin)
+		if !relay do plan.result["relay"] = json.Boolean(false)
+		return plan, ""
+
+	case "signal_publish":
+		// Live-line signalling (core/signal.odin): validated and handed to the
+		// host's stream and relays; no change, nothing persisted.
+		value, _ := json_field(parsed, "event")
+		signal, err := signal_event_normalize(value)
+		if err != "" do return plan, err
+		origin, origin_error := live_origin(parsed)
+		if origin_error != "" do return plan, origin_error
+		space, space_error := signal_space(parsed)
+		if space_error != "" do return plan, space_error
+		plan.result["signal"] = signal
+		plan.result["origin"] = json.String(origin)
+		if space != "" do plan.result["space"] = json.String(space)
 		return plan, ""
 
 	case "conversation_open":

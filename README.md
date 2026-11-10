@@ -139,8 +139,9 @@ POST /api/query              {filters, sorts, textQuery, setId, type, limit, off
 POST /api/mutate             {action, ...} — create (optionally with its body),
                              blocks_append, block_add/update/move/remove,
                              block_set_attrs, set_field, delete, channel_*
-GET  /api/events             SSE: {"objectId"} per committed change; {"type":"live","origin","live"}
-                             per live progress event (live_publish, never stored)
+GET  /api/events             SSE: {"objectId"} per committed change; {"type":"live","origin","live","relay"?}
+                             per live progress event (live_publish, never stored); {"type":"signal",
+                             "origin","signal","space"?} per live-line signal (signal_publish, never stored)
 ```
 
 ## For external machines (bots outside Roostr)
@@ -510,6 +511,22 @@ harness seeds in every space with computers) fetches every File's bytes it
 lacks - when a File appears or changes, on boot, and every ten minutes - one at
 a time, and lets files whose holders are all offline wait (10 minutes, doubling
 to 6 hours) instead of retrying them every pass (`harness/src/keep-files.ts`).
+
+Live progress (an agent's thinking and tool steps while it answers a chat,
+`core/live.odin`) travels as encrypted ephemeral Nostr kind 25078 events,
+which relays pass on and never keep - and, phase 2, over direct lines: the
+harness running the agent opens a WebRTC data channel (`roostr-live`,
+`harness/src/rtc.ts`, node-datachannel, STUN only) to every app device that has
+the app open. The relay only introduces them, with kind 25079 signals
+(`core/signal.odin`: hello / offer / answer / ice / bye, encrypted and tagged
+like the 25078s: self-encrypted for this account's devices, a shared space's
+key and stream tag for its members, who only get that space's runs). A viewer
+says hello every minute; the harness offers, reopens failed lines with backoff
+and lets a viewer go after 5 minutes of silence. Each event still goes to the
+local store (`live_publish`); its relay copy is sent only while some viewer
+heard from in the last 3 minutes has no open line, or when no viewer is known
+(`live_publish` with `"relay":false` keeps it off the relays), so the relays
+remain the fallback. Receivers drop duplicates by run and seq.
 
 ## Harness (`harness/`)
 
