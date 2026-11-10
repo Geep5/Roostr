@@ -196,9 +196,12 @@ async function callKimi(req: LLMRequest): Promise<LLMResult> {
 			messages.push({ role: t.role, content: t.content });
 			continue;
 		}
-		// Flatten content blocks: text joins; tool blocks become tool messages.
+		// Flatten content blocks: text joins; images ride as data-URL parts
+		// (OpenAI-style content array); tool blocks become tool messages.
 		const texts = t.content.filter((c) => c.type === "text").map((c) => (c.type === "text" ? c.text : ""));
-		if (texts.length) messages.push({ role: t.role, content: texts.join("\n") });
+		const images = t.content.flatMap((c) => (c.type === "image" ? [{ type: "image_url", image_url: { url: `data:${c.source.media_type};base64,${c.source.data}` } }] : []));
+		if (images.length) messages.push({ role: t.role, content: [...(texts.length ? [{ type: "text", text: texts.join("\n") }] : []), ...images] });
+		else if (texts.length) messages.push({ role: t.role, content: texts.join("\n") });
 		for (const c of t.content) {
 			if (c.type === "tool_use") {
 				messages.push({

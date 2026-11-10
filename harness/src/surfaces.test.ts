@@ -114,6 +114,16 @@ test("a mark written before conversations were addressed still holds", async () 
 	expect((await pendingMessages(obj, humanRef(obj.id), AGENT, NAME)).map((p) => p.text)).toEqual(["@Agent second question", "@Agent asked since"]);
 });
 
+test("a pending message carries the files pasted with it", async () => {
+	const pasted = {
+		id: "f1",
+		childrenIds: [],
+		content: { custom: { contentType: "chat", meta: { author: HUMAN, ts: "100", text: "@Agent what's in this screenshot?", files: "file-a,file-b" } } },
+	} as unknown as BlockJSON;
+	const obj = objectWith("pasted", { threadId: HUMAN_THREAD, order: [pasted] });
+	expect((await pendingMessages(obj, humanRef(obj.id), AGENT, NAME)).map((p) => p.files)).toEqual([["file-a", "file-b"]]);
+});
+
 test("a watermark belongs to one conversation, not the whole object", async () => {
 	// The transcript and the discussion live on the same object. Keying the
 	// mark on the object id alone would let a turn in either one silence the

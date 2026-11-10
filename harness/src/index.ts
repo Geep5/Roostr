@@ -44,6 +44,7 @@ import { migrateCapabilities } from "./migrate-capabilities";
 import { runBootSteps } from "./boot";
 import { startDiscordManager } from "./discord";
 import { addressableAgents, answersGuestQuestion, chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, mentions, pendingMessages, setMark, spaceOfObject } from "./surfaces";
+import { fileNames } from "./attachments";
 import { defaultSpaceId } from "./spacemap";
 import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
 import { deliverOutbox, pendingInbox, recoverInbox } from "./mailbox";
@@ -278,8 +279,9 @@ async function ingestSurface(s: Served, origin: ConvRef): Promise<ConvRef | null
 		const copied = ingestedOriginBlocks(transcript, conv);
 		const fresh = pending.filter((p) => !copied.has(p.blockId));
 		if (fresh.length === 0) return null;
-		const framed = frameMessage(surface, origin, fresh);
-		await ingestIntoChat(conv, origin, fresh[fresh.length - 1].author || "user", framed, fresh[fresh.length - 1].blockId);
+		const files = fresh.flatMap((p) => p.files);
+		const framed = frameMessage(surface, origin, fresh, await fileNames(files));
+		await ingestIntoChat(conv, origin, fresh[fresh.length - 1].author || "user", framed, fresh[fresh.length - 1].blockId, files);
 		return conv;
 	} finally {
 		ingesting.delete(lock);

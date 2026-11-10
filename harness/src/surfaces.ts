@@ -23,6 +23,7 @@
 
 import { fetchObject, guestAgents, str, type BlockJSON, type ObjectJSON } from "./api";
 import { addConvBlock, convBlocks, convKey, HUMAN_THREAD, isHuman, parseConvKey, type ConvRef } from "./conv";
+import { messageFiles } from "./attachments";
 
 // ── Marks ─────────────────────────────────────────────────────────
 
@@ -79,6 +80,8 @@ export interface PendingMessage {
 	blockId: string;
 	author: string;
 	text: string;
+	/** File object ids attached to the message (pasted images), from meta `files`. */
+	files: string[];
 }
 
 /** A conversation's message blocks, in append order. */
@@ -202,7 +205,7 @@ export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: st
 		const text = meta["text"] ?? "";
 		// An agent answers what is addressed to it, whoever wrote it.
 		if (!mentions(text, addressedAs) && !(await answersGuestQuestion(msgs, at, agentId))) continue;
-		pending.push({ blockId: id, author, text });
+		pending.push({ blockId: id, author, text, files: messageFiles(meta) });
 	}
 
 	// Never-spoken surface with no mark: only the newest message is live
@@ -364,8 +367,12 @@ function bodyDecision(surfaceKey: string, body: string): "send" | "skip" {
 	return "send";
 }
 
-/** The bridge's exact message shape for a surface message. */
-export function frameMessage(surface: ObjectJSON, ref: ConvRef, pending: PendingMessage[]): string {
+/**
+ * The bridge's exact message shape for a surface message. Attached files are
+ * named with their ids (`fileNames`: id → name), so the agent can link them;
+ * the images themselves reach the model beside this text (attachments.ts).
+ */
+export function frameMessage(surface: ObjectJSON, ref: ConvRef, pending: PendingMessage[], fileNames: ReadonlyMap<string, string> = new Map()): string {
 	const kind = surface.typeKey || "object";
 	const name = str(surface.fields, "name") || "(untitled)";
 	const parts: string[] = [];
@@ -389,20 +396,27 @@ export function frameMessage(surface: ObjectJSON, ref: ConvRef, pending: Pending
 	const earlier = chatCount - pending.length;
 	if (earlier > 0) parts.push(`[this ${kind} has ${earlier} earlier discussion message(s) \u2014 discussion_read ${surface.id} to see them]`);
 
-	for (const p of pending) if (p.text.trim()) parts.push(p.text);
+	for (const p of pending) {
+		if (p.text.trim()) parts.push(p.text);
+		for (const id of p.files) parts.push(`[attached: ${fileNames.get(id) || "file"} (${id})]`);
+	}
 	return parts.join("\n");
 }
 
 /** Copy a surface message into the agent's transcript, origin-tagged.
  * `originBlock` is the source message's block id - the identity that makes
- * ingestion idempotent across machines and lost marks. */
-export async function ingestIntoChat(dest: ConvRef, origin: ConvRef, author: string, text: string, originBlock = ""): Promise<void> {
+ * ingestion idempotent across machines and lost marks. `files` are the
+ * message's attached File ids, kept as the copy's meta `files` so the turn
+ * shows the model the images (attachments.ts). */
+export async function ingestIntoChat(dest: ConvRef, origin: ConvRef, author: string, text: string, originBlock = "", files: string[] = []): Promise<void> {
 	// Keep the source object and thread for navigation. Mailbox messages carry
 	// their immutable id in origin_block, so retries do not duplicate context.
+	const meta: Record<string, string> = { author, text, origin: origin.objectId, origin_thread: origin.threadId, origin_block: originBlock, ts: String(Date.now()) };
+	if (files.length) meta["files"] = files.join(",");
 	await addConvBlock(dest, {
 		id: crypto.randomUUID(),
 		childrenIds: [],
-		content: { custom: { contentType: "chat", meta: { author, text, origin: origin.objectId, origin_thread: origin.threadId, origin_block: originBlock, ts: String(Date.now()) } } },
+		content: { custom: { contentType: "chat", meta } },
 	});
 }
 

@@ -280,6 +280,50 @@ legacy_discussion_is_the_human_conversation :: proc(t: ^testing.T) {
 }
 
 @(test)
+chat_post_carries_attached_files :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	v := Vault{changes = make([dynamic]Change, context.temp_allocator)}
+	created, _ := apply(&v, "create", params({"type_key", "note"}, {"name", "Screens"}))
+	object_id := json_str(created, "id")
+
+	ids := proc(values: ..string) -> json.Value {
+		out := make(json.Array, 0, len(values), context.temp_allocator)
+		for value in values do append(&out, json.String(value))
+		return out
+	}
+	with_files := params({"object_id", object_id}, {"text", "look"})
+	with_files["files"] = ids("file-a", "file-b")
+	posted, err := apply(&v, "chat_post", with_files)
+	testing.expect(t, err == "", err)
+	// An image-only message: no text, just the pasted file.
+	image_only := params({"object_id", object_id})
+	image_only["files"] = ids("file-c")
+	bare, bare_err := apply(&v, "chat_post", image_only)
+	testing.expect(t, bare_err == "", bare_err)
+	// Neither text nor files is still refused, as is an empty files list.
+	_, empty_err := apply(&v, "chat_post", params({"object_id", object_id}))
+	testing.expect(t, empty_err != "", "a message with no text and no files is refused")
+	no_files := params({"object_id", object_id})
+	no_files["files"] = ids()
+	_, no_files_err := apply(&v, "chat_post", no_files)
+	testing.expect(t, no_files_err != "", "an empty files list is no attachment")
+
+	files_of := proc(st: ^Object_State, id: string) -> (string, bool) {
+		for &b in st.blocks {
+			if b.id != id do continue
+			for p in b.content.custom.meta do if p.key == "files" do return p.value, true
+		}
+		return "", false
+	}
+	files, has := files_of(state_of(&v, object_id), json_str(posted, "id"))
+	testing.expect(t, has, "files land on the message meta")
+	testing.expect_value(t, files, "file-a,file-b")
+	only, has_only := files_of(state_of(&v, object_id), json_str(bare, "id"))
+	testing.expect(t, has_only, "image-only message keeps its file")
+	testing.expect_value(t, only, "file-c")
+}
+
+@(test)
 conversation_keeps_fields_it_cannot_name :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
 	// A thread opened by a newer client, then edited by this build: the

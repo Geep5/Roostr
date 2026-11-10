@@ -603,7 +603,17 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 	case "chat_post":
 		object_id := json_str(parsed, "object_id")
 		text := json_str(parsed, "text")
-		if object_id == "" || text == "" {
+		// `files`: File object ids attached to the message (pasted images).
+		// Stored comma-joined in the message meta; a message may be only files.
+		files := make([dynamic]string, context.temp_allocator)
+		if files_value, ok := json_field(parsed, "files"); ok {
+			if arr, is_array := files_value.(json.Array); is_array {
+				for item in arr {
+					if s, is_string := item.(json.String); is_string && s != "" do append(&files, string(s))
+				}
+			}
+		}
+		if object_id == "" || (text == "" && len(files) == 0) {
 			return plan, "object_id and text required"
 		}
 		// An object holds many conversations: the human thread plus the
@@ -639,6 +649,9 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 		append(&meta, Str_Pair{key = "author", value = author})
 		append(&meta, Str_Pair{key = "ts", value = fmt.tprintf("%d", input.timestamp)})
 		append(&meta, Str_Pair{key = "text", value = text})
+		if len(files) > 0 {
+			append(&meta, Str_Pair{key = "files", value = strings.join(files[:], ",", context.temp_allocator)})
+		}
 		if reply := json_str(parsed, "reply_to"); reply != "" {
 			append(&meta, Str_Pair{key = "replyTo", value = reply})
 		}

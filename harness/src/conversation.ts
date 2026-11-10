@@ -186,8 +186,12 @@ export function pruneToolOutputs(items: ClassifiedItem[], ratio: number): Classi
 	});
 }
 
-/** Group contiguous same-role items into turns (agent-conversation.ts:269+). */
-export function groupIntoTurns(items: ClassifiedItem[]): Turn[] {
+/**
+ * Group contiguous same-role items into turns (agent-conversation.ts:269+).
+ * `attachments`: a user message's files as model content (attachments.ts),
+ * by block id, placed right after that message's text.
+ */
+export function groupIntoTurns(items: ClassifiedItem[], attachments: ReadonlyMap<string, AnthropicContent[]> = new Map()): Turn[] {
 	const roleOf = (item: ClassifiedItem): "user" | "assistant" | null => {
 		switch (item.kind) {
 			case "user_text":
@@ -226,6 +230,7 @@ export function groupIntoTurns(items: ClassifiedItem[]): Turn[] {
 			current = { role, content: [] };
 		}
 		current.content.push(content);
+		if (item.kind === "user_text") current.content.push(...(attachments.get(item.blockId) ?? []));
 	}
 	if (current) turns.push(current);
 	return turns;
@@ -253,14 +258,14 @@ export interface ConversationView {
 }
 
 /** Full projection of one conversation: latest summary → systemExtension;
- * kept items → turns. */
-export function buildConversationView(object: ObjectJSON, agentId: string, ratio = 1, threadId = HUMAN_THREAD): ConversationView {
+ * kept items (plus their messages' attachments) → turns. */
+export function buildConversationView(object: ObjectJSON, agentId: string, ratio = 1, threadId = HUMAN_THREAD, attachments: ReadonlyMap<string, AnthropicContent[]> = new Map()): ConversationView {
 	const allItems = classifyBlocks(object, agentId, threadId);
 	const latest = findLatestCompaction(allItems);
 	let kept = latest ? filterToKept(allItems, latest.firstKeptBlockId) : allItems.filter((i) => i.kind !== "compaction");
 	kept = repairToolPairs(kept);
 	kept = pruneToolOutputs(kept, ratio);
-	const turns = mergeConsecutiveTurns(groupIntoTurns(kept));
+	const turns = mergeConsecutiveTurns(groupIntoTurns(kept, attachments));
 	const systemExtension = latest
 		? `<conversation-summary>\nEarlier conversation was compacted. Summary:\n${latest.summary}${
 				latest.touchedObjects.length ? `\n\nObjects touched earlier: ${latest.touchedObjects.join(", ")}` : ""
@@ -269,11 +274,16 @@ export function buildConversationView(object: ObjectJSON, agentId: string, ratio
 	return { turns, systemExtension, items: kept, allItems, latestCompaction: latest };
 }
 
+/** Roughly what one image costs the model (Anthropic: up to ~1600 tokens). */
+const IMAGE_TOKENS = 1600;
+
 /** Estimate the full ask payload (agent-conversation.ts:73-90). */
 export function estimateAskTokens(system: string, view: ConversationView, tools: ToolDef[], ratio: number): number {
 	let total = estimateTokens(system, ratio) + estimateTokens(view.systemExtension, ratio);
 	for (const tool of tools) total += estimateTokens(tool.name + tool.description + JSON.stringify(tool.input_schema), ratio);
 	for (const item of view.items) total += estimateTokens(itemText(item), ratio) + 8;
+	// Attachments ride in the turns only; images are priced, notes are short.
+	for (const turn of view.turns) if (typeof turn.content !== "string") for (const c of turn.content) if (c.type === "image") total += IMAGE_TOKENS;
 	return total;
 }
 

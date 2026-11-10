@@ -16,6 +16,7 @@ import { addConvBlock, postTo, type ConvRef } from "./conv";
 import { objectContext } from "./spacemap";
 import { compactionConfig, doCompact, shouldAutoCompact } from "./compaction";
 import { buildConversationView, estimateAskTokens, estimateTokens, type ConversationView } from "./conversation";
+import { loadAttachments } from "./attachments";
 import { callLLM, isContextOverflowError, modelProvider } from "./llm";
 import { channelInstructions, listSkills, skillsPromptSection } from "./skills";
 import { agentModelKey, credentialsPromptLine } from "./credential-objects";
@@ -25,7 +26,7 @@ import { checkProjectFolder, folderHolder, workspaceAt, workspacePromptSection, 
 import { genesisCalls, genesisFingerprint, lastGenesis } from "./genesis";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
-import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, truncateToolResult, type ToolDef } from "./types";
+import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, truncateToolResult, type AnthropicContent, type ToolDef } from "./types";
 import { knowledgeBaseRows, kbPromptSection } from "./kb";
 
 /**
@@ -335,6 +336,8 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 
 	/** The text the model last wrote alongside tool calls: the reply if the turn then ends silent. */
 	let unsaid = "";
+	/** Message attachments loaded this turn, by block id: each read once, not once per iteration. */
+	const attachmentCache = new Map<string, AnthropicContent[]>();
 	for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
 		// Fresh fetch each iteration: picks up steered user messages and the
 		// blocks we just appended.
@@ -362,7 +365,10 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		ctx.toolset = await agentToolset(agent);
 		const tools = toolDefs(opts.template ?? "", ctx.depth, ctx.allowAsk, ctx.toolset);
 
-		let view = buildConversationView(conv, agentId, ratio, ref.threadId);
+		// Each view carries the messages' attached images; one turn loads each once.
+		const viewOf = async (obj: ObjectJSON): Promise<ConversationView> =>
+			buildConversationView(obj, agentId, ratio, ref.threadId, await loadAttachments(obj, ref.threadId, agentId, attachmentCache));
+		let view = await viewOf(conv);
 		const systemParts = await buildSystemParts(agent, conv, view, opts, ctx.toolset.granted);
 		const system = systemParts.map((p) => p.text).join("\n\n");
 		// Subagent prompts are per-spawn and ephemeral; only a top-level
@@ -373,8 +379,7 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		if (shouldAutoCompact(system, view, tools, cfg, ratio)) {
 			const compacted = await doCompact(agentId, ref, view, cfg, ratio);
 			if (compacted) {
-				const fresh = await fetchObject(ref.objectId);
-				view = buildConversationView(fresh, agentId, ratio, ref.threadId);
+				view = await viewOf(await fetchObject(ref.objectId));
 			}
 		}
 
@@ -393,7 +398,7 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 					const out = await dispatchTool(use.name, use.input, ctx);
 					await persistToolResult(ref, use.id, out.content, out.isError);
 				}
-				view = buildConversationView(await fetchObject(ref.objectId), agentId, ratio, ref.threadId);
+				view = await viewOf(await fetchObject(ref.objectId));
 				console.log(`[harness] genesis for ${str(agent.fields, "name") || agentId.slice(0, 8)} on ${ref.objectId.slice(0, 8)}/${ref.threadId}`);
 			}
 		}
