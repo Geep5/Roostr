@@ -14,7 +14,7 @@
  * pair - watermarks, turn state, tool blocks, compaction summaries.
  */
 
-import { addBlock, chatPost, fetchObject, mutate, str, type BlockJSON, type ObjectJSON } from "./api";
+import { addBlock, chatPost, fetchObject, mutate, str, type BlockJSON, type ObjectJSON, type ReplyWork } from "./api";
 
 /** The human thread's root, auto-created by the first post (mutate.odin). */
 export const HUMAN_THREAD = "__discussion__";
@@ -80,8 +80,8 @@ export function convBlocks(object: ObjectJSON, threadId: string): Array<{ id: st
 }
 
 /** Post a message into a conversation. */
-export const postTo = (ref: ConvRef, text: string, asAuthor = "", replyTo = ""): Promise<{ id: string }> =>
-	chatPost(ref.objectId, text, asAuthor, replyTo, isHuman(ref) ? "" : ref.threadId);
+export const postTo = (ref: ConvRef, text: string, asAuthor = "", replyTo = "", work: ReplyWork = {}): Promise<{ id: string }> =>
+	chatPost(ref.objectId, text, asAuthor, replyTo, isHuman(ref) ? "" : ref.threadId, work);
 
 /** Append a non-message block (tool_use, tool_result, compaction) to a conversation. */
 export const addConvBlock = (ref: ConvRef, block: Partial<BlockJSON>): Promise<unknown> =>

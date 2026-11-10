@@ -26,7 +26,8 @@ import { checkProjectFolder, folderHolder, workspaceAt, workspacePromptSection, 
 import { genesisCalls, genesisFingerprint, lastGenesis } from "./genesis";
 import { ensureAgentPrompt, promptFor, promptTarget } from "./prompts";
 import { digest } from "./memory";
-import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, truncateToolResult, type AnthropicContent, type ToolDef } from "./types";
+import { BLOCK_TOOL_RESULT, BLOCK_TOOL_USE, MAX_TOOL_ITERATIONS, TURN_MAX_TOKENS, truncateToolResult, type AnthropicContent, type LLMResult, type ToolDef } from "./types";
+import { LiveRun } from "./live";
 import { knowledgeBaseRows, kbPromptSection } from "./kb";
 
 /**
@@ -72,16 +73,25 @@ function tokenRatio(obj: ObjectJSON): number {
 /**
  * One tool call, persisted. `note` is the text the model wrote alongside it
  * ("let me check the list") - its working notes: kept on the call so the
- * model's own history reads unchanged, never posted as a chat message.
+ * model's own history reads unchanged, never posted as a chat message. The
+ * thinking it did before the call rides along verbatim (`thinking_blocks`):
+ * the next request of the tool-use turn must carry it back unmodified.
  */
-async function persistToolUse(ref: ConvRef, use: { id: string; name: string; input: Record<string, unknown> }, note = ""): Promise<void> {
+async function persistToolUse(ref: ConvRef, use: LLMResult["toolUses"][number], note = ""): Promise<void> {
 	await addConvBlock(ref, {
 		id: crypto.randomUUID(),
 		childrenIds: [],
 		content: {
 			custom: {
 				contentType: BLOCK_TOOL_USE,
-				meta: { tool_use_id: use.id, tool_name: use.name, input: JSON.stringify(use.input), ts: String(Date.now()), ...(note ? { note } : {}) },
+				meta: {
+					tool_use_id: use.id,
+					tool_name: use.name,
+					input: JSON.stringify(use.input),
+					ts: String(Date.now()),
+					...(note ? { note } : {}),
+					...(use.thinking?.length ? { thinking_blocks: JSON.stringify(use.thinking) } : {}),
+				},
 			},
 		},
 	});
@@ -105,6 +115,8 @@ export interface RunOptions {
 	depth?: number;
 	spawn?: ToolContext["spawn"];
 	submitResult?: (content: string) => void;
+	/** This turn answers an object's chat: its thinking and steps are published live there. */
+	live?: LiveRun;
 	systemSuffix?: string;
 	/** True when this turn answers another agent: agent_ask is withheld. */
 	a2aTurn?: boolean;
@@ -405,7 +417,17 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 
 		let res;
 		try {
-			res = await callLLM({ model, system, turns: view.turns, tools, temperature: num(agent.fields, "temperature"), apiKey });
+			res = await callLLM({
+				model,
+				system,
+				turns: view.turns,
+				tools,
+				maxTokens: TURN_MAX_TOKENS,
+				temperature: num(agent.fields, "temperature"),
+				apiKey,
+				thinking: true,
+				progress: opts.live ? { thinking: (delta) => opts.live?.thinking(delta) } : undefined,
+			});
 		} catch (err) {
 			// Overflow → compact → retry (agent-runner.ts:507-527).
 			if (isContextOverflowError(err) && overflowRetries < 2 && cfg.enabled) {
@@ -438,6 +460,10 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 		}
 		if (text) unsaid = text;
 
+		// Output that hit the length limit cuts its last tool call off mid-input
+		// (it arrives as `{}`): running it fails with a bare "command required"
+		// and the model retries the same oversized call until the iteration cap.
+		const cutOff = res.stopReason === "max_tokens" || res.stopReason === "length";
 		for (const [i, use] of res.toolUses.entries()) {
 			// Persist into the CONVERSATION thread - the same one the next
 			// iteration's view is built from. Writing these to the agent
@@ -445,10 +471,35 @@ export async function runTurn(agentId: string, ref: ConvRef, opts: RunOptions = 
 			// tool calls: the model re-ran the same action until the
 			// iteration cap (14 grocery lists on one page).
 			await persistToolUse(ref, use, i === 0 ? text : "");
+			opts.live?.step(use.name, use.input);
+			if (cutOff && i === res.toolUses.length - 1) {
+				await persistToolResult(ref, use.id, `Not run: your reply hit the ${TURN_MAX_TOKENS}-token output limit and this call was cut off before its input was complete. Send long content in smaller pieces (write it in several steps, e.g. append section by section).`, true);
+				continue;
+			}
 			const out = await dispatchTool(use.name, use.input, ctx);
 			await persistToolResult(ref, use.id, out.content, out.isError);
 		}
 	}
 	await setField(agentId, "last_run_iterations", iv(MAX_TOOL_ITERATIONS));
 	return "(stopped: tool iteration limit)";
+}
+
+/**
+ * A turn answering an object's chat (`surface`), run in the agent's
+ * transcript `conv`. While it works, its thinking and tool steps are
+ * published live on the surface (live.ts); the reply it posts there carries
+ * the record of that work (`thinking`) and how long it took (`thought_ms`).
+ * Returns the reply, trimmed ("" when the agent said nothing).
+ */
+export async function answerChat(agentId: string, conv: ConvRef, surface: ConvRef, opts: RunOptions = {}): Promise<string> {
+	const live = new LiveRun(agentId, surface.objectId, surface.threadId);
+	try {
+		const reply = (await runTurn(agentId, conv, { ...opts, live })).trim();
+		if (reply) await postTo(surface, reply, agentId, "", { thinking: live.record(), thoughtMs: live.thoughtMs() });
+		live.done();
+		return reply;
+	} catch (err) {
+		live.error(err instanceof Error ? err.message : String(err));
+		throw err;
+	}
 }

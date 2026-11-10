@@ -27,6 +27,7 @@ import {
 	safeJsonParse,
 	type AnthropicContent,
 	type ClassifiedItem,
+	type ThinkingContent,
 	type ToolDef,
 	type Turn,
 } from "./types";
@@ -43,6 +44,8 @@ export function itemText(item: ClassifiedItem): string {
 		case "user_text":
 		case "assistant_text":
 			return item.text;
+		case "assistant_thinking":
+			return item.block.type === "thinking" ? item.block.thinking + item.block.signature : item.block.data;
 		case "tool_use":
 			return `${item.name} ${JSON.stringify(item.input)}`;
 		case "tool_result":
@@ -68,8 +71,11 @@ export function classifyBlocks(object: ObjectJSON, agentId: string, threadId = H
 				break;
 			}
 			case BLOCK_TOOL_USE:
-				// The text the model wrote alongside the call: its own words, so
-				// the next request reads exactly as it answered.
+				// The thinking the model did before the call (verbatim, signed:
+				// the API wants it back within the tool-use turn), then the text
+				// it wrote alongside: its own words, so the next request reads
+				// exactly as it answered.
+				for (const thought of thinkingBlocks(meta["thinking_blocks"])) items.push({ kind: "assistant_thinking", blockId: cid, block: thought });
 				if (meta["note"]) items.push({ kind: "assistant_text", blockId: cid, text: meta["note"] });
 				items.push({
 					kind: "tool_use",
@@ -101,6 +107,17 @@ export function classifyBlocks(object: ObjectJSON, agentId: string, threadId = H
 		}
 	}
 	return items;
+}
+
+/** A tool_use block's `thinking_blocks` meta, keeping only well-formed blocks. */
+function thinkingBlocks(raw: string | undefined): ThinkingContent[] {
+	if (!raw) return [];
+	const parsed = safeJsonParse(raw);
+	if (!Array.isArray(parsed)) return [];
+	return parsed.filter(
+		(b): b is ThinkingContent =>
+			(b?.type === "thinking" && typeof b.thinking === "string" && typeof b.signature === "string") || (b?.type === "redacted_thinking" && typeof b.data === "string"),
+	);
 }
 
 export function findLatestCompaction(items: ClassifiedItem[]): Extract<ClassifiedItem, { kind: "compaction" }> | null {
@@ -198,6 +215,7 @@ export function groupIntoTurns(items: ClassifiedItem[], attachments: ReadonlyMap
 			case "tool_result":
 				return "user";
 			case "assistant_text":
+			case "assistant_thinking":
 			case "tool_use":
 				return "assistant";
 			case "compaction":
@@ -210,6 +228,8 @@ export function groupIntoTurns(items: ClassifiedItem[], attachments: ReadonlyMap
 				return { type: "text", text: item.author ? `[from ${item.author}] ${item.text}` : item.text };
 			case "assistant_text":
 				return item.text.length > 0 ? { type: "text", text: item.text } : null;
+			case "assistant_thinking":
+				return item.block;
 			case "tool_use":
 				return { type: "tool_use", id: item.toolUseId, name: item.name, input: item.input };
 			case "tool_result":

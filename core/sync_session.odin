@@ -190,6 +190,10 @@ Sync_Ingest :: struct {
 	h_tag:           string,
 	// The owner deleted this installed space (a kind-5 on its stream tag).
 	space_vanished:  string,
+	// A LIVE_KIND progress event (core/live.odin), normalized: never an item,
+	// never moves the cursor. Shared-space ones carry their provenance.
+	live:            json.Value,
+	live_provenance: json.Value,
 }
 
 sync_fault :: proc(r: ^Sync_Ingest, at: i64) {
@@ -234,6 +238,10 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 	kind, _ := json_int(event, "kind")
 	if kind == SYNC_DELETE_KIND {
 		r.space_vanished = sync_space_deleted(event)
+		return
+	}
+	if kind == LIVE_KIND {
+		sync_ingest_live(event, &r)
 		return
 	}
 	if kind != SYNC_CHANGE_KIND && kind != SYNC_CHECKPOINT_KIND && kind != SYNC_BASE_KIND && kind != SYNC_BASE_PART_KIND do return
@@ -416,6 +424,61 @@ sync_ingest :: proc(event: json.Value, now_ms: i64) -> (r: Sync_Ingest) {
 	sync_provenance(&item, space, pubkey)
 	r.item = json.Object(item)
 	return
+}
+
+// A live progress event opens with the keys its object's changes use: the
+// self conversation key when we signed it, else the space key its stream tag
+// names. The payload must be one valid live event.
+sync_ingest_live :: proc(event: json.Value, r: ^Sync_Ingest) {
+	tags := json_array(event, "tags")
+	if h, ok := event_tag(tags, "h"); ok do r.h_tag = tag_string(h, 1)
+	pubkey := json_str(event, "pubkey")
+	content := json_str(event, "content")
+	plain := ""
+	opened := false
+	space: ^Sync_Space
+	if pubkey == sync_session.pk {
+		if key, ok := hex_bytes(sync_session.conversation_key); ok do plain, opened = nip44_decrypt(content, key, context.temp_allocator)
+	}
+	if !opened {
+		for &candidate in sync_session.spaces {
+			tagged := false
+			for tag in tags {
+				if arr, ok := tag.(json.Array); ok && tag_string(arr, 0) == "h" && tag_string(arr, 1) == candidate.space_tag { tagged = true; break }
+			}
+			if !tagged do continue
+			key, ok := hex_bytes(candidate.key_hex)
+			if !ok do continue
+			if plain, opened = nip44_decrypt(content, key, context.temp_allocator); opened {
+				space = &candidate
+				break
+			}
+		}
+	}
+	if !opened {
+		r.decrypt_failure = true
+		return
+	}
+	if !json_depth_ok(transmute([]byte)plain) {
+		r.decode_failure = true
+		return
+	}
+	parsed, perr := json.parse(transmute([]byte)plain, parse_integers = true, allocator = context.temp_allocator)
+	if perr != nil {
+		r.decode_failure = true
+		return
+	}
+	live, why := live_event_normalize(parsed)
+	if why != "" {
+		r.decode_failure = true
+		return
+	}
+	r.live = live
+	if space != nil {
+		holder := jobj()
+		sync_provenance(&holder, space, pubkey)
+		r.live_provenance = holder["provenance"]
+	}
 }
 
 // The installed space a verified kind-5 deletes, "" for any other deletion:

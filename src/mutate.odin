@@ -112,6 +112,7 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
  case "nostr_relays_set": mutate_relays_set(sock, parsed); return
  case "nostr_key_import": mutate_key_import(sock, parsed); return
  case "identity_logout": mutate_identity_logout(sock); return
+ case "live_publish": mutate_live_publish(sock, parsed); return
  }
  sync.lock(&g_mutation_mu)
  defer sync.unlock(&g_mutation_mu)
@@ -149,6 +150,25 @@ handle_mutate :: proc(sock: net.TCP_Socket, body: []byte) {
  }
  plan.result["ok"] = json.Boolean(true)
  respond_json(sock, json.Object(plan.result))
+}
+
+// Live progress (core/live.odin): no plan, no lock, no write - the event goes
+// to the change stream only, where the sync daemon relays local ones.
+mutate_live_publish :: proc(sock: net.TCP_Socket, parsed: json.Value) {
+ event, _ := core.json_field(parsed, "event")
+ live, err := core.live_event_normalize(event)
+ if err == "" {
+  origin: string
+  origin, err = core.live_origin(parsed)
+  if err == "" {
+   sse_broadcast_live(live, origin)
+   out := core.jobj()
+   out["ok"] = json.Boolean(true)
+   respond_json(sock, json.Object(out))
+   return
+  }
+ }
+ respond_error(sock, err)
 }
 
 seed_space_defaults :: proc(channel_id: string) {

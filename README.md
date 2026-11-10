@@ -139,7 +139,8 @@ POST /api/query              {filters, sorts, textQuery, setId, type, limit, off
 POST /api/mutate             {action, ...} — create (optionally with its body),
                              blocks_append, block_add/update/move/remove,
                              block_set_attrs, set_field, delete, channel_*
-GET  /api/events             SSE: {"objectId"} per committed change
+GET  /api/events             SSE: {"objectId"} per committed change; {"type":"live","origin","live"}
+                             per live progress event (live_publish, never stored)
 ```
 
 ## For external machines (bots outside Roostr)

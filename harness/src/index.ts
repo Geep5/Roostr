@@ -16,7 +16,7 @@ import { API, VANISH_LOG_ID, apiFetch, chatPost, deleteField, fetchObject, guest
 import { TEMPLATE_OWN, kindTemplates, seedCatalog } from "./catalog-seeds";
 import { DEFAULT_MODEL, PROMPT_SEEDS } from "./prompts";
 import type { ObjectJSON, ValueJSON } from "./api";
-import { publishSystemSnapshot, runTurn } from "./runner";
+import { answerChat, publishSystemSnapshot, runTurn } from "./runner";
 import { spawnSubagent } from "./spawn";
 import { migrateLoginInstalls, refreshCredentials, spaceCredential, CREDENTIAL_TYPE } from "./credential-objects";
 import { installShippedCommand } from "./shipped-commands";
@@ -289,16 +289,13 @@ async function ingestSurface(s: Served, origin: ConvRef): Promise<ConvRef | null
 }
 
 /**
- * Handle a message on one surface: ingest, run the turn on the chat, reply
- * where asked.
+ * Handle a message on one surface: ingest, run the turn on the chat (its
+ * progress live on the surface), reply where asked.
  */
 async function handleSurface(s: Served, surface: ConvRef): Promise<boolean> {
 	const conv = await ingestSurface(s, surface);
 	if (!conv) return false;
-	const reply = await runTurn(s.agentId, conv, { spawn: spawnSubagent });
-	if (reply.trim()) {
-		await postTo(surface, reply.trim(), s.agentId);
-	}
+	const reply = await answerChat(s.agentId, conv, surface, { spawn: spawnSubagent });
 	console.log(`[${new Date().toISOString()}] ${s.agentId.slice(0, 8)} answered in ${convKey(surface).slice(0, 26)}: ${reply.slice(0, 120)}`);
 	return true;
 }

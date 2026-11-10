@@ -367,7 +367,10 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		if err := sync_session_set_spaces(payload); err != "" do return nil, err
 		return sync_state_json(), ""
 	case "ingest":
-		// {event: {pubkey, created_at, kind, tags, content}, nowMs} → {cursor, item?, faultAt?, replayGroups?, decryptFailure?, decodeFailure?, hTag?, spaceVanished?}
+		// {event: {pubkey, created_at, kind, tags, content}, nowMs} → {cursor, item?, live?, provenance?, faultAt?, replayGroups?, decryptFailure?, decodeFailure?, hTag?, spaceVanished?}
+		// A kind-25078 live progress event (core/live.odin) answers `live`
+		// (the normalized payload) and, for a shared space, its `provenance`;
+		// never an item, and the cursor stays where it was.
 		// The host has already verified the event signature. A pointer base
 		// (31078 with ["blob", ...]) yields item {bytes: "", blob: {hash, sha256,
 		// size, key, url?}, provenance?}: the host fetches and decrypts the blob,
@@ -381,6 +384,8 @@ sync_dispatch :: proc(payload: json.Value) -> (json.Value, string) {
 		out := jobj()
 		out["cursor"] = json.Integer(sync_session.cursor)
 		if r.item != nil do out["item"] = r.item
+		if r.live != nil do out["live"] = r.live
+		if r.live_provenance != nil do out["provenance"] = r.live_provenance
 		if r.faulted do out["faultAt"] = json.Integer(r.fault_at)
 		if r.replay_changed do out["replayGroups"] = sync_replay_groups_json()
 		if r.decrypt_failure do out["decryptFailure"] = json.Boolean(true)

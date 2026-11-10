@@ -30,11 +30,17 @@ import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { machines, serverOf, servesHere } from "./machine";
 import { machineId } from "./roster";
 import { blossomServer, decryptBlob, deleteBlob, download, encryptBlob, sha256Hex, upload } from "./blossom";
+import type { LiveEvent } from "./types";
 
 const CHANGE_KIND = 1078;
 /** One Checkpoint (docs/checkpoint-sync.md) per object: a replay cache, same envelope as 1078. */
 const CHECKPOINT_KIND = 1079;
 const CHECKPOINT_INTERVAL_MS = 10 * 60_000;
+/**
+ * Live progress in chats (core/live.odin): ephemeral (relays forward it,
+ * never store it), same keys and h tags as the object's 1078s.
+ */
+const PROGRESS_KIND = 25078;
 /** State sync (docs/state-sync.md): a per-object base, addressable, and its parts 2..n. */
 const BASE_KIND = 31078;
 const BASE_PART_KIND = 1080;
@@ -2622,7 +2628,48 @@ export async function startNostrSync(): Promise<void> {
 			return;
 		}
 		void publishObject(objectId);
+	}, undefined, (live, origin) => {
+		// Only this computer's own progress leaves; a relayed one never goes back out.
+		if (origin === "local") void relayProgress(live);
 	});
+
+	// ── Live progress: one event out per local publish, one in per relay event ──
+	//
+	// Best effort both ways: a lost event is a missing line of progress,
+	// never retried. Relays echo our own events back; their ids are skipped.
+	const sentProgress = new Set<string>();
+
+	async function relayProgress(live: LiveEvent): Promise<void> {
+		try {
+			const space = sharedSpaces.get(spaceMap.get(live.object) ?? "");
+			const event = finalizeEvent(
+				{
+					kind: PROGRESS_KIND,
+					created_at: Math.floor(Date.now() / 1000),
+					tags: space ? [["h", blindShared(space.keyHex, live.object)], ["h", space.spaceTag]] : [["h", blindObjectId(id!, live.object)]],
+					content: nip44.encrypt(JSON.stringify(live), space ? space.convKey : id!.conversationKey),
+				},
+				id!.sk,
+			);
+			if (sentProgress.size >= 1024) sentProgress.clear();
+			sentProgress.add(event.id);
+			await Promise.any(pool.publish(id!.relays, event));
+		} catch {
+			/* no relay took it: this line of progress stays local */
+		}
+	}
+
+	async function onProgressEvent(event: Event): Promise<void> {
+		if (event.kind !== PROGRESS_KIND || sentProgress.has(event.id) || !verifyEvent(event)) return;
+		const opened = decryptEvent(event);
+		if (!opened) return;
+		try {
+			await mutate("live_publish", { event: JSON.parse(opened.part), origin: "relay" });
+		} catch {
+			/* not a live event, or the store is restarting */
+		}
+	}
+
 	// ── Live subscriptions + deafness watchdog ─────────────────────
 	//
 	// nostr-tools does not resurrect subscriptions after a socket drop
@@ -2673,6 +2720,20 @@ export async function startNostrSync(): Promise<void> {
 				onevent: (event) => void handleWrap(event),
 			}),
 		);
+		// Live progress is only ever now: no history to ask for.
+		const now = Math.floor(Date.now() / 1000);
+		liveSubs.push(
+			pool.subscribeMany(id!.relays, { kinds: [PROGRESS_KIND], authors: [id!.pk], since: now }, {
+				onevent: (event) => void onProgressEvent(event),
+			}),
+		);
+		if (tags.length > 0) {
+			liveSubs.push(
+				pool.subscribeMany(id!.relays, { kinds: [PROGRESS_KIND], "#h": tags, since: now }, {
+					onevent: (event) => void onProgressEvent(event),
+				}),
+			);
+		}
 	}
 
 	const WATCHDOG_MS = 60_000;

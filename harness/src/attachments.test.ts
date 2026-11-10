@@ -80,10 +80,15 @@ async function requestFor(files: Record<string, ObjectJSON>, model = "claude-son
 		globalThis.fetch = Object.assign(
 			async (_url: string | URL | Request, init?: RequestInit) => {
 				sent = String(init?.body ?? "");
-				const reply = model.startsWith("kimi")
-					? { choices: [{ message: { content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } }
-					: { content: [{ type: "text", text: "ok" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } };
-				return new Response(JSON.stringify(reply), { status: 200 });
+				if (model.startsWith("kimi")) return Response.json({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } });
+				// Claude answers as a stream (llm.ts readAnthropicStream).
+				const events = [
+					{ type: "message_start", message: { usage: { input_tokens: 1, output_tokens: 1 } } },
+					{ type: "content_block_start", index: 0, content_block: { type: "text", text: "ok" } },
+					{ type: "content_block_stop", index: 0 },
+					{ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } },
+				];
+				return new Response(events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(""), { status: 200 });
 			},
 			{ preconnect: originalFetch.preconnect },
 		);

@@ -30,7 +30,20 @@ Sse_Hub :: struct {
 g_sse: Sse_Hub
 
 sse_broadcast :: proc(object_id: string) {
-	msg := fmt.tprintf("data: {{\"objectId\":\"%s\"}}\n\n", object_id)
+	sse_send(fmt.tprintf("data: {{\"objectId\":\"%s\"}}\n\n", object_id))
+}
+
+// A live progress event (core/live.odin) on the same stream, told apart by
+// "type":"live": {"type":"live","origin":"local"|"relay","live":{...}}.
+sse_broadcast_live :: proc(live: json.Value, origin: string) {
+	frame := core.jobj()
+	frame["type"] = json.String("live")
+	frame["origin"] = json.String(origin)
+	frame["live"] = live
+	sse_send(fmt.tprintf("data: %s\n\n", string(core.marshal(json.Object(frame)))))
+}
+
+sse_send :: proc(msg: string) {
 	sync.lock(&g_sse.mu)
 	defer sync.unlock(&g_sse.mu)
 	for i := len(g_sse.clients) - 1; i >= 0; i -= 1 {

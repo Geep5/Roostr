@@ -1,11 +1,12 @@
 /**
  * Provider layer — trimmed port of glon agent-llm.ts. Anthropic Messages
- * API (non-streaming) + Moonshot Kimi (OpenAI-shaped), plus a deterministic
- * "mock" model for offline smoke tests. Overflow detection mirrors
- * isContextOverflowError (agent-llm.ts:673-676).
+ * API (streamed, with thinking on agent turns) + Moonshot Kimi
+ * (OpenAI-shaped), plus a deterministic "mock" model for offline smoke
+ * tests. Overflow detection mirrors isContextOverflowError
+ * (agent-llm.ts:673-676).
  */
 
-import type { LLMResult, ToolDef, Turn } from "./types";
+import type { LLMProgress, LLMResult, ThinkingContent, ToolDef, Turn } from "./types";
 import { resolveAnthropicAuth, resolveKimiKey } from "./auth";
 
 export interface LLMRequest {
@@ -14,9 +15,37 @@ export interface LLMRequest {
 	turns: Turn[];
 	tools: ToolDef[];
 	maxTokens?: number;
+	/** Ignored when `thinking` is on: thinking takes no custom temperature. */
 	temperature?: number;
 	/** The agent's own model key (a Credential it lists); overrides this computer's login. */
 	apiKey?: string;
+	/** Ask Claude to think first (agent turns). Kimi and the mock model never think. */
+	thinking?: boolean;
+	/** Called as the streamed answer arrives. */
+	progress?: LLMProgress;
+}
+
+/**
+ * Tokens of thinking a manual-mode model may spend per call, added on top of
+ * the caller's `maxTokens` so the answer keeps all of its room (the API
+ * wants max_tokens > budget_tokens >= 1024).
+ */
+export const THINKING_BUDGET_TOKENS = 8192;
+
+/**
+ * The documented thinking configuration for a model, with the max_tokens it
+ * needs. Claude 4.6 and later (and every Claude 5) take only adaptive
+ * thinking - `type: "enabled"` is a 400 there - and return thinking text only
+ * with `display: "summarized"`; earlier models take manual extended thinking
+ * with a budget.
+ */
+export function thinkingConfig(model: string, maxTokens: number): { thinking: Record<string, unknown>; maxTokens: number; manual: boolean } {
+	const version = model.match(/^claude-(?:[a-z]+-)?(\d+)(?:-(\d{1,2}))?(?:-|$)/);
+	const major = version ? Number(version[1]) : 0;
+	const minor = version?.[2] ? Number(version[2]) : 0;
+	const adaptive = major > 4 || (major === 4 && minor >= 6);
+	if (adaptive) return { thinking: { type: "adaptive", display: "summarized" }, maxTokens: maxTokens + THINKING_BUDGET_TOKENS, manual: false };
+	return { thinking: { type: "enabled", budget_tokens: THINKING_BUDGET_TOKENS }, maxTokens: maxTokens + THINKING_BUDGET_TOKENS, manual: true };
 }
 
 export function isContextOverflowError(err: unknown): boolean {
@@ -30,10 +59,12 @@ export function isContextOverflowError(err: unknown): boolean {
 const CLAUDE_CODE_VERSION = "2.1.302";
 const CLAUDE_CODE_SYSTEM_INSTRUCTION = "You are Claude Code, Anthropic's official CLI for Claude.";
 const CLAUDE_CODE_TOOL_PREFIX = "proxy_";
+/** Interleaved thinking: manual-mode models think between tool calls only with this beta. */
+const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 const CLAUDE_CODE_BETAS = [
 	"claude-code-20250219",
 	"oauth-2025-04-20",
-	"interleaved-thinking-2025-05-14",
+	INTERLEAVED_THINKING_BETA,
 	"prompt-caching-scope-2026-01-05",
 ].join(",");
 const PROVIDER_RETRY_DELAYS_MS = [1_000, 3_000];
@@ -114,12 +145,16 @@ async function callAnthropic(req: LLMRequest): Promise<LLMResult> {
 		: await resolveAnthropicAuth().catch((err) => {
 				throw new Error(`This agent lists no Anthropic credential, and this computer's own Claude sign-in failed (${err instanceof Error ? err.message.slice(0, 160) : String(err)}). Add the space's "Anthropic" credential to the agent's Credentials, and sign in with Claude in Settings or paste a key in it.`);
 			});
+	const maxTokens = req.maxTokens ?? 4096;
+	const thinking = req.thinking ? thinkingConfig(req.model, maxTokens) : null;
 	const body: Record<string, unknown> = {
 		model: req.model,
-		max_tokens: req.maxTokens ?? 4096,
+		max_tokens: thinking ? thinking.maxTokens : maxTokens,
 		messages: req.turns,
+		stream: true,
 	};
-	if (req.temperature !== undefined) body.temperature = req.temperature;
+	if (thinking) body.thinking = thinking.thinking;
+	else if (req.temperature !== undefined) body.temperature = req.temperature;
 	body.system = auth.isOAuth
 		? [{ type: "text", text: CLAUDE_CODE_SYSTEM_INSTRUCTION }, ...(req.system ? [{ type: "text", text: req.system }] : [])]
 		: req.system
@@ -146,6 +181,7 @@ async function callAnthropic(req: LLMRequest): Promise<LLMResult> {
 		Object.assign(headers, CLAUDE_CODE_STAINLESS_HEADERS);
 	} else {
 		headers["x-api-key"] = auth.token;
+		if (thinking?.manual) headers["anthropic-beta"] = INTERLEAVED_THINKING_BETA;
 	}
 
 	const res = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
@@ -162,29 +198,130 @@ async function callAnthropic(req: LLMRequest): Promise<LLMResult> {
 		}
 		throw new Error(`anthropic ${res.status}: ${errBody.slice(0, 600)}`);
 	}
-	const out = (await res.json()) as {
-		content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>;
-		stop_reason: string;
-		usage: { input_tokens: number; output_tokens: number };
+	return readAnthropicStream(res, req.progress, auth.isOAuth ? CLAUDE_CODE_TOOL_PREFIX : "");
+}
+
+/** One content block of a streamed message, as it accumulates. */
+type StreamBlock =
+	| { type: "text"; text: string }
+	| { type: "thinking"; thinking: string; signature: string }
+	| { type: "redacted_thinking"; data: string }
+	| { type: "tool_use"; id: string; name: string; json: string }
+	| { type: "other" };
+
+/**
+ * A streamed Messages response (server-sent events) folded into the result
+ * callers expect, reporting thinking and text deltas as they arrive. Thinking
+ * blocks are kept whole - signature included - on the tool call they precede,
+ * because the next request of the tool-use turn has to carry them back.
+ */
+export async function readAnthropicStream(res: Response, progress: LLMProgress | undefined, toolPrefix: string): Promise<LLMResult> {
+	const reader = res.body?.getReader();
+	if (!reader) throw new Error("anthropic: no response body");
+	const blocks: StreamBlock[] = [];
+	let stopReason = "";
+	let inputTokens = 0;
+	let outputTokens = 0;
+	const decoder = new TextDecoder();
+	let buf = "";
+	const onEvent = (data: string): void => {
+		const event = JSON.parse(data) as {
+			type: string;
+			index?: number;
+			message?: { usage?: { input_tokens?: number; output_tokens?: number } };
+			content_block?: { type: string; text?: string; thinking?: string; signature?: string; data?: string; id?: string; name?: string };
+			delta?: { type?: string; text?: string; thinking?: string; signature?: string; partial_json?: string; stop_reason?: string };
+			usage?: { input_tokens?: number; output_tokens?: number };
+			error?: { type?: string; message?: string };
+		};
+		switch (event.type) {
+			case "message_start":
+				inputTokens = event.message?.usage?.input_tokens ?? 0;
+				outputTokens = event.message?.usage?.output_tokens ?? 0;
+				return;
+			case "content_block_start": {
+				const b = event.content_block;
+				const block: StreamBlock =
+					b?.type === "text"
+						? { type: "text", text: b.text ?? "" }
+						: b?.type === "thinking"
+							? { type: "thinking", thinking: b.thinking ?? "", signature: b.signature ?? "" }
+							: b?.type === "redacted_thinking"
+								? { type: "redacted_thinking", data: b.data ?? "" }
+								: b?.type === "tool_use"
+									? { type: "tool_use", id: b.id ?? "", name: b.name ?? "", json: "" }
+									: { type: "other" };
+				blocks[event.index ?? blocks.length] = block;
+				if (block.type === "text" && block.text) progress?.text?.(block.text);
+				if (block.type === "thinking" && block.thinking) progress?.thinking?.(block.thinking);
+				return;
+			}
+			case "content_block_delta": {
+				const block = blocks[event.index ?? -1];
+				const d = event.delta;
+				if (!block || !d) return;
+				if (d.type === "text_delta" && block.type === "text") {
+					block.text += d.text ?? "";
+					if (d.text) progress?.text?.(d.text);
+				} else if (d.type === "thinking_delta" && block.type === "thinking") {
+					block.thinking += d.thinking ?? "";
+					if (d.thinking) progress?.thinking?.(d.thinking);
+				} else if (d.type === "signature_delta" && block.type === "thinking") {
+					block.signature += d.signature ?? "";
+				} else if (d.type === "input_json_delta" && block.type === "tool_use") {
+					block.json += d.partial_json ?? "";
+				}
+				return;
+			}
+			case "message_delta":
+				if (event.delta?.stop_reason) stopReason = event.delta.stop_reason;
+				if (event.usage?.output_tokens !== undefined) outputTokens = event.usage.output_tokens;
+				if (event.usage?.input_tokens) inputTokens = event.usage.input_tokens;
+				return;
+			case "error":
+				throw new Error(`anthropic stream ${event.error?.type ?? "error"}: ${(event.error?.message ?? data).slice(0, 600)}`);
+		}
 	};
-	const text = out.content
-		.filter((c) => c.type === "text")
-		.map((c) => c.text ?? "")
-		.join("");
-	const toolUses = out.content
-		.filter((c) => c.type === "tool_use")
-		.map((c) => {
-			let name = c.name ?? "";
-			if (auth.isOAuth && name.startsWith(CLAUDE_CODE_TOOL_PREFIX)) name = name.slice(CLAUDE_CODE_TOOL_PREFIX.length);
-			return { id: c.id ?? "", name, input: c.input ?? {} };
-		});
-	return {
-		text,
-		toolUses,
-		stopReason: out.stop_reason,
-		inputTokens: out.usage.input_tokens,
-		outputTokens: out.usage.output_tokens,
-	};
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (value) buf += decoder.decode(value, { stream: !done });
+		let idx: number;
+		while ((idx = buf.indexOf("\n\n")) >= 0) {
+			const frame = buf.slice(0, idx);
+			buf = buf.slice(idx + 2);
+			const data = frame
+				.split("\n")
+				.filter((line) => line.startsWith("data:"))
+				.map((line) => line.slice(5).trimStart())
+				.join("\n");
+			if (data) onEvent(data);
+		}
+		if (done) break;
+	}
+	if (!stopReason) throw new Error("anthropic: the response stream ended early");
+
+	let text = "";
+	const toolUses: LLMResult["toolUses"] = [];
+	let thinking: ThinkingContent[] = [];
+	for (const block of blocks) {
+		if (!block) continue;
+		if (block.type === "text") text += block.text;
+		else if (block.type === "thinking") thinking.push({ type: "thinking", thinking: block.thinking, signature: block.signature });
+		else if (block.type === "redacted_thinking") thinking.push({ type: "redacted_thinking", data: block.data });
+		else if (block.type === "tool_use") {
+			const name = toolPrefix && block.name.startsWith(toolPrefix) ? block.name.slice(toolPrefix.length) : block.name;
+			// A call cut off by max_tokens arrives with partial input: `{}` (the runner refuses it).
+			let input: Record<string, unknown> = {};
+			try {
+				input = block.json ? (JSON.parse(block.json) as Record<string, unknown>) : {};
+			} catch {
+				input = {};
+			}
+			toolUses.push({ id: block.id, name, input, ...(thinking.length ? { thinking } : {}) });
+			thinking = [];
+		}
+	}
+	return { text, toolUses, stopReason, inputTokens, outputTokens };
 }
 async function callKimi(req: LLMRequest): Promise<LLMResult> {
 	const key = req.apiKey || (await resolveKimiKey());

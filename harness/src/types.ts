@@ -34,6 +34,8 @@ export const PRUNE_MINIMUM_SAVINGS = 20_000;
 export const PRUNE_PROTECTED_TOOLS = new Set(["object_get", "skill_read"]);
 
 export const MAX_TOOL_ITERATIONS = 50;
+/** Output budget of one agent model call: room for a long document written in one tool call. */
+export const TURN_MAX_TOKENS = 16000;
 export const MAX_SPAWN_DEPTH = 3;
 export const SPAWN_CONCURRENCY = 4;
 
@@ -48,6 +50,8 @@ export interface CompactionConfig {
 export type ClassifiedItem =
 	| { kind: "user_text"; blockId: string; text: string; author: string }
 	| { kind: "assistant_text"; blockId: string; text: string }
+	/** One thinking block the model wrote before a tool call, kept verbatim (signature included) for the API. */
+	| { kind: "assistant_thinking"; blockId: string; block: ThinkingContent }
 	| { kind: "tool_use"; blockId: string; toolUseId: string; name: string; input: Record<string, unknown> }
 	| { kind: "tool_result"; blockId: string; toolUseId: string; content: string; isError: boolean; pruned?: boolean }
 	| {
@@ -59,11 +63,15 @@ export type ClassifiedItem =
 			touchedObjects: string[];
 	  };
 
+/** A model's thinking as the Anthropic API returns it and requires back, unmodified, within a tool-use turn. */
+export type ThinkingContent = { type: "thinking"; thinking: string; signature: string } | { type: "redacted_thinking"; data: string };
+
 export type AnthropicContent =
 	| { type: "text"; text: string }
 	| { type: "image"; source: { type: "base64"; media_type: string; data: string } }
 	| { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
-	| { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
+	| { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean }
+	| ThinkingContent;
 
 export interface Turn {
 	role: "user" | "assistant";
@@ -76,9 +84,33 @@ export interface ToolDef {
 	input_schema: Record<string, unknown>;
 }
 
+/** What a streamed model call reports as it arrives (agent turns publish it live). */
+export interface LLMProgress {
+	/** A piece of the model's (summarized) thinking. */
+	thinking?: (delta: string) => void;
+	/** A piece of the answer text. */
+	text?: (delta: string) => void;
+}
+
+/** Live progress in a chat (core/live.odin): sent by `live_publish`, never stored. */
+export type LiveKind = "thinking" | "step" | "text" | "done" | "error";
+export interface LiveEvent {
+	v: 1;
+	run: string;
+	agent: string;
+	object: string;
+	thread: string;
+	seq: number;
+	kind: LiveKind;
+	/** thinking/text: a delta to append; step: a one-line summary; error: the message; done: "". */
+	text: string;
+	ts: number;
+}
+
 export interface LLMResult {
 	text: string;
-	toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>;
+	/** `thinking`: the thinking blocks the model wrote right before this call, which the next request must carry back. */
+	toolUses: Array<{ id: string; name: string; input: Record<string, unknown>; thinking?: ThinkingContent[] }>;
 	stopReason: string;
 	inputTokens: number;
 	outputTokens: number;

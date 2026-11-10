@@ -631,4 +631,5 @@ sync_session_contract :: proc(t: ^testing.T) {
 	sync_session_outbox_wake_clears_backoff(t)
 	state_sync_base_wire_scenario(t)
 	state_sync_pointer_base_scenario(t)
+	sync_session_opens_live_events_without_importing_them(t)
 }

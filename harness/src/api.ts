@@ -6,6 +6,7 @@
  */
 
 import { API, apiFetch } from "./local-api-auth";
+import type { LiveEvent } from "./types";
 export { API, apiFetch } from "./local-api-auth";
 
 export interface ValueJSON {
@@ -300,18 +301,35 @@ export async function ownedSpaces(): Promise<Array<{ id: string; name: string }>
  * human-facing caller wants; an agent's own transcript and an A2A exchange
  * pass the thread they live in (`$lib/conv`).
  */
-export const chatPost = async (objectId: string, text: string, asAuthor = "", replyTo = "", threadId = "") =>
-	(await mutate("chat_post", { object_id: objectId, text, as_author: asAuthor, reply_to: replyTo, thread_id: threadId })) as {
+export const chatPost = async (objectId: string, text: string, asAuthor = "", replyTo = "", threadId = "", work: ReplyWork = {}) =>
+	(await mutate("chat_post", {
+		object_id: objectId,
+		text,
+		as_author: asAuthor,
+		reply_to: replyTo,
+		thread_id: threadId,
+		...(work.thinking ? { thinking: work.thinking } : {}),
+		...(work.thoughtMs !== undefined ? { thought_ms: work.thoughtMs } : {}),
+	})) as {
 		id: string;
 		threadId: string;
 	};
+
+/** An agent reply's record of its work (live.ts): its `thinking` JSON and how long it worked. */
+export interface ReplyWork {
+	thinking?: string;
+	thoughtMs?: number;
+}
 
 /** Append an arbitrary block (used for tool_use / tool_result / compaction). */
 export const addBlock = (objectId: string, block: Partial<BlockJSON>, targetId = "", position = 0) =>
 	mutate("block_add", { object_id: objectId, block, target_id: targetId, position });
 
-/** Subscribe to commits; onConnected also runs after every reconnection. */
-export function subscribe(onObject: (objectId: string) => void, onConnected?: () => void): void {
+/**
+ * Subscribe to commits; onConnected also runs after every reconnection.
+ * `onLive`: live progress frames on the same stream ({"type":"live",...}, core/live.odin).
+ */
+export function subscribe(onObject: (objectId: string) => void, onConnected?: () => void, onLive?: (live: LiveEvent, origin: "local" | "relay") => void): void {
 	void (async () => {
 		for (;;) {
 			try {
@@ -333,8 +351,9 @@ export function subscribe(onObject: (objectId: string) => void, onConnected?: ()
 						const m = frame.match(/^data: (.+)$/m);
 						if (!m) continue;
 						try {
-							const parsed = JSON.parse(m[1]) as { objectId?: string };
+							const parsed = JSON.parse(m[1]) as { objectId?: string; type?: string; origin?: "local" | "relay"; live?: LiveEvent };
 							if (parsed.objectId) onObject(parsed.objectId);
+							else if (parsed.type === "live" && parsed.live) onLive?.(parsed.live, parsed.origin ?? "local");
 						} catch {
 							/* hello frame etc. */
 						}

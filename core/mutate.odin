@@ -655,6 +655,23 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 		if reply := json_str(parsed, "reply_to"); reply != "" {
 			append(&meta, Str_Pair{key = "replyTo", value = reply})
 		}
+		// The agent's work behind its reply (live progress, core/live.odin):
+		// `thinking` a JSON array of {kind, text, ts}, `thought_ms` how long it worked.
+		if value, present := json_field(parsed, "thinking"); present && value != nil {
+			thinking, is_string := value.(json.String)
+			if !is_string do return plan, "thinking must be a string (a JSON array)"
+			if thinking != "" {
+				if !json_depth_ok(transmute([]byte)string(thinking)) do return plan, "thinking must be a JSON array"
+				steps, perr := json.parse(transmute([]byte)string(thinking), allocator = context.temp_allocator)
+				if _, is_array := steps.(json.Array); perr != nil || !is_array do return plan, "thinking must be a JSON array"
+				append(&meta, Str_Pair{key = "thinking", value = string(thinking)})
+			}
+		}
+		if _, present := json_field(parsed, "thought_ms"); present {
+			ms, ok := json_int(parsed, "thought_ms")
+			if !ok || ms < 0 do return plan, "thought_ms must be an integer >= 0"
+			append(&meta, Str_Pair{key = "thought_ms", value = fmt.tprintf("%d", ms)})
+		}
 		mid := mutation_id(&plan, input)
 		append(&ops, Operation {
 			kind      = .Block_Add,
@@ -678,6 +695,18 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 		extra["id"] = json.String(mid)
 		extra["threadId"] = json.String(thread_id)
 		plan.result = extra
+		return plan, ""
+
+	case "live_publish":
+		// Live progress (core/live.odin): validated and handed to the host's
+		// stream and relays; no change, nothing persisted.
+		value, _ := json_field(parsed, "event")
+		live, err := live_event_normalize(value)
+		if err != "" do return plan, err
+		origin, origin_error := live_origin(parsed)
+		if origin_error != "" do return plan, origin_error
+		plan.result["live"] = live
+		plan.result["origin"] = json.String(origin)
 		return plan, ""
 
 	case "conversation_open":
