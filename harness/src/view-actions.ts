@@ -18,6 +18,10 @@
  * object, or clears a done box, overrules that query for it for good.
  * Binning comes last, after the note is written.
  *
+ * Don't delete (`dont_delete`, checkbox) is a property anything can carry: a
+ * query that moves things to the bin leaves an object with it ticked alone
+ * (no action, nothing noted), so unticking it later lets the query act.
+ *
  * Every action leaves one line in the object's chat saying what and which
  * query; a query whose action fails says so on its own Error ("view action
  * failed: …") until a run of it works.
@@ -38,6 +42,8 @@ export const DONE_KEY = "view_mark_done";
 export const TAG_KEY = "view_tag_agents";
 export const SET_PROPERTY_KEY = "view_set_property";
 export const SET_VALUE_KEY = "view_set_value";
+/** On any object: binning queries leave it alone. */
+export const KEEP_KEY = "dont_delete";
 /** On an acted-on object: query id -> {at, did}. */
 export const ACTED_FIELD = "view_acted";
 
@@ -59,6 +65,7 @@ export async function seedViewActions(): Promise<number> {
 			[TAG_KEY, "Tag agents", "object", "🏷️"],
 			[SET_PROPERTY_KEY, "Set property", "shorttext", "✏️"],
 			[SET_VALUE_KEY, "Set value", "shorttext", "✏️"],
+			[KEEP_KEY, "Don't delete", "checkbox", "🛡️"],
 		];
 		for (const r of own) if (wanted.some(([key]) => key === str(r.fields, "key"))) await markSystem(r);
 		for (const [key, name, format, emoji] of wanted) {
@@ -66,7 +73,9 @@ export async function seedViewActions(): Promise<number> {
 			const fields = relationFields(space.id, key, name, format, emoji, []);
 			if (key === TAG_KEY && agentType) fields["object_types"] = { valuesValue: { items: [sv(agentType.id)] } };
 			fields["description"] = sv(
-				key === TAG_KEY
+				key === KEEP_KEY
+					? "Queries that move things to the bin leave this alone"
+					: key === TAG_KEY
 					? "On a query: agents added to everything it matches, and @-mentioned there"
 					: key === SET_PROPERTY_KEY
 						? "On a query: the name of a property to set on everything it matches (with Set value)"
@@ -81,7 +90,7 @@ export async function seedViewActions(): Promise<number> {
 	return made;
 }
 
-interface Actions {
+export interface Actions {
 	bin: boolean;
 	done: boolean;
 	tag: string[];
@@ -112,6 +121,15 @@ export function valueFor(format: string, text: string): ValueJSON {
 	if (format === "tag") return { valuesValue: { items: [sv(text)] } };
 	if (["status", "shorttext", "text", "longtext", "url", "email", "phone"].includes(format)) return sv(text);
 	throw new Error(`Set property can't set a ${format} property`);
+}
+
+/**
+ * Whether query `q` (with actions `a`) leaves `obj` alone this pass: it acted on
+ * it before, or it bins and the object is marked Don't delete.
+ */
+export function leavesAlone(q: { id: string }, a: Actions, obj: { id: string; fields: Record<string, ValueJSON> }): boolean {
+	if (obj.id === q.id || obj.fields[ACTED_FIELD]?.mapValue?.entries?.[q.id]) return true;
+	return a.bin && obj.fields[KEEP_KEY]?.boolValue === true;
 }
 
 /** Do one query's actions to one object; bin last, after the note. */
@@ -199,7 +217,7 @@ async function pass(): Promise<string[]> {
 			const matches = await queryAll(body);
 			const failures: string[] = [];
 			for (const obj of matches) {
-				if (obj.id === q.id || obj.fields[ACTED_FIELD]?.mapValue?.entries?.[q.id]) continue;
+				if (leavesAlone(q, a, obj)) continue;
 				try {
 					await act(q, a, obj);
 					if (a.bin) binned.push(obj.id);

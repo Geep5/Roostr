@@ -120,11 +120,14 @@ export function convertViewFilters(obj: ObjectJSON, rels: Map<string, RelDef>): 
 		if (!e) continue;
 		const key = e["key"]?.stringValue ?? "";
 		const condition = e["condition"]?.stringValue ?? "equal";
+		// A relative-date rule (`numberOfDaysAgo`): the value is a day count.
+		const quickOption = e["quickOption"]?.stringValue || undefined;
 		const values = strItems(e["value"]);
 		if (!key) continue;
 		const format = key === "createdAt" || key === "updatedAt" ? "number" : (rels.get(key)?.format ?? "shorttext");
 		let value: unknown;
-		if (format === "checkbox") value = true;
+		if (quickOption) value = values[0] !== undefined ? Number(values[0]) : undefined;
+		else if (format === "checkbox") value = true;
 		else if (condition === "in" || condition === "notIn" || condition === "allIn" || condition === "exactIn") value = values;
 		else if (format === "number" || format === "date") value = values[0] !== undefined ? Number(values[0]) : undefined;
 		else value = values[0];
@@ -136,7 +139,7 @@ export function convertViewFilters(obj: ObjectJSON, rels: Map<string, RelDef>): 
 			(value === undefined || value === "" || (Array.isArray(value) && value.length === 0))
 		)
 			continue;
-		out.push({ key, condition, value });
+		out.push(quickOption ? { key, condition, quickOption, value } : { key, condition, value });
 	}
 	return out;
 }
