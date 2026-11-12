@@ -14,6 +14,13 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 		const ms = properties.get(key)?.format === "date" ? value.intValue : undefined;
 		fields[key] = ms !== undefined ? new Date(ms).toISOString() : roostr.plain(value);
 	}
+	// The Properties pane's sections, as the person sees them: field keys under Who, When, State, Setup, Details.
+	const labels = { who: "Who", when: "When", state: "State", setup: "Setup", details: "Details" } as const;
+	const sections: Record<string, string[]> = {};
+	for (const [role, label] of Object.entries(labels)) {
+		const keys = Object.keys(obj.fields).filter((k) => k !== "error" && properties.get(k)?.role === role);
+		if (keys.length > 0) sections[label] = keys;
+	}
 	const body = roostr.body(obj);
 	const shown = body.slice(0, 400);
 	// A link card reads as the linked object's name on the page, so the agent sees that too (plus the id to open it).
@@ -30,6 +37,7 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 			id: obj.id,
 			typeKey: obj.typeKey,
 			fields,
+			sections,
 			// Body, one entry per block: pass `block` to the object_*_block tools to change it.
 			body: shown.map((b, i) => ({ block: b.id, depth: b.depth, line: lines[i].slice(0, 300) })),
 			...(body.length > shown.length ? { bodyTruncated: body.length - shown.length } : {}),

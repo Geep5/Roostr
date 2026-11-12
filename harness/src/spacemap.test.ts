@@ -26,7 +26,7 @@ const view = (...rules: ValueJSON[]): ObjectJSON => ({
 	updatedAt: 0,
 });
 
-const due: RelDef = { key: "due", name: "Due", emoji: "", format: "date", definition: "", readOnly: false };
+const due: RelDef = { key: "due", name: "Due", emoji: "", format: "date", definition: "", readOnly: false, role: "details" };
 
 test("a relative date rule passes its quick option with a numeric day count", () => {
 	const q = view(

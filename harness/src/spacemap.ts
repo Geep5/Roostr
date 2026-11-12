@@ -10,6 +10,7 @@
  */
 
 import { API, apiFetch, fetchObject, guestAgents, query, queryAll, str, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
+import { roleOf, type Role } from "./property-roles";
 
 // ── space filter (objects with no stamp belong to the default space) ──
 
@@ -57,6 +58,8 @@ export interface RelDef {
 	definition: string;
 	/** Computed by the store (created/modified dates): nobody writes it. */
 	readOnly: boolean;
+	/** The Properties pane section it shows under (its `role`, else its key's built-in place). */
+	role: Role;
 }
 
 export async function relationDefs(spaceId: string): Promise<Map<string, RelDef>> {
@@ -73,6 +76,7 @@ export async function relationDefs(spaceId: string): Promise<Map<string, RelDef>
 			format: str(r.fields, "format") || "shorttext",
 			definition: str(r.fields, "description"),
 			readOnly: r.fields["readOnly"]?.boolValue === true,
+			role: roleOf(r.fields),
 		});
 	}
 	return out;

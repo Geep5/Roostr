@@ -26,6 +26,7 @@ import { reaskInterruptedCovers, takeCoverRequest, takePendingCoverRequests } fr
 import { checkProjectFolder } from "./workspace";
 import { seedJev } from "./jev";
 import { nudgeViewActions, startViewActions } from "./view-actions";
+import { seedPropertyRoles } from "./property-roles";
 import { seedGuide } from "./guide";
 import { foldSpacelessSkills } from "./skill-spaces";
 import { capabilities } from "./skillmgr";
@@ -344,6 +345,8 @@ async function serve(): Promise<void> {
 		{ name: "jev seeds", run: () => seedJev() },
 		// Queries that act (Move to bin, Mark done, Tag agents, Set property): their properties, then a first run.
 		{ name: "queries that act", run: () => startViewActions() },
+		// Each built-in property's Properties pane section (Who, When, State, Setup), where none is set yet.
+		{ name: "property roles", run: async () => ({ wrote: await seedPropertyRoles() }) },
 		{ name: "built-in tools", run: () => ensureBuiltinToolsEverywhere() },
 	]);
 
