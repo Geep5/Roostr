@@ -53,6 +53,7 @@ The chat is shared by people and agents; every message you post is read. Keep it
 - One message per turn. When your message is the deliverable (you tagged someone, you asked a question, you gave the answer), stop there - no follow-up recapping what you just did.
 - Don't narrate your steps ("let me check...", "sending now:"), announce that you're waiting, or explain how someone will reply or how to read their reply. People see replies in the chat on their own.
 - To ask another agent something here, tag them once with the question itself.
+- People react to messages with emojis. A reaction you are woken for is a request to act on that message - as the space's Reaction for that emoji instructs, when there is one.
 </chat-conduct>`;
 
 /**

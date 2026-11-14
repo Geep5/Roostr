@@ -9,6 +9,9 @@
  * - **An "OpenAI" credential**, its key empty: generated page covers
  *   (covers.ts) use it, on the computer it is served by.
  * - **The Cover and Cover position properties** a page's cover is kept in.
+ * - **The Reaction type** with its Emoji and Agent properties: what an
+ *   emoji reaction in chat means and who acts on it (reactions.ts). No
+ *   Reactions - the space writes its own.
  * - **"<Space> Space"**: the space's setup-and-upkeep agent, with its own
  *   System prompt naming the space, served by the computer that seeded it,
  *   on the space's guest list.
@@ -28,6 +31,7 @@ import { OPENAI_SERVICE } from "./openai";
 import { SYSTEM_PROMPT_TYPE, DEFAULT_MODEL, writePageText } from "./prompts";
 import { machineId } from "./roster";
 import { defaultAgentTools, linkIds, linkList, TOOLS_KEY } from "./tool-objects";
+import { REACTION_AGENT_KEY, REACTION_EMOJI_KEY, REACTION_TYPE } from "./reactions";
 
 export const ANTHROPIC_SERVICE = "anthropic";
 /** A space's Default type (what it makes when nobody picks one) until someone chooses another. */
@@ -49,6 +53,12 @@ const OPENAI_PAGE = [
 	"The computer in Served by makes the calls: the art director (gpt-6-astra) writes an image idea from the page's title, type, text and properties, then gpt-image-2.5-sunburst paints it at high quality - about $0.20 an image, billed to this key.",
 ].join("\n");
 
+/** A Reaction's own properties: the emoji it means something for, and who acts on it. */
+const REACTION_PROPERTIES = [
+	{ key: REACTION_EMOJI_KEY, name: "Emoji", format: "shorttext", emoji: "😀", role: "setup", description: "On a Reaction: the emoji in chat it gives a meaning to" },
+	{ key: REACTION_AGENT_KEY, name: "Agent", format: "object", emoji: "🤖", role: "who", description: "On a Reaction: the agent a reaction with its emoji wakes" },
+] as const;
+
 /** The standing prompt of a space's "<Space> Space" agent. */
 export function spaceAgentPrompt(space: string): string {
 	return `You are ${space} Space, the setup and upkeep helper for the ${space} space in Roostr. You keep the space organized: you change objects, their properties, types, templates, queries and collections when a person asks. You don't do the work itself (emails, research, coding) - other agents and people do that.
@@ -60,7 +70,7 @@ Queries are saved filtered lists. A query has the types it lists (Object Type), 
 Queries that act: a query with Move to bin, Mark done, Tag agents, or Set property + Set value does that to everything it matches, including what already matched when it was switched on, once per object. Treat these as rules - set them only when a person asks, and check what the query lists first.
 Deleting moves an object to the space's Bin; a person can restore it. Emptying the Bin is permanent - never do that.
 Agents are objects too: their System prompt, Model, Credentials, Tools, Skills and Served by are properties. A new agent needs this space's "Anthropic" credential in its Credentials to run.
-Chat: every object has a chat. Typing @Name addresses an agent and wakes it. Reply in the chat you were asked in.
+Chat: every object has a chat. Typing @Name addresses an agent and wakes it. People also react to messages with emojis: a reaction you are woken for is a request to act on that message, as the space's Reaction for that emoji (its name is the meaning, its page the instructions) says. Reply in the chat you were asked in.
 How to behave
 Do only what was asked. If a request is unclear, ask one short question.
 Before deleting anything, or changing more than 10 objects at once, say exactly what you will change (how many, which) and wait for a yes.
@@ -140,6 +150,43 @@ async function seedSpace(space: { id: string; name: string }, me: string, out: {
 			system: bv(true),
 			// The Cover picker lists the space's Files (its bundled File type), as Agent's lists agents.
 			...(p.pickerType ? { object_types: lv([`bundled-type-${p.pickerType}-${space.id.slice(0, 8)}`]) } : {}),
+		}, id);
+	}
+
+	// 0c'. What an emoji reaction means here (reactions.ts): the Reaction type, its Emoji and its Agent.
+	// No Reactions themselves - a space says what its emojis mean.
+	const reactionTypeId = `type-${REACTION_TYPE}-${space.id}`;
+	const types = await queryAll({ type: "type" });
+	if (!types.some((t) => str(t.fields, "channel") === space.id && str(t.fields, "key") === REACTION_TYPE) && !(await everMade(reactionTypeId))) {
+		await createDefault("Reaction", "type", {
+			channel: sv(space.id),
+			key: sv(REACTION_TYPE),
+			name: sv("Reaction"),
+			description: sv("What an emoji reaction in chat means here: its name is the meaning, Emoji the reaction, Agent who acts on it, its page the instructions."),
+			iconEmoji: sv("😀"),
+			layout: sv("page"),
+			system: bv(true),
+		}, reactionTypeId);
+	}
+	for (const p of REACTION_PROPERTIES) {
+		const id = `rel-${p.key}-${space.id}`;
+		if (relations.some((r) => str(r.fields, "channel") === space.id && str(r.fields, "key") === p.key) || (await everMade(id))) continue;
+		await createDefault(p.name, "relation", {
+			channel: sv(space.id),
+			key: sv(p.key),
+			name: sv(p.name),
+			description: sv(p.description),
+			format: sv(p.format),
+			iconEmoji: sv(p.emoji),
+			role: sv(p.role),
+			hidden: bv(false),
+			readOnly: bv(false),
+			maxCount: iv(1),
+			options: lv([]),
+			bundled: bv(false),
+			system: bv(true),
+			// Its Agent picker lists the space's agents, as the bundled Agent's does.
+			...(p.format === "object" ? { object_types: lv([`bundled-type-agent-${space.id.slice(0, 8)}`]) } : {}),
 		}, id);
 	}
 

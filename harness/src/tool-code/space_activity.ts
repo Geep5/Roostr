@@ -33,7 +33,7 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 			const custom = m.block.content.custom;
 			if (custom?.contentType !== "chat") continue;
 			const meta = custom.meta ?? {};
-			if (roostr.isAgentAuthor(String(meta.author ?? "")) || meta.origin) continue;
+			if (roostr.isAgentAuthor(String(meta.author ?? "")) || meta.origin || roostr.isReaction(meta)) continue;
 			msgs.push(`- ${String(meta.author || "human")} on "${nameOf(obj)}": ${String(meta.text ?? "").slice(0, 140)}`);
 		}
 	}

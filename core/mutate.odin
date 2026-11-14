@@ -599,6 +599,7 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 	// {contentType:"chat", meta:{author, ts, text, replyTo, reactions}}.
 	// reactions is a JSON object emoji -> [author ids]. Block adds merge
 	// cleanly across devices; a reaction toggle is a whole-message LWW.
+	// (Clients now post reactions as lines instead: chat_post `reaction`.)
 
 	case "chat_post":
 		object_id := json_str(parsed, "object_id")
@@ -613,7 +614,15 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 				}
 			}
 		}
-		if object_id == "" || (text == "" && len(files) == 0) {
+		// `reaction`: an emoji reaction to the message `reply_to`, stored as
+		// its own chat line (kind "reaction"); `removed` takes it back. The
+		// latest line per (author, emoji, replyTo) wins. Text may be empty.
+		reaction := json_str(parsed, "reaction")
+		if object_id == "" do return plan, "object_id and text required"
+		if reaction != "" {
+			if json_str(parsed, "reply_to") == "" do return plan, "reaction needs reply_to"
+			if len(files) > 0 do return plan, "reaction cannot carry files"
+		} else if text == "" && len(files) == 0 {
 			return plan, "object_id and text required"
 		}
 		// An object holds many conversations: the human thread plus the
@@ -654,6 +663,13 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 		}
 		if reply := json_str(parsed, "reply_to"); reply != "" {
 			append(&meta, Str_Pair{key = "replyTo", value = reply})
+		}
+		if reaction != "" {
+			append(&meta, Str_Pair{key = "kind", value = "reaction"})
+			append(&meta, Str_Pair{key = "emoji", value = reaction})
+			if removed, _ := json_bool(parsed, "removed"); removed {
+				append(&meta, Str_Pair{key = "removed", value = "1"})
+			}
 		}
 		// The agent's work behind its reply (live progress, core/live.odin):
 		// `thinking` a JSON array of {kind, text, ts}, `thought_ms` how long it worked.

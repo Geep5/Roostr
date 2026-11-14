@@ -45,6 +45,7 @@ import { machines, primeServing, servesHere } from "./machine";
 import { machineId } from "./roster";
 import { linkIds, runToolObject } from "./tool-objects";
 import { localClock } from "./repeat";
+import { isReaction } from "./reactions";
 import { SCORE_WITH_KEY, scoreWithSkill } from "./jev";
 import { runViewActions } from "./view-actions";
 import { relationDefs, savedViewBody, viewRowProps } from "./spacemap";
@@ -220,12 +221,12 @@ const waitingSeen = new Map<string, number>();
 
 /** Agents (object ids) and the scheduler post in a chat; anyone else is a person. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** The newest chat message (by a person only, with `byPerson`): its time and text. */
+/** The newest chat message (by a person only, with `byPerson`): its time and text. A reaction is not a message. */
 function newestChat(obj: ObjectJSON, byPerson = false): { ts: number; text: string } {
 	let newest = { ts: 0, text: "" };
 	for (const b of obj.blocks) {
 		const m = b.content.custom?.meta;
-		if (b.content.custom?.contentType !== "chat" || !m) continue;
+		if (b.content.custom?.contentType !== "chat" || !m || isReaction(m)) continue;
 		const author = m.author ?? "";
 		if (byPerson && (!author || author === "scheduler" || UUID.test(author))) continue;
 		const ts = Number(m.ts ?? 0);

@@ -378,7 +378,7 @@ test("Check asks OpenAI whether the key works: a refused key breaks the credenti
 	expect(objects.get(CRED)!.fields.error).toBeUndefined();
 });
 
-test("every space you own gets a blank OpenAI credential served here, the Cover properties and its own agent with the default tools, once", async () => {
+test("every space you own gets a blank OpenAI credential served here, the Cover properties, the Reaction type and its own agent with the default tools, once", async () => {
 	world("");
 	objects.delete(CRED);
 	objects.delete("rel-cover");
@@ -399,6 +399,13 @@ test("every space you own gets a blank OpenAI credential served here, the Cover 
 	// Its "<Space> Space" agent can run commands and fetch the web, like every new agent.
 	const tools = objects.get(`space-agent-${SPACE}`)!.fields.tools?.valuesValue?.items.map((i) => i.linkValue?.targetId);
 	expect(tools).toEqual(["tool-shell_exec", "tool-web_fetch"]);
+	// What a reaction means is the space's to say: the Reaction type and its Emoji and Agent, sectioned - but no Reactions.
+	expect(objects.get(`type-reaction-${SPACE}`)!.fields).toMatchObject({ channel: sv(SPACE), key: sv("reaction"), name: sv("Reaction"), layout: sv("page") });
+	expect(objects.get(`rel-emoji-${SPACE}`)!.fields).toMatchObject({ key: sv("emoji"), name: sv("Emoji"), format: sv("shorttext"), role: sv("setup"), maxCount: { intValue: 1 } });
+	const reactionAgent = objects.get(`rel-reaction_agent-${SPACE}`)!;
+	expect(reactionAgent.fields).toMatchObject({ key: sv("reaction_agent"), name: sv("Agent"), format: sv("object"), role: sv("who"), maxCount: { intValue: 1 } });
+	expect(reactionAgent.fields.object_types?.valuesValue?.items).toEqual([sv(`bundled-type-agent-${SPACE.slice(0, 8)}`)]);
+	expect([...objects.values()].filter((o) => o.typeKey === "reaction")).toEqual([]);
 
 	const count = objects.size;
 	await seedSpaceDefaults();

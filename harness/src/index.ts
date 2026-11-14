@@ -45,7 +45,8 @@ import { TOOLS_KEY, defaultAgentTools, ensureBuiltinTools, ensureBuiltinToolsEve
 import { migrateCapabilities } from "./migrate-capabilities";
 import { runBootSteps } from "./boot";
 import { startDiscordManager } from "./discord";
-import { addressableAgents, answersGuestQuestion, chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, mentions, pendingMessages, setMark, spaceOfObject } from "./surfaces";
+import { addressableAgents, answersGuestQuestion, chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, mentions, pendingMessages, reactionWake, setMark, spaceOfObject } from "./surfaces";
+import { isReaction } from "./reactions";
 import { fileNames } from "./attachments";
 import { defaultSpaceId } from "./spacemap";
 import { agentSubject, agentThread, agentThreadOn, convKey, humanRef, parseConvKey, postTo, type ConvRef } from "./conv";
@@ -334,7 +335,7 @@ async function serve(): Promise<void> {
 		// Service presets become Credential templates - before the check below reads those recipes.
 		{ name: "credential seeds", run: () => seedCredentials() },
 		{ name: "credential check", run: () => refreshCredentials() },
-		// Every space of yours starts with Anthropic and OpenAI credentials (keys empty), the Cover properties and its "<Space> Space" agent.
+		// Every space of yours starts with Anthropic and OpenAI credentials (keys empty), the Cover properties, the Reaction type and its "<Space> Space" agent.
 		{ name: "space defaults", run: () => seedSpaceDefaults() },
 		// Cover runs this computer was in the middle of when it stopped, asked again; then the requests written
 		// while it was off - after the credentials above say who serves which.
@@ -910,7 +911,8 @@ async function serve(): Promise<void> {
 		if (obj.typeKey === "agent") return; // other agents' brains
 		// ── One conversation per object (`__discussion__`). Humans and agents
 		// post there; an @-mention of any agent of the space is the wake
-		// signal for that agent. A post with no tag wakes nobody; the reply
+		// signal for that agent, and an emoji reaction wakes the one agent
+		// that acts on it. A post with no tag wakes nobody; the reply
 		// lands in the same thread. Exchanges are only for explicit
 		// group/agent-to-agent asks. ──
 		if (externallyAnswered(obj)) return;
@@ -920,23 +922,37 @@ async function serve(): Promise<void> {
 		// object follows another agent's pin.
 		for (const aid of guestAgents(obj.fields)) if (await runsAgentHere(objectId, aid)) void adoptForObject(obj, aid);
 
-		// ── @-mentions in the human thread: wake each tagged agent. ──
+		// ── @-mentions and reactions in the human thread: wake who they are for. ──
 		await wakeMentioned(obj);
 	}
 
-	/** Wake every agent of the space the newest discussion message @-mentions, or answers (an agent replying to that agent's question). */
+	/**
+	 * Wake every agent of the space the newest discussion message @-mentions,
+	 * or answers (an agent replying to that agent's question); or, when it is
+	 * a reaction, the one agent that acts on it (`reactionWake`). The woken
+	 * agent's own pendingMessages decides again, so a reaction it already
+	 * took (marked, or copied into its transcript) never runs twice.
+	 */
 	async function wakeMentioned(obj: ObjectJSON): Promise<void> {
 		const msgs = chatBlocks(obj, humanRef(obj.id))
 			.map((row, index) => ({ ...row, index, ts: Number(row.block.content.custom?.meta?.["ts"] ?? 0) }))
 			.sort((a, b) => a.ts - b.ts || a.index - b.index);
 		if (msgs.length === 0) return;
-		const newest = msgs[msgs.length - 1].block.content.custom?.meta?.["text"] ?? "";
+		const newest = msgs[msgs.length - 1].block.content.custom?.meta ?? {};
+		if (isReaction(newest)) {
+			// adoptForObject runs it only where this computer runs it, and never one another bot answers for.
+			const aid = (await reactionWake(obj, msgs, msgs.length - 1))?.agentId;
+			const s2 = aid ? await adoptForObject(obj, aid) : null;
+			if (s2) void drive(s2, humanRef(obj.id));
+			return;
+		}
+		const text = newest["text"] ?? "";
 		for (const aid of await addressable(obj)) {
 			const agent = await fetchObject(aid).catch(() => null);
 			if (!agent) continue;
 			const name = str(agent.fields, "name");
 			if (!name) continue;
-			if (!mentions(newest, name) && !(await answersGuestQuestion(msgs, msgs.length - 1, aid))) continue;
+			if (!mentions(text, name) && !(await answersGuestQuestion(msgs, msgs.length - 1, aid))) continue;
 			if (!(await runsAgentHere(obj.id, aid))) continue;
 			const s2 = await adoptForObject(obj, aid);
 			if (s2) void drive(s2, humanRef(obj.id));

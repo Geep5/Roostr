@@ -136,14 +136,26 @@ object_conversations :: proc(st: ^Object_State, allocator := context.allocator) 
 }
 
 /** Message count per conversation, without materialising the messages: the
- *  drawer's "12 threads" chip needs the number, not the text. */
+ *  drawer's "12 threads" chip needs the number, not the text. Reaction lines
+ *  (chat_post `reaction`, meta kind "reaction") are not messages. */
 conversation_message_count :: proc(st: ^Object_State, root_id: string) -> int {
 	if st == nil do return 0
+	children: []string
+	found := false
+	reactions := make(map[string]bool, allocator = context.temp_allocator)
 	for &b in st.blocks {
-		if b.id != root_id do continue
-		return len(b.children_ids)
+		if b.id == root_id {
+			children = b.children_ids[:]
+			found = true
+			continue
+		}
+		if b.content.kind != .Custom || b.content.custom.content_type != "chat" do continue
+		for pair in b.content.custom.meta do if pair.key == "kind" && pair.value == "reaction" do reactions[b.id] = true
 	}
-	return 0
+	if !found do return 0
+	count := 0
+	for id in children do if !(id in reactions) do count += 1
+	return count
 }
 
 conversations_equal :: proc(a, b: Conversation) -> bool {

@@ -1,19 +1,27 @@
 import type { Roostr } from "../tool-sdk";
 
-export const description = "Read one conversation on an object (object_get shows only the body). Returns the last messages oldest-first with author names and timestamps. Use it when the current message refers to earlier conversation on that object.";
+export const description = "Read one conversation on an object (object_get shows only the body). Returns the last messages oldest-first with author names and timestamps; an emoji reaction reads as one line saying who reacted with what to which message. Use it when the current message refers to earlier conversation on that object.";
 export const inputs = "id: string\nthread_id?: string - a conversation on that object; omit for the human discussion\nlimit?: number - max messages, default 30";
 
 export default async function (input: Record<string, unknown>, roostr: Roostr) {
 	const threadId = typeof input.thread_id === "string" ? input.thread_id : "";
 	const obj = await roostr.getInSpace(typeof input.id === "string" ? input.id : "");
 	roostr.touch(obj.id);
-	const msgs: Array<{ author: string; text: string; ts: number }> = [];
-	for (const { block } of roostr.conversation(obj, threadId)) {
+	const msgs: Array<{ author: string; text: string; ts: number; reaction?: { meta: Record<string, string>; target: Record<string, string> | undefined } }> = [];
+	const rows = roostr.conversation(obj, threadId);
+	for (const { block } of rows) {
 		const c = block.content.custom;
 		if (c?.contentType !== "chat") continue;
 		const meta = c.meta ?? {};
+		const ts = Number(meta["ts"] ?? 0);
+		// A reaction is an event on another message, never words of its own.
+		if (roostr.isReaction(meta)) {
+			const target = rows.find((r) => r.id === meta["replyTo"])?.block.content.custom?.meta;
+			msgs.push({ author: meta["author"] ?? "", text: "", ts, reaction: { meta, target } });
+			continue;
+		}
 		if (!(meta["text"] ?? "").trim()) continue;
-		msgs.push({ author: meta["author"] ?? "", text: meta["text"] ?? "", ts: Number(meta["ts"] ?? 0) });
+		msgs.push({ author: meta["author"] ?? "", text: meta["text"] ?? "", ts });
 	}
 	// Agent-to-agent messages ride in the object's mailbox, each on its exchange thread.
 	for (const entry of obj.mailbox ?? []) {
@@ -26,15 +34,20 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 	const limit = Math.max(1, Math.min(200, Number(input.limit) || 30));
 	const tail = msgs.slice(-limit);
 	const names = new Map<string, string>();
-	for (const m of tail) {
-		if (names.has(m.author)) continue;
-		if (m.author === roostr.context.agentId) names.set(m.author, "you");
+	for (const author of tail.flatMap((m) => [m.author, m.reaction?.target?.["author"] ?? ""])) {
+		if (names.has(author)) continue;
+		if (author === roostr.context.agentId) names.set(author, "you");
 		// A uuid author is an agent; anything else is a person's key.
-		else if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(m.author)) {
-			const agent = await roostr.get(m.author).catch(() => null);
-			names.set(m.author, agent?.fields.name?.stringValue || m.author.slice(0, 8));
-		} else names.set(m.author, "user");
+		else if (roostr.isAgentAuthor(author)) {
+			const agent = await roostr.get(author).catch(() => null);
+			names.set(author, agent?.fields.name?.stringValue || author.slice(0, 8));
+		} else names.set(author, "user");
 	}
-	const lines = tail.map((m) => `${names.get(m.author)} \u00b7 ${new Date(m.ts).toISOString().slice(0, 16)}: ${m.text}`);
+	const lines = tail.map((m) => {
+		const when = new Date(m.ts).toISOString().slice(0, 16);
+		if (!m.reaction) return `${names.get(m.author)} \u00b7 ${when}: ${m.text}`;
+		const target = m.reaction.target;
+		return `${when}: ${roostr.reactionLine(names.get(m.author) ?? "user", m.reaction.meta, target ? { author: names.get(target["author"] ?? "") ?? "user", text: target["text"] ?? "" } : null)}`;
+	});
 	return `${msgs.length} message(s) total, last ${tail.length}:\n${lines.join("\n")}`;
 }

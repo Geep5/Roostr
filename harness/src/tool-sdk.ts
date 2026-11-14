@@ -32,6 +32,7 @@ import { objectText, type SkillListing } from "./skills";
 import type { ScoreRow } from "./jev";
 import { assertInSpace, buildNeighborhood, buildSpaceMap, defaultSpaceId, relationDefs, savedViewBody, spaceFilterFor, typeDefs, viewRowProps, type RelDef, type TypeDef } from "./spacemap";
 import { bodyBlocks, isAgentAuthor, type BodyLine } from "./surfaces";
+import { isReaction, reactionLine } from "./reactions";
 
 export type { AgentEndpoint, BlockJSON, ObjectJSON, QueryRow, ValueJSON } from "./api";
 export type { CredentialAction } from "./credentials";
@@ -241,6 +242,10 @@ export interface Roostr {
 	text(obj: ObjectJSON): string;
 	/** Whether a message's author is an agent (an agent id) rather than a person (a key). */
 	isAgentAuthor(author: string): boolean;
+	/** Whether a chat message is an emoji reaction (meta `kind` "reaction": `emoji`, `replyTo`, `removed`) rather than words. */
+	isReaction(meta: Record<string, string>): boolean;
+	/** A reaction as one line: `reactor` reacted (or took back) its emoji on `target` - its author's name ("you" for yours) and text; null when that message is gone. */
+	reactionLine(reactor: string, meta: Record<string, string>, target: { author: string; text: string } | null): string;
 	memory: RoostrMemory;
 	/**
 	 * `gws-as <mailbox> <args...>` on this computer, its JSON output parsed.
@@ -359,6 +364,8 @@ export function createRoostr(context: ToolRunContext, touched: Set<string>, harn
 		conversation: (obj, threadId) => convBlocks(obj, threadId || HUMAN_THREAD),
 		text: objectText,
 		isAgentAuthor,
+		isReaction,
+		reactionLine,
 		memory: {
 			upsertFact: (key, value, confidence, sourcedFromBlockId) => sdkCall(() => memory.upsertFact(owner, key, value, confidence, sourcedFromBlockId)),
 			upsertMilestone: (args) => sdkCall(() => memory.upsertMilestone(owner, args)),

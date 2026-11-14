@@ -58,6 +58,37 @@ live_event :: proc() -> map[string]json.Value {
 }
 
 @(test)
+chat_post_reaction_is_its_own_line :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	// Empty text is fine: the emoji is the message.
+	p := jobj()
+	p["object_id"] = json.String("object-1")
+	p["reaction"] = json.String("✅")
+	p["reply_to"] = json.String("m1")
+	out, err := plan("chat_post", p)
+	testing.expect(t, err == "", err)
+	meta := posted_meta(t, out)
+	testing.expect_value(t, meta["kind"], "reaction")
+	testing.expect_value(t, meta["emoji"], "✅")
+	testing.expect_value(t, meta["replyTo"], "m1")
+	testing.expect_value(t, meta["text"], "")
+	testing.expect(t, "removed" not_in meta, "a live reaction carries no removed key")
+
+	// Taking it back is another line with removed = "1".
+	p["removed"] = json.Boolean(true)
+	removed_out, removed_err := plan("chat_post", p)
+	testing.expect(t, removed_err == "", removed_err)
+	testing.expect_value(t, posted_meta(t, removed_out)["removed"], "1")
+
+	// A reaction must name the message it reacts to.
+	orphan := jobj()
+	orphan["object_id"] = json.String("object-1")
+	orphan["reaction"] = json.String("✅")
+	_, orphan_err := plan("chat_post", orphan)
+	testing.expect_value(t, orphan_err, "reaction needs reply_to")
+}
+
+@(test)
 chat_post_keeps_the_work_behind_a_reply :: proc(t: ^testing.T) {
 	context.allocator = context.temp_allocator
 	thinking := `[{"kind":"thinking","text":"check the repo","ts":1},{"kind":"step","text":"shell_exec: git status","ts":2}]`

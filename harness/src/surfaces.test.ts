@@ -15,10 +15,11 @@ import { afterAll, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addressableAgents, mentions, pendingMessages, setMark } from "./surfaces";
+import { addressableAgents, chatBlocks, mentions, pendingMessages, reactionWake, setMark } from "./surfaces";
 import { humanRef, HUMAN_THREAD } from "./conv";
 import * as api from "./api";
-import type { BlockJSON, ObjectJSON } from "./api";
+import * as spacemap from "./spacemap";
+import type { BlockJSON, ObjectJSON, QueryRow } from "./api";
 
 const AGENT = "9b08be05-ed4b-4417-a976-1efead0cb561";
 /** The name AGENT answers to: every message it takes @-mentions it. */
@@ -244,4 +245,141 @@ test("an @-mention on an object can wake any agent of its space, default agents 
 	expect(addressableAgents({ id: SPACE, typeKey: "channel", fields: {} }, roster, "space-dflt")).toEqual(["unlisted", "default-1"]);
 	// An unstamped object belongs to the default space.
 	expect(addressableAgents({ id: "n", typeKey: "note", fields: {} }, [agent("d", ""), ...roster], "space-dflt")).toEqual(["d"]);
+});
+
+// ── Reactions ─────────────────────────────────────────────────────
+
+const R_SPACE = "space-r";
+/** Wrote the message reacted to. */
+const TRIAGE = "1f2e3d4c-5b6a-4789-8abc-def012345678";
+/** The ✅ Reaction's agent. */
+const PICKED = "2a3b4c5d-6e7f-4a1b-9c2d-3e4f5a6b7c8d";
+/** Runs the object's Repeat. */
+const RUNNER = "3b4c5d6e-7f8a-4b2c-8d3e-4f5a6b7c8d9e";
+const SPACE_AGENT = `space-agent-${R_SPACE}`;
+/** A space's own agent made before the fixed id: known only by its name. */
+const LEGACY_SPACE_AGENT = "4c5d6e7f-8a9b-4c3d-8e4f-5a6b7c8d9e0f";
+const sv = (s: string): api.ValueJSON => ({ stringValue: s });
+const linkTo = (id: string): api.ValueJSON => ({ linkValue: { targetId: id, relationKey: "agent" } });
+
+function reaction(id: string, author: string, ts: number, replyTo: string, emoji: string, removed = false): BlockJSON {
+	const meta: Record<string, string> = { author, ts: String(ts), text: "", replyTo, kind: "reaction", emoji, ...(removed ? { removed: "1" } : {}) };
+	return { id, childrenIds: [], content: { custom: { contentType: "chat", meta } } } as unknown as BlockJSON;
+}
+
+/** A task in R_SPACE whose discussion is `order` (chronological), with extra fields. */
+function taskWith(id: string, order: BlockJSON[], fields: Record<string, api.ValueJSON> = {}): ObjectJSON {
+	const obj = objectWith(id, { threadId: HUMAN_THREAD, order });
+	obj.fields = { channel: sv(R_SPACE), ...fields };
+	return obj;
+}
+
+const row = (id: string, typeKey: string, fields: Record<string, api.ValueJSON>): QueryRow => ({ id, typeKey, createdAt: 1, updatedAt: 1, fields });
+
+/** The ✅ Reaction "Approve", its agent PICKED, its page the instructions. */
+const APPROVE = row("reaction-approve", "reaction", { channel: sv(R_SPACE), name: sv("Approve"), emoji: sv("✅"), reaction_agent: linkTo(PICKED) });
+
+/**
+ * The daemon as the resolver reads it: the space's `agents`, `reactions`,
+ * the space and the Reaction pages. Returns the restore.
+ */
+function reactionWorld(reactions: QueryRow[], agents = [TRIAGE, PICKED, RUNNER, SPACE_AGENT]): () => void {
+	const names: Record<string, string> = { [TRIAGE]: "Inbox Triage", [PICKED]: "Approver", [RUNNER]: "Runner", [SPACE_AGENT]: "Garden Space", [LEGACY_SPACE_AGENT]: "Garden Space" };
+	const roster = agents.map((id) => row(id, "agent", { channel: sv(R_SPACE), name: sv(names[id]) }));
+	const page = { id: "p1", childrenIds: [], content: { text: { text: "Send the drafted reply, then mark the email done.", style: 0 } } };
+	const objects: Record<string, ObjectJSON> = {
+		[R_SPACE]: { id: R_SPACE, typeKey: "channel", fields: { name: sv("Garden") }, blocks: [] } as unknown as ObjectJSON,
+		[APPROVE.id]: { ...APPROVE, blocks: [page] } as unknown as ObjectJSON,
+	};
+	const spies = [
+		spyOn(spacemap, "defaultSpaceId").mockImplementation(async () => "space-dflt"),
+		spyOn(api, "queryAll").mockImplementation(async (body: Record<string, unknown>) => (body.type === "agent" ? roster : body.type === "reaction" ? reactions : [])),
+		spyOn(api, "fetchObject").mockImplementation(async (id: string) => {
+			const found = objects[id];
+			if (!found) throw new Error(`objects/${id}: 404`);
+			return found;
+		}),
+	];
+	return () => {
+		for (const spy of spies) spy.mockRestore();
+	};
+}
+
+const TARGET_TEXT = "Found 1 new message from Ada: can we move Friday's call?";
+
+test("a reaction wakes the space's Reaction agent, else the message's agent, else the Repeat's, else the space's own", async () => {
+	const byAgent = taskWith("react-agent-msg", [msg("t1", TRIAGE, 100, TARGET_TEXT), reaction("r1", HUMAN, 200, "t1", "✅")]);
+	const byPerson = taskWith("react-person-msg", [msg("t1", HUMAN, 100, "We should call Ada back."), reaction("r1", HUMAN, 200, "t1", "✅")]);
+	const repeating = taskWith("react-repeat", [msg("t1", HUMAN, 100, "We should call Ada back."), reaction("r1", HUMAN, 200, "t1", "✅")], {
+		repeat: { mapValue: { entries: {} } },
+		assignee: linkTo(RUNNER),
+		agent: { valuesValue: { items: [linkTo(TRIAGE)] } },
+	});
+	const wake = (obj: ObjectJSON) => reactionWake(obj, chatBlocks(obj, humanRef(obj.id)), 1);
+
+	// 1. The space says what ✅ means: its Reaction's agent acts, told who, what, on which message, and the instructions.
+	let restore = reactionWorld([APPROVE]);
+	const approved = await wake(byAgent);
+	expect(approved?.agentId).toBe(PICKED);
+	expect(approved?.context).toBe(
+		`user reacted ✅ to Inbox Triage's message: "${TARGET_TEXT}"\n` +
+			`In this space ✅ means "Approve" (Reaction ${APPROVE.id}). Its instructions:\nSend the drafted reply, then mark the email done.`,
+	);
+	restore();
+
+	// 2. No Reaction for ✅ here (another space's does not count): the agent that wrote the message.
+	const elsewhere = row("reaction-elsewhere", "reaction", { channel: sv("space-other"), name: sv("Ship it"), emoji: sv("✅"), reaction_agent: linkTo(PICKED) });
+	const heart = row("reaction-heart", "reaction", { channel: sv(R_SPACE), name: sv("Love"), emoji: sv("❤️"), reaction_agent: linkTo(PICKED) });
+	restore = reactionWorld([elsewhere, heart]);
+	const own = await wake(byAgent);
+	expect(own?.agentId).toBe(TRIAGE);
+	expect(own?.context.split("\n")).toEqual([
+		`user reacted ✅ to your message: "${TARGET_TEXT}"`,
+		"No Reaction in this space says what ✅ means: read it as the person's answer to that message, and act on it if it asks for something.",
+	]);
+
+	// 3. A person's message: the agent that runs the object's Repeat (its picked one before the guest list).
+	expect((await wake(repeating))?.agentId).toBe(RUNNER);
+
+	// 4. Otherwise the space's own agent.
+	expect((await wake(byPerson))?.agentId).toBe(SPACE_AGENT);
+	restore();
+
+	// One made before the fixed id is found by its name.
+	restore = reactionWorld([], [TRIAGE, LEGACY_SPACE_AGENT]);
+	expect((await wake(byPerson))?.agentId).toBe(LEGACY_SPACE_AGENT);
+	restore();
+});
+
+test("a reaction that was taken back wakes nobody", async () => {
+	const restore = reactionWorld([APPROVE]);
+	const removed = taskWith("react-removed", [msg("t1", TRIAGE, 100, TARGET_TEXT), reaction("r1", HUMAN, 200, "t1", "👍", true)]);
+	expect(await reactionWake(removed, chatBlocks(removed, humanRef(removed.id)), 1)).toBeNull();
+	expect(await pendingMessages(removed, humanRef(removed.id), TRIAGE, "Inbox Triage")).toEqual([]);
+	// Reacted, then took it back before the agent got to it: nothing is asked.
+	const undone = taskWith("react-undone", [msg("t1", TRIAGE, 100, TARGET_TEXT), reaction("r1", HUMAN, 200, "t1", "👍"), reaction("r2", HUMAN, 300, "t1", "👍", true)]);
+	expect(await pendingMessages(undone, humanRef(undone.id), TRIAGE, "Inbox Triage")).toEqual([]);
+	restore();
+});
+
+test("a reaction is pending for exactly one agent, once", async () => {
+	const restore = reactionWorld([]);
+	const obj = taskWith("react-once", [msg("t1", TRIAGE, 100, TARGET_TEXT), reaction("r1", HUMAN, 200, "t1", "👍")]);
+	const chat = humanRef(obj.id);
+	await setMark(chat, "t1");
+	const pending = await pendingMessages(obj, chat, TRIAGE, "Inbox Triage");
+	expect(pending.map((p) => [p.blockId, p.author])).toEqual([["r1", HUMAN]]);
+	expect(pending[0].text).toStartWith(`user reacted 👍 to your message: "${TARGET_TEXT}"`);
+	// Nobody else takes it: a reaction is never an @-mention or an answer.
+	expect(await pendingMessages(obj, chat, PICKED, "Approver")).toEqual([]);
+	expect(await pendingMessages(obj, chat, SPACE_AGENT, "Garden Space")).toEqual([]);
+
+	// Handled: marked past it, it is never pending again.
+	await setMark(chat, "r1");
+	expect(await pendingMessages(obj, chat, TRIAGE, "Inbox Triage")).toEqual([]);
+
+	// A lost mark (a restart, another computer): the agent's reply after the reaction seeds the surface.
+	const replied = taskWith("react-replied", [msg("t1", TRIAGE, 100, TARGET_TEXT), reaction("r1", HUMAN, 200, "t1", "👍"), msg("t2", TRIAGE, 300, "Moved the call to Monday.")]);
+	expect(await pendingMessages(replied, humanRef(replied.id), TRIAGE, "Inbox Triage")).toEqual([]);
+	restore();
 });

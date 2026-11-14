@@ -21,9 +21,11 @@
  * newest message is picked up (their SEED_BACKLOG idea, conservative).
  */
 
-import { fetchObject, guestAgents, str, type BlockJSON, type ObjectJSON } from "./api";
+import { fetchObject, guestAgents, queryAll, str, type BlockJSON, type ObjectJSON } from "./api";
 import { addConvBlock, convBlocks, convKey, HUMAN_THREAD, isHuman, parseConvKey, type ConvRef } from "./conv";
 import { messageFiles } from "./attachments";
+import { bareEmoji, isReaction, REACTION_AGENT_KEY, REACTION_EMOJI_KEY, REACTION_TYPE, reactionLine, reactionRemoved, reactionSuperseded } from "./reactions";
+import { defaultSpaceId } from "./spacemap";
 
 // ── Marks ─────────────────────────────────────────────────────────
 
@@ -134,13 +136,17 @@ type ChatRow = { id: string; block: BlockJSON };
  * `msgs` is chronological.
  */
 export async function answersGuestQuestion(msgs: ChatRow[], at: number, agentId: string): Promise<boolean> {
-	const author = msgs[at].block.content.custom?.meta?.["author"] ?? "";
+	const own = msgs[at].block.content.custom?.meta ?? {};
+	// A reaction is not an answer, and never stands between a question and its answer.
+	if (isReaction(own)) return false;
+	const author = own["author"] ?? "";
 	if (!isAgentAuthor(author) || author === agentId) return false;
 	const answerer = await fetchObject(author).catch(() => null);
 	const answererName = answerer ? str(answerer.fields, "name") : "";
 	if (!answererName) return false;
 	for (let i = at - 1; i >= 0; i--) {
 		const meta = msgs[i].block.content.custom?.meta ?? {};
+		if (isReaction(meta)) continue;
 		if (meta["author"] === author) return false; // it already answered
 		if (meta["author"] !== agentId) {
 			// Someone else asked the answerer since: the answer is theirs.
@@ -160,8 +166,9 @@ export async function answersGuestQuestion(msgs: ChatRow[], at: number, agentId:
  * `addressedAs`: the agent's name. Only messages that @-mention it are its
  * to answer - a person's, or another agent's that tagged it ("@Marco Dev
  * Bot, which tournaments?") - plus an agent's answer to a question it asked
- * (answersGuestQuestion). On every object, the agent's own page included:
- * nothing wakes an agent untagged.
+ * (answersGuestQuestion), and a reaction it is the one to act on
+ * (`reactionWake`; its text is the reaction's context). On every object,
+ * the agent's own page included: nothing else wakes an agent.
  */
 export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: string, addressedAs: string): Promise<PendingMessage[]> {
 	if (!isHuman(ref)) return [];
@@ -186,7 +193,8 @@ export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: st
 	if (startAfter === undefined) {
 		// Fresh surface: seed at the agent's own newest message.
 		for (let i = msgs.length - 1; i >= 0; i--) {
-			if ((msgs[i].block.content.custom?.meta?.["author"] ?? "") === agentId) {
+			const meta = msgs[i].block.content.custom?.meta ?? {};
+			if ((meta["author"] ?? "") === agentId && !isReaction(meta)) {
 				startAfter = msgs[i].id;
 				break;
 			}
@@ -194,14 +202,22 @@ export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: st
 	}
 
 	const markAt = startAfter === undefined ? -1 : msgs.findIndex((x) => x.id === startAfter);
+	const metas = msgs.map((x) => x.block.content.custom?.meta ?? {});
 	const pending: PendingMessage[] = [];
 	// Newest last, so the caller's `pending[last]` mark only ever advances.
 	for (let at = markAt + 1; at < msgs.length; at++) {
-		const { id, block } = msgs[at];
-		const meta = block.content.custom?.meta ?? {};
+		const { id } = msgs[at];
+		const meta = metas[at];
 		const author = meta["author"] ?? "";
 		if (author === agentId) continue;
 		if (meta["origin"]) continue; // ingested copy, handled with its origin surface
+		if (isReaction(meta)) {
+			// One taken back, or changed since, asks nothing.
+			if (reactionRemoved(meta) || reactionSuperseded(metas, at)) continue;
+			const wake = await reactionWake(obj, msgs, at);
+			if (wake?.agentId === agentId) pending.push({ blockId: id, author, text: wake.context, files: [] });
+			continue;
+		}
 		const text = meta["text"] ?? "";
 		// An agent answers what is addressed to it, whoever wrote it.
 		if (!mentions(text, addressedAs) && !(await answersGuestQuestion(msgs, at, agentId))) continue;
@@ -212,6 +228,65 @@ export async function pendingMessages(obj: ObjectJSON, ref: ConvRef, agentId: st
 	// (a full-history replay of an old discussion would be noise).
 	if (startAfter === undefined && pending.length > 1) return pending.slice(-1);
 	return pending;
+}
+
+/** The agent a reaction wakes, and what its turn is told. */
+export interface ReactionWake {
+	agentId: string;
+	/** Who reacted with what to which message, and what the space says the emoji means. */
+	context: string;
+}
+
+/**
+ * Who acts on the reaction `msgs[at]` (`msgs` chronological), first that
+ * applies, among the agents of the object's space:
+ *  1. the agent of the space's Reaction for that emoji;
+ *  2. the agent that wrote the message reacted to;
+ *  3. the agent that runs the object's Repeat;
+ *  4. the space's own "<Space> Space" agent.
+ * Null for a removed reaction, or when the space has none of them.
+ */
+export async function reactionWake(obj: ObjectJSON, msgs: ChatRow[], at: number): Promise<ReactionWake | null> {
+	const meta = msgs[at].block.content.custom?.meta ?? {};
+	const emoji = bareEmoji(meta["emoji"] ?? "");
+	if (!isReaction(meta) || reactionRemoved(meta) || !emoji) return null;
+	const dflt = await defaultSpaceId();
+	const space = spaceOfObject(obj, dflt);
+	const [roster, reactions] = await Promise.all([queryAll({ type: "agent" }), queryAll({ type: REACTION_TYPE })]);
+	const ofSpace = addressableAgents(obj, roster, dflt);
+	const inSpace = (id: string | undefined): id is string => !!id && ofSpace.includes(id);
+	// The space's meaning for the emoji; the oldest, should two say it.
+	const meaning = reactions
+		.filter((r) => spaceOfObject(r, dflt) === space && bareEmoji(str(r.fields, REACTION_EMOJI_KEY)) === emoji)
+		.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))[0];
+	const target = msgs.find((row) => row.id === meta["replyTo"])?.block.content.custom?.meta;
+	const targetAuthor = target?.["author"] ?? "";
+	// Only agents of the space qualify (`inSpace`): a person's message, or another space's agent, falls through.
+	const candidates = [
+		...(meaning ? guestAgents({ agent: meaning.fields[REACTION_AGENT_KEY] }).slice(0, 1) : []),
+		targetAuthor,
+		// Who runs the Repeat: the one its editor picked, else the first on the guest list (schedule.ts ownerOf).
+		...(obj.fields["repeat"] ? [...guestAgents({ agent: obj.fields["assignee"] }), ...guestAgents(obj.fields)] : []),
+		`space-agent-${space}`,
+	];
+	let agentId = candidates.find(inSpace);
+	if (!agentId) {
+		// A space whose own agent predates the fixed id: the one by its name.
+		const spaceName = str((await fetchObject(space).catch(() => null))?.fields ?? {}, "name");
+		if (spaceName) agentId = roster.find((a) => inSpace(a.id) && str(a.fields, "name") === `${spaceName} Space`)?.id;
+	}
+	if (!agentId) return null;
+
+	const nameOf = (id: string): string => (id === agentId ? "you" : str(roster.find((a) => a.id === id)?.fields ?? {}, "name") || (isAgentAuthor(id) ? "an agent" : "user"));
+	const parts = [reactionLine(nameOf(meta["author"] ?? ""), meta, target ? { author: nameOf(targetAuthor), text: target["text"] ?? "" } : null)];
+	if (meaning) {
+		const page = await fetchObject(meaning.id).then((o) => serializeBody(o).body.trim(), () => "");
+		const said = page ? `Its instructions:\n${page}` : "It has no instructions written: act on the message as that meaning asks.";
+		parts.push(`In this space ${meta["emoji"]} means "${str(meaning.fields, "name") || "(unnamed)"}" (Reaction ${meaning.id}). ${said}`);
+	} else {
+		parts.push(`No Reaction in this space says what ${meta["emoji"]} means: read it as the person's answer to that message, and act on it if it asks for something.`);
+	}
+	return { agentId, context: parts.join("\n") };
 }
 
 // ── Host framing (bot.odin build_user_message + host_info) ────────
@@ -392,8 +467,9 @@ export function frameMessage(surface: ObjectJSON, ref: ConvRef, pending: Pending
 	}
 	if (["query", "set", "collection"].includes(surface.typeKey)) parts.push(`[a saved view: query_run ${surface.id} lists what it shows]`);
 
-	const chatCount = chatBlocks(surface, ref).filter((row) => (row.block.content.custom?.meta?.["text"] ?? "").trim()).length;
-	const earlier = chatCount - pending.length;
+	// Words only: a reaction is not a message to read back.
+	const now = new Set(pending.map((p) => p.blockId));
+	const earlier = chatBlocks(surface, ref).filter((row) => !now.has(row.id) && (row.block.content.custom?.meta?.["text"] ?? "").trim()).length;
 	if (earlier > 0) parts.push(`[this ${kind} has ${earlier} earlier discussion message(s) \u2014 discussion_read ${surface.id} to see them]`);
 
 	for (const p of pending) {

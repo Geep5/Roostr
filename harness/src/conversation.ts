@@ -17,6 +17,7 @@
 
 import type { ObjectJSON } from "./api";
 import { convBlocks, HUMAN_THREAD } from "./conv";
+import { isReaction, reactionLine } from "./reactions";
 import {
 	BLOCK_COMPACTION,
 	BLOCK_TOOL_RESULT,
@@ -58,13 +59,21 @@ export function itemText(item: ClassifiedItem): string {
 /** Classify one conversation's children in append order. */
 export function classifyBlocks(object: ObjectJSON, agentId: string, threadId = HUMAN_THREAD): ClassifiedItem[] {
 	const items: ClassifiedItem[] = [];
-	for (const { id: cid, block } of convBlocks(object, threadId)) {
+	const rows = convBlocks(object, threadId);
+	for (const { id: cid, block } of rows) {
 		const custom = block.content.custom;
 		if (!custom) continue;
 		const meta = custom.meta ?? {};
 		switch (custom.contentType) {
 			case "chat": {
 				const author = meta["author"] ?? "";
+				if (isReaction(meta)) {
+					// A reaction is an event, never words: one line, whoever made it.
+					const target = rows.find((r) => r.id === meta["replyTo"])?.block.content.custom?.meta;
+					const on = target ? { author: target["author"] === agentId ? "you" : "someone", text: target["text"] ?? "" } : null;
+					items.push({ kind: "user_text", blockId: cid, text: reactionLine(author === agentId ? "you" : "someone", meta, on), author });
+					break;
+				}
 				const text = meta["text"] ?? "";
 				if (author === agentId) items.push({ kind: "assistant_text", blockId: cid, text });
 				else items.push({ kind: "user_text", blockId: cid, text, author });
