@@ -33,8 +33,10 @@ import type { ScoreRow } from "./jev";
 import { assertInSpace, buildNeighborhood, buildSpaceMap, defaultSpaceId, relationDefs, savedViewBody, spaceFilterFor, typeDefs, viewRowProps, type RelDef, type TypeDef } from "./spacemap";
 import { bodyBlocks, isAgentAuthor, type BodyLine } from "./surfaces";
 import { isReaction, reactionLine } from "./reactions";
+import { describeStrip, editTabs, readOpenTabs, type TabChange } from "./tabs";
 
 export type { AgentEndpoint, BlockJSON, ObjectJSON, QueryRow, ValueJSON } from "./api";
+export type { TabChange } from "./tabs";
 export type { CredentialAction } from "./credentials";
 export type { CapabilityRow } from "./capabilities";
 export type { Mark } from "./markdown";
@@ -254,6 +256,14 @@ export interface Roostr {
 	gws(mailbox: string, args: string[], options?: { cwd?: string }): Promise<unknown>;
 	/** Notes for the harness log (stderr); never part of the result. */
 	log(...args: unknown[]): void;
+	/** The person's open tabs in the app (tabs.ts): a space's strip as paths in order, #1 the browsing tab. */
+	tabs: {
+		get(space: string): Promise<string[]>;
+		/** Open (append, skipping open pages), close, move - refused before writing when an opened object is not in `space`; returns the new strip. */
+		edit(space: string, change: TabChange): Promise<string[]>;
+		/** A strip as numbered lines naming what each tab shows. */
+		show(space: string, strip: readonly string[]): Promise<string>;
+	};
 	// ── Asked of the harness (HarnessApi) ──
 	/** `sh -lc command` on this computer (5 minutes at most), in the agent's Project folder, else home. Refused unless the agent's Tools list shell_exec. */
 	shell(command: string): Promise<ShellRun>;
@@ -361,6 +371,11 @@ export function createRoostr(context: ToolRunContext, touched: Set<string>, harn
 		chatPost: (objectId, text) => sdkCall(() => chatPost(objectId, text)),
 		// An object id alone addresses its human discussion; agent-to-agent talk has its own threads.
 		reply: (objectId, text) => sdkCall(() => postTo(humanRef(objectId), text, owner)),
+		tabs: {
+			get: (space) => sdkCall(async () => (await readOpenTabs())[space] ?? []),
+			edit: (space, change) => sdkCall(() => editTabs(space, change)),
+			show: (space, strip) => sdkCall(() => describeStrip(space, strip)),
+		},
 		conversation: (obj, threadId) => convBlocks(obj, threadId || HUMAN_THREAD),
 		text: objectText,
 		isAgentAuthor,

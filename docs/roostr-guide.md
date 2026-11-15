@@ -115,6 +115,7 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 
 - **Tools** are objects: a name the model calls, a description, inputs, and TypeScript in the body, run by the harness. Built-in Tools ship with Roostr in every space; custom Tools are written the same way and given to agents through their Tools property.
 - **Skills** are instructions an agent reads on demand. Every agent's prompt lists Skills by name and one line; the agent reads the full page with `skill_read` when the task matches. A Skill lives in one space, and an agent sees only its own space's Skills - a space shared with you never lends its Skills to your other spaces. The defaults (the Roostr Guide, Headless Chrome, Google Workspace) are copied into each space you own, so each space's copy can be edited on its own. A Skill with a `key` is also catalog software its computer must have.
+- **Tabs and pins**: agents can change what the person sees in the app. `tabs_list` shows the person's open tabs in a space (on every device), `tabs_edit` opens objects as new tabs (last), closes and reorders them - "open my overdue tasks as tabs". Tab #1 is the browsing tab: navigation shows pages there, it never moves, and closing it shows the space home. Which tab is selected is up to each device; no tool can select one. `object_pin` pins an object to the space's sidebar (or unpins it).
 
 ## 10. How an agent should behave in Roostr
 
