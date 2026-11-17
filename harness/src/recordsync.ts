@@ -25,6 +25,11 @@
  *     seq <= the previous pack's cursor are deleted (NIP-09; the relay only
  *     honours the author's own) and the previous pack blob too.
  *
+ * Live progress (kind 25078) and live-line signals (kind 25079) ride the
+ * same relay connection through nostrsync.ts's EphemeralBridge, exactly as
+ * in legacy mode: this computer's frames out, other devices' frames into
+ * the store, under this identity's key or the owning shared space's.
+ *
  * Cursors are per relay: only the first configured relay carries record
  * sync (its seqs are that relay's numbering).
  */
@@ -33,7 +38,7 @@ import { finalizeEvent, nip44, verifyEvent, type Event } from "nostr-tools";
 import { API, apiFetch, subscribe } from "./api";
 import { blossomServer, deleteBlob, download, sha256Hex, upload } from "./blossom";
 import { servesHere } from "./machine";
-import { blindObjectId, blindShared, loadIdentity, loadSharedSpaces, localVanished, type Identity, type SharedSpace } from "./nostrsync";
+import { blindObjectId, blindShared, EphemeralBridge, loadIdentity, loadSharedSpaces, loadSpaceMap, localVanished, type Identity, type SharedSpace } from "./nostrsync";
 import { decryptPack, encryptPack } from "./pack";
 import { CursorRelay, type CursorFilter, type SeqEvent } from "./relay-cursor";
 
@@ -213,6 +218,14 @@ export class RecordSync {
 	private flushAgain = false;
 	private persistTimer: Timer | null = null;
 	private timers: Timer[] = [];
+	/** The shared-space view the ephemeral bridge reads: spaces by id, object -> owning space. */
+	private spaces = new Map<string, SharedSpace>();
+	private spaceMap = new Map<string, string>();
+	private spaceMapLoading: Promise<void> | null = null;
+	private readonly ephemeral: EphemeralBridge;
+	private ephemeralSub: string | null = null;
+	/** The space tags `ephemeralSub` listens to. */
+	private ephemeralTags = "";
 
 	constructor(id: Identity, config: RecordSyncConfig) {
 		this.id = id;
@@ -222,6 +235,10 @@ export class RecordSync {
 			for (const run of this.runs.values()) this.enqueue(run, () => this.catchUp(run));
 			this.scheduleFlush();
 		};
+		this.ephemeral = new EphemeralBridge(id, { spaces: () => this.spaces, spaceOf: (objectId) => this.spaceMap.get(objectId) ?? "" }, async (event) => {
+			const result = await this.relay.publish(event);
+			if (!result.ok) throw new Error(result.message);
+		});
 	}
 
 	async start(): Promise<void> {
@@ -230,7 +247,9 @@ export class RecordSync {
 		subscribe((objectId) => {
 			this.scheduleFlush();
 			if (this.runs.has(objectId)) void this.refreshStreams().catch((err) => log("stream refresh failed:", err));
-		}, () => this.scheduleFlush());
+			// A new object's space: its progress goes out under the right key.
+			else if (!this.spaceMap.has(objectId)) void this.refreshSpaceMap(objectId);
+		}, () => this.scheduleFlush(), this.ephemeral.handlers);
 		this.timers.push(setInterval(() => this.scheduleFlush(), this.config.journalPollMs));
 		this.timers.push(setInterval(() => void this.refreshStreams().catch((err) => log("stream refresh failed:", err)), 30_000));
 		this.timers.push(setInterval(() => this.checkPacks(), this.config.packCheckMs));
@@ -241,6 +260,9 @@ export class RecordSync {
 	/** Personal stream plus one per shared space; new ones catch up, gone ones close. */
 	private async refreshStreams(): Promise<void> {
 		const spaces = await loadSharedSpaces(this.id, await localVanished());
+		this.spaces = spaces;
+		await this.refreshSpaceMap();
+		await this.subscribeEphemeral();
 		const desired = new Map<string, Stream>();
 		const personalD = blindObjectId(this.id, "stream:personal");
 		desired.set(PERSONAL, {
@@ -280,6 +302,37 @@ export class RecordSync {
 			this.runs.set(label, run);
 			this.enqueue(run, () => this.catchUp(run));
 		}
+	}
+
+	/** Object -> owning space for the ephemeral bridge; `objectId` still unlisted afterwards counts as this account's. */
+	private refreshSpaceMap(objectId?: string): Promise<void> {
+		this.spaceMapLoading ??= loadSpaceMap()
+			.then((map) => {
+				// Space objects are not listed: every shared space owns itself.
+				for (const spaceId of this.spaces.keys()) map.set(spaceId, spaceId);
+				if (objectId !== undefined && !map.has(objectId)) map.set(objectId, "");
+				this.spaceMap = map;
+			})
+			.finally(() => {
+				this.spaceMapLoading = null;
+			});
+		return this.spaceMapLoading;
+	}
+
+	/**
+	 * Live progress and signals of this account and every shared space. The
+	 * relay client re-sends it after reconnects; a changed set of spaces
+	 * replaces it, and so does a relay that closed it.
+	 */
+	private async subscribeEphemeral(): Promise<void> {
+		const tags = [...this.spaces.values()].map((space) => space.spaceTag).join(",");
+		if (this.ephemeralSub && tags === this.ephemeralTags) return;
+		if (this.ephemeralSub) this.relay.close(this.ephemeralSub);
+		this.ephemeralTags = tags;
+		this.ephemeralSub = await this.relay.subscribe(this.ephemeral.filters(), ({ event }) => void this.ephemeral.receive(event), undefined, (reason) => {
+			log(`live progress subscription closed: ${reason}`);
+			this.ephemeralSub = null;
+		});
 	}
 
 	/** One stream's work runs in order: catch-up, live events and pack builds never interleave. */

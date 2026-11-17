@@ -217,11 +217,19 @@ export class CursorRelay {
 		return promise;
 	}
 
-	/** A live subscription, re-sent after reconnects (with whatever `filters` holds then). */
+	/**
+	 * A live subscription, re-sent after reconnects (with whatever `filters` holds then).
+	 * An unreachable relay does not lose it: it is kept and sent once a retry connects.
+	 */
 	async subscribe(filters: CursorFilter[], onEvent: (item: SeqEvent) => void, onEose?: (cursor: StreamCursor | null) => void, onClosed?: (reason: string) => void): Promise<string> {
 		const id = `s${this.nextId++}`;
 		this.subs.set(id, { filters, onEvent, onEose, onClosed });
-		await this.connect();
+		try {
+			await this.connect();
+		} catch {
+			this.retryLater();
+			return id;
+		}
 		this.ws!.send(JSON.stringify(["REQ", id, ...filters]));
 		return id;
 	}

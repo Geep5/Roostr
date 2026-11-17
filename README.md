@@ -526,7 +526,10 @@ and lets a viewer go after 5 minutes of silence. Each event still goes to the
 local store (`live_publish`); its relay copy is sent only while some viewer
 heard from in the last 3 minutes has no open line, or when no viewer is known
 (`live_publish` with `"relay":false` keeps it off the relays), so the relays
-remain the fallback. Receivers drop duplicates by run and seq.
+remain the fallback. Receivers drop duplicates by run and seq. `bun run sync`
+carries both kinds in either mode: record sync (GLON_RECORDS=1) sends and
+subscribes them on its record relay connection through the same bridge as the
+legacy loop (`EphemeralBridge` in `harness/src/nostrsync.ts`).
 
 ## Harness (`harness/`)
 

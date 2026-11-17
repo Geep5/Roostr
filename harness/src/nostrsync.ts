@@ -25,7 +25,7 @@
 
 import { SimplePool, finalizeEvent, getPublicKey, nip19, nip44, verifyEvent, type Event, type EventTemplate as SignableEvent, type Filter } from "nostr-tools";
 import { unwrapEvent, wrapEvent } from "nostr-tools/nip59";
-import { API, VANISH_LOG_ID, apiFetch, mutate, subscribe, vanishedEntries, type VanishedEntry } from "./api";
+import { API, VANISH_LOG_ID, apiFetch, mutate, subscribe, vanishedEntries, type EphemeralHandlers, type VanishedEntry } from "./api";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { machines, serverOf, servesHere } from "./machine";
 import { machineId } from "./roster";
@@ -392,6 +392,137 @@ export function signalTemplate(signal: LiveSignal, conversationKey: Uint8Array, 
 	};
 }
 
+/** Try the self key, then every shared space whose stream tag the event carries; a space's event counts only from one of its writers. */
+export function openEvent(event: Event, id: Identity, spaces: ReadonlyMap<string, SharedSpace>): { part: string; space: SharedSpace | null } | null {
+	if (event.pubkey === id.pk) {
+		try {
+			return { part: nip44.decrypt(event.content, id.conversationKey), space: null };
+		} catch {
+			/* not self-encrypted */
+		}
+	}
+	for (const space of spaces.values()) {
+		if (!event.tags.some((tag) => tag[0] === "h" && tag[1] === space.spaceTag)) continue;
+		try {
+			const part = nip44.decrypt(event.content, space.convKey);
+			// Writer gate: a viewer (or stranger holding a leaked key)
+			// can encrypt valid events - drop anything not authored by
+			// an allowed writer of this space.
+			if (!space.writers.has(event.pubkey)) return null;
+			return { part, space };
+		} catch {
+			/* next key */
+		}
+	}
+	return null;
+}
+
+// ── Live progress + its signals (PROGRESS_KIND, SIGNAL_KIND) ─────
+//
+// One event out per local publish, one in per relay event; both sync
+// loops (this file and recordsync.ts) run one bridge over their own relay
+// connection. Best effort both ways: a lost event is a missing line of
+// progress (or an introduction the next hello repeats), never retried.
+// Relays echo our own events back; their ids are skipped.
+
+/** What a bridge reads from its sync loop's current shared-space view. */
+export interface EphemeralScope {
+	/** Shared spaces syncing under their space key, by space id. */
+	spaces(): ReadonlyMap<string, SharedSpace>;
+	/** The space owning an object ("" = this account's own). */
+	spaceOf(objectId: string): string;
+}
+
+export class EphemeralBridge {
+	private readonly id: Identity;
+	private readonly scope: EphemeralScope;
+	/** Hands a signed event to the relays; rejects when none took it. */
+	private readonly send: (event: Event) => Promise<void>;
+	private readonly sent = new Set<string>();
+
+	constructor(id: Identity, scope: EphemeralScope, send: (event: Event) => Promise<void>) {
+		this.id = id;
+		this.scope = scope;
+		this.send = send;
+	}
+
+	/**
+	 * The daemon event stream's handlers (api.ts `subscribe`). Only this
+	 * computer's own progress and signals leave; relayed ones never go back
+	 * out. Progress its harness already handed every viewer over a direct
+	 * line (relay:false) stays here too.
+	 */
+	readonly handlers: EphemeralHandlers = {
+		live: (live, origin, relay) => {
+			if (origin === "local" && relay) void this.relayProgress(live);
+		},
+		signal: (signal, origin, space) => {
+			if (origin === "local") void this.relaySignal(signal, space);
+		},
+	};
+
+	/** The live subscription: this account's events and every shared space's. Only ever now: no history to ask for. */
+	filters(now = Math.floor(Date.now() / 1000)): Filter[] {
+		const tags = [...this.scope.spaces().values()].map((space) => space.spaceTag);
+		const out: Filter[] = [{ kinds: [PROGRESS_KIND, SIGNAL_KIND], authors: [this.id.pk], since: now }];
+		if (tags.length > 0) out.push({ kinds: [PROGRESS_KIND, SIGNAL_KIND], "#h": tags, since: now });
+		return out;
+	}
+
+	private async publish(template: SignableEvent): Promise<void> {
+		const event = finalizeEvent(template, this.id.sk);
+		if (this.sent.size >= 1024) this.sent.clear();
+		this.sent.add(event.id);
+		await this.send(event);
+	}
+
+	private async relayProgress(live: LiveEvent): Promise<void> {
+		try {
+			const space = this.scope.spaces().get(this.scope.spaceOf(live.object));
+			await this.publish({
+				kind: PROGRESS_KIND,
+				created_at: Math.floor(Date.now() / 1000),
+				tags: space ? [["h", blindShared(space.keyHex, live.object)], ["h", space.spaceTag]] : [["h", blindObjectId(this.id, live.object)]],
+				content: nip44.encrypt(JSON.stringify(live), space ? space.convKey : this.id.conversationKey),
+			});
+		} catch {
+			/* no relay took it: this line of progress stays local */
+		}
+	}
+
+	private async relaySignal(signal: LiveSignal, space: string): Promise<void> {
+		const spaces = this.scope.spaces();
+		for (const scope of signalScopes(signal, space, spaces.keys())) {
+			const shared = scope ? spaces.get(scope) : null;
+			// A space this computer no longer holds a key for has nobody to reach.
+			if (shared === undefined) continue;
+			try {
+				await this.publish(signalTemplate(signal, this.id.conversationKey, shared, Math.floor(Date.now() / 1000)));
+			} catch {
+				/* no relay took it: the viewer's next hello starts over */
+			}
+		}
+	}
+
+	/** One relay event of the live subscription: another device's progress or signal into the store. */
+	async receive(event: Event): Promise<void> {
+		if ((event.kind !== PROGRESS_KIND && event.kind !== SIGNAL_KIND) || this.sent.has(event.id) || !verifyEvent(event)) return;
+		const opened = openEvent(event, this.id, this.scope.spaces());
+		if (!opened) return;
+		try {
+			if (event.kind === PROGRESS_KIND) {
+				await mutate("live_publish", { event: JSON.parse(opened.part), origin: "relay" });
+				return;
+			}
+			const scope = signalScope(event.pubkey, this.id.pk, opened.space);
+			if (scope === null) return;
+			await mutate("signal_publish", { event: JSON.parse(opened.part), origin: "relay", ...(scope ? { space: scope } : {}) });
+		} catch {
+			/* not a valid payload, or the store is restarting */
+		}
+	}
+}
+
 function npubToHex(npub: string): string | null {
 	try {
 		const d = nip19.decode(npub.trim());
@@ -459,7 +590,7 @@ export async function loadSharedSpaces(identity: Identity, gone: ReadonlyMap<str
 }
 
 /** objectId -> owning space id ("" when unassigned). Channels own themselves. */
-async function loadSpaceMap(): Promise<Map<string, string>> {
+export async function loadSpaceMap(): Promise<Map<string, string>> {
 	const out = new Map<string, string>();
 	try {
 		const objs = (await (await apiFetch(`${API}/api/objects`)).json()) as Array<{ id: string; typeKey?: string; channelId?: string }>;
@@ -1322,31 +1453,6 @@ export async function startNostrSync(): Promise<void> {
 		throw last;
 	}
 
-	/** Try self key, then every shared-space key. */
-	function decryptEvent(event: Event): { part: string; space: SharedSpace | null } | null {
-		if (event.pubkey === id!.pk) {
-			try {
-				return { part: nip44.decrypt(event.content, id!.conversationKey), space: null };
-			} catch {
-				/* not self-encrypted */
-			}
-		}
-		for (const space of sharedSpaces.values()) {
-			if (!event.tags.some((tag) => tag[0] === "h" && tag[1] === space.spaceTag)) continue;
-			try {
-				const part = nip44.decrypt(event.content, space.convKey);
-				// Writer gate: a viewer (or stranger holding a leaked key)
-				// can encrypt valid events - drop anything not authored by
-				// an allowed writer of this space.
-				if (!space.writers.has(event.pubkey)) return null;
-				return { part, space };
-			} catch {
-				/* next key */
-			}
-		}
-		return null;
-	}
-
 	/** Bases bound every replay: nothing older than `historyFloor` is ever re-walked. */
 	function retainReplaySince(createdAt: number): void {
 		const since = Math.max(createdAt, historyFloor);
@@ -1465,7 +1571,7 @@ export async function startNostrSync(): Promise<void> {
 		activeImports++;
 		try {
 			if ((event.kind !== CHANGE_KIND && event.kind !== CHECKPOINT_KIND && event.kind !== BASE_KIND && event.kind !== BASE_PART_KIND) || !verifyEvent(event)) return;
-			const dec = decryptEvent(event);
+			const dec = openEvent(event, id!, sharedSpaces);
 			if (!dec) return;
 			const { part, space } = dec;
 			const chunkTags = event.tags.filter((t) => t[0] === "c");
@@ -2136,7 +2242,7 @@ export async function startNostrSync(): Promise<void> {
 		const groups = new Map<string, { changeId?: string; eventIds: string[] }>();
 		for (const event of events) {
 			if (event.kind !== CHANGE_KIND) continue;
-			const dec = decryptEvent(event);
+			const dec = openEvent(event, id!, sharedSpaces);
 			if (!dec) continue;
 			const chunk = event.tags.find((tag) => tag[0] === "c");
 			const key = chunk ? `${event.pubkey}/${chunk[1]}` : event.id;
@@ -2615,6 +2721,10 @@ export async function startNostrSync(): Promise<void> {
 	setInterval(() => void periodic(), CHECKPOINT_INTERVAL_MS);
 	persist();
 
+	const bridge = new EphemeralBridge(id!, { spaces: () => sharedSpaces, spaceOf: (objectId) => spaceMap.get(objectId) ?? "" }, async (event) => {
+		await Promise.any(pool.publish(id!.relays, event));
+	});
+
 	// ── Live: both directions ──────────────────────────────────────
 	subscribe((objectId) => {
 		if (objectId === VANISH_LOG_ID) {
@@ -2661,75 +2771,7 @@ export async function startNostrSync(): Promise<void> {
 			return;
 		}
 		void publishObject(objectId);
-	}, undefined, {
-		// Only this computer's own progress and signals leave; relayed ones
-		// never go back out. Progress its harness already handed every
-		// viewer over a direct line (relay:false) stays here too.
-		live: (live, origin, relay) => {
-			if (origin === "local" && relay) void relayProgress(live);
-		},
-		signal: (signal, origin, space) => {
-			if (origin === "local") void relaySignal(signal, space);
-		},
-	});
-
-	// ── Live progress + its signals: one event out per local publish, one in per relay event ──
-	//
-	// Best effort both ways: a lost event is a missing line of progress (or
-	// an introduction the next hello repeats), never retried. Relays echo our
-	// own events back; their ids are skipped.
-	const sentEphemeral = new Set<string>();
-
-	async function publishEphemeral(template: SignableEvent): Promise<void> {
-		const event = finalizeEvent(template, id!.sk);
-		if (sentEphemeral.size >= 1024) sentEphemeral.clear();
-		sentEphemeral.add(event.id);
-		await Promise.any(pool.publish(id!.relays, event));
-	}
-
-	async function relayProgress(live: LiveEvent): Promise<void> {
-		try {
-			const space = sharedSpaces.get(spaceMap.get(live.object) ?? "");
-			await publishEphemeral({
-				kind: PROGRESS_KIND,
-				created_at: Math.floor(Date.now() / 1000),
-				tags: space ? [["h", blindShared(space.keyHex, live.object)], ["h", space.spaceTag]] : [["h", blindObjectId(id!, live.object)]],
-				content: nip44.encrypt(JSON.stringify(live), space ? space.convKey : id!.conversationKey),
-			});
-		} catch {
-			/* no relay took it: this line of progress stays local */
-		}
-	}
-
-	async function relaySignal(signal: LiveSignal, space: string): Promise<void> {
-		for (const scope of signalScopes(signal, space, sharedSpaces.keys())) {
-			const shared = scope ? sharedSpaces.get(scope) : null;
-			// A space this computer no longer holds a key for has nobody to reach.
-			if (shared === undefined) continue;
-			try {
-				await publishEphemeral(signalTemplate(signal, id!.conversationKey, shared, Math.floor(Date.now() / 1000)));
-			} catch {
-				/* no relay took it: the viewer's next hello starts over */
-			}
-		}
-	}
-
-	async function onEphemeralEvent(event: Event): Promise<void> {
-		if ((event.kind !== PROGRESS_KIND && event.kind !== SIGNAL_KIND) || sentEphemeral.has(event.id) || !verifyEvent(event)) return;
-		const opened = decryptEvent(event);
-		if (!opened) return;
-		try {
-			if (event.kind === PROGRESS_KIND) {
-				await mutate("live_publish", { event: JSON.parse(opened.part), origin: "relay" });
-				return;
-			}
-			const scope = signalScope(event.pubkey, id!.pk, opened.space);
-			if (scope === null) return;
-			await mutate("signal_publish", { event: JSON.parse(opened.part), origin: "relay", ...(scope ? { space: scope } : {}) });
-		} catch {
-			/* not a valid payload, or the store is restarting */
-		}
-	}
+	}, undefined, bridge.handlers);
 
 	// ── Live subscriptions + deafness watchdog ─────────────────────
 	//
@@ -2781,17 +2823,10 @@ export async function startNostrSync(): Promise<void> {
 				onevent: (event) => void handleWrap(event),
 			}),
 		);
-		// Live progress and its signals are only ever now: no history to ask for.
-		const now = Math.floor(Date.now() / 1000);
-		liveSubs.push(
-			pool.subscribeMany(id!.relays, { kinds: [PROGRESS_KIND, SIGNAL_KIND], authors: [id!.pk], since: now }, {
-				onevent: (event) => void onEphemeralEvent(event),
-			}),
-		);
-		if (tags.length > 0) {
+		for (const filter of bridge.filters()) {
 			liveSubs.push(
-				pool.subscribeMany(id!.relays, { kinds: [PROGRESS_KIND, SIGNAL_KIND], "#h": tags, since: now }, {
-					onevent: (event) => void onEphemeralEvent(event),
+				pool.subscribeMany(id!.relays, filter, {
+					onevent: (event) => void bridge.receive(event),
 				}),
 			);
 		}
