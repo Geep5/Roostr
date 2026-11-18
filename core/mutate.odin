@@ -1705,6 +1705,10 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	{"phone", "phone", "Phone", "📞", false, false, 0, {}},
 	{"featuredRelations", "relations", "Featured relations", "⭐", true, false, 0, {}},
 	{"setOf", "object", "Set of", "🗂️", true, false, 0, {}},
+	// Ticked: this object alerts on phones (the iOS app) when something triggers it -
+	// today each run of its Repeat. Shared like any property: one tick for everyone in
+	// the space.
+	{"mobile_alert", "checkbox", "Mobile alert", "📱", false, false, 1, {}},
 }
 
 /**

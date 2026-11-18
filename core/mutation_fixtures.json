@@ -6358,6 +6358,110 @@
       {
         "author": "alice",
         "id": "",
+        "objectId": "bundled-rel-mobile_alert-new-id",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "mobile_alert"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "checkbox"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Mobile alert"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "📱"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
         "objectId": "bundled-type-page-new-id",
         "ops": [
           {
@@ -8046,6 +8150,53 @@
           },
           {
             "fieldSet": {
+              "key": "rel:bundled-rel-mobile_alert-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "mobile_alert"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Mobile alert"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📱"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "checkbox"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "rel:bundled-rel-model-new-id",
               "value": {
                 "mapValue": {
@@ -9570,7 +9721,7 @@
             "fieldSet": {
               "key": "count:relation:alice",
               "value": {
-                "intValue": 33
+                "intValue": 34
               }
             }
           },
@@ -13202,6 +13353,110 @@
               "key": "readOnly",
               "value": {
                 "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-mobile_alert-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "mobile_alert"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "checkbox"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Mobile alert"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "📱"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
               }
             }
           },
@@ -17450,6 +17705,110 @@
       {
         "author": "alice",
         "id": "",
+        "objectId": "bundled-rel-mobile_alert-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "mobile_alert"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "checkbox"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Mobile alert"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "📱"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
         "objectId": "bundled-type-file-s",
         "ops": [
           {
@@ -19175,6 +19534,53 @@
           },
           {
             "fieldSet": {
+              "key": "rel:bundled-rel-mobile_alert-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "mobile_alert"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Mobile alert"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "📱"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "checkbox"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "rel:bundled-rel-model-s",
               "value": {
                 "mapValue": {
@@ -20699,7 +21105,7 @@
             "fieldSet": {
               "key": "count:relation:alice",
               "value": {
-                "intValue": 33
+                "intValue": 34
               }
             }
           },
