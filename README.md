@@ -292,8 +292,8 @@ host + Signed-in cookie (`session_host`, `session_cookie`: the cookie that
 proves a real sign-in), and one property per pasted key - any field named
 `key_<name>` (`key_token` "Bot token", `key_api_key` "API key"...). A property
 you add named "Key: App ID" (`key_app_id`) is a key too. Status, Error and
-Served by are the built-in properties; the Status popover carries Connect /
-Check now / Disconnect.
+Served by are the built-in properties; the Status popover carries Check now,
+and for a Google account Connect / Disconnect.
 
 The presets (X, LinkedIn, Discord bot, Anthropic, Kimi, OpenAI, and any a
 private extension adds) are
@@ -315,29 +315,44 @@ Credentials made before keys were properties still carry `key_fields` and
 `secret` for computers on the previous harness; a browser login stored as one
 `session` JSON property is converted to `cookie_*` by the computer serving it.
 
-**Sign in anywhere.** Connect (`POST /credentials/connect {id}` on :7334) runs
-on whichever of your computers the app is paired with: it opens the headed
-sign-in window (or gws's Google sign-in) there, saves the login onto the
-credential the moment the login cookie appears, and names that computer in
-`cookie_meta`. `served_by` names the computer that looks after it: it keeps
+**Browser sign-ins come from Roostr Pass.** The Roostr Pass Chrome extension
+(`roostr-pass/`) brings them from the person's own Chrome: it talks to this
+computer through `glon-odin` in Chrome's native-host mode (`src/pass_host.odin`;
+register it once with `./glon-odin pass install <extension-id>`), which
+forwards to the harness's service-only `GET /pass/watch` and `POST /pass/cookies`
+(`harness/src/pass.ts`). The watch list is every browser-login credential (a
+login page and signed-in cookie; not Google) and whether it needs a fresh login:
+signed out or never filled in, with no delivered login still waiting for its
+check. For each that does, Roostr Pass sends that site's cookies once if Chrome
+is signed in to it - never the same cookies twice, never another account's (X's
+`twid`) - and otherwise badges its icon until the person signs in, whose cookie
+change sends it. The status a failing run or check leaves is the request: a run
+that meets a login wall writes `check_requested`, the serving computer's check
+writes Signed out, Roostr Pass answers, and a run blocked by the login retries
+once it is Connected again. The first computer to deliver wins: its login waits
+for the serving computer's check (`cookie_meta.at` newer than `checked_at`).
+Chrome reads the native host's manifest from `<profile dir>/NativeMessagingHosts`.
+
+`served_by` names the computer that looks after a credential: it keeps
 `status` (`missing` | `connecting` | `active` | `needs_auth` | `broken`),
 `auth`, `error` and `checked_at` true - at boot, on every change, and every 5
 minutes - and the first time it meets cookies signed in on another computer it
 opens the site with them in a throwaway headless Chrome (remembered by hash in
 `~/.glon/session-checks.json`). A site that sends it to a login wall or clears
 the session cookie leaves the credential Signed out with "<site> didn't accept
-the login made on <computer>; sign in on <served-by computer> instead" - the
-values stay. `/credentials/check` (try the cookies on the site now; a Google
+the login from <computer>" - the values stay, and Roostr Pass is asked again.
+`/credentials/check` (try the cookies on the site now; a Google
 account's refresh token is exchanged with Google) runs only on the serving
 computer; another computer gets a 409 naming it. Any device can ask for the
 same check without a harness of its own: it writes `check_requested` (epoch
 ms) on the credential, and the serving computer's refresh (it runs on every
 credential change) runs the check for a request newer than `checked_at` -
-once per request, even while another computer's sign-in shows `connecting`
-(the person says they finished) - and stamps `checked_at`, the answer the app
-waits for. A sign-in window open on the serving computer itself is left open;
-the answer is its `connecting` status. The request stays on the credential.
-`/credentials/disconnect`
+once per request - and stamps `checked_at`, the answer the app waits for. The
+request stays on the credential.
+
+A Google account's Connect (`POST /credentials/connect {id}` on :7334) runs
+gws's sign-in on whichever of your computers the app is paired with and saves
+the login onto the credential. `/credentials/disconnect`
 stops a sign-in running on that computer and removes its local gws sign-in -
 the login saved on the credential stays and keeps being used until the site
 refuses it; clear its Cookie / key properties to remove it. Keys need no

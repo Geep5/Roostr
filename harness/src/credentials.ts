@@ -29,7 +29,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { str, type ValueJSON } from "./api";
+import { num, str, type ValueJSON } from "./api";
 import { PLAN_REFRESH, PLAN_TOKEN } from "./anthropic-plan";
 import { LOGIN_WALL, type SessionCookie } from "./browser";
 
@@ -443,6 +443,15 @@ export function credentialSession(fields: Record<string, ValueJSON>): SessionCoo
 		out.push({ name: m.name, value, domain: m.domain, path: m.path || "/", expires: typeof m.expires === "number" ? m.expires : -1, httpOnly: !!m.httpOnly, secure: !!m.secure, ...(m.sameSite ? { sameSite: m.sameSite } : {}) });
 	}
 	return out;
+}
+
+/**
+ * A login delivered (by Roostr Pass, cookie_meta's `at`) after the last
+ * answer from the computer serving it (`checked_at`): it waits for that
+ * computer to try it.
+ */
+export function deliveryWaiting(fields: Record<string, ValueJSON>): boolean {
+	return (sessionMeta(fields)?.at ?? 0) > (num(fields, "checked_at") ?? 0);
 }
 
 /** The pre-property `session` JSON array, read only to convert it. */

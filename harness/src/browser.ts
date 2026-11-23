@@ -1,9 +1,8 @@
 /**
  * Minimal Chrome DevTools Protocol driver for credential-backed browser
  * work. A Credential's signed-in session travels as its cookies (the
- * credential's `cookie_*` properties, credentials.ts): sign-in exports them
- * from the headed login window on whichever computer it ran, and every later
- * action injects them into a fresh, throwaway headless Chrome - so any
+ * credential's `cookie_*` properties, credentials.ts): Roostr Pass brings
+ * them from the person's own Chrome (pass.ts), and every action injects them into a fresh, throwaway headless Chrome - so any
  * computer can act with the login. Agents receive only page text, never the
  * cookies.
  */
@@ -256,63 +255,6 @@ export async function profileCookies(profile: string, timeoutMs = 20_000): Promi
 		proc.kill();
 		await exited;
 	}
-}
-
-export interface LoginWindow {
-	/** Whether the window's profile holds a cookie by that name for that host yet (names are plaintext on disk). */
-	hasCookie(host: string, name: string): boolean;
-	/** Close the window (Chrome flushes its cookies on a clean quit), export every cookie, delete the profile. */
-	finish(): Promise<SessionCookie[]>;
-	/** Resolves when the person closes the window. */
-	exited: Promise<unknown>;
-}
-
-/**
- * Open a plain HEADED Chrome on a fresh profile at a login page. Nothing is
- * attached while the person signs in, and no DevTools port is opened: sites'
- * bot checks (Twitch, X, Google's "This browser or app may not be secure")
- * reject a window with remote debugging on. The cookies are read afterwards,
- * from the closed profile; the profile is then thrown away.
- */
-export function openLoginWindow(loginUrl: string): LoginWindow {
-	const chrome = chromeBinary();
-	if (!chrome) throw new Error("No Chrome, Chromium or Brave is installed on this computer.");
-	const profile = mkdtempSync(join(tmpdir(), "roostr-login-"));
-	const proc = spawn(chrome, [`--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--new-window", loginUrl], { stdio: "ignore" });
-	const exited = new Promise((resolve) => proc.once("exit", resolve));
-	let gone = false;
-	void exited.then(() => (gone = true));
-	return {
-		exited,
-		hasCookie(host, name) {
-			const db = [join(profile, "Default", "Network", "Cookies"), join(profile, "Default", "Cookies")].find((p) => existsSync(p));
-			if (!db) return false;
-			// Chrome holds the db open; read a snapshot.
-			const snap = join(tmpdir(), `roostr-cookies-${crypto.randomUUID()}`);
-			try {
-				copyFileSync(db, snap);
-				const sqlite = new Database(snap, { readonly: true });
-				const row = sqlite.query("SELECT 1 FROM cookies WHERE name = ? AND host_key LIKE ? LIMIT 1").get(name, `%${host.replace(/^www\./, "")}`);
-				sqlite.close();
-				return row !== null;
-			} catch {
-				return false;
-			} finally {
-				rmSync(snap, { force: true });
-			}
-		},
-		async finish() {
-			if (!gone) {
-				proc.kill("SIGTERM");
-				await exited;
-			}
-			try {
-				return await profileCookies(profile);
-			} finally {
-				rmSync(profile, { recursive: true, force: true });
-			}
-		},
-	};
 }
 
 /**

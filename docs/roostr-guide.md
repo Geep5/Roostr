@@ -107,7 +107,7 @@ The always-on core tools let every agent read and edit objects (`object_get`, `o
 
 - A **Credential** object is one login: an API key, a bot token, a database URL, a browser sign-in, a Google account. Its **Served by** is the computer that keeps and checks it; its Status says whether it works (Connected, Signed out - reconnect, Broken...).
 - Pasted keys and saved logins are on the credential, readable by everyone in its space; sign in from any of your computers. A browser sign-in is saved as one Cookie property per cookie plus Cookie details; a Google sign-in as its client and refresh-token keys.
-- A Credential's browser or Google sign-in is done by a person: **Connect** opens the sign-in window on the computer the app is paired with, and Roostr hands the login to the credential's Served by computer, which tries it on the site and says so in Error if the site refuses a login made elsewhere. An agent can create the credential and ask a person to press Connect; it cannot do that sign-in itself.
+- A Credential's browser sign-in comes from the person's own Chrome through the **Roostr Pass** extension: when the credential is signed out (or new), Roostr Pass sends that site's login from Chrome, or asks the person to sign in there first; the Served by computer tries it and says so in Error if the site refuses it. A Google account's sign-in is **Connect** on the credential, done by a person. An agent can create a credential and tell the person to sign in in Chrome (or press Connect for Google); it cannot do that sign-in itself.
 - An agent can sign in to a site on its own with Headless Chrome: `browserless --profile <name> --eval '<js>' <url>` runs JavaScript in the page with a Chrome profile kept on its computer, so it fills the login form once and later runs stay signed in (the Headless Chrome skill says how). The login it types comes from its own instructions - a system prompt or a skill only it can read.
 - An agent uses a credential only if its Credentials property lists it. Having the credential is the permission; what to do with it is in the agent's instructions.
 - Every space you own also has an **OpenAI** credential with an empty "API key": paste an OpenAI key (`sk-…`) there to generate page covers (about $0.20 an image at high quality, billed to that key). The computer in its Served by makes the calls; a blank or refused key shows on its Error and in the cover panel.
@@ -183,7 +183,7 @@ These are enforced by the harness for every agent; follow them in any prompt you
 ### Give an agent a login
 
 1. New object -> Credential from the service's template; set Served by to the computer that should keep it.
-2. Paste the key, or ask a person to press Connect.
+2. Paste the key, or ask a person to sign in to the site in Chrome with Roostr Pass (Connect, for a Google account).
 3. Add the credential to the agent's Credentials.
 4. Say in the agent's instructions which actions to use and when.
 

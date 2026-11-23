@@ -18,6 +18,7 @@ import { ensureBlob, blobDir, mimeOf, storeUpload } from "./files";
 import { apiFetch, authorizeLocalRequest, localCors, localPreflight, sessionOrigin, validLocalHost } from "./local-api-auth";
 import { loadIdentity, type SpaceJoinLink } from "./nostrsync";
 import { OwnerPairing } from "./owner-pairing";
+import { passDeliver, passWatch } from "./pass";
 
 /** Public identity (npub + hex pubkey) derived from the local nostr key. */
 async function identity(): Promise<{ npub: string; pubkeyHex: string } | { error: string }> {
@@ -188,8 +189,25 @@ export function startAuthServer(served: Set<string>): void {
 						return json({ error: error instanceof Error ? error.message : "Capability approval failed." }, 400);
 					}
 				}
-				// Connect (and Disconnect, which stops a sign-in) run on whichever paired computer is
-				// asked: the sign-in window opens here and the login is saved on the credential. Check
+				// Roostr Pass (pass.ts), through `glon-odin` in its Chrome native-host mode: the
+				// service token only - the extension never holds a UI session.
+				if (url.pathname === "/pass/watch" && req.method === "GET") {
+					if (authorization.role !== "service") return json({ error: "Roostr Pass only." }, 403);
+					return json({ logins: await passWatch() });
+				}
+				if (url.pathname === "/pass/cookies" && req.method === "POST") {
+					if (authorization.role !== "service") return json({ error: "Roostr Pass only." }, 403);
+					const body = (await req.json().catch(() => null)) as { id?: unknown; cookies?: unknown } | null;
+					if (typeof body?.id !== "string" || !body.id || !Array.isArray(body.cookies)) return json({ error: "id and cookies are required." }, 400);
+					try {
+						return json({ status: await passDeliver(body.id, body.cookies) });
+					} catch (error) {
+						if (error instanceof CredentialError) return json({ error: error.message }, error.status);
+						return json({ error: error instanceof Error ? error.message : String(error) }, 400);
+					}
+				}
+				// Connect (a Google sign-in; and Disconnect, which stops one) runs on whichever paired
+				// computer is asked: the sign-in opens here and the login is saved on the credential. Check
 				// runs only on the computer its Served by names; anyone else gets a 409 naming that computer.
 				const credentialOps: Record<string, (id: string) => Promise<CredentialRow>> = { "/credentials/connect": connectCredential, "/credentials/check": checkCredential, "/credentials/disconnect": disconnectCredential };
 				const credentialOp = req.method === "POST" ? credentialOps[url.pathname] : undefined;

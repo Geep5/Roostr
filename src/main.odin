@@ -7,6 +7,7 @@ package glon
 //   glon-odin dump <objectId>  computed state as JSON (parity testing)
 //   glon-odin records-check [objectId]  offline dry run of the record conversion
 //   glon-odin journal          record mode: the unsent patches
+//   glon-odin pass install <extension-id>  register Roostr Pass's native host with Chrome
 //
 // GLON_RECORDS=1 runs the record store (src/records.odin), synced by the
 // harness through /api/records/* (src/records_sync.odin).
@@ -17,8 +18,19 @@ import "core:strconv"
 import "core:path/filepath"
 import "core:encoding/hex"
 import "core:slice"
+import "core:strings"
 import "../core"
 main :: proc() {
+	// Roostr Pass (src/pass_host.odin) never opens the store: Chrome starts this binary as
+	// its native host, naming the extension's origin first.
+	if len(os.args) > 1 && strings.has_prefix(os.args[1], "chrome-extension://") {
+		pass_host()
+		return
+	}
+	if len(os.args) > 1 && os.args[1] == "pass" {
+		pass_cli(os.args[2:])
+		return
+	}
 	data_root := os.get_env_alloc("GLON_DATA", context.allocator)
 	if data_root == "" {
 		home := os.get_env_alloc("HOME", context.allocator)

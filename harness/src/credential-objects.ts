@@ -7,16 +7,17 @@
  * OAuth client and refresh token in `key_*`. So an agent on ANY computer
  * can use a credential it lists in its Credentials property.
  *
- * Connect runs on whichever of the person's computers the app asks: it opens
- * the headed sign-in window (or gws's Google sign-in) THERE and saves the
- * login onto the credential. `served_by` names the computer that looks
+ * A browser login comes from the person's own Chrome through Roostr Pass
+ * (pass.ts): a credential signed out (or never filled in) is what asks for
+ * it. A Google account's Connect runs gws's sign-in on whichever computer
+ * the app asks and saves the login onto the credential. `served_by` names the computer that looks
  * after it: it keeps `status` / `auth` / `error` / `checked_at` true for
  * everyone to see, and the first time it meets cookies signed in on another
  * computer it tries them on the site before calling them connected. One
  * writer per credential outside a sign-in, so two computers never fight
  * over its status. Check, pressed on any device, writes `check_requested`;
  * the computer serving it runs the live check and stamps `checked_at`.
- * Disconnect stops a sign-in in progress and forgets this
+ * Disconnect stops a Google sign-in in progress and forgets this
  * computer's local Google sign-in; the login saved on the credential stays
  * and keeps being used until the site refuses it.
  */
@@ -27,10 +28,10 @@ import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { createObject, deleteField, fetchObject, mutate, num, queryAll, setField, str, sv, iv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
 import { linkTarget } from "./capabilities";
-import { credentialPageAction, openLoginWindow, profileCookies, type LoginWindow, type SessionCookie } from "./browser";
+import { credentialPageAction, profileCookies, type SessionCookie } from "./browser";
 import { anthropicKey, anthropicState } from "./anthropic-plan";
 import { renewPlans } from "./claude-plan";
-import { actionsOf, KEY_PREFIX, COOKIE_META, cookieProperty, cookieValueKeys, credentialKeys, credentialProperties, credentialSession, dropLegacySecrets, LEGACY_SESSION, legacyKeyName, legacyKeys, legacyProfileDir, legacyProfileExists, legacySession, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionAccepted, sessionDecision, sessionFields, sessionHash, sessionMeta, sessionSignedIn, type SessionCheck } from "./credentials";
+import { actionsOf, KEY_PREFIX, COOKIE_META, cookieProperty, cookieValueKeys, credentialKeys, credentialProperties, credentialSession, dropLegacySecrets, LEGACY_SESSION, legacyKeyName, legacyKeys, legacyProfileDir, legacyProfileExists, legacySession, recipeOf, seedFor, seedRecipeFields, serviceCookies, sessionAccepted, sessionDecision, deliveryWaiting, sessionFields, sessionHash, sessionMeta, sessionSignedIn, type SessionCheck } from "./credentials";
 import { ensureProperties } from "./credential-seeds";
 import { legacyInstalls } from "./migrate-capabilities";
 import { sessionRenewers } from "./extensions";
@@ -88,7 +89,7 @@ export async function pinOf(fields: Record<string, ValueJSON>): Promise<string> 
 	return byObject ? byObject.machineId : raw;
 }
 
-async function rowOf(r: QueryRow | ObjectJSON): Promise<CredentialRow> {
+export async function credentialRowOf(r: QueryRow | ObjectJSON): Promise<CredentialRow> {
 	return {
 		id: r.id,
 		name: str(r.fields, "name"),
@@ -102,11 +103,9 @@ async function rowOf(r: QueryRow | ObjectJSON): Promise<CredentialRow> {
 	};
 }
 
-/** Sign-in windows open on this computer, by credential id. */
-const windows = new Map<string, LoginWindow>();
-/** What a sign-in running on this computer tells the person (its `error` while `connecting`), by credential id. */
+/** What a Google sign-in running on this computer tells the person (its `error` while `connecting`), by credential id. */
 const signInText = new Map<string, string>();
-/** A `connecting` status another computer wrote is left alone this long: its sign-in window stays open at most this. */
+/** A `connecting` status another computer wrote is left alone this long: its Google sign-in stays open at most this. */
 const SIGN_IN_MS = 15 * 60_000;
 
 /** A computer's name, from its machine_id. */
@@ -126,15 +125,19 @@ function liveState(row: CredentialRow): LiveState {
 	const session = credentialSession(row.fields);
 	if (sessionSignedIn(session, recipe)) return { status: "active", auth: "browser_profile", error: "" };
 	if (credentialKeys(row.fields)) return { status: "active", auth: "api_key", error: "" };
-	if (windows.has(row.id)) return { status: "connecting", auth: "", error: signInText.get(row.id) ?? `Finish signing in to ${label} in the Chrome window on ${hostname()}.` };
 	// It carried a login and the login is gone (expired, signed out): say so, rather than looking never-connected.
-	if (session.length > 0 || row.status === "active" || row.status === "needs_auth") return { status: "needs_auth", auth: "", error: `The ${label} sign-in expired or was signed out - press Reconnect.` };
+	if (session.length > 0 || row.status === "active" || row.status === "needs_auth") return { status: "needs_auth", auth: "", error: passAsks(label) };
 	// Never filled in: a keys-only credential says which ones to paste, by the names its Properties show.
 	if (!recipe.sessionCookie) {
 		const labels = recipe.passwordFields.map((f) => seedFor(row.service)?.passwordFields?.find((p) => p.key === f.key)?.label ?? f.label);
 		return { status: "missing", auth: "", error: `No key yet - paste ${labels.map((l) => `"${l}"`).join(" and ")} to use it.` };
 	}
-	return { status: "missing", auth: "", error: "" };
+	return { status: "missing", auth: "", error: `Roostr Pass brings the ${label} sign-in from Chrome: sign in to ${label} there if it asks.` };
+}
+
+/** A signed-out browser login's error: Roostr Pass brings a fresh one. */
+function passAsks(label: string): string {
+	return `The ${label} sign-in expired or was signed out - Roostr Pass brings a fresh one from Chrome (sign in to ${label} there if it asks).`;
 }
 
 type LiveState = { status: CredentialStatus; auth: CredentialRow["auth"]; error: string };
@@ -161,7 +164,7 @@ async function publishState(row: CredentialRow, stamp = false, next: LiveState =
  * lacks are removed, as is the pre-property `session`. Returns the fields
  * the credential carries afterwards.
  */
-async function saveSession(row: CredentialRow, cookies: SessionCookie[], signedInOn: string): Promise<Record<string, ValueJSON>> {
+export async function saveSession(row: CredentialRow, cookies: SessionCookie[], signedInOn: string): Promise<Record<string, ValueJSON>> {
 	const next = sessionFields(cookies, signedInOn);
 	const metaProperty = credentialProperties().filter((p) => p.key === COOKIE_META);
 	await ensureProperties(str(row.fields, "channel"), [...metaProperty, ...(sessionMeta(next)?.cookies ?? []).map((c) => cookieProperty(c.key, c.name))]).catch((err) => console.error("[credentials] cookie properties:", err instanceof Error ? err.message : err));
@@ -270,8 +273,8 @@ function trySession(row: CredentialRow): Promise<boolean | null> {
 async function refusedState(row: CredentialRow, me: string): Promise<LiveState> {
 	const label = recipeOf(row.fields).label || "This site";
 	const from = sessionMeta(row.fields)?.signedInOn ?? "";
-	if (!from || from === me) return { status: "needs_auth", auth: "", error: `The ${label} sign-in expired or was signed out - press Reconnect.` };
-	return { status: "needs_auth", auth: "", error: `${label} didn't accept the login made on ${await computerName(from)}; sign in on ${await computerName(me)} instead (press Reconnect there).` };
+	if (!from || from === me) return { status: "needs_auth", auth: "", error: passAsks(label) };
+	return { status: "needs_auth", auth: "", error: `${label} didn't accept the login from ${await computerName(from)} - sign in to ${label} again in Chrome; Roostr Pass sends it.` };
 }
 
 /**
@@ -331,6 +334,15 @@ async function openaiState(row: CredentialRow, force: boolean): Promise<LiveStat
 export const CHECK_REQUEST_KEY = "check_requested";
 
 /**
+ * A run met the credential signed out (a login wall, a refused token): ask
+ * the computer serving it for the live check, which writes it signed out -
+ * the status Roostr Pass answers with a fresh login. Any computer may ask.
+ */
+export async function requestCredentialCheck(id: string): Promise<void> {
+	await setField(id, CHECK_REQUEST_KEY, iv(Date.now())).catch((err) => console.error(`[credentials] asking for a check of ${id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
+}
+
+/**
  * The Check asked for that the computer serving the credential has not
  * answered (0 = none): newer than `checked_at`, and not the one it last
  * answered (`answered`) - a device clock running ahead of this one's would
@@ -350,9 +362,9 @@ export function pendingCheck(fields: Record<string, ValueJSON>, answered = 0): n
  * - `check`: a Check was asked for - the live check runs now, even while
  *   another computer's sign-in is marked running (the request is newer than
  *   its start: the person says they finished signing in);
- * - `leave`: a sign-in owns the status until it finishes (or SIGN_IN_MS
- *   passes) - here, or on another computer that wrote `connecting` - so a
- *   Reconnect never reads "Connected" off the old login mid-sign-in;
+ * - `leave`: a Google sign-in owns the status until it finishes (or
+ *   SIGN_IN_MS passes) - here, or on another computer that wrote
+ *   `connecting` - so it never reads "Connected" off the old login mid-sign-in;
  * - `refresh`: the usual quiet refresh.
  */
 export function refreshPlan(fields: Record<string, ValueJSON>, status: string, here: boolean, answered = 0, now = Date.now()): "answer" | "check" | "leave" | "refresh" {
@@ -368,7 +380,7 @@ const answeredChecks = new Map<string, number>();
 /** Run the live check a person asked for (any device's Check, or this computer's POST /credentials/check) and stamp `checked_at`. */
 async function checkNow(row: CredentialRow, me: string): Promise<CredentialRow> {
 	// A sign-in running here owns the status: the answer is that it is still waiting, its window left open.
-	if (windows.has(row.id) || googleLogins.has(row.id)) return publishState(row, true, { status: "connecting", auth: "", error: signInText.get(row.id) ?? row.error });
+	if (googleLogins.has(row.id)) return publishState(row, true, { status: "connecting", auth: "", error: signInText.get(row.id) ?? row.error });
 	return publishState(row, true, await servedState(row, me, true));
 }
 
@@ -412,12 +424,12 @@ async function refreshCredentialsOnce(): Promise<CredentialRow[]> {
 	// Claude plans this computer serves are renewed before they expire, so the states below read the new tokens.
 	await renewPlans().catch((err) => console.error("[claude-plan] renewal:", err instanceof Error ? err.message : err));
 	const me = await machineId();
-	const rows = await Promise.all((await queryAll({ type: CREDENTIAL_TYPE })).map(rowOf));
+	const rows = await Promise.all((await queryAll({ type: CREDENTIAL_TYPE })).map(credentialRowOf));
 	mine = await Promise.all(
 		rows
 			.filter((r) => r.servedBy === me)
 			.map(async (r) => {
-				const plan = refreshPlan(r.fields, r.status, windows.has(r.id) || googleLogins.has(r.id), answeredChecks.get(r.id));
+				const plan = refreshPlan(r.fields, r.status, googleLogins.has(r.id), answeredChecks.get(r.id));
 				if (plan === "leave") return r;
 				if (plan !== "refresh") {
 					const request = pendingCheck(r.fields);
@@ -432,8 +444,9 @@ async function refreshCredentialsOnce(): Promise<CredentialRow[]> {
 				}
 				if (r.service === GOOGLE_SERVICE || r.service === POSTGRES_SERVICE) return publishState(r, false, await servedState(r, me));
 				const { row, refused } = await renewSession(await convertLegacySession(r, me), me);
-				if (refused) return publishState(row, false, { status: "needs_auth", auth: "", error: `${recipeOf(row.fields).label || row.name || "This site"} turned down the sign-in (${refused}) - press Reconnect.` });
-				return publishState(row, false, await servedState(row, me));
+				if (refused) return publishState(row, false, { status: "needs_auth", auth: "", error: `${recipeOf(row.fields).label || row.name || "This site"} turned down the sign-in (${refused}) - Roostr Pass brings a fresh one from Chrome.` });
+				// A login Roostr Pass delivered gets its answer stamped even when the status reads the same, so the delivery stops waiting.
+				return publishState(row, deliveryWaiting(row.fields), await servedState(row, me));
 			}),
 	);
 	// Google sign-ins travel on their Credentials: import local ones, write the listed ones here.
@@ -488,10 +501,10 @@ export class CredentialNotConnected extends Error {
 /** The agent lists no credential for a service at all (adding one to its Credentials fixes it). */
 export class CredentialMissing extends Error {}
 
-async function credentialObject(id: string): Promise<CredentialRow> {
+export async function credentialObject(id: string): Promise<CredentialRow> {
 	const obj = await fetchObject(id).catch(() => null);
 	if (!obj || obj.deleted || obj.typeKey !== CREDENTIAL_TYPE) throw new CredentialError(404, "No such credential.");
-	return rowOf(obj);
+	return credentialRowOf(obj);
 }
 
 /** A credential this computer looks after, or the refusal an endpoint returns. */
@@ -504,63 +517,20 @@ async function keptHere(id: string): Promise<CredentialRow> {
 }
 
 /**
- * Sign a credential in on THIS computer, whichever computer serves it: a
- * browser login opens a plain headed sign-in window here, a Google account
- * runs gws's sign-in here (connectGoogle). The moment the service's session
- * cookie shows up in the window's profile (or the person closes the
- * window), the window is closed, its cookies are exported, and a signed-in
- * set is saved on the credential as `cookie_*` properties naming this
- * computer - the computer serving it takes it from there. A database has no
- * sign-in: its Connect is its live check, on the computer serving it.
+ * Connect a credential from THIS computer: a Google account runs gws's
+ * sign-in here (connectGoogle) and the computer serving it takes it from
+ * there; a database has no sign-in, its Connect is its live check, on the
+ * computer serving it. A browser login has no Connect: Roostr Pass brings it
+ * from Chrome when the credential needs one (pass.ts).
  */
 export async function connectCredential(id: string): Promise<CredentialRow> {
 	const row = await credentialObject(id);
 	if (row.service === POSTGRES_SERVICE) return checkCredential(id);
+	if (row.service !== GOOGLE_SERVICE) throw new CredentialError(400, `${recipeOf(row.fields).label || "This credential"} has nothing to connect: a browser sign-in comes from Roostr Pass in Chrome, keys are pasted on it.`);
 	if (!row.servedBy) throw new CredentialError(409, "Set this credential's Served by to a computer first.");
 	const me = await machineId();
-	const here = await computerName(me);
 	const handOff = row.servedBy === me ? "" : `; Roostr then hands the login to ${await computerName(row.servedBy)}`;
-	if (row.service === GOOGLE_SERVICE) return connectGoogle(row, me, `Finish signing in to Google in the browser on ${here}${handOff}.`);
-	const recipe = recipeOf(row.fields);
-	if (!recipe.loginUrl || !recipe.sessionCookie) throw new CredentialError(400, `${recipe.label || "This credential"} has no login page and signed-in cookie - it connects with pasted keys.`);
-	if (windows.has(row.id)) throw new CredentialError(409, "A sign-in window for this credential is already open on this computer.");
-	let win: LoginWindow;
-	try {
-		win = openLoginWindow(recipe.loginUrl);
-	} catch (err) {
-		throw new CredentialError(409, err instanceof Error ? err.message : String(err));
-	}
-	windows.set(row.id, win);
-	const text = `Finish signing in to ${recipe.label || "this service"} in the Chrome window on ${here}${handOff}.`;
-	signInText.set(row.id, text);
-	const state = await publishState(row, true, { status: "connecting", auth: "", error: text });
-	const deadline = Date.now() + SIGN_IN_MS;
-	let closed = false;
-	void win.exited.then(() => (closed = true));
-	const cookie = recipe.sessionCookie;
-	void (async () => {
-		while (!closed && Date.now() < deadline && !win.hasCookie(cookie.host, cookie.name)) await Bun.sleep(2000);
-		// Let the site finish setting its other cookies before closing.
-		if (!closed) await Bun.sleep(3000);
-		try {
-			const cookies = serviceCookies(await win.finish(), recipe);
-			if (windows.get(row.id) === win && sessionSignedIn(cookies, recipe)) await saveSession(await credentialObject(row.id), cookies, me);
-		} catch (err) {
-			console.error("[credentials] reading the sign-in window's cookies failed:", err instanceof Error ? err.message : err);
-		}
-		if (windows.get(row.id) !== win) return; // disconnected meanwhile
-		windows.delete(row.id);
-		signInText.delete(row.id);
-		try {
-			// The sign-in's own end: what it left (the computer serving it then tries cookies made elsewhere on its next refresh).
-			const fresh = await credentialObject(row.id);
-			await publishState(fresh, true, fresh.servedBy === me ? await servedState(fresh, me) : undefined);
-		} catch (err) {
-			console.error("[credentials] finishing the sign-in failed:", err instanceof Error ? err.message : err);
-		}
-		await refreshCredentials().catch((err) => console.error("[credentials] refresh after sign-in failed:", err instanceof Error ? err.message : err));
-	})();
-	return state;
+	return connectGoogle(row, me, `Finish signing in to Google in the browser on ${await computerName(me)}${handOff}.`);
 }
 
 /**
@@ -713,18 +683,16 @@ async function connectGoogle(row: CredentialRow, me: string, text: string): Prom
 }
 
 /**
- * Stop a sign-in running for this credential on this computer and forget
- * this computer's local Google sign-in for its account. The login saved on
- * the credential (`cookie_*`, `key_*`) stays and keeps being used until the
- * site refuses it; the computer serving it re-states its status from that.
+ * Stop a Google sign-in running for this credential on this computer and
+ * forget this computer's local Google sign-in for its account. The login
+ * saved on the credential (`cookie_*`, `key_*`) stays and keeps being used
+ * until the site refuses it; the computer serving it re-states its status
+ * from that.
  */
 export async function disconnectCredential(id: string): Promise<CredentialRow> {
 	const row = await credentialObject(id);
 	const me = await machineId();
-	const win = windows.get(row.id);
-	windows.delete(row.id);
 	signInText.delete(row.id);
-	void win?.finish().catch(() => {});
 	const login = googleLogins.get(row.id);
 	googleLogins.delete(row.id);
 	login?.kill();
@@ -735,7 +703,7 @@ export async function disconnectCredential(id: string): Promise<CredentialRow> {
 		return kept;
 	}
 	// A sign-in this computer was running wrote `connecting`: put back what the credential carries.
-	return win || login ? publishState(row, true, row.service === GOOGLE_SERVICE ? await googleCheck(row) : undefined) : row;
+	return login ? publishState(row, true, await googleCheck(row)) : row;
 }
 
 /** A credential an agent may act with, its secrets read off the object: session cookies and pasted keys. */

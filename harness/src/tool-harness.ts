@@ -18,7 +18,7 @@ import { fetchCapabilities } from "./capabilities";
 import { requestCapability } from "./capability-messages";
 import { agentSubject } from "./conv";
 import { noteCredentialIssue } from "./credential-issues";
-import { agentCredential, CredentialMissing, CredentialNotConnected, type AgentCredential } from "./credential-objects";
+import { agentCredential, CredentialMissing, CredentialNotConnected, requestCredentialCheck, type AgentCredential } from "./credential-objects";
 import { actionsOf, blankSecrets, blankSecretsDeep, secretList } from "./credentials";
 import { serverOf } from "./machine";
 import { sendMessage } from "./mailbox";
@@ -195,6 +195,7 @@ export function harnessFor(ctx: ToolContext): HarnessServe {
 				token = await api.token(row.fields);
 			} catch (error) {
 				noteCredentialIssue(ctx.agentId, { kind: "signed_out", name: row.name });
+				await requestCredentialCheck(row.id);
 				return { ok: false, signedOut: true, error: blankSecrets(errorText(error), secretsOf(found.cred)) };
 			}
 			tokens.set(row.id, token);
@@ -242,11 +243,14 @@ export function harnessFor(ctx: ToolContext): HarnessServe {
 			const found = await credentialFor(ctx, textArg(service, "service"));
 			if (!found.ok) return { ok: false, unavailable: true, error: found.error };
 			const { row, cookies } = found.cred;
-			if (cookies.length === 0) return { ok: false, unavailable: true, error: `"${row.name}" has no browser sign-in - it needs Connect pressed on it.` };
+			if (cookies.length === 0) return { ok: false, unavailable: true, error: `"${row.name}" has no browser sign-in yet - Roostr Pass brings it from Chrome once the person signs in there.` };
 			const page = await credentialPageAction(cookies, url, script).catch((error: unknown) => new Error(errorText(error)));
 			if (page instanceof Error) return { ok: false, unavailable: false, error: page.message };
 			const signedOut = !page.arrived && LOGIN_WALL.test(page.url + page.title);
-			if (signedOut) noteCredentialIssue(ctx.agentId, { kind: "signed_out", name: row.name });
+			if (signedOut) {
+				noteCredentialIssue(ctx.agentId, { kind: "signed_out", name: row.name });
+				await requestCredentialCheck(row.id);
+			}
 			const secrets = secretsOf(found.cred);
 			return { ok: true, name: row.name, arrived: page.arrived, signedOut, url: blankSecrets(page.url, secrets), title: blankSecrets(page.title, secrets), text: blankSecrets(page.text, secrets), result: blankSecrets(page.actionResult, secrets) };
 		},

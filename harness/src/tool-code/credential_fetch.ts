@@ -61,7 +61,7 @@ return JSON.stringify({ clicks: done, opened: want.length ? ([...new Set(opened)
 `;
 	const page = await roostr.credentials.page(typeof input.service === "string" ? input.service : "", url, script);
 	if (!page.ok) return page.unavailable ? `Credential unavailable: ${page.error} Tell the person; do not retry this turn.` : `Credential page failed: ${page.error}`;
-	if (page.signedOut) return `Credential signed out: ${url} showed a login page, so "${page.name}" is no longer signed in. Tell the person to press Reconnect on it.`;
+	if (page.signedOut) return `Credential signed out: ${url} showed a login page, so "${page.name}" is no longer signed in. Roostr Pass brings a fresh login from Chrome; tell the person to sign in there if it asks.`;
 	if (!page.arrived) return `Did not reach ${url}: the site sent the page to ${page.url}. Nothing was done there.\n${page.text}`.slice(0, 14_000);
 	// What the clicks found leads: the page text after it is context and may be cut.
 	return `${page.result ? `Result: ${page.result}\n\n` : ""}${page.title}\n${page.url}\n${page.text}`.slice(0, 14_000);
