@@ -35,7 +35,7 @@ const RENEW_BEFORE_MS = 2 * 86_400_000;
 const RECONCILE_EVERY_MS = 5 * 60_000;
 const RETRY_MS = 30_000;
 
-interface Inbox {
+export interface Inbox {
 	id: string;
 	mailbox: string;
 	topic: string;
@@ -166,22 +166,40 @@ async function renewWatch(inbox: Inbox): Promise<void> {
 
 // ── Listening ─────────────────────────────────────────────────────
 
-/** One open pull per subscription, shared by the inboxes it carries. */
-const listeners = new Map<string, { inboxes: Inbox[]; stop: AbortController }>();
+/** One open pull per subscription, shared by the inboxes it carries; `reader` is the mailbox whose sign-in last read it. */
+const listeners = new Map<string, { inboxes: Inbox[]; stop: AbortController; reader?: string }>();
 
-async function listen(subscription: string, state: { inboxes: Inbox[]; stop: AbortController }): Promise<void> {
+/**
+ * The mailboxes to read a subscription with, the one that last worked first:
+ * not every sign-in may read it (Pub/Sub access is per Google user - one
+ * mailbox's account can have it while another's is refused with a 403), and
+ * the inbox listed first is no better a guess than any other.
+ */
+export function readerOrder(inboxes: Inbox[], last?: string): string[] {
+	const mailboxes = [...new Set(inboxes.map((i) => i.mailbox))];
+	return last && mailboxes.includes(last) ? [last, ...mailboxes.filter((m) => m !== last)] : mailboxes;
+}
+
+async function listen(subscription: string, state: { inboxes: Inbox[]; stop: AbortController; reader?: string }): Promise<void> {
 	const signal = state.stop.signal;
 	while (!signal.aborted) {
-		// Any inbox on this subscription can read it: all share the project.
-		const reader = state.inboxes[0];
 		const asked = Date.now();
 		try {
-			const res = await google<{ receivedMessages?: PulledMessage[] }>(
-				reader.mailbox,
-				`https://pubsub.googleapis.com/v1/${subscription}:pull`,
-				{ maxMessages: 50 },
-				signal,
-			);
+			// The first sign-in that may read the subscription; every refusal named if none may.
+			let res: { receivedMessages?: PulledMessage[] } | undefined;
+			const refused: string[] = [];
+			for (const mailbox of readerOrder(state.inboxes, state.reader)) {
+				try {
+					res = await google<{ receivedMessages?: PulledMessage[] }>(mailbox, `https://pubsub.googleapis.com/v1/${subscription}:pull`, { maxMessages: 50 }, signal);
+					state.reader = mailbox;
+					break;
+				} catch (err) {
+					if (signal.aborted) throw err;
+					refused.push(`${mailbox}: ${err instanceof Error ? err.message : String(err)}`);
+				}
+			}
+			if (!res || !state.reader) throw new Error(refused.join("; "));
+			const reader = state.reader;
 			for (const inbox of state.inboxes) await clearBadge(inbox.id);
 			const received = res.receivedMessages ?? [];
 			if (received.length === 0) {
@@ -200,7 +218,7 @@ async function listen(subscription: string, state: { inboxes: Inbox[]; stop: Abo
 			}
 			// Acknowledged before the run: the run reads Gmail from where it
 			// last left off, so a run that fails is made up by the next note.
-			await google(reader.mailbox, `https://pubsub.googleapis.com/v1/${subscription}:acknowledge`, { ackIds: received.map((m) => m.ackId) }, signal);
+			await google(reader, `https://pubsub.googleapis.com/v1/${subscription}:acknowledge`, { ackIds: received.map((m) => m.ackId) }, signal);
 			for (const inbox of state.inboxes) {
 				if (!changed.has(inbox.mailbox)) continue;
 				runNow(inbox.id, `new mail in ${inbox.mailbox}`);
