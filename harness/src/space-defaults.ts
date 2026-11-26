@@ -89,7 +89,7 @@ When creating new agents, make them terse by default.`;
 }
 
 /** Finder's model: it routes, so fast and cheap beats deep. */
-export const FINDER_MODEL = "claude-haiku-4-5";
+export const FINDER_MODEL = "claude-opus-5-5";
 
 /** The standing prompt of a space's Finder agent. */
 export function finderPrompt(space: string): string {
