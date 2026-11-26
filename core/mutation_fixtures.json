@@ -5466,7 +5466,7 @@
                           [
                             "text",
                             {
-                              "stringValue": "claude-sonnet-4-5"
+                              "stringValue": "claude-haiku-4-5"
                             }
                           ],
                           [
@@ -5496,7 +5496,7 @@
                           [
                             "text",
                             {
-                              "stringValue": "claude-opus-5-5"
+                              "stringValue": "claude-sonnet-4-5"
                             }
                           ],
                           [
@@ -5509,6 +5509,36 @@
                             "orderId",
                             {
                               "stringValue": "0002"
+                            }
+                          ]
+                        ]
+                      }
+                    },
+                    {
+                      "mapValue": {
+                        "entries": [
+                          [
+                            "id",
+                            {
+                              "stringValue": "opt-3"
+                            }
+                          ],
+                          [
+                            "text",
+                            {
+                              "stringValue": "claude-opus-5-5"
+                            }
+                          ],
+                          [
+                            "color",
+                            {
+                              "stringValue": ""
+                            }
+                          ],
+                          [
+                            "orderId",
+                            {
+                              "stringValue": "0003"
                             }
                           ]
                         ]
@@ -13478,7 +13508,7 @@
                           [
                             "text",
                             {
-                              "stringValue": "claude-sonnet-4-5"
+                              "stringValue": "claude-haiku-4-5"
                             }
                           ],
                           [
@@ -13508,7 +13538,7 @@
                           [
                             "text",
                             {
-                              "stringValue": "claude-opus-5-5"
+                              "stringValue": "claude-sonnet-4-5"
                             }
                           ],
                           [
@@ -13521,6 +13551,36 @@
                             "orderId",
                             {
                               "stringValue": "0002"
+                            }
+                          ]
+                        ]
+                      }
+                    },
+                    {
+                      "mapValue": {
+                        "entries": [
+                          [
+                            "id",
+                            {
+                              "stringValue": "opt-3"
+                            }
+                          ],
+                          [
+                            "text",
+                            {
+                              "stringValue": "claude-opus-5-5"
+                            }
+                          ],
+                          [
+                            "color",
+                            {
+                              "stringValue": ""
+                            }
+                          ],
+                          [
+                            "orderId",
+                            {
+                              "stringValue": "0003"
                             }
                           ]
                         ]
@@ -18098,7 +18158,7 @@
                           [
                             "text",
                             {
-                              "stringValue": "claude-sonnet-4-5"
+                              "stringValue": "claude-haiku-4-5"
                             }
                           ],
                           [
@@ -18128,7 +18188,7 @@
                           [
                             "text",
                             {
-                              "stringValue": "claude-opus-5-5"
+                              "stringValue": "claude-sonnet-4-5"
                             }
                           ],
                           [
@@ -18141,6 +18201,36 @@
                             "orderId",
                             {
                               "stringValue": "0002"
+                            }
+                          ]
+                        ]
+                      }
+                    },
+                    {
+                      "mapValue": {
+                        "entries": [
+                          [
+                            "id",
+                            {
+                              "stringValue": "opt-3"
+                            }
+                          ],
+                          [
+                            "text",
+                            {
+                              "stringValue": "claude-opus-5-5"
+                            }
+                          ],
+                          [
+                            "color",
+                            {
+                              "stringValue": ""
+                            }
+                          ],
+                          [
+                            "orderId",
+                            {
+                              "stringValue": "0003"
                             }
                           ]
                         ]

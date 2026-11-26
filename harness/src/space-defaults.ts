@@ -15,6 +15,11 @@
  * - **"<Space> Space"**: the space's setup-and-upkeep agent, with its own
  *   System prompt naming the space, served by the computer that seeded it,
  *   on the space's guest list.
+ * - **Finder**: finds the page a person's request belongs on and the agent
+ *   for it, then hands it over there (the Finder bubble). Its own System
+ *   prompt, the fast Claude Haiku model and the space's Anthropic
+ *   credential - set like any agent's, so a person changes them on it. Not
+ *   on the guest list: it answers only in Finder.
  *
  * Only spaces this identity owns (`owner` ""): a space someone shared with
  * you is theirs to set up. Fixed ids (create-if-absent) keep two computers
@@ -80,6 +85,22 @@ Reuse what exists: existing properties, types, templates and queries before new 
 Problems go on the object's Error (object_flag_error), so they show where people look.
 Keep replies short: what changed, or the one question you need answered.
 When creating new agents, make them terse by default.`;
+}
+
+/** Finder's model: it routes, so fast and cheap beats deep. */
+export const FINDER_MODEL = "claude-haiku-4-5";
+
+/** The standing prompt of a space's Finder agent. */
+export function finderPrompt(space: string): string {
+	return `You are Finder for the ${space} space in Roostr. A person tells you what they want; your only job is to get it to the right place: the page (object, query or collection) it belongs on, and the agent there best suited to it. You never do the work yourself.
+How to find the page
+Search this space's pages (find) by the names and words in the request. Prefer a page the request names, then the closest match, then recently active pages. If one page clearly fits, use it. If two or three could, ask the person which, listing them by name. If none fits, offer the space's own chat or a new page.
+How to pick the agent
+Read the space's agents and their Role, Good for and Not for properties. Pick the one whose Role and Good for fit the request, and never one whose Not for covers it. The page's own Agent property is a hint. If it's a close call, ask the person which, by name.
+The handoff
+Once the page and agent are clear, post on that page's chat: @Agent, then the person's request in their words, said briefly as theirs ("Grant asks: …"). Then tell the person in one line where it went.
+How to behave
+Ask at most one short question at a time. Never change objects, properties or settings - only find, ask and hand off. Keep every reply to a line or two.`;
 }
 
 /**
@@ -216,6 +237,9 @@ async function seedSpace(space: { id: string; name: string }, me: string, out: {
 		out.credentials += 1;
 	}
 
+	// 1b. Finder.
+	await seedFinder(space, me, cred, out);
+
 	// 2. "<Space> Space" - unless the space has one by that name, or ever had the default one.
 	const name = `${space.name} Space`;
 	const agentId = `space-agent-${space.id}`;
@@ -245,4 +269,28 @@ async function seedSpace(space: { id: string; name: string }, me: string, out: {
 	const guests = linkIds(spaceObj.fields, "agent");
 	if (!guests.includes(agentId)) await setField(space.id, "agent", linkList("agent", [...guests, agentId]));
 	out.agents += 1;
+}
+
+/** The space's Finder: its own prompt, Claude Haiku, the space's Anthropic credential; unless it ever had one. */
+async function seedFinder(space: { id: string; name: string }, me: string, cred: QueryRow | undefined, out: { credentials: number; agents: number }): Promise<void> {
+	const agentId = `finder-agent-${space.id}`;
+	const promptId = `finder-prompt-${space.id}`;
+	if (await everMade(agentId)) return;
+	if (!(await everMade(promptId))) {
+		if (!(await createDefault("Finder", SYSTEM_PROMPT_TYPE, { channel: sv(space.id), description: sv(`Finding the page and agent for a request in the ${space.name} space.`) }, promptId))) return;
+		const p = await fetchObject(promptId);
+		if (p.blocks.length === 0) await writePageText(promptId, finderPrompt(space.name));
+	}
+	const made = await createDefault("Finder", "agent", {
+		channel: sv(space.id),
+		prompt: { linkValue: { relationKey: "prompt", targetId: promptId } },
+		served_by: sv(me),
+		model: lv([FINDER_MODEL]),
+		iconEmoji: sv("🧭"),
+		agent_role: sv("Gets a request to the right page and the right agent in this space, then hands it over there."),
+		good_for: sv("- \"Where does this go?\"\n- passing a request to the best agent\n- finding a page by what it's about"),
+		not_for: sv("- doing the work itself - it hands off to the agent that does\n- changing pages or settings → the space agent"),
+		...(cred ? { credentials: linkList("credentials", [cred.id]) } : {}),
+	}, agentId);
+	if (made) out.agents += 1;
 }
