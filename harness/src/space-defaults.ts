@@ -289,7 +289,7 @@ async function seedFinder(space: { id: string; name: string }, me: string, cred:
 		served_by: sv(me),
 		model: lv([FINDER_MODEL]),
 		iconEmoji: sv("🧭"),
-		// Answered only by finder.ts: never woken or adopted by the chat machinery, so a reply
+		// Answered only by the app's Finder (RoostrWebsite finder_answer.rs): never woken or adopted here, so a reply
 		// to its handoff can't start a back-and-forth with the agent it tagged.
 		external_responder: sv("finder"),
 		agent_role: sv("Gets a request to the right page and the right agent in this space, then hands it over there."),

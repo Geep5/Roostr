@@ -45,7 +45,6 @@ import { TOOLS_KEY, defaultAgentTools, ensureBuiltinTools, ensureBuiltinToolsEve
 import { migrateCapabilities } from "./migrate-capabilities";
 import { runBootSteps } from "./boot";
 import { startDiscordManager } from "./discord";
-import { catchUpFinderSessions, FINDER_SESSION_TYPE, handleFinderSession, sweepFinderSessions } from "./finder";
 import { addressableAgents, answersGuestQuestion, chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, mentions, pendingMessages, reactionWake, setMark, spaceOfObject } from "./surfaces";
 import { isReaction } from "./reactions";
 import { fileNames } from "./attachments";
@@ -910,11 +909,8 @@ async function serve(): Promise<void> {
 			return;
 		}
 		if (obj.typeKey === "agent") return; // other agents' brains
-		// A person's private Finder session: the space's Finder answers it (finder.ts).
-		if (obj.typeKey === FINDER_SESSION_TYPE) {
-			void handleFinderSession(obj).catch((err) => console.error(`[finder] ${obj.id.slice(0, 8)}:`, err instanceof Error ? err.message : err));
-			return;
-		}
+		// A person's private Finder session: the app they type in answers it (RoostrWebsite finder_answer.rs).
+		if (obj.typeKey === "finder_session") return;
 		// ── One conversation per object (`__discussion__`). Humans and agents
 		// post there; an @-mention of any agent of the space is the wake
 		// signal for that agent, and an emoji reaction wakes the one agent
@@ -966,10 +962,6 @@ async function serve(): Promise<void> {
 	}
 
 	startAuthServer(agents);
-	// Finder sessions are a week's scratch: older ones go, at boot and daily.
-	const sweepFinder = () => void sweepFinderSessions().then((n) => { if (n) console.log(`[finder] removed ${n} old session(s)`); }).catch((err) => console.error("[finder] sweep:", err instanceof Error ? err.message : err));
-	sweepFinder();
-	setInterval(sweepFinder, 86_400_000);
 	void startFilePeer()
 		.then(() => keepAllFiles())
 		.catch((err) => console.error("[files] peer failed to start:", err));
@@ -996,7 +988,6 @@ async function serve(): Promise<void> {
 		},
 		() => {
 			void scanMailboxes().catch((error) => console.error("[harness] mailbox catch-up:", error));
-			void catchUpFinderSessions().catch((error) => console.error("[finder] catch-up:", error instanceof Error ? error.message : error));
 		},
 		{ signal: (signal, _origin, space) => liveLines.onSignal(signal, space) },
 	);
