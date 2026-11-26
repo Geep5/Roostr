@@ -3,9 +3,10 @@
  * agent of a space (space-defaults.ts seeds each space's Finder agent).
  *
  * A session is a `finder_session` object with no space - so it lives in the
- * person's own private stream - naming the space in `finder_space`. The app
- * makes a new one each time the Finder bubble opens. When the person posts,
- * the computer serving that space's Finder answers in the session as Finder:
+ * person's own private stream - naming the space in `finder_space` and, in
+ * `served_by`, the computer the app that opened it talks to. The app makes a
+ * new one each time the Finder bubble opens. When the person posts, that
+ * computer answers in the session as Finder (`finderComputer`):
  * with the agent's own System prompt, Model and Credentials, it searches the
  * space's pages (`find_pages`), offers choices (`ask`: written to
  * `finder_options`, shown as buttons) and hands off (`hand_off`): it posts
@@ -144,7 +145,17 @@ const inFlight = new Set<string>();
 /** The person's messages answered (session id:ts): each is answered once, whatever events follow. */
 const answered = new Set<string>();
 
-/** A session changed: answer its newest message when it is the person's and this computer serves the space's Finder. */
+/**
+ * The computer that answers a session: the one the app that opened it talks to (the
+ * session's own `served_by`, stamped by the app), so every computer runs Finder for its own
+ * people. A session without one - opened before sessions were stamped, or by a browser
+ * with no computer of its own - falls back to the computer the space's Finder names.
+ */
+export async function finderComputer(session: ObjectJSON, finder: ObjectJSON): Promise<string> {
+	return (await pinOf(session.fields)) || (await pinOf(finder.fields));
+}
+
+/** A session changed: answer its newest message when it is the person's and this computer answers the session. */
 export async function handleFinderSession(session: ObjectJSON): Promise<void> {
 	if (session.deleted || inFlight.has(session.id)) return;
 	const space = str(session.fields, "finder_space");
@@ -160,7 +171,7 @@ export async function handleFinderSession(session: ObjectJSON): Promise<void> {
 	if (answered.has(key)) return;
 	const finder = await fetchObject(finderId).catch(() => null);
 	if (!finder || finder.deleted) return;
-	if ((await pinOf(finder.fields)) !== (await machineId())) return;
+	if ((await finderComputer(session, finder)) !== (await machineId())) return;
 	answered.add(key);
 	inFlight.add(session.id);
 	try {
