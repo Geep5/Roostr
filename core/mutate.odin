@@ -299,7 +299,9 @@ mutation_plan_action :: proc(parsed: json.Value, input: Mutation_Input) -> (Muta
 		// Every object belongs to a space (Anytype invariant): unassigned
 		// creations land in the oldest channel instead of floating into
 		// whichever space happens to be the display default.
-		if !has_channel && type_key != "channel" {
+		// A Finder session (harness finder.ts) is the one exception: a person's private
+		// scratch chat, it stays out of every space - in their own stream.
+		if !has_channel && type_key != "channel" && type_key != "finder_session" {
 			ch := oldest_channel_id(input.states)
 			if ch != "" do append(&ops, Operation{kind = .Field_Set, key = "channel", value = string_value(ch)})
 		}

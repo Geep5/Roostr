@@ -326,3 +326,34 @@ slice_contains :: proc(list: []string, want: string) -> bool {
 	for s in list do if s == want do return true
 	return false
 }
+
+// A new object with no space lands in the oldest space - except a Finder session, a person's
+// private scratch chat, which stays in their own stream.
+@(test)
+mutation_create_keeps_finder_sessions_out_of_spaces :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+	channel_of :: proc(t: ^testing.T, type_key: string) -> string {
+		payload, err := json.parse(transmute([]byte)fmt.tprintf(`{{
+			"action": "create",
+			"params": {{"name": "x", "type_key": "%s"}},
+			"objects": [
+				{{"id": "space-aa", "typeKey": "channel", "fields": [], "blocks": [], "deleted": false, "createdAt": 1, "updatedAt": 1, "heads": []}}
+			],
+			"timestamp": 1234, "author": "alice", "id_seed": "seed", "key_id": 0
+		}}`, type_key), parse_integers = true)
+		testing.expect(t, err == nil)
+		result, derr := mutation_dispatch(payload)
+		testing.expect_value(t, derr, "")
+		for change in json_array(result, "changes") {
+			for op in json_array(change, "ops") {
+				if set, ok := json_field(op, "fieldSet"); ok && json_str(set, "key") == "channel" {
+					value, _ := json_field(set, "value")
+					return json_str(value, "stringValue")
+				}
+			}
+		}
+		return ""
+	}
+	testing.expect_value(t, channel_of(t, "page"), "space-aa")
+	testing.expect_value(t, channel_of(t, "finder_session"), "")
+}
