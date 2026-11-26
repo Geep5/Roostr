@@ -59,6 +59,22 @@ export function rankPages(rows: QueryRow[], space: string, query: string, limit 
 		.map((x) => x.hit);
 }
 
+/** A button under Finder's message: a page card, a new page, or a step of the confirm. */
+export interface FinderOption {
+	id: string;
+	name: string;
+	kind: "page" | "new" | "do" | "pick_agent" | "agent";
+	type?: string;
+	icon?: string;
+}
+
+/** A hand-off waiting on [✓ Do it]. */
+interface Pending {
+	page: string;
+	agent: string;
+	message: string;
+}
+
 const TOOLS: ToolDef[] = [
 	{
 		name: "find_pages",
@@ -66,28 +82,31 @@ const TOOLS: ToolDef[] = [
 		input_schema: { type: "object", properties: { query: { type: "string", description: "words from the request" } }, required: ["query"] },
 	},
 	{
-		name: "ask",
-		description: "Ask the person to choose, shown as buttons: the pages (or agents) that could fit. Ends your turn.",
+		name: "show_pages",
+		description: "Show pages as cards the person taps to choose (a '+ New page' card is added). Use this whenever you have candidate pages - never ask about a page in words. Ends your turn.",
 		input_schema: {
 			type: "object",
-			properties: {
-				question: { type: "string" },
-				options: { type: "array", items: { type: "object", properties: { id: { type: "string" }, name: { type: "string" } }, required: ["id", "name"] } },
-			},
-			required: ["question", "options"],
+			properties: { prompt: { type: "string", description: "one short line above the cards" }, page_ids: { type: "array", items: { type: "string" } } },
+			required: ["prompt", "page_ids"],
 		},
 	},
 	{
+		name: "new_page",
+		description: "Make a new page in this space; only after the person tapped '+ New page'. Returns its id for hand_off.",
+		input_schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+	},
+	{
 		name: "hand_off",
-		description: "Post the request on the page's chat, tagging the agent (the @ wakes it), and open the page for the person. Ends your turn.",
+		description: "Give the request to an agent on a page. Leave agent_id out when no agent's Role / Good for clearly fits: the page's agent, else the space agent, takes it. sure=false shows the person [Do it] first. Ends your turn.",
 		input_schema: {
 			type: "object",
 			properties: {
 				page_id: { type: "string" },
 				agent_id: { type: "string" },
 				message: { type: "string", description: "the person's request, briefly, as theirs (\"Grant asks: …\")" },
+				sure: { type: "boolean", description: "the page and agent are clearly right" },
 			},
-			required: ["page_id", "agent_id", "message"],
+			required: ["page_id", "message", "sure"],
 		},
 	},
 ];
@@ -100,6 +119,25 @@ function rosterText(agents: QueryRow[]): string {
 			return `- ${str(a.fields, "name")} (id ${a.id}): ${line("agent_role") || "no Role yet"}${line("good_for") ? ` | Good for: ${line("good_for")}` : ""}${line("not_for") ? ` | Not for: ${line("not_for")}` : ""}`;
 		})
 		.join("\n");
+}
+
+/** The agent a hand-off goes to: the one asked for, else the page's own, else the space agent. `fallback`: not the one asked for. */
+export function handOffAgent(rows: QueryRow[], page: QueryRow, space: string, spaceName: string, asked: string): { id: string; fallback: boolean } | null {
+	const agents = rows.filter((r) => r.typeKey === "agent" && !r.id.startsWith("finder-agent-"));
+	if (asked && agents.some((a) => a.id === asked)) return { id: asked, fallback: false };
+	const own = page.fields["agent"]?.valuesValue?.items?.map((i) => i.linkValue?.targetId ?? "") ?? [page.fields["agent"]?.linkValue?.targetId ?? ""];
+	const onPage = own.find((id) => agents.some((a) => a.id === id));
+	if (onPage) return { id: onPage, fallback: true };
+	const spaceAgent = agents.find((a) => a.id === `space-agent-${space}`) ?? agents.find((a) => str(a.fields, "name") === `${spaceName} Space`);
+	return spaceAgent ? { id: spaceAgent.id, fallback: true } : null;
+}
+
+function parseJson<T>(raw: string, fallback: T): T {
+	try {
+		return raw ? (JSON.parse(raw) as T) : fallback;
+	} catch {
+		return fallback;
+	}
 }
 
 const inFlight = new Set<string>();
@@ -126,7 +164,10 @@ export async function handleFinderSession(session: ObjectJSON): Promise<void> {
 	answered.add(key);
 	inFlight.add(session.id);
 	try {
-		await answer(session, space, finder, msgs);
+		const rows = await queryAll({ filters: [{ key: "channel", condition: "equal", value: space }] });
+		const spaceName = str((await fetchObject(space)).fields, "name");
+		const ctx: Ctx = { session, space, spaceName, finder, rows };
+		if (!(await tapped(ctx, (newest["text"] ?? "").trim()))) await answer(ctx, msgs);
 	} catch (err) {
 		await chatPost(session.id, `Finder couldn't run: ${err instanceof Error ? err.message : String(err)}`.slice(0, 400), finder.id);
 	} finally {
@@ -134,30 +175,94 @@ export async function handleFinderSession(session: ObjectJSON): Promise<void> {
 	}
 }
 
-async function answer(session: ObjectJSON, space: string, finder: ObjectJSON, msgs: Array<Record<string, string>>): Promise<void> {
-	const model = str(finder.fields, "model") || finder.fields["model"]?.valuesValue?.items?.[0]?.stringValue || "claude-haiku-4-5";
+interface Ctx {
+	session: ObjectJSON;
+	space: string;
+	spaceName: string;
+	finder: ObjectJSON;
+	rows: QueryRow[];
+}
+
+/** Write the buttons under Finder's next message, and that message. */
+async function offer(ctx: Ctx, line: string, options: FinderOption[]): Promise<void> {
+	await setField(ctx.session.id, "finder_options", sv(JSON.stringify(options)));
+	await chatPost(ctx.session.id, line, ctx.finder.id);
+}
+
+/** A tap on one of the buttons offered (its name, posted): Do it and the agent buttons act here. True when handled. */
+async function tapped(ctx: Ctx, text: string): Promise<boolean> {
+	const options = parseJson<FinderOption[]>(str(ctx.session.fields, "finder_options"), []);
+	const hit = options.find((o) => o.name === text);
+	if (!hit || hit.kind === "page" || hit.kind === "new") return false;
+	const pending = parseJson<Pending | null>(str(ctx.session.fields, "finder_pending"), null);
+	if (!pending) return false;
+	if (hit.kind === "do") {
+		await send(ctx, pending);
+		return true;
+	}
+	if (hit.kind === "pick_agent") {
+		const agents = ctx.rows.filter((r) => r.typeKey === "agent" && !r.id.startsWith("finder-agent-"));
+		await offer(ctx, "Which agent?", agents.map((a) => ({ id: a.id, name: str(a.fields, "name"), kind: "agent" as const, icon: str(a.fields, "iconEmoji") })));
+		return true;
+	}
+	await send(ctx, { ...pending, agent: hit.id });
+	return true;
+}
+
+/** Post the request on the page as Finder, tagging the agent, and open the page. */
+async function send(ctx: Ctx, p: Pending): Promise<void> {
+	const page = ctx.rows.find((r) => r.id === p.page) ?? (await fetchObject(p.page).catch(() => null));
+	const agent = ctx.rows.find((r) => r.id === p.agent);
+	if (!page || !agent) {
+		await chatPost(ctx.session.id, "That page or agent is gone - tell me again what you need.", ctx.finder.id);
+		return;
+	}
+	const agentName = str(agent.fields, "name");
+	await chatPost(page.id, `@${agentName} ${p.message}`, ctx.finder.id);
+	await setField(ctx.session.id, "finder_handoff", sv(JSON.stringify({ page: page.id, at: Date.now() })));
+	await setField(ctx.session.id, "finder_options", sv(""));
+	await setField(ctx.session.id, "finder_pending", sv(""));
+	await chatPost(ctx.session.id, `→ Sent to ${agentName} on ${str(page.fields, "name")}.`, ctx.finder.id);
+}
+
+/** Page cards for `ids` (pages of the space only), then "+ New page". */
+function pageCards(rows: QueryRow[], ids: string[]): FinderOption[] {
+	const cards = ids
+		.map((id) => rows.find((r) => r.id === id && !NOT_PAGES.has(r.typeKey)))
+		.filter((r): r is QueryRow => !!r)
+		.slice(0, 3)
+		.map((r) => ({ id: r.id, name: str(r.fields, "name"), kind: "page" as const, type: r.typeKey, icon: str(r.fields, "iconEmoji") }));
+	return [...cards, { id: "new", name: "＋ New page", kind: "new" }];
+}
+
+async function answer(ctx: Ctx, msgs: Array<Record<string, string>>): Promise<void> {
+	const { session, space, finder } = ctx;
+	let rows = ctx.rows;
+	const model = finder.fields["model"]?.valuesValue?.items?.[0]?.stringValue || str(finder.fields, "model") || "claude-haiku-4-5";
 	const apiKey = (await agentModelKey(finder, modelProvider(model))) ?? undefined;
 	const promptId = finder.fields["prompt"]?.linkValue?.targetId ?? "";
 	const prompt = promptId ? objectText(await fetchObject(promptId)) : "";
-	const rows = await queryAll({ filters: [{ key: "channel", condition: "equal", value: space }] });
 	const agents = rows.filter((r) => r.typeKey === "agent" && r.id !== finder.id);
-	const spaceName = str((await fetchObject(space)).fields, "name");
-	const offered = str(session.fields, "finder_options");
+	const offered = parseJson<FinderOption[]>(str(session.fields, "finder_options"), []);
 	const system = [
 		prompt,
-		`This space: ${spaceName} (id ${space}).`,
+		`This space: ${ctx.spaceName} (id ${space}).`,
 		`Its agents:\n${rosterText(agents)}`,
-		offered ? `Choices you last offered (name → id): ${offered}` : "",
-		"Use find_pages to search, ask to offer choices, hand_off to finish. Reply in plain text only to say where something went or when nothing fits.",
+		offered.length ? `Buttons you last showed (name → id): ${offered.map((o) => `${o.name} → ${o.id}`).join("; ")}` : "",
 	]
 		.filter(Boolean)
 		.join("\n\n");
 	const turns: Turn[] = msgs.slice(-12).map((m) => ({ role: m["author"] === finder.id || isAgentAuthor(m["author"] ?? "") ? "assistant" : "user", content: m["text"] ?? "" }));
 	while (turns.length > 0 && turns[0].role === "assistant") turns.shift();
+	let lastHits: string[] = [];
+	// A new page only once the person asked for one: the "+ New page" card.
+	const wantsNew = (msgs[msgs.length - 1]?.["text"] ?? "").trim() === "＋ New page";
 	for (let step = 0; step < MAX_STEPS; step++) {
 		const res = await callLLM({ model, system, turns, tools: TOOLS, maxTokens: 1024, apiKey });
 		if (res.toolUses.length === 0) {
-			if (res.text.trim()) await chatPost(session.id, res.text.trim(), finder.id);
+			// Show, don't ask: pages it found go out as cards, whatever it wrote.
+			if (lastHits.length > 0) await offer(ctx, res.text.trim().split("\n")[0] || "Which page?", pageCards(rows, lastHits));
+			else if (res.text.trim()) await chatPost(session.id, res.text.trim(), finder.id);
 			return;
 		}
 		const assistant: AnthropicContent[] = [...(res.text ? [{ type: "text" as const, text: res.text }] : []), ...res.toolUses.map((u) => ({ type: "tool_use" as const, id: u.id, name: u.name, input: u.input }))];
@@ -165,42 +270,57 @@ async function answer(session: ObjectJSON, space: string, finder: ObjectJSON, ms
 		for (const use of res.toolUses) {
 			if (use.name === "find_pages") {
 				const hits = rankPages(rows, space, String(use.input["query"] ?? ""));
+				lastHits = hits.map((h) => h.id);
 				results.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify(hits.map(({ id, name, type }) => ({ id, name, type }))) });
 				continue;
 			}
-			if (use.name === "ask") {
-				const options = (Array.isArray(use.input["options"]) ? use.input["options"] : []) as Array<{ id?: unknown; name?: unknown }>;
-				const valid = options.filter((o) => typeof o.id === "string" && typeof o.name === "string").slice(0, 6) as Array<{ id: string; name: string }>;
-				await setField(session.id, "finder_options", sv(JSON.stringify(valid)));
-				await chatPost(session.id, String(use.input["question"] ?? "Which one?"), finder.id);
+			if (use.name === "show_pages") {
+				const ids = Array.isArray(use.input["page_ids"]) ? use.input["page_ids"].map(String) : lastHits;
+				await offer(ctx, String(use.input["prompt"] ?? "Which page?"), pageCards(rows, ids));
 				return;
 			}
-			if (use.name === "hand_off") {
-				const done = await handOff(session, space, finder, rows, use.input);
-				if (done.ok) return;
-				results.push({ type: "tool_result", tool_use_id: use.id, content: done.error, is_error: true });
+			if (use.name === "new_page") {
+				if (!wantsNew) {
+					results.push({ type: "tool_result", tool_use_id: use.id, content: "not yet: show_pages first; a new page is made only after the person taps '+ New page'", is_error: true });
+					continue;
+				}
+				const name = String(use.input["name"] ?? "").trim() || "New page";
+				const made = (await mutate("create", { name, type_key: "page", fields: { channel: sv(space) } })) as { id?: string };
+				if (made.id) rows = [...rows, { id: made.id, typeKey: "page", createdAt: Date.now(), updatedAt: Date.now(), fields: { name: sv(name), channel: sv(space) } }];
+				results.push({ type: "tool_result", tool_use_id: use.id, content: made.id ? JSON.stringify({ id: made.id, name }) : "could not make the page", is_error: !made.id });
 				continue;
+			}
+			if (use.name === "hand_off") {
+				const page = rows.find((r) => r.id === use.input["page_id"] && !NOT_PAGES.has(r.typeKey));
+				const message = String(use.input["message"] ?? "").trim();
+				if (!page || !message) {
+					results.push({ type: "tool_result", tool_use_id: use.id, content: "page_id must be a page id from find_pages or new_page, and message not empty", is_error: true });
+					continue;
+				}
+				const who = handOffAgent(rows, page, space, ctx.spaceName, String(use.input["agent_id"] ?? ""));
+				if (!who) {
+					results.push({ type: "tool_result", tool_use_id: use.id, content: "this space has no agent to take it", is_error: true });
+					continue;
+				}
+				const pending: Pending = { page: page.id, agent: who.id, message };
+				if (use.input["sure"] === true && !who.fallback) {
+					await send({ ...ctx, rows }, pending);
+					return;
+				}
+				await setField(session.id, "finder_pending", sv(JSON.stringify(pending)));
+				const agentName = str(rows.find((r) => r.id === who.id)?.fields ?? {}, "name");
+				await offer({ ...ctx, rows }, `${message.replace(/^Grant asks:\s*/i, "")} - on ${str(page.fields, "name")}, with ${agentName}?`, [
+					{ id: "do", name: "✓ Do it", kind: "do" },
+					{ id: "pick", name: "Pick another agent", kind: "pick_agent" },
+				]);
+				return;
 			}
 			results.push({ type: "tool_result", tool_use_id: use.id, content: `no tool ${use.name}`, is_error: true });
 		}
 		turns.push({ role: "assistant", content: assistant }, { role: "user", content: results });
 	}
-	await chatPost(session.id, "I couldn't work out where this goes - can you say which page?", finder.id);
-}
-
-async function handOff(session: ObjectJSON, space: string, finder: ObjectJSON, rows: QueryRow[], input: Record<string, unknown>): Promise<{ ok: true } | { ok: false; error: string }> {
-	const page = rows.find((r) => r.id === input["page_id"]);
-	if (!page || NOT_PAGES.has(page.typeKey)) return { ok: false, error: "page_id is not a page of this space; use an id find_pages returned" };
-	const agent = rows.find((r) => r.id === input["agent_id"] && r.typeKey === "agent");
-	if (!agent) return { ok: false, error: "agent_id is not an agent of this space" };
-	const agentName = str(agent.fields, "name");
-	const message = String(input["message"] ?? "").trim();
-	if (!message) return { ok: false, error: "message is empty" };
-	await chatPost(page.id, `@${agentName} ${message}`, finder.id);
-	await setField(session.id, "finder_handoff", sv(JSON.stringify({ page: page.id, at: Date.now() })));
-	await setField(session.id, "finder_options", sv(""));
-	await chatPost(session.id, `→ Sent to ${agentName} on ${str(page.fields, "name")}.`, finder.id);
-	return { ok: true };
+	if (lastHits.length > 0) await offer(ctx, "Which page?", pageCards(rows, lastHits));
+	else await chatPost(session.id, "I couldn't find where this goes - tell me the page's name.", finder.id);
 }
 
 /** Remove this identity's Finder sessions older than a week. */
