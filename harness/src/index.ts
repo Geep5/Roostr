@@ -45,7 +45,7 @@ import { TOOLS_KEY, defaultAgentTools, ensureBuiltinTools, ensureBuiltinToolsEve
 import { migrateCapabilities } from "./migrate-capabilities";
 import { runBootSteps } from "./boot";
 import { startDiscordManager } from "./discord";
-import { FINDER_SESSION_TYPE, handleFinderSession, sweepFinderSessions } from "./finder";
+import { catchUpFinderSessions, FINDER_SESSION_TYPE, handleFinderSession, sweepFinderSessions } from "./finder";
 import { addressableAgents, answersGuestQuestion, chatBlocks, frameMessage, ingestIntoChat, ingestedOriginBlocks, mentions, pendingMessages, reactionWake, setMark, spaceOfObject } from "./surfaces";
 import { isReaction } from "./reactions";
 import { fileNames } from "./attachments";
@@ -996,6 +996,7 @@ async function serve(): Promise<void> {
 		},
 		() => {
 			void scanMailboxes().catch((error) => console.error("[harness] mailbox catch-up:", error));
+			void catchUpFinderSessions().catch((error) => console.error("[finder] catch-up:", error instanceof Error ? error.message : error));
 		},
 		{ signal: (signal, _origin, space) => liveLines.onSignal(signal, space) },
 	);

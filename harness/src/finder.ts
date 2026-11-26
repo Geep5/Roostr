@@ -97,8 +97,13 @@ const TOOLS: ToolDef[] = [
 		input_schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
 	},
 	{
+		name: "open_page",
+		description: "Open a page for the person, and nothing else: no agent is asked. Use it when they want to find, see, open, read or check something. Ends your turn.",
+		input_schema: { type: "object", properties: { page_id: { type: "string" } }, required: ["page_id"] },
+	},
+	{
 		name: "hand_off",
-		description: "Give the request to an agent on a page. Leave agent_id out when no agent's Role / Good for clearly fits: the page's agent, else the space agent, takes it. sure=false shows the person [Do it] first. Ends your turn.",
+		description: "Give the request to an agent on a page - only when an agent has work to do there (add, write, change, send, sort out…); to find or see something use open_page. Leave agent_id out when no agent's Role / Good for clearly fits: the page's agent, else the space agent, takes it. sure=false shows the person [Do it] first. Ends your turn.",
 		input_schema: {
 			type: "object",
 			properties: {
@@ -241,6 +246,14 @@ async function send(ctx: Ctx, p: Pending): Promise<void> {
 	await chatPost(ctx.session.id, `➡️ Sent to @${agentName} on ${pageLink(page)}.`, ctx.finder.id);
 }
 
+/** Open the page in the person's app (the hand-off field the app follows), asking no agent. */
+async function openPage(ctx: Ctx, page: { id: string; fields: QueryRow["fields"] }): Promise<void> {
+	await setField(ctx.session.id, "finder_handoff", sv(JSON.stringify({ page: page.id, at: Date.now() })));
+	await setField(ctx.session.id, "finder_options", sv(""));
+	await setField(ctx.session.id, "finder_pending", sv(""));
+	await chatPost(ctx.session.id, `Opened ${pageLink(page)}.`, ctx.finder.id);
+}
+
 /** Page cards for `ids` (pages of the space only), then "+ New page". */
 function pageCards(rows: QueryRow[], ids: string[]): FinderOption[] {
 	const cards = ids
@@ -263,6 +276,7 @@ async function answer(ctx: Ctx, msgs: Array<Record<string, string>>): Promise<vo
 	const system = [
 		prompt,
 		`This space: ${ctx.spaceName} (id ${space}).`,
+		"When the person only wants to find, see, open or look something up, open the page with open_page once they picked it (or it is the one clear match) - never hand it to an agent. Hand off only when an agent has work to do.",
 		`Its agents:\n${rosterText(agents)}`,
 		offered.length ? `Buttons you last showed (name → id): ${offered.map((o) => `${o.name} → ${o.id}`).join("; ")}` : "",
 	]
@@ -306,6 +320,15 @@ async function answer(ctx: Ctx, msgs: Array<Record<string, string>>): Promise<vo
 				results.push({ type: "tool_result", tool_use_id: use.id, content: made.id ? JSON.stringify({ id: made.id, name }) : "could not make the page", is_error: !made.id });
 				continue;
 			}
+			if (use.name === "open_page") {
+				const page = rows.find((r) => r.id === use.input["page_id"] && !NOT_PAGES.has(r.typeKey));
+				if (!page) {
+					results.push({ type: "tool_result", tool_use_id: use.id, content: "page_id must be a page id from find_pages", is_error: true });
+					continue;
+				}
+				await openPage({ ...ctx, rows }, page);
+				return;
+			}
 			if (use.name === "hand_off") {
 				const page = rows.find((r) => r.id === use.input["page_id"] && !NOT_PAGES.has(r.typeKey));
 				const message = String(use.input["message"] ?? "").trim();
@@ -337,6 +360,19 @@ async function answer(ctx: Ctx, msgs: Array<Record<string, string>>): Promise<vo
 	}
 	if (lastHits.length > 0) await offer(ctx, "Which page?", pageCards(rows, lastHits));
 	else await chatPost(session.id, "I couldn't find where this goes - tell me the page's name.", finder.id);
+}
+
+/**
+ * Answer what was posted while this computer wasn't listening (it was starting, or the
+ * store's feed reconnected): every session touched in the last hour whose newest message is
+ * still the person's. handleFinderSession skips the rest.
+ */
+export async function catchUpFinderSessions(now = Date.now()): Promise<void> {
+	for (const row of await queryAll({ type: FINDER_SESSION_TYPE })) {
+		if ((row.updatedAt ?? 0) < now - 3_600_000) continue;
+		const session = await fetchObject(row.id).catch(() => null);
+		if (session) await handleFinderSession(session);
+	}
 }
 
 /** Remove this identity's Finder sessions older than a week. */
