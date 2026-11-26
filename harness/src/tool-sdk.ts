@@ -233,7 +233,8 @@ export interface Roostr {
 	/** Any engine mutation (`/api/mutate`), e.g. ("block_add", {object_id, block}). */
 	mutate(action: string, params: Record<string, unknown>): Promise<Record<string, unknown>>;
 	/** Markdown appended to an object's body as the editor's blocks - one per line, indentation nests, inline marks - inside the line `parentId` when given. Returns how many were added. */
-	addText(objectId: string, markdown: string, parentId?: string): Promise<number>;
+	/** `top`: above everything on the page, then a blank line. */
+	addText(objectId: string, markdown: string, parentId?: string, top?: boolean): Promise<number>;
 	/** A message in the object's chat, as the app's own chat box posts it. */
 	chatPost(objectId: string, text: string): Promise<{ id: string; threadId: string }>;
 	/** A message from this tool's agent in an object's human discussion. */
@@ -363,10 +364,10 @@ export function createRoostr(context: ToolRunContext, touched: Set<string>, harn
 				if (typeof params.object_id === "string" && action !== "chat_post") await refuseToolEdit(params.object_id);
 				return mutate(action, params);
 			}),
-		addText: (objectId, markdown, parentId = "") =>
+		addText: (objectId, markdown, parentId = "", top = false) =>
 			sdkCall(async () => {
 				await refuseToolEdit(objectId);
-				return appendMarkdown(objectId, markdown, parentId);
+				return appendMarkdown(objectId, markdown, parentId, top);
 			}),
 		chatPost: (objectId, text) => sdkCall(() => chatPost(objectId, text)),
 		// An object id alone addresses its human discussion; agent-to-agent talk has its own threads.

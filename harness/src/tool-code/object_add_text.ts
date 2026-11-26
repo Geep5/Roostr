@@ -1,7 +1,7 @@
 import type { Roostr } from "../tool-sdk";
 
-export const description = "Append NEW text to an object's body. Markdown lines become real blocks: '- [ ] x' checkboxes, '- x' bullets, '1. x' numbered, '# x' headings, '> x' quotes; plain lines become paragraphs. Indent a line to nest it under the one above; **bold**, *italic*, `code` and [text](url) become formatting. When the object already has a matching list or section, pass 'under' with that block's text (e.g. under: \"Walmart\") so new items join it as children instead of landing at the page root. To change what is already there, use object_edit_block / object_check / object_set_block_style / object_move_block / object_remove_blocks; to link another object, object_add_link (never write '🔗 Name' text).";
-export const inputs = "id: string\ntext: string\nunder?: string - text of an existing block to nest the new blocks under";
+export const description = "Add NEW text to an object's body - at the TOP of the page, above everything already there, followed by a blank line, so the newest is first (pass bottom: true only when the page's own instructions say new items go at the end, like a log). Markdown lines become real blocks: '- [ ] x' checkboxes, '- x' bullets, '1. x' numbered, '# x' headings, '> x' quotes; plain lines become paragraphs. Indent a line to nest it under the one above; **bold**, *italic*, `code` and [text](url) become formatting. When the object already has a matching list or section, pass 'under' with that block's text (e.g. under: \"Walmart\") so new items join it as children instead of landing at the page root. To change what is already there, use object_edit_block / object_check / object_set_block_style / object_move_block / object_remove_blocks; to link another object, object_add_link (never write '🔗 Name' text).";
+export const inputs = "id: string\ntext: string\nunder?: string - text of an existing block to nest the new blocks under\nbottom?: boolean - add at the end instead of the top";
 
 export default async function (input: Record<string, unknown>, roostr: Roostr) {
 	const id = typeof input.id === "string" ? input.id : "";
@@ -19,6 +19,7 @@ export default async function (input: Record<string, unknown>, roostr: Roostr) {
 		if (!hit) return `error: no block matching "${under}" - blocks were NOT added; re-check the text or omit "under"`;
 		parent = hit.id;
 	}
-	const added = await roostr.addText(obj.id, typeof input.text === "string" ? input.text : "", parent);
-	return `ok: ${added} block(s) added${parent ? ` under "${under}"` : ""}`;
+	const bottom = input.bottom === true;
+	const added = await roostr.addText(obj.id, typeof input.text === "string" ? input.text : "", parent, !parent && !bottom);
+	return `ok: ${added} block(s) added${parent ? ` under "${under}"` : bottom ? " at the end" : " at the top"}`;
 }

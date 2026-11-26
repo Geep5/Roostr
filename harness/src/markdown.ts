@@ -10,7 +10,7 @@
  * "1.") and `**` showed as literal asterisks.
  */
 
-import { mutate } from "./api";
+import { fetchObject, mutate, type ObjectJSON } from "./api";
 
 /** proto TextStyle values the editor renders. */
 export const STYLE = { paragraph: 0, h1: 1, h2: 2, h3: 3, quote: 4, bullet: 6, numbered: 7, checkbox: 8 } as const;
@@ -119,23 +119,39 @@ export function mdToTree(markdown: string): MdBlock[] {
 
 /** glon.Position.Inner: a block added as the target's last child. */
 const POSITION_INNER = 5;
+/** glon.Position.Top: a block added just above the target. */
+const POSITION_TOP = 1;
+
+/** The page's own top-level blocks in order: not the discussion, chat or an agent's thread. */
+export function bodyRoots(obj: ObjectJSON): string[] {
+	const referenced = new Set(obj.blocks.flatMap((b) => b.childrenIds));
+	return obj.blocks
+		.filter((b) => !referenced.has(b.id) && b.id !== "__discussion__" && !["chat", "discussion"].includes(b.content.custom?.contentType ?? ""))
+		.map((b) => b.id);
+}
 
 /**
  * Markdown appended to an object's body as the blocks the editor renders,
  * at the page root or inside `parentId` (as its last children). Parents are
  * written before their children. Returns how many blocks were added.
+ *
+ * `top`: at the page root, the new blocks go above everything already there,
+ * followed by one empty line - newest first, set apart from the rest.
  */
-export async function appendMarkdown(objectId: string, markdown: string, parentId = ""): Promise<number> {
+export async function appendMarkdown(objectId: string, markdown: string, parentId = "", top = false): Promise<number> {
 	let added = 0;
-	const add = async (blocks: MdBlock[], parent: string): Promise<void> => {
+	const first = top && !parentId ? bodyRoots(await fetchObject(objectId))[0] ?? "" : "";
+	const add = async (blocks: MdBlock[], parent: string, root: boolean): Promise<void> => {
 		for (const b of blocks) {
 			const id = crypto.randomUUID();
 			const content = { text: { text: b.text, style: b.style, ...(b.marks.length ? { marks: b.marks } : {}), ...(b.style === STYLE.checkbox ? { checked: b.checked === true } : {}) } };
-			await mutate("block_add", { object_id: objectId, block: { id, childrenIds: [], content }, ...(parent ? { target_id: parent, position: POSITION_INNER } : {}) });
+			const place = parent ? { target_id: parent, position: POSITION_INNER } : root && first ? { target_id: first, position: POSITION_TOP } : {};
+			await mutate("block_add", { object_id: objectId, block: { id, childrenIds: [], content }, ...place });
 			added += 1;
-			await add(b.children, id);
+			await add(b.children, id, false);
 		}
 	};
-	await add(mdToTree(markdown), parentId);
+	await add(mdToTree(markdown), parentId, true);
+	if (first && added > 0) await mutate("block_add", { object_id: objectId, block: { id: crypto.randomUUID(), childrenIds: [], content: { text: { text: "", style: 0 } } }, target_id: first, position: POSITION_TOP });
 	return added;
 }

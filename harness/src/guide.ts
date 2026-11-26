@@ -15,7 +15,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createDefault, fetchObject, mutate, ownedSpaces, queryAll, setField, str, sv, type ObjectJSON, type QueryRow, type ValueJSON } from "./api";
-import { appendMarkdown } from "./markdown";
+import { appendMarkdown, bodyRoots } from "./markdown";
 import { copyBody, copyFields, spacelessSource } from "./skill-spaces";
 import { GUIDE_SEED_KEY as SEED_KEY, objectText, SKILL_TYPE } from "./skills";
 
@@ -34,13 +34,6 @@ function guideBody(markdown: string): string {
 	return markdown.replace(/^# .*\n+/, "").trim();
 }
 
-/** The page's own blocks, top level: not the discussion, not chat. */
-function bodyRoots(obj: ObjectJSON): string[] {
-	const referenced = new Set(obj.blocks.flatMap((b) => b.childrenIds));
-	return obj.blocks
-		.filter((b) => !referenced.has(b.id) && b.id !== "__discussion__" && !["chat", "discussion"].includes(b.content.custom?.contentType ?? ""))
-		.map((b) => b.id);
-}
 
 async function writeBody(id: string, markdown: string, fileHash: string): Promise<void> {
 	await appendMarkdown(id, guideBody(markdown));

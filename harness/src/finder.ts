@@ -227,7 +227,7 @@ async function send(ctx: Ctx, p: Pending): Promise<void> {
 	await setField(ctx.session.id, "finder_handoff", sv(JSON.stringify({ page: page.id, at: Date.now() })));
 	await setField(ctx.session.id, "finder_options", sv(""));
 	await setField(ctx.session.id, "finder_pending", sv(""));
-	await chatPost(ctx.session.id, `→ Sent to @${agentName} on ${pageLink(page)}.`, ctx.finder.id);
+	await chatPost(ctx.session.id, `➡️ Sent to @${agentName} on ${pageLink(page)}.`, ctx.finder.id);
 }
 
 /** Page cards for `ids` (pages of the space only), then "+ New page". */
@@ -315,7 +315,7 @@ async function answer(ctx: Ctx, msgs: Array<Record<string, string>>): Promise<vo
 				await setField(session.id, "finder_pending", sv(JSON.stringify(pending)));
 				const agentName = str(rows.find((r) => r.id === who.id)?.fields ?? {}, "name");
 				await offer({ ...ctx, rows }, `${message.replace(/^Grant asks:\s*/i, "")} - on ${pageLink(page)}, with @${agentName}?`, [
-					{ id: "do", name: "✓ Do it", kind: "do" },
+					{ id: "do", name: "✅ Do it", kind: "do" },
 					{ id: "pick", name: "Pick another agent", kind: "pick_agent" },
 				]);
 				return;
