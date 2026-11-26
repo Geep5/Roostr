@@ -3,14 +3,33 @@
   "name": "Roostr Pass",
   "version": "1.0.0",
   "description": "Brings Roostr a fresh sign-in from this Chrome when one of its logins is signed out.",
-  "permissions": ["nativeMessaging", "cookies", "alarms", "storage"],
-  "host_permissions": ["https://*/*", "http://*/*"],
+  "permissions": [
+    "nativeMessaging",
+    "cookies",
+    "alarms",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "action": {
     "default_title": "Roostr Pass",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
   }
 }
