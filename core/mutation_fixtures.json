@@ -6462,6 +6462,318 @@
       {
         "author": "alice",
         "id": "",
+        "objectId": "bundled-rel-agent_role-new-id",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "agent_role"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "shorttext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Role"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🎯"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-good_for-new-id",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "good_for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "longtext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Good for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "👍"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-not_for-new-id",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "new-id"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "not_for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "longtext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Not for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🚫"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
         "objectId": "bundled-type-page-new-id",
         "ops": [
           {
@@ -7586,6 +7898,53 @@
           },
           {
             "fieldSet": {
+              "key": "rel:bundled-rel-agent_role-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "agent_role"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Role"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🎯"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "rel:bundled-rel-chat_color-new-id",
               "value": {
                 "mapValue": {
@@ -8056,6 +8415,53 @@
           },
           {
             "fieldSet": {
+              "key": "rel:bundled-rel-good_for-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "good_for"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Good for"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "👍"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "rel:bundled-rel-iconEmoji-new-id",
               "value": {
                 "mapValue": {
@@ -8317,6 +8723,53 @@
                       "format",
                       {
                         "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-not_for-new-id",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "not_for"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Not for"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🚫"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
                       }
                     ],
                     [
@@ -9721,7 +10174,7 @@
             "fieldSet": {
               "key": "count:relation:alice",
               "value": {
-                "intValue": 34
+                "intValue": 37
               }
             }
           },
@@ -13441,6 +13894,318 @@
               "key": "iconEmoji",
               "value": {
                 "stringValue": "📱"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-agent_role-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "agent_role"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "shorttext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Role"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🎯"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-good_for-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "good_for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "longtext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Good for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "👍"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-not_for-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "not_for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "longtext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Not for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🚫"
               }
             }
           },
@@ -17809,6 +18574,318 @@
       {
         "author": "alice",
         "id": "",
+        "objectId": "bundled-rel-agent_role-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "agent_role"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "shorttext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Role"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🎯"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-good_for-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "good_for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "longtext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Good for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "👍"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
+        "objectId": "bundled-rel-not_for-s",
+        "ops": [
+          {
+            "objectCreate": {
+              "typeKey": "relation"
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "channel",
+              "value": {
+                "stringValue": "s"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "key",
+              "value": {
+                "stringValue": "not_for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "format",
+              "value": {
+                "stringValue": "longtext"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "name",
+              "value": {
+                "stringValue": "Not for"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "iconEmoji",
+              "value": {
+                "stringValue": "🚫"
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "hidden",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "readOnly",
+              "value": {
+                "boolValue": false
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "maxCount",
+              "value": {
+                "intValue": 1
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "bundled",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "system",
+              "value": {
+                "boolValue": true
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "options",
+              "value": {
+                "valuesValue": {
+                  "items": []
+                }
+              }
+            }
+          }
+        ],
+        "parentIds": [],
+        "timestamp": 1234
+      },
+      {
+        "author": "alice",
+        "id": "",
         "objectId": "bundled-type-file-s",
         "ops": [
           {
@@ -18970,6 +20047,53 @@
           },
           {
             "fieldSet": {
+              "key": "rel:bundled-rel-agent_role-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "agent_role"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Role"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🎯"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "rel:bundled-rel-chat_color-s",
               "value": {
                 "mapValue": {
@@ -19440,6 +20564,53 @@
           },
           {
             "fieldSet": {
+              "key": "rel:bundled-rel-good_for-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "good_for"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Good for"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "👍"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
               "key": "rel:bundled-rel-iconEmoji-s",
               "value": {
                 "mapValue": {
@@ -19701,6 +20872,53 @@
                       "format",
                       {
                         "stringValue": "shorttext"
+                      }
+                    ],
+                    [
+                      "hidden",
+                      {
+                        "boolValue": false
+                      }
+                    ],
+                    [
+                      "builtin",
+                      {
+                        "boolValue": true
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "fieldSet": {
+              "key": "rel:bundled-rel-not_for-s",
+              "value": {
+                "mapValue": {
+                  "entries": [
+                    [
+                      "key",
+                      {
+                        "stringValue": "not_for"
+                      }
+                    ],
+                    [
+                      "name",
+                      {
+                        "stringValue": "Not for"
+                      }
+                    ],
+                    [
+                      "icon",
+                      {
+                        "stringValue": "🚫"
+                      }
+                    ],
+                    [
+                      "format",
+                      {
+                        "stringValue": "longtext"
                       }
                     ],
                     [
@@ -21105,7 +22323,7 @@
             "fieldSet": {
               "key": "count:relation:alice",
               "value": {
-                "intValue": 34
+                "intValue": 37
               }
             }
           },

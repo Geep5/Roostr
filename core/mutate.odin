@@ -1709,6 +1709,11 @@ BUNDLED_RELATIONS :: []Bundled_Relation{
 	// today each run of its Repeat. Shared like any property: one tick for everyone in
 	// the space.
 	{"mobile_alert", "checkbox", "Mobile alert", "📱", false, false, 1, {}},
+	// An agent's job card, read by people picking an agent and by Finder: what it does (one
+	// line), what to bring it, and what belongs to another agent.
+	{"agent_role", "shorttext", "Role", "🎯", false, false, 1, {}},
+	{"good_for", "longtext", "Good for", "👍", false, false, 1, {}},
+	{"not_for", "longtext", "Not for", "🚫", false, false, 1, {}},
 }
 
 /**
