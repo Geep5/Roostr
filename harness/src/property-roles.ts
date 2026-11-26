@@ -23,6 +23,7 @@ export const BUILTIN_ROLES: Readonly<Record<string, Role>> = {
 	repeat_instructions: "when",
 	check_first: "when",
 	due_date: "when",
+	error: "state",
 	done: "state",
 	status: "state",
 	model: "setup",
