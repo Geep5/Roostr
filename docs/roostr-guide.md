@@ -220,6 +220,7 @@ These are enforced by the harness for every agent; follow them in any prompt you
 1. Every space has a **Shortcut** credential template. Paste a Shortcut API token into its "API token" (app.shortcut.com -> Settings -> Your Account -> API Tokens; it acts as the person who made it).
 2. Add the credential to the agent's Credentials. The agent gets the built-in `shortcut` tool: one request to Shortcut's REST API v3 per call (`path` like `/search/stories?query=state:started&page_size=25&detail=slim`, `/stories/<id>`, `/workflows`, `/members`; `PUT /stories/<id>` to move or assign a story, `POST /stories/<id>/comments` to comment). The harness sends the token; the agent never sees it.
 3. Ask on any object: "@Agent which stories are waiting to deploy?", "move story 123 to Done", "make a story for the PayPal cash-out bug and give it to Josh". Say in the agent's instructions when it may write (create, move, comment) - by default it only reads.
+4. To have stories as objects (one-way, like Emails): an import page - a repeating Task with Check first = an import Tool that reads Shortcut through `roostr.credentials.api("shortcut", …)` and makes one object per story, the Shortcut credential in the Task's own Credentials, and no agent. A Tool run without an agent takes its credentials from the object it runs for.
 
 ### Keep a computer running Roostr
 
