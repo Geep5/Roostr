@@ -712,6 +712,22 @@ async function ownerOf(obj: ObjectJSON): Promise<{ agentId: string; conv: ConvRe
 	return undefined;
 }
 
+/**
+ * The agent whose TypeSafe credential pays for an object's Score with: the first on it (its
+ * assignee, then its Agent list) that has one - not necessarily the one that runs the turn
+ * (an inbox's space agent runs it; its email bot holds the TypeSafe login).
+ */
+async function scoringAgent(obj: ObjectJSON): Promise<string> {
+	const candidates = [...new Set([...agentIdsOf(obj.fields["assignee"]), ...agentIdsOf(obj.fields["agent"])])];
+	for (const id of candidates) {
+		const agent = await fetchObject(id).catch(() => null);
+		if (!agent || agent.deleted) continue;
+		const creds = await Promise.all(agentCredentialIds(agent).map((c) => fetchObject(c).catch(() => null)));
+		if (creds.some((c) => c && !c.deleted && str(c.fields, "service") === "typesafe")) return id;
+	}
+	return "";
+}
+
 /** A scheduler message: same block shape as an ingested copy, tagged with its occurrence. */
 async function postScheduled(ref: ConvRef, text: string, d: Due, me: string): Promise<void> {
 	await addConvBlock(ref, {
@@ -780,11 +796,12 @@ async function dispatch(d: Due, me: string, kind: RunKind = "scheduled", why = "
 			if (ids.length > 0) {
 				if (skillIds.length > 0) {
 					const problems: string[] = [];
-					if (!owner) problems.push("Score with needs an agent on this object (its TypeSafe credential pays for the scores)");
+					const payer = await scoringAgent(obj);
+					if (!payer) problems.push("Score with needs an agent on this object with a TypeSafe credential (it pays for the scores)");
 					else {
 						for (const skillId of skillIds) {
 							try {
-								const rows = await scoreWithSkill(await fetchObject(skillId), ids, owner.agentId);
+								const rows = await scoreWithSkill(await fetchObject(skillId), ids, payer);
 								for (const row of rows) if (row.error && row.error !== "deleted") problems.push(`${row.name || row.id.slice(0, 8)}: ${row.error}`);
 							} catch (err) {
 								problems.push(err instanceof Error ? err.message : String(err));
