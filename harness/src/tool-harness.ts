@@ -120,14 +120,18 @@ export async function fileCapabilityHoldup(capability: string, error: string, ct
 /**
  * The run's agent's credential for `service` (the one named `pick` - its
  * name or id - when given), or why it can't be used; one that is signed out
- * is noted for the run's badge (credential-issues.ts).
+ * is noted for the run's badge (credential-issues.ts). A run with no agent -
+ * an import page's own Check first - uses the credentials its object lists in
+ * its Credentials property, as an agent would.
  */
 async function credentialFor(ctx: ToolContext, service: string, pick = ""): Promise<{ ok: true; cred: AgentCredential } | { ok: false; error: string }> {
+	const holder = ctx.agentId || ctx.boundObject || "";
 	try {
-		return { ok: true, cred: await agentCredential(await fetchObject(ctx.agentId), service, pick) };
+		if (!holder) throw new CredentialMissing("This run has no agent and no object to take a credential from.");
+		return { ok: true, cred: await agentCredential(await fetchObject(holder), service, pick) };
 	} catch (error) {
-		if (error instanceof CredentialNotConnected) noteCredentialIssue(ctx.agentId, { kind: "signed_out", name: error.credentialName });
-		else if (error instanceof CredentialMissing) noteCredentialIssue(ctx.agentId, { kind: "missing", service });
+		if (ctx.agentId && error instanceof CredentialNotConnected) noteCredentialIssue(ctx.agentId, { kind: "signed_out", name: error.credentialName });
+		else if (ctx.agentId && error instanceof CredentialMissing) noteCredentialIssue(ctx.agentId, { kind: "missing", service });
 		return { ok: false, error: errorText(error) };
 	}
 }

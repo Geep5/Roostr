@@ -98,3 +98,20 @@ test("without a Shortcut credential, or with a bad call, nothing is sent", async
 	expect(await shortcut({ path: "/stories/42", method: "PATCH" }, roostr())).toStartWith("error:");
 	expect(sent).toEqual([]);
 });
+
+test("an import page's own Check first (no agent) signs with the credential the page lists", async () => {
+	const page = object("page", "task", { credentials: { valuesValue: { items: [{ linkValue: { relationKey: "credentials", targetId: "cred" } }] } } });
+	const bare = object("page", "task", {});
+	const pageRoostr = () => {
+		const run = harnessFor({ agentId: "", boundObject: "page", channelId: "space", depth: 0, touched: new Set<string>() });
+		const abort = new AbortController();
+		return createRoostr({ agentId: "", objectId: "page", channelId: "space", machineId: "m" }, new Set(), harnessCalls((method, args) => run(method, args, abort.signal)));
+	};
+	const sent = serve([page, credential]);
+	const read = await shortcut({ path: "/stories/42" }, pageRoostr());
+	expect(sent).toEqual([{ url: `${SHORTCUT_API}/stories/42`, method: "GET", token: TOKEN, body: undefined }]);
+	expect(read).not.toContain(TOKEN);
+	const none = serve([bare, credential]);
+	expect(await shortcut({ path: "/stories/42" }, pageRoostr())).toStartWith("error:");
+	expect(none).toEqual([]);
+});
